@@ -60,6 +60,7 @@ from orchestrator.mall_builder import (
     DEMAND_MALL_SLOT_TARGET,
     locate_mall_cell,
     mall_allocation_completes_pair,
+    mall_allocation_is_committed, saved_mall_allocation,
     mall_cell_needs_rebuild,
     mall_demand_slot_count,
     mall_entity_positions,
@@ -8029,6 +8030,9 @@ def _reserve_compact_mall_project(
                 if allocation is not None and reference_point is not None
                 else True
             ),
+            client=client if callable(getattr(client, "command", None)) else None,
+            surface=surface, force=force, allocation=allocation,
+            reference_point=reference_point,
         )
     stock = live_base.transferable_items(client, surface, force)
     sources, rates = _material_sources_and_rates(
@@ -8296,7 +8300,10 @@ def _build_assembled_stage(
                 )
             except Exception:
                 pair_completion = False
-        if _mall_slot_cap_reached(committed, slot_limit) and not pair_completion:
+        continuation = saved_mall_allocation(surface, force, item)
+        already_committed = (continuation is not None and mall_allocation_is_committed(
+            client, surface, force, continuation))
+        if _mall_slot_cap_reached(committed, slot_limit) and not pair_completion and not already_committed:
             emit(
                 f"  BOOTSTRAP MALL CAP: {committed}/"
                 f"{slot_limit} assemblers are committed; "
@@ -9584,6 +9591,10 @@ def _rationed_mall_batch(
         )
     active = active_bootstrap_loans(client, surface, force)
     own_loan = next((loan for loan in active if loan.target_item == item), None)
+    if own_loan is None and saved_mall_allocation(surface, force, item) is not None:
+        # This job already admitted a standing cell. Continue its exact kit;
+        # repricing a fresh slot or borrowing an anchor abandons installed work.
+        return False
     if own_loan is not None:
         missing_input = _missing_rotating_input(
             client, surface, force, item, target,

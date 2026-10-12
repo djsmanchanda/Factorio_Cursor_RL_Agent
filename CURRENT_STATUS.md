@@ -491,3 +491,8 @@ now release their owned drain; maintenance recovers drains whose borrower has
 released or changed recipe. Same/different-recipe conservation/restart and
 orphan regressions pass;142 focused/1231 fast passes, three skips and only known
 firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
+
+- 2026-10-12 15:22 IST: Laya executor assigns owned empty mall lanes and retains
+  installed continuations without duplicate kit bills/borrower fallback.187
+  focused/1234 fast pass; known four-import firewall remains. Read-only preserved
+  engine bill replay passes. Lifecycle: new frozen private runner; no Lua deploy.

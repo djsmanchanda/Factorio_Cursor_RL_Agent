@@ -369,3 +369,10 @@ numeric limits or manufacture an item/progress credit.
 Feeder-drain cleanup applies to same-recipe configuration as well as a changed
 recipe. Maintenance restores drain records whose borrower has released or
 moved to another recipe, so an abandoned pause cannot starve a standing source.
+
+Built unconfigured mall cells belong to the executor's ready-work pool. It
+assigns an unclaimed, recipe-capable lane to a funded queued item or its
+missing producible ancestor, preserving another job's allocation. Installed
+continuations retain their exact geometry, resume at the slot cap, and reserve
+only missing construction plus startup inputs. They do not re-enter the
+borrower search or pay for an already-installed assembler a second time.

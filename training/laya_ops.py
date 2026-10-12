@@ -308,6 +308,7 @@ class DeterministicSession:
     def execute_queue(self, facts, economics, reached):
         from orchestrator.execution_slice import execution_slice
         self.reached_phases = tuple(reached)
+        self._queue_assign_idle_malls(facts, economics)
         # Recovery from an interrupted atomic hold is local to its owned lane.
         for job in self.queue.jobs.values():
             if "hold_position" in job.checkpoint:
@@ -349,6 +350,75 @@ class DeterministicSession:
             receipts = self.queue.pulse(snapshot, execute, can_produce=self._queue_can_produce,
                                         preempt=self._queue_preempt)
         return receipts
+
+    def _queue_assign_idle_malls(self, facts, economics):
+        """Fill installed spare capacity from goals/precursors without a policy turn."""
+        from orchestrator import mall_builder as mall
+        from planners.recipe_data import machine_supports_recipe
+        if not callable(getattr(self.client, "command", None)):
+            return
+        tick = int(facts["tick"])
+        stock = economics.get("material_stock")
+        if stock is None:
+            return  # Unknown stock cannot fund even a first craft.
+        self.queue.reconcile(self._queue_snapshot(facts, economics))
+        active = [j for j in self.queue.jobs.values() if j.state != "complete"]
+        claims = {}
+        for job in active:
+            for key, value in job.checkpoint.items():
+                if key.startswith(f"mall_allocation:{SURFACE}:{FORCE}:"):
+                    origin, side = value
+                    claims[f"{SURFACE}:{FORCE}:{origin[0]}:{origin[1]}:{side}"] = key.rsplit(":", 1)[1]
+        self.queue.runtime["mall_allocations"] = claims
+        idle = mall.idle_mall_allocations(self.client, SURFACE, FORCE, self.reference_point)
+        free = ab._MATERIAL_RESERVATION_LEDGER.allocatable_stock(stock)
+        # A missing direct ingredient inherits urgency. Repeating this walk
+        # reaches ready ancestors without taking a slot for an unfunded child.
+        pending = sorted(active, key=lambda j: (-j.priority, j.sequence))
+        seen = set()
+        while pending and idle:
+            job = pending.pop(0)
+            if job.job_id in seen:
+                continue
+            seen.add(job.job_id)
+            if (job.operation not in {"produce", "mall_slot", "mall_capacity"}
+                    or not self._queue_can_produce(job.item)
+                    or job.checkpoint.get("pending_entities")):
+                continue
+            spec = LINE_RECIPES[job.item]
+            if spec.get("machine") not in live_base.ASSEMBLER_TIERS or spec.get("fluid_ingredients"):
+                continue
+            key = f"mall_allocation:{SURFACE}:{FORCE}:{job.item}"
+            assigned = job.checkpoint.get(key)
+            if live_base.find_line(self.client, SURFACE, FORCE, job.item, spec["machine"]) is not None:
+                continue
+            missing = [(i, math.ceil(n)) for i,n in zip(spec["ingredients"], spec["amounts"], strict=True)
+                       if free.get(i, 0) < math.ceil(n)]
+            if assigned is None and missing:
+                for item, count in missing:
+                    if self._queue_can_produce(item):
+                        child = self.queue.enqueue("produce", {"item": item, "stock_target": count},
+                            priority=job.priority+1, tick=tick, parent=job.job_id)
+                        if child is not None:
+                            pending.insert(0, child)
+                continue
+            if assigned is None and any(self.queue.jobs[d].state != "complete" for d in job.dependencies):
+                continue
+            selected = next((slot for slot in idle
+                if (assigned is None or (list(slot[0]), slot[1]) == (assigned[0], assigned[1]))
+                and claims.get(f"{SURFACE}:{FORCE}:{slot[0][0]}:{slot[0][1]}:{slot[1]}", job.item) == job.item
+                and machine_supports_recipe(slot[2], job.item)), None)
+            if selected is None:
+                continue
+            origin, side, _machine = selected
+            job.checkpoint[key] = [list(origin), side]
+            claims[f"{SURFACE}:{FORCE}:{origin[0]}:{origin[1]}:{side}"] = job.item
+            job.state, job.reason, job.blocked_signature, job.retry_tick = "ready", "idle_mall_assignment", None, tick
+            idle.remove(selected)
+            for item,n in zip(spec["ingredients"], spec["amounts"], strict=True):
+                free[item] = max(0, free.get(item, 0)-math.ceil(n))
+            self.emit(f"QUEUE IDLE MALL: {job.item} owns {origin} {side}; continuing installed capacity")
+        self.queue.save()
 
     def set_rate_targets(self, targets: Mapping[str, float]) -> None:
         """Declare the phase's measured products to shared stock maintenance."""

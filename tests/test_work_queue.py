@@ -434,3 +434,82 @@ def test_released_borrower_cannot_leave_precursor_feeders_parked(tmp_path, monke
     with execution_slice(runtime=q.runtime,persist=q.save):
         boundary.recover_orphan_drains(object(),'private','player',active)
     assert calls==[{'x':1,'y':1,'recipe':'electronic-circuit'}]
+
+
+def test_retry_prices_installed_cell_and_keeps_its_allocation(monkeypatch):
+    from orchestrator import mall_builder as mall
+    install_live_recipe_fixture(monkeypatch)
+    origin = (32,32)
+    state = {'mall_allocation:private:player:electronic-circuit': [list(origin),'right']}
+    spec = mall.LINE_RECIPES['electronic-circuit']
+    plan = mall.generate_paired_mall_layout('electronic-circuit','assembling-machine-1',
+        spec['ingredients'],spec['amounts'],origin,'right',craft_time=spec['craft_time'],
+        include_substation=False)
+    records = [{'name':a['entity'],'position':tuple(a['position'].values()),'force':'player',
+                'type':'assembling-machine' if a['entity'].startswith('assembling-machine') else 'container',
+                'is_ghost':False,'deconstructed':False}
+               for p in plan['phases'] for a in p['actions']]
+    monkeypatch.setattr(mall.live_base,'area_entity_records',lambda *a:records)
+    monkeypatch.setattr(mall,'_choose_slot',lambda *a,**k: (_ for _ in ()).throw(AssertionError('abandoned allocation')))
+    with execution_slice(checkpoint=state):
+        assert mall.preview_mall_allocation(object(),'private','electronic-circuit',(0,0)) == (origin,'right')
+        bill = mall.compact_mall_project_bill('electronic-circuit',machine_name='assembling-machine-1',
+            side='right',include_substation=False,client=object(),surface='private',allocation=(origin,'right'))
+    assert bill == {'copper-cable':3,'iron-plate':1}
+    # Unbuilt or foreign entities cannot pay the construction bill.
+    records[0]['is_ghost'] = True
+    bill = mall.compact_mall_project_bill('electronic-circuit',machine_name='assembling-machine-1',
+        side='right',include_substation=False,client=object(),surface='private',allocation=(origin,'right'))
+    assert bill['assembling-machine-1'] == 1
+
+
+def test_committed_cell_continues_at_cap_without_borrowing(monkeypatch):
+    from orchestrator import autonomous_builder as ab
+    install_live_recipe_fixture(monkeypatch)
+    state={'mall_allocation:private:player:transport-belt': [[32,32],'right']}
+    monkeypatch.setattr(ab,'_independent_mall_ready',lambda *a:False)
+    monkeypatch.setattr(ab,'_pipe_is_temporary_batch',lambda *a:False)
+    monkeypatch.setattr(ab,'_recipe_depends_on_fast_transport_belt',lambda *a:False)
+    monkeypatch.setattr(ab,'_transferable_or_available_stock',lambda *a:{})
+    monkeypatch.setattr(ab,'_rationed_mall_completion_target',lambda *a:10)
+    monkeypatch.setattr(ab,'_unfunded_ladder_ingredient',lambda *a:None)
+    monkeypatch.setattr(ab,'active_bootstrap_loans',lambda *a:[])
+    monkeypatch.setattr(ab,'_start_bootstrap_loan',lambda *a,**k: (_ for _ in ()).throw(AssertionError('borrowed')))
+    monkeypatch.setattr(ab,'mall_slot_count',lambda *a:8)
+    monkeypatch.setattr(ab,'_bootstrap_mall_slot_limit',lambda *a:8)
+    monkeypatch.setattr(ab.live_base,'entity_at',lambda *a:{'name':'assembling-machine-1','force':'player'})
+    monkeypatch.setattr(ab,'_ingredient_sources',lambda *a,**k:None)
+    plan=SimpleNamespace(spec={'machine':'assembling-machine-1'},promote_to_line=False,existing=None,at_size=False)
+    with execution_slice(checkpoint=state):
+        assert not ab._rationed_mall_batch(object(),object(),'private','player','transport-belt',10,(0,0),lambda _:None)
+        ab._build_assembled_stage(object(),object(),'private','player','transport-belt',(0,0),lambda _:None,
+                                  plan,None,upgrade_bootstrap=False)
+
+
+def test_idle_lanes_automatically_take_ready_items_and_missing_precursors(tmp_path, monkeypatch):
+    from orchestrator import autonomous_builder as ab, mall_builder as mall
+    from planners.recipe_data import MACHINE_CAPABILITIES
+    monkeypatch.setitem(MACHINE_CAPABILITIES, 'assembling-machine-1',
+                        {'ingredient_count':6,'categories':('crafting','pressing','electronics')})
+    install_live_recipe_fixture(monkeypatch)
+    s=object.__new__(DeterministicSession)
+    s.queue=queue(tmp_path)
+    s.client=SimpleNamespace(command=lambda _: '')
+    s.reference_point,s.emit,s.reached_phases=(0,0),lambda _:None,['C0','C1']
+    first=s.queue.enqueue('produce',{'item':'transport-belt','stock_target':12},priority=80,tick=0)
+    second=s.queue.enqueue('produce',{'item':'electric-mining-drill','stock_target':6},priority=70,tick=0)
+    idle=[((32,32),'right','assembling-machine-1'),((32,44),'left','assembling-machine-1')]
+    monkeypatch.setattr(mall,'idle_mall_allocations',lambda *a: list(idle))
+    monkeypatch.setattr(ab.live_base,'find_line',lambda *a:None)
+    monkeypatch.setattr(ab,'_MATERIAL_RESERVATION_LEDGER',SimpleNamespace(allocatable_stock=lambda s:dict(s)))
+    s._queue_assign_idle_malls({'tick':100},{'material_stock':{'iron-plate':100,'iron-gear-wheel':50,'copper-cable':20}})
+    assert first.checkpoint['mall_allocation:nauvis:player:transport-belt']==[[32,32],'right']
+    circuits=next(j for j in s.queue.jobs.values() if j.item=='electronic-circuit')
+    assert circuits.priority > second.priority
+    assert circuits.checkpoint['mall_allocation:nauvis:player:electronic-circuit']==[[32,44],'left']
+    assert 'mall_allocation:nauvis:player:electric-mining-drill' not in second.checkpoint
+    # Existing ownership survives the next pass; a stranger can't seize it.
+    circuits.params['stock_target'] = 40
+    stranger=s.queue.enqueue('produce',{'item':'inserter','stock_target':5},priority=100,tick=100)
+    s._queue_assign_idle_malls({'tick':120},{'material_stock':{'iron-plate':100,'iron-gear-wheel':50,'electronic-circuit':20}})
+    assert not any(k.startswith('mall_allocation:') for k in stranger.checkpoint)

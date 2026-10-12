@@ -7,7 +7,7 @@ import math
 from collections import Counter
 from collections.abc import Callable, Mapping
 
-from orchestrator.execution_slice import cooperative, checkpoint, persist_checkpoint
+from orchestrator.execution_slice import cooperative, checkpoint, persist_checkpoint, runtime_checkpoint
 from orchestrator import live_base, resource_patches
 from orchestrator.extraction_transport import planned_footprint_tiles
 from orchestrator.game_bridge import GameBridge
@@ -126,6 +126,8 @@ def compact_mall_project_bill(
     shared_provider: bool = False,
     machine_name: str | None = None,
     include_substation: bool = True,
+    client=None, surface: str | None = None, force: str = "player",
+    allocation=None, reference_point=None,
 ) -> dict[str, int]:
     """Incremental cell-half bill plus one craft of bootstrap ingredients."""
     spec = LINE_RECIPES[recipe]
@@ -143,16 +145,20 @@ def compact_mall_project_bill(
         return dict(sorted(bill.items()))
     preview = generate_paired_mall_layout(
         recipe, machine_name or spec["machine"], spec["ingredients"], spec["amounts"],
-        (0, 0), side, stock_target=stock_target,
+        tuple(allocation[0]) if allocation is not None else (0, 0), side, stock_target=stock_target,
         product_amount=spec.get("product_amount", 1),
         craft_time=spec["craft_time"], set_recipe=spec.get("set_recipe", True),
         stock_gate_target=stock_gate_target, fill_chest=fill_chest,
         request_multiplier_override=request_multiplier_override,
         shared_provider=shared_provider,
         include_substation=include_substation,
+        substation_position=(reserved_substation_position(reference_point, tuple(allocation[0]))
+                             if allocation is not None and reference_point is not None else None),
     )
+    if client is not None and surface is not None and allocation is not None:
+        _reconcile_built_mall_plan(client, surface, force, preview)
     bill: Counter[str] = Counter(plan_material_bill(preview))
-    if side == "right":
+    if side == "right" and allocation is None:
         # The cell's centre requester and substation already belong to its
         # first half. Each half owns a provider, so the right half only reuses
         # the requester and substation.
@@ -165,6 +171,70 @@ def compact_mall_project_bill(
     return dict(sorted(
         (item, count) for item, count in bill.items() if count > 0
     ))
+
+
+def _reconcile_built_mall_plan(client, surface, force, plan):
+    """Already installed owned entities need configuration, never a second kit."""
+    actions = [a for p in plan["phases"] for a in p["actions"]
+               if a.get("action_type") in {"place_entity", "place_ghost"}]
+    if not actions:
+        return
+    points = [(a["position"]["x"], a["position"]["y"]) for a in actions]
+    records = live_base.area_entity_records(client, surface, force,
+        (min(x for x,y in points)-2, min(y for x,y in points)-2),
+        (max(x for x,y in points)+2, max(y for x,y in points)+2))
+    built = {(tuple(r["position"]), r["name"]) for r in records
+             if r.get("force") == force and not r.get("is_ghost")
+             and not r.get("deconstructed")}
+    for action, point in zip(actions, points, strict=True):
+        if (point, action["entity"]) in built:
+            action["action_type"] = "configure_entity"
+
+
+def saved_mall_allocation(surface, force, recipe):
+    state = checkpoint()
+    value = state.get(f"mall_allocation:{surface}:{force}:{recipe}") if state is not None else None
+    return (tuple(value[0]), value[1]) if value is not None else None
+
+
+def idle_mall_allocations(client, surface, force, reference_point, *, demand_slot=False, states=None):
+    """Built no-recipe halves of this declared mall, excluding another job's claim."""
+    origins = _cell_origins(reference_point)
+    origins = origins[-_DEMAND_CELL_COUNT:] if demand_slot else origins[:-_DEMAND_CELL_COUNT]
+    states = states if states is not None else _district_state(client, surface, origins)
+    candidates = [(origin, side) for origin in origins
+                  for side, value in zip(("left", "right"), states[origin][:2], strict=True)
+                  if value == "?" and states[origin][2] == "requester-chest"]
+    if not candidates:
+        return []
+    points = [_slot_position(origin, side) for origin,side in candidates]
+    records = live_base.area_entity_records(client, surface, force,
+        (min(x for x,y in points)-5, min(y for x,y in points)-2),
+        (max(x for x,y in points)+5, max(y for x,y in points)+2))
+    built = {tuple(r["position"]): r for r in records if r.get("force") == force
+             and not r.get("is_ghost") and not r.get("deconstructed")}
+    result = []
+    for origin, side in candidates:
+        position = _slot_position(origin, side)
+        machine = built.get(position)
+        requester = built.get((origin[0]+4.5, origin[1]+1.5))
+        if (machine and machine.get("force") == force and machine.get("type") == "assembling-machine"
+                and machine["name"] in live_base.ASSEMBLER_TIERS
+                and requester and requester.get("force") == force
+                and requester["name"] == "requester-chest"):
+            result.append((origin, side, machine["name"]))
+    return result
+
+
+def mall_allocation_is_committed(client, surface, force, allocation):
+    if allocation is None:
+        return False
+    origin, side = allocation
+    position = (_vertical_slot_position(origin, side) if side in VERTICAL_SIDES
+                else _slot_position(origin, side))
+    entity = live_base.entity_at(client, surface, position)
+    return bool(entity and entity.get("force") == force
+                and entity.get("ghost_name", entity["name"]) in live_base.ASSEMBLER_TIERS)
 
 
 def mall_slot_count(
@@ -343,6 +413,9 @@ def preview_mall_allocation(
     demand_slot: bool = False, vertical_ok: bool = False,
 ) -> tuple[tuple[int, int], str] | None:
     """Expose the allocator's next stable cell half for exact bill pricing."""
+    saved = saved_mall_allocation(surface, "player", recipe)
+    if saved is not None:
+        return saved
     return _choose_slot(
         client, surface, recipe, reference_point, demand_slot=demand_slot,
         vertical_ok=vertical_ok,
@@ -986,6 +1059,12 @@ def _choose_slot(
     )
     states = _district_state(client, surface, origins)
     preferred_open: list[tuple[tuple[int, int], str]] = []
+    claims = (runtime_checkpoint() or {}).get("mall_allocations", {})
+    for origin, side, _machine in idle_mall_allocations(
+            client, surface, "player", reference_point, demand_slot=demand_slot, states=states):
+        claim_key = f"{surface}:player:{origin[0]}:{origin[1]}:{side}"
+        if claims.get(claim_key, recipe) == recipe:
+            return origin, side
     related_open: list[tuple[tuple[int, int], str]] = []
     other_open: list[tuple[tuple[int, int], str]] = []
     empty_origins: list[tuple[int, int]] = []
@@ -1220,6 +1299,10 @@ def build_compact_mall_stage(
     origin, side = tuple(allocation[0]), allocation[1]
     if saved is not None and allocation_key not in saved:
         saved[allocation_key] = [list(origin), side]
+        runtime = runtime_checkpoint()
+        if runtime is not None:
+            runtime.setdefault("mall_allocations", {})[
+                f"{surface}:{force}:{origin[0]}:{origin[1]}:{side}"] = recipe
         persist_checkpoint()
     if side in VERTICAL_SIDES:
         return _build_seed_vertical_slot(
@@ -1244,6 +1327,8 @@ def build_compact_mall_stage(
         shared_provider=False,
     )
     plan["surface"], plan["force"] = surface, force
+    if callable(getattr(client, "command", None)):
+        _reconcile_built_mall_plan(client, surface, force, plan)
     machine = _slot_position(origin, side)
     provider = (
         origin[0] + 4.5,

@@ -322,3 +322,16 @@ restoring an identical recipe skipped cleanup. Stopped through OC and preserved.
 Cleanup now applies to same-recipe configuration, and maintenance recovers
 released/reconfigured borrowers' drain records.142 focused/1231 fast pass; three
 skips and only unchanged firewall failure. A new private freeze follows.
+
+### 2026-10-12 15:22 IST — installed idle mall continuation repaired
+
+Stopped b337cf9 run persistent-laya-s50616-1791797050 through OC at324wall
+seconds; C0 accepted only. Read-only engine survey found two no-recipe cells.
+Their next retries abandoned installed geometry during affordability/reservation
+and sought a fresh assembler or lender. Persisted previews, remaining exact
+construction bills, committed-cap continuation and executor assignment of
+unclaimed idle lanes/ready precursors repair this path.187 focused pass;
+fast1234 pass/3 skip, only the unchanged four-import firewall failure.
+Read-only preserved-world replay reduces circuit/belt construction bills to
+startup inputs alone. Lifecycle: fresh frozen private runner after the user's
+four-slot repeating-layout work; no mod deployment. Throughput is unverified.
