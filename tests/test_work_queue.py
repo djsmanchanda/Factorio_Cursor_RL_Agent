@@ -234,7 +234,11 @@ def install_live_recipe_fixture(monkeypatch):
         monkeypatch.setitem(LINE_RECIPES, item, spec)
 
 
-def test_backlog_automatically_queues_a_real_capacity_operation(tmp_path, monkeypatch):
+@pytest.mark.parametrize('capacity', [
+    {'free_slots':4},
+    {'free_slots':None,'mall_capacity':{'unlimited':True,'committed_slots':8}},
+])
+def test_backlog_automatically_queues_a_real_capacity_operation(tmp_path, monkeypatch, capacity):
     from orchestrator import autonomous_builder as ab
     from orchestrator import live_base
     install_live_recipe_fixture(monkeypatch)
@@ -253,7 +257,7 @@ def test_backlog_automatically_queues_a_real_capacity_operation(tmp_path, monkey
     session.run = lambda op, **params: (calls.append((op,params)) or
                                       {'ok':False,'code':'queued_construction_wait','params':params,'operation':op})
     session._queue_preempt = lambda *a:False
-    session.execute_queue({'tick':0}, {'material_stock':{},'free_slots':4}, reached=['C0','C1'])
+    session.execute_queue({'tick':0}, {'material_stock':{},**capacity}, reached=['C0','C1'])
     assert ('mall_capacity', {'item':'electric-mining-drill','minimum_machines':1}) in calls
 
 
@@ -709,3 +713,42 @@ def test_conflicting_saved_previews_replan_only_unbuilt_later_claim(tmp_path, mo
     assert 'mall_allocation:nauvis:player:inserter' in first.checkpoint
     assert 'mall_allocation:nauvis:player:splitter' not in later.checkpoint
     assert s.queue.runtime['mall_allocations']['nauvis:player:35:31:north']=='inserter'
+
+
+def test_completed_owned_construction_resumes_without_refilling_consumed_kits(tmp_path):
+    q=queue(tmp_path)
+    cell=q.enqueue('mall_slot',{'item':'inserter'},priority=100,tick=0)
+    q.record(cell,{'ok':False,'code':'material_shortage','details':{'required':{'long-handed-inserter':8}}},
+             snapshot(),can_produce=lambda _:True)
+    supply=q.jobs[cell.dependencies[0]]
+    q.record(cell,{'ok':False,'code':'infrastructure_construction_wait',
+                  'details':{'owner':'paired_mall_inserter','pending':[{'entity':'long-handed-inserter','position':[1,2]}]}},
+             snapshot(),can_produce=lambda _:True)
+    pending=snapshot(120,owned={cell.job_id:{'pending_ready':False}})
+    q.reconcile(pending)
+    assert cell not in q.ready(pending)
+    built=snapshot(240,owned={cell.job_id:{'pending_ready':True}})
+    q.reconcile(built)
+    assert supply.state!='complete' and supply.target==8
+    assert cell in q.ready(built) and cell.checkpoint['resume_construction'] is True
+    restored=queue(tmp_path,tick=240)
+    assert restored.jobs[cell.job_id] in restored.ready(snapshot(240))
+    q.record(cell,{'ok':False,'code':'material_shortage','details':{'required':{'electronic-circuit':1}}},
+             snapshot(240),can_produce=lambda _:True)
+    assert cell not in q.ready(snapshot(240))  # Resumption still honors a new measured shortage.
+
+
+def test_resume_recovers_completed_pending_entities_from_own_receipt(tmp_path, monkeypatch):
+    from training.laya_ops import live_base
+    s=object.__new__(DeterministicSession)
+    s.client=object();s.queue=queue(tmp_path)
+    cell=s.queue.enqueue('mall_slot',{'item':'inserter'},priority=100,tick=0)
+    cell.checkpoint['receipt']={'code':'infrastructure_construction_wait',
+                              'details':{'owner':'paired_mall_inserter',
+                                         'pending':[{'entity':'long-handed-inserter','position':[1,2]}]}}
+    monkeypatch.setattr(live_base,'entity_names_at',lambda *a:{(1,2):'long-handed-inserter'})
+    proof=s._queue_snapshot({'tick':240},{'projects':{'paired_mall_inserter':{'state':'constructing','reserved':{}}}})
+    assert proof['owned'][cell.job_id]['pending_ready'] is True
+    assert proof['owned'][cell.job_id]['funded'] is False
+    s.queue.reconcile(proof)
+    assert cell.checkpoint['resume_construction'] is True

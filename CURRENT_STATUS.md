@@ -536,3 +536,8 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
   overlapping empty-slot claims. Shared preview claims slots immediately;
   vertical construction reuses preflight owner.307 focused/1250fast pass,3skip;
   known firewall failure. Lifecycle: frozen private-world resumption.
+
+- 2026-10-12 17:02 IST: Bot-built queue transactions now resume without refilling their
+  consumed kits; approved automatic growth replaces the queue opening cap.
+  Actual saved-world replay readies its installed inserter cell.311focused/
+  1253fast pass,3skip; knownfirewall. Lifecycle: new frozen private resumption.

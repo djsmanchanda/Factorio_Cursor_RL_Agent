@@ -165,9 +165,14 @@ class WorkQueue:
                     and not job.reason.startswith('geometry:')
                     and not job.checkpoint.get('pending_entities')):
                 job.state, job.reason, job.blocked_signature, job.retry_tick = 'ready', 'owned_bill_funded', None, self.tick
-            if job.checkpoint.get('pending_entities') and evidence.get('pending_ready') is True:
-                job.checkpoint.pop('pending_entities')
-                job.state, job.reason, job.retry_tick = 'ready', '', self.tick
+            if (evidence.get('pending_ready') is True
+                    and (job.checkpoint.get('pending_entities')
+                         or job.checkpoint.get('receipt', {}).get('code') == 'infrastructure_construction_wait')):
+                job.checkpoint.pop('pending_entities', None)
+                # Installed kit items have been consumed by bots. Finish this
+                # transaction without waiting for their global refill targets.
+                job.checkpoint['resume_construction'] = True
+                job.state, job.reason, job.blocked_signature, job.retry_tick = 'ready', '', None, self.tick
             if evidence.get('complete') is True or (
                 job.kind in {'production', 'spare'} and stock is not None and job.target > 0
                 and job.delivered + int(evidence.get('stock', stock.get(job.item, 0))) >= job.target
@@ -187,7 +192,8 @@ class WorkQueue:
                       and (j.kind != 'spare' or not any(
                           higher.state != 'complete' and higher.priority > j.priority
                           for higher in self.jobs.values()))
-                      and (snapshot.get('owned', {}).get(j.job_id, {}).get('funded') is True
+                      and (j.checkpoint.get('resume_construction') is True
+                           or snapshot.get('owned', {}).get(j.job_id, {}).get('funded') is True
                            or all(self.jobs[d].state == 'complete' for d in j.dependencies))]
         return sorted(candidates, key=lambda j: (
             j.state == 'blocked',

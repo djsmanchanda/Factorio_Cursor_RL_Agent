@@ -461,3 +461,16 @@ def test_quad_module_places_the_capability_aware_machine(monkeypatch) -> None:
         if action.get("entity", "").startswith("assembling-machine")
     ]
     assert {action["entity"] for action in machine_actions} == {"assembling-machine-1"}
+
+
+def test_goal_queue_growth_authorization_replaces_opening_cap_only_in_execution_scope(monkeypatch):
+    from orchestrator.execution_slice import execution_slice
+    monkeypatch.setattr(builder,'_independent_mall_ready',lambda *a:False)
+    monkeypatch.setattr(builder,'_production_started',lambda *a:False)
+    monkeypatch.setattr(builder,'_dense_bootstrap_mall_enabled',lambda *a:False)
+    assert builder._bootstrap_mall_slot_limit(object(),'nauvis','player')==8
+    with execution_slice(runtime={'automatic_mall_growth':True}):
+        assert builder._bootstrap_mall_slot_limit(object(),'private','player') is None
+    with execution_slice(runtime={}):
+        assert builder._bootstrap_mall_slot_limit(object(),'private','player')==8
+    assert builder._bootstrap_mall_slot_limit(object(),'nauvis','player')==8

@@ -48,7 +48,7 @@ from orchestrator.baseline_production import (
     STEEL_IRON_CAPACITY_FLOOR,
 )
 from orchestrator.game_bridge import GameBridge, load_json
-from orchestrator.execution_slice import cooperative
+from orchestrator.execution_slice import cooperative, runtime_checkpoint
 from orchestrator.controller_budget import (
     BudgetExhausted, begin_run_budget, consume_diagnosis,
     consume_remediation, consume_wait, end_run_budget,
@@ -3839,7 +3839,11 @@ _POST_STARTER_FULL_STACK_BATCH_ITEMS = frozenset({
 def _bootstrap_mall_slot_limit(
     client: RconClient, surface: str, force: str,
 ) -> int | None:
-    """Return the pre-advanced-circuit cap; post-transition is unlimited."""
+    """Return the deterministic opening cap unless goal-owned growth is authorized."""
+    if cooperative() and (runtime_checkpoint() or {}).get("automatic_mall_growth") is True:
+        # The queue owns measured backlog and funded capacity admission. This
+        # opening preference must not prevent constructing its input producers.
+        return None
     try:
         if _independent_mall_ready(client, surface, force):
             return None

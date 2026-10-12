@@ -414,3 +414,14 @@ All empty halves honor peer claims. Vertical cells submit under the same
 `paired_mall_<item>` reservation as preflight. On resumption, unsubmitted
 duplicate vertical reservation aliases are retired, and conflicting saved
 claims are replanned only when no physical machine or ghost occupies the half.
+
+The approved goal queue enables automatic mall growth in its execution scope.
+The deterministic eight-slot opening preference does not constrain this queue;
+actual material funding, protected reservations, coverage, recipe capability
+and the shared lattice geometry still validate every added cell. Capacity
+facts report this authorization consistently, including automatic backlog jobs.
+
+Once observation verifies a job's pending bot-built entities, its continuation
+can finish without refilling the consumed kit's shared supply target. The
+checkpoint survives resumption; new shortages and geometry blockers still wait.
+Pending proof may be recovered from the same world's exact construction receipt.

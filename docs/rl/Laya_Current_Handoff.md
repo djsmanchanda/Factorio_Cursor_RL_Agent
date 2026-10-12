@@ -467,3 +467,20 @@ and vertical submission uses its original paired_mall owner. Only unsubmitted
 redundant aliases and unbuilt duplicate claims are reconciled; actual built or
 ghosted work is preserved.307focused/1250fast pass,3skip/knownfour-importfailure.
 Lifecycle: new private freeze resumes preserved world; no Lua deployment.
+
+### 2026-10-12 17:02 IST — installed continuations and approved growth repaired
+
+6457195 run persistent-laya-s50616-1791804326 built a new physical inserter
+cell at63.5,48.5 but did not configure it after supports finished. The queue
+waited on global consumed-kit refill dependencies. A169game-second observation
+window measured zero production for all tracked products; stopped130wallseconds.
+The old eight-slot deterministic opening cap also blocked the assembler cell.
+Observed completed pending entities now persist a same-world continuation proof,
+recoverable from the exact construction receipt on restart. New shortages and
+geometry failures still wait. Approved queue automatic growth now replaces
+the opening preference within execution scope, with consistent capacity facts
+and backlog expansion; material and geometry validators remain authoritative.
+311focused/1253fast pass,3skip/knownfour-importfailure. Read-only replay of
+actual preserved queue readies the installed inserter cell despite unfinished
+global supply targets. Next lifecycle: frozen private resumption to observe
+crafting, manufacturing mix and parallel capacity.

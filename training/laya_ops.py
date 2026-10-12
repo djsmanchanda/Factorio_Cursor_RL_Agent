@@ -152,6 +152,8 @@ class DeterministicSession:
         self.queue = WorkQueue(self.script_output.parent / "logs" / "laya-work-queue.json",
                                world_id=world_id, tick=tick)
         self._queue_dependencies = ()
+        self.queue.runtime['automatic_mall_growth'] = True
+        self.queue.save()
 
     def queue_menu(self, menu):
         """Expose enqueue/reorder authority using the same feasible-operation menu."""
@@ -200,13 +202,18 @@ class DeterministicSession:
         stock = economics.get("material_stock")
         owned = {}
         loans = economics.get("loans") or []
+        def pending_entities(job):
+            receipt = job.checkpoint.get("receipt", {})
+            return (job.checkpoint.get("pending_entities")
+                    or ((receipt.get("details") or {}).get("pending", [])
+                        if receipt.get("code") == "infrastructure_construction_wait" else []))
         pending_positions = tuple({tuple(e["position"]) for job in self.queue.jobs.values()
-                                   for e in job.checkpoint.get("pending_entities", [])})
+                                   if job.state != "complete" for e in pending_entities(job)})
         pending_names = (live_base.entity_names_at(self.client, SURFACE, pending_positions)
                          if pending_positions else {})
         for job in self.queue.jobs.values():
             proof = {"reserved": {}}
-            pending = job.checkpoint.get("pending_entities", [])
+            pending = pending_entities(job) if job.state != "complete" else []
             if pending:
                 proof["pending_ready"] = all(pending_names.get(tuple(e["position"])) == e["entity"] for e in pending)
             current_stock = int((stock or {}).get(job.item, 0))
@@ -230,7 +237,8 @@ class DeterministicSession:
             if job.operation == "retire_starter":
                 proof["complete"] = (economics.get("bootstrap_districts", {}).get(job.item, {})
                                       .get("lifecycle_state") == "released")
-            owner = (job.checkpoint.get("receipt", {}).get("details") or {}).get("stage")
+            details = job.checkpoint.get("receipt", {}).get("details") or {}
+            owner = details.get("stage") or details.get("owner")
             canonical = f"paired_mall_{job.item}"
             if (owner in {f"seed_vertical_mall_{job.item}_north", f"seed_vertical_mall_{job.item}_south"}
                     and canonical in economics.get("projects", {})):
@@ -320,7 +328,8 @@ class DeterministicSession:
                 self._queue_release_hold(job)
         active = [j for j in self.queue.jobs.values() if j.state != "complete"]
         self._queue_dependencies = tuple({j.item for j in active if j.item
-                                          and all(self.queue.jobs[d].state == "complete" for d in j.dependencies)})
+                                          and (j.checkpoint.get("resume_construction") is True
+                                               or all(self.queue.jobs[d].state == "complete" for d in j.dependencies))})
         ab._BLOCKING_MALL_ITEMS.update(j.item for j in active if j.parents and j.item)
         ledger = ab._MATERIAL_RESERVATION_LEDGER
         ab._refresh_logistic_chest_budget(self.client, SURFACE, FORCE, ledger, self.emit,
@@ -336,7 +345,10 @@ class DeterministicSession:
         # lane. Exact kit/material/geometry admission stays in shared tooling.
         waiting = [j for j in active if j.operation == "produce" and j.parents
                    and not j.dependencies and int((stock or {}).get(j.item, 0))+j.delivered < j.target]
-        if len({j.item for j in waiting}) >= 2 and (economics.get("free_slots") or 0) > 0:
+        capacity = economics.get("mall_capacity") or {}
+        capacity_available = ((economics.get("free_slots") or 0) > 0
+                              or (capacity.get("unlimited") is True and capacity.get("committed_slots") is not None))
+        if len({j.item for j in waiting}) >= 2 and capacity_available:
             demanded = sorted(waiting, key=lambda j: (-j.priority, j.sequence))[0]
             existing = live_base.find_line(self.client, SURFACE, FORCE, demanded.item,
                                             LINE_RECIPES[demanded.item]["machine"])
@@ -725,7 +737,12 @@ class DeterministicSession:
                                         "replacement_submitted": state.replacement_submitted,
                                         "construction_pending": pending}
         try:
-            limit = ab._bootstrap_mall_slot_limit(self.client, SURFACE, FORCE)
+            from orchestrator.execution_slice import execution_slice
+            if hasattr(self, "queue"):
+                with execution_slice(runtime=self.queue.runtime):
+                    limit = ab._bootstrap_mall_slot_limit(self.client, SURFACE, FORCE)
+            else:
+                limit = ab._bootstrap_mall_slot_limit(self.client, SURFACE, FORCE)
             capacity = ab._mall_capacity_facts(self.client, SURFACE, self.reference_point, limit)
         except Exception:
             capacity = {"committed_slots": None, "slot_limit": None, "free_slots": None, "unlimited": None}
