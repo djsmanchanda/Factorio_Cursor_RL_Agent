@@ -692,3 +692,21 @@ throughput.277focused queue/construction/chemical tests pass. New frozen private
 runner required after fast gate; no mod deployment.
 
 Final census fast gate:1,272passed,three skipped,only unchanged four-import firewall failure.
+
+### 2026-10-12 20:25 IST — funded batch readiness bypasses expansion prerequisites
+
+Run persistent-laya-s50616-1791816599 (32a5624) personally produced the missing
+three refineries, meeting the target4. At+146s, chemical/science output remained
+zero; iron-stick/pole/underground-pipe jobs were ready in storage but excluded
+by provider-chest dependencies inherited from unfunded preview builds.
+
+Queue snapshot now exposes batch_funded from the complete remaining solid
+assembler input bill against allocatable stock. It can service that batch
+through existing shared rotation independently of a new-cell supply dependency.
+No construction bill is marked funded by this fact; phase legality, fluids,
+physical pending construction, and other projects' reservations remain enforced.
+A regression tests19 reserved iron,20total(no batch),21total(two funded crafts),
+with the chest job blocked on advanced circuits.79focused tests pass; fast gate
+running. Stop was graceful; next Python freeze required, no Lua deployment.
+
+Final funded-batch fast gate:1,273passed,three skipped,only inherited four-import firewall failure.

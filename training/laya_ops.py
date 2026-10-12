@@ -200,6 +200,8 @@ class DeterministicSession:
 
     def _queue_snapshot(self, facts, economics):
         stock = economics.get("material_stock")
+        ledger = getattr(ab, "_MATERIAL_RESERVATION_LEDGER", None)
+        free = (ledger.allocatable_stock(stock) if ledger is not None else stock) if stock is not None else None
         owned = {}
         producers = {m.get("recipe") for m in facts.get("machines", [])
                      if m.get("name") in live_base.ASSEMBLER_TIERS and m.get("recipe")}
@@ -238,6 +240,16 @@ class DeterministicSession:
             # again as both crafted and still held stock.
             proof["delivered"] = max(job.delivered, produced-current_stock)
             proof["stock"] = current_stock
+            if job.operation == "produce" and free is not None and self._queue_can_produce(job.item):
+                spec = LINE_RECIPES[job.item]
+                if spec.get("machine") in live_base.ASSEMBLER_TIERS and not spec.get("fluid_ingredients"):
+                    crafts = math.ceil(max(0, job.target-job.delivered-current_stock) /
+                                       max(float(spec.get("product_amount", 1)), 1))
+                    # Actual finite inputs admit rotation independently of an
+                    # unfunded new-cell bill. Preserve other projects' ownership.
+                    proof["batch_funded"] = crafts > 0 and all(
+                        free.get(i, 0) >= math.ceil(n*crafts)
+                        for i,n in zip(spec["ingredients"], spec["amounts"], strict=True))
             if job.operation == "retire_starter":
                 proof["complete"] = (economics.get("bootstrap_districts", {}).get(job.item, {})
                                       .get("lifecycle_state") == "released")

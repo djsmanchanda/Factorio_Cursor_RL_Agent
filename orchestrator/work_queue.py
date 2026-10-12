@@ -165,7 +165,7 @@ class WorkQueue:
             job.reserved = dict(evidence.get('reserved', job.reserved))
             # A complete owned kit can precede a shared aggregate supply goal.
             # The operation still validates physical construction and materials.
-            if (evidence.get('funded') is True and job.state == 'blocked'
+            if ((evidence.get('funded') is True or evidence.get('batch_funded') is True) and job.state == 'blocked'
                     and not job.reason.startswith('geometry:')
                     and not job.checkpoint.get('pending_entities')):
                 job.state, job.reason, job.blocked_signature, job.retry_tick = 'ready', 'owned_bill_funded', None, self.tick
@@ -195,6 +195,7 @@ class WorkQueue:
                       and (not j.reason.startswith('dependency_cycle:')
                            or snapshot.get('owned', {}).get(j.job_id, {}).get('producer_present') is True
                            or snapshot.get('owned', {}).get(j.job_id, {}).get('funded') is True
+                           or snapshot.get('owned', {}).get(j.job_id, {}).get('batch_funded') is True
                            or (j.dependencies and all(self.jobs[d].state == 'complete' for d in j.dependencies)))
                       and (j.kind != 'spare' or not any(
                           higher.state != 'complete' and higher.priority > j.priority
@@ -202,6 +203,7 @@ class WorkQueue:
                       and (j.checkpoint.get('resume_construction') is True
                            or snapshot.get('owned', {}).get(j.job_id, {}).get('producer_present') is True
                            or snapshot.get('owned', {}).get(j.job_id, {}).get('funded') is True
+                           or snapshot.get('owned', {}).get(j.job_id, {}).get('batch_funded') is True
                            or all(self.jobs[d].state == 'complete' for d in j.dependencies))]
         return sorted(candidates, key=lambda j: (
             j.state == 'blocked',

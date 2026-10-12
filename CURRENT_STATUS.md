@@ -593,3 +593,8 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
   candidate. Shared cooperative predecessor query covers borrowed steps too.
   277focused/1272fast pass,3skip/inherited firewall. Lifecycle:new private freeze,
   personal observation/helper disabled; chemical/science still pending.
+
+- 2026-10-12 20:25 IST: Real run completed missing3refineries. Added batch_funded input
+  evidence so rotation can bypass unfunded cell/chest dependencies; preserves
+  unrelated reservations.79focused/1273fast passes,3skip/inherited firewall.
+  Lifecycle:new private freeze/no Lua deploy; actual plastic/science pending.

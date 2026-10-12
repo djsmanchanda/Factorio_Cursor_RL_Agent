@@ -854,3 +854,38 @@ def test_world_clock_rollback_discards_old_chemical_admission(tmp_path):
     q.save()
     restored=queue(tmp_path,tick=0)
     assert 'production_baseline' not in restored.runtime and 'product_admission' not in restored.runtime
+
+
+def test_funded_batch_runs_while_new_cell_waits_for_chests_and_preserves_claims(tmp_path,monkeypatch):
+    from orchestrator import autonomous_builder as ab
+    from orchestrator.material_reservations import MaterialReservationLedger
+    install_live_recipe_fixture(monkeypatch)
+    s=object.__new__(DeterministicSession);s.queue=queue(tmp_path)
+    s.client=object();s.reached_phases=()
+    item='iron-stick';spec=ab.LINE_RECIPES[item]
+    ledger=MaterialReservationLedger(tmp_path/'reservations',episode_id='batch',surface='nauvis',force='player')
+    monkeypatch.setattr(ab,'_MATERIAL_RESERVATION_LEDGER',ledger)
+    iron=spec['ingredients'][0]
+    stock={iron:20}
+    ledger.declare('other-project',{iron:19},stock,hold_until_producing=True)
+    ledger.mark_constructing('other-project',stock)
+    batch=s.queue.enqueue('produce',{'item':item,'stock_target':4},priority=100,tick=0)
+    s.queue.record(batch,{'ok':False,'code':'material_shortage','details':{'required':{'passive-provider-chest':1}}},
+                   snapshot(),can_produce=lambda _:True)
+    chests=s.queue.jobs[batch.dependencies[0]]
+    s.queue.record(chests,{'ok':False,'code':'material_shortage','details':{'required':{'advanced-circuit':1}}},
+                   snapshot(),can_produce=lambda _:False)
+    facts={'tick':0,'machines':[]}
+    unfunded=s._queue_snapshot(facts,{'material_stock':stock})
+    s.queue.reconcile(unfunded)
+    assert not unfunded['owned'][batch.job_id]['batch_funded'] and batch not in s.queue.ready(unfunded)
+    # Surplus funds the actual two crafts while the unrelated project keeps19.
+    stock[iron]=21
+    funded=s._queue_snapshot(facts,{'material_stock':stock})
+    s.queue.reconcile(funded)
+    assert funded['owned'][batch.job_id]['batch_funded'] and batch in s.queue.ready(funded)
+    assert chests.state!='complete' and ledger.projects['other-project'].reserved[iron]==19
+    calls=[]
+    s.queue.pulse(funded,lambda job,params:calls.append(job.item) or {'ok':True},
+                  can_produce=lambda _:True,max_jobs=1)
+    assert calls==[item]  # No new chest or assembler is prerequisite to rotation.
