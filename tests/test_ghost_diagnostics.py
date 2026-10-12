@@ -723,12 +723,13 @@ def test_coverage_remedy_targets_the_stranded_ghost_not_stage_origin(monkeypatch
     assert acted
     assert targets == [(25.5, -49.5)]
 
-def test_stage_power_repairs_stranded_machine_when_substation_is_powered(monkeypatch) -> None:
+@pytest.mark.parametrize('anchor_usable', [False, True])
+def test_stage_power_repairs_stranded_machine_when_substation_is_powered(monkeypatch, anchor_usable) -> None:
     calls = []
 
     def fake_extend(_client, _bridge, _surface, _force, position, _emit):
         calls.append(position)
-        return position == (59.5, -63.5)
+        return anchor_usable if position == (48.0, -70.0) else position == (59.5, -63.5)
 
     monkeypatch.setattr(builder, "extend_power", fake_extend)
     monkeypatch.setattr(
@@ -1387,3 +1388,16 @@ def test_covered_charging_ghost_with_stock_keeps_coverage_wait(
     )
 
     assert issue is not None and issue[1] == "coverage_charge_wait"
+
+
+def test_stage_power_hooks_stranded_machines_when_the_anchor_already_generates(monkeypatch) -> None:
+    """2026-10-17 (batch-20261017-early control-s76307): the crude-oil substation at (-298, -78) answered
+    "nothing to bridge" for 10 rounds while its pumpjacks at (-330.5, 10.5) stayed unpowered."""
+    calls = []
+    monkeypatch.setattr(builder, "extend_power", lambda _c, _b, _s, _f, position, _e: calls.append(position) or True)
+    monkeypatch.setattr(live_base, "entity_statuses", lambda *_a: {(-330.5, 10.5): "no_power", (-326.5, 10.5): "working"})
+    acted = builder._apply_remedy(
+        None, None, "nauvis", "player", "crude-oil source", "stage_power", "2 machine(s) unpowered",
+        (-298.0, -78.0), (-298.0, -78.0), [(-330.5, 10.5), (-326.5, 10.5)], [], None, lambda _m: None,
+    )
+    assert acted and (-330.5, 10.5) in calls and (-326.5, 10.5) not in calls
