@@ -426,3 +426,18 @@ expose their legal plate construction operation and measured shortfall, with
 backpressure guards preserved.225 focused pass; fast1241 pass/3skip, only known
 four-import firewall failure. Lifecycle: new frozen runner resumes this private
 world; no mod deployment, manual game repair, merge or adoption.
+
+### 2026-10-12 16:27 IST — same-world construction history and raw queue bills restored
+
+Frozen5c1ef4d resumption persistent-laya-s50616-1791802180 raised copper to3.75/s
+but no iron foundation option appeared. Its per-run results were empty while
+starter jobs were complete in the queue; suppressed duplicate starter choices
+prevented discovering foundation work. Raw queue bills also never reached the
+legacy mall target map. Stopped throughOC before changing code.
+
+Option compilation now uses verified completed construction receipts from the
+same world and includes active measured queue bills. Actual saved-state replay:
+last iron shortage had available1/required26; completed iron/copper starter
+receipts now expose op.foundation.iron-plate.227 focused pass; fast1243 pass/3skip,
+only unchanged four-import firewall failure. Next lifecycle is frozen private
+resumption for live expansion evidence; no manual save repair or Lua deployment.

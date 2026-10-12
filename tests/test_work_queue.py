@@ -598,3 +598,31 @@ def test_existing_recipe_does_not_prevent_parallel_assignment_to_a_built_idle_la
     assert capacity.params=={'item':'electronic-circuit','minimum_machines':2}
     assert capacity.checkpoint['mall_allocation:nauvis:player:electronic-circuit']==[[59,42],'south']
     assert capacity.priority > production.priority
+
+
+def test_restart_restores_verified_plate_stages_without_replaying_old_decisions(tmp_path):
+    from training.laya_ops_runner import compile_options
+    q=queue(tmp_path)
+    for plate in ('iron-plate','copper-plate'):
+        j=q.enqueue('starter',{'recipe':plate},priority=100,tick=0)
+        q.record(j,{'ok':True,'operation':'starter','params':j.params,'code':'producing'},snapshot(),can_produce=lambda _:True)
+    unfinished=q.enqueue('foundation',{'recipe':'iron-plate'},priority=100,tick=0)
+    unfinished.checkpoint['receipt']={'ok':True,'operation':'foundation','params':unfinished.params}
+    q.save()
+    restored=queue(tmp_path,tick=100)
+    receipts=restored.planning_receipts()
+    assert len(receipts)==2
+    menu=compile_options({'needs':[{'item':'iron-plate','condition':'satisfied'}]},receipts,
+                         queued_targets={'iron-plate':26},material_stock={'iron-plate':2},continuous_queue=True)
+    ids={o['option_id'] for o in menu['options']}
+    assert 'op.foundation.iron-plate' in ids
+    assert 'op.starter.iron-plate' not in ids and 'op.extend.iron-plate' not in ids
+
+
+def test_live_raw_input_bills_reach_options_without_resurrecting_finished_kit(tmp_path):
+    q=queue(tmp_path)
+    slot=q.enqueue('mall_slot',{'item':'splitter'},priority=100,tick=0)
+    q.record(slot,{'ok':False,'code':'material_shortage','details':{'required':{'iron-plate':26}}},snapshot(),can_produce=lambda _:False)
+    assert q.supply_targets({'transport-belt':20})=={'transport-belt':20,'iron-plate':26}
+    q.record(slot,{'ok':True,'operation':'mall_slot','params':slot.params,'code':'producing'},snapshot(),can_produce=lambda _:False)
+    assert q.supply_targets({'transport-belt':20})=={'transport-belt':20}

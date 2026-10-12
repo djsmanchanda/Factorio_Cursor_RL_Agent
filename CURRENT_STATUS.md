@@ -521,3 +521,8 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
   copper output~0.625→2.662/s; iron stayed~1.25/s. Committed plate shortages now
   expose growth despite met phase rates.225 focused/1241fast pass; known firewall
   failure only. Lifecycle: frozen private resumption; sustained speed unproven.
+
+- 2026-10-12 16:27 IST: Resumption restores same-world verified construction
+  stages and active raw queue bills into options. Real saved-state replay1/26
+  iron now exposes its foundation.227 focused/1243fast pass; known firewall
+  failure only. Lifecycle: frozen private resumption; live growth awaited.

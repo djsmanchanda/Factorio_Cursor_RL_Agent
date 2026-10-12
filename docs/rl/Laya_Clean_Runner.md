@@ -396,3 +396,10 @@ option even when the phase's small measured rate target is already met. The
 option carries the exact stock shortfall and goal urgency; full/backpressured
 output still prevents unnecessary capacity. Raw plates remain in their shared
 mining/smelting operation family, and Laya retains queue-order authority.
+
+On restart, option compilation includes the same world's verified completed
+construction receipts from the durable queue. It does not count an unfinished
+job or carry prior decision choices/checkpoint claims into the new run. Active
+measured queue material bills augment the legacy mall target map, so raw plate
+shortages cannot disappear from the decision layer merely because the mall
+omits raw products. Resolved/completed bills leave that target map again.

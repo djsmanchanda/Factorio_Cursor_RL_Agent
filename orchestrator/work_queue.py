@@ -257,6 +257,23 @@ class WorkQueue:
     def describe(self):
         return [asdict(j) for j in sorted(self.jobs.values(), key=lambda j: (-j.priority, j.sequence))]
 
+    def planning_receipts(self):
+        """Restore verified construction stages from this queue's owned world."""
+        operations = {'starter', 'foundation', 'extend', 'steel', 'retire_starter'}
+        return [dict(receipt) for job in sorted(self.jobs.values(), key=lambda j:j.sequence)
+                if job.state == 'complete' and job.operation in operations
+                and (receipt := job.checkpoint.get('receipt', {})).get('ok') is True
+                and receipt.get('operation') == job.operation and receipt.get('params') == job.params]
+
+    def supply_targets(self, targets):
+        """Include measured active bills, including raw inputs the mall omits."""
+        result = dict(targets or {})
+        for job in self.jobs.values():
+            if job.state != 'complete' and job.checkpoint.get('receipt', {}).get('code') == 'material_shortage':
+                for item, count in job.required.items():
+                    result[item] = max(result.get(item, 0), count)
+        return result
+
     def save(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temp = self.path.with_suffix('.tmp')

@@ -1017,12 +1017,16 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         economics = session.economics() if hasattr(session, "economics") else None
         districts = (economics or {}).get("bootstrap_districts")
         allocation = reservation_allocation(economics) if economics is not None else None
-        menu = with_economics(compile_options(board, results, facts["tick"], facts.get("recipes"), stock,
+        planning_results = session.queue.planning_receipts() + results if queue_enabled else results
+        queued_targets = (economics or {}).get("mall_targets")
+        if queue_enabled:
+            queued_targets = session.queue.supply_targets(queued_targets)
+        menu = with_economics(compile_options(board, planning_results, facts["tick"], facts.get("recipes"), stock,
                                              bootstrap_districts=districts, allocation=allocation,
                                              measurement=measurement, research_goal=goal,
                                              goal_status=goal_status, labs=_lab_count(facts), reached_phases=reached,
                                              layout=layout_signature(facts),
-                                             queued_targets=(economics or {}).get("mall_targets"),
+                                             queued_targets=queued_targets,
                                              continuous_queue=queue_enabled,
                                              material_stock=(economics or {}).get("material_stock"),
                                              pending_precursors=tuple({part for parts in
