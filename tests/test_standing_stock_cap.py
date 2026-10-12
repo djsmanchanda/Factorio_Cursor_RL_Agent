@@ -301,3 +301,20 @@ def test_binding_consumer_opens_its_queued_precursor_gate(monkeypatch):
     assert builder._effective_mall_stock_gate(
         object(), "nauvis", "player", "electronic-circuit",
         upgrade_bootstrap=False, requested=18) == 18
+
+
+def test_restart_restores_world_gate_floor_before_lower_or_small_higher_demand(monkeypatch):
+    submitted=[]
+    monkeypatch.setattr(builder,'_MALL_STOCK_GATE_FLOORS',{})
+    monkeypatch.setattr(builder,'active_bootstrap_loans',lambda *a:[SimpleNamespace(machine_position=(60.5,38.5))])
+    surveyed=[]
+    def limits(*args,**kwargs):
+        surveyed.append(kwargs['excluded_positions'])
+        return {'transport-belt':50}
+    monkeypatch.setattr(builder.live_base,'standing_stock_gate_limits',limits)
+    builder._restore_standing_mall_limits(SimpleNamespace(command=lambda _:None),'nauvis','player')
+    _drive_refresh(monkeypatch,submitted,stock_gate_target=35)
+    _drive_refresh(monkeypatch,submitted,stock_gate_target=53)
+    gates=[a['logistic_condition']['constant'] for plan in submitted for a in actions(plan) if 'logistic_condition' in a]
+    assert gates==[50,50,60,60]
+    assert surveyed==[[(60.5,38.5)]]

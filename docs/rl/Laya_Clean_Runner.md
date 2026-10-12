@@ -439,3 +439,8 @@ coverage path as left/right cells.
 A rejected bootstrap-cycle edge does not permanently disable a job after its
 real retained dependencies finish or its exact kit is funded. The operation
 then revalidates/produces a seed; unchanged material signatures still wait.
+
+Runner startup restores standing item floors from current owned assembler
+controls before maintenance or new builds. Temporary loan machines are excluded.
+A cold restart therefore preserves the live cap and applies the same minimum
+20% increase for any subsequent rise.

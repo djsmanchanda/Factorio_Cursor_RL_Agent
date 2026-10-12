@@ -527,3 +527,19 @@ reopen dispatch, while unchanged self-seed shortage still waits.319focus/
 Remaining geometric evidence: iron direct_belt_approach_wait at(-8.5,50.5),
 copper district_expansion_unbuildable at(77.5,-39.5). Do not call manufacturing
 stuck while actual output continues.
+
+### 2026-10-12 17:26 IST — live12mall recovery; restart cap persistence repaired
+
+2be723d run persistent-laya-s50616-1791805669 observed340wallseconds and
+stopped/preserved. Assembler job produced26machines in155.817game-second
+window (actor counter28), mall grew10→12, thirdgearactor built,29queuejobs
+complete. Remaining3: iron direct_belt_approach_wait, copper district geometry,
+longhandcapacity2 prerequisite_advanced. Manufacturing runs until real reserves
+fill; newconstruction is bottleneck. Exact dynamic acceptance log showedC2passed
+butC1failed afterstarterretirement/idlefilledreserves; proxyphaseC2, no research.
+Cross-run probes also confirmed standing longhand35→27 when memoryfloorsreset.
+Shared startup now reads actual item gate maxima, excludes temporary loans,
+and restores floors before maintenance/builds. Existing historicalshrink is
+not retroactivelyreversed; future coldrestart preservescurrentestablishedcaps.
+337focused/1259fast pass,3skip/knownfirewall. Actualprivatecensus: gears143,
+circuits134, belts389, inserter63, longhand27, AM1limit29. Newfreeze needed.

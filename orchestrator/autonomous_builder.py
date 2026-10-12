@@ -13400,6 +13400,16 @@ def _reserve_steel_starter_power_seed(
     )
 
 
+def _restore_standing_mall_limits(client, surface, force):
+    """A runner restart must not shrink item caps already established in the world."""
+    if not callable(getattr(client, "command", None)):
+        return
+    borrowed = [loan.machine_position for loan in active_bootstrap_loans(client, surface, force)]
+    limits = live_base.standing_stock_gate_limits(client, surface, force, excluded_positions=borrowed)
+    for item, limit in limits.items():
+        _MALL_STOCK_GATE_FLOORS[(surface, force, item)] = limit
+
+
 def _open_the_run(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     goal_item: str, mission_items: tuple[str, ...], script_output: Path | str,
@@ -13425,6 +13435,7 @@ def _open_the_run(
     _MALL_PROVIDER_CAPACITY_FLOORS.clear()
     _MALL_STOCK_GATE_FLOORS.clear()
     _MALL_ITEM_PROVIDER_LIMITS.clear()
+    _restore_standing_mall_limits(client, surface, force)
     _REFINERY_SITE_RESERVATIONS.clear()
     _STARTUP_METAL_STARTERS_OBSERVED = False
     _STARTUP_MALL_LIMITS_RELEASED = False

@@ -2046,6 +2046,24 @@ def pending_construction_items(client: RconClient, surface: str, force: str) -> 
     return {name: int(count) for name, count in (part.split('=') for part in raw.split(',') if part)}
 
 
+def standing_stock_gate_limits(client, surface, force, *, excluded_positions=()):
+    """Current item limits on owned recipe actors, excluding temporary loans."""
+    excluded = [{"x": x, "y": y} for x, y in excluded_positions]
+    lua = (
+        "local s=game.surfaces[" + json.dumps(surface) + "];local out={};"
+        "local excluded=helpers.json_to_table(" + json.dumps(json.dumps(excluded)) + ");"
+        "for _,e in pairs(s.find_entities_filtered{type='assembling-machine',force=" + json.dumps(force) + "}) do "
+        "local skip=false;for _,p in pairs(excluded) do if e.position.x==p.x and e.position.y==p.y then skip=true end end;"
+        "local r=e.get_recipe();local b=e.get_control_behavior();"
+        "if not skip and r and b and b.connect_to_logistic_network then "
+        "local c=b.logistic_condition;c=c and (c.condition or c);"
+        "if c and c.first_signal and c.first_signal.name==r.name and c.comparator=='<' "
+        "and c.constant and c.constant>0 then out[r.name]=math.max(out[r.name] or 0,c.constant) end end end;"
+        "rcon.print(helpers.table_to_json(out))"
+    )
+    return {item: int(count) for item, count in json.loads(_sc(client, lua)).items()}
+
+
 def stock_capped_mall_positions(client: RconClient, surface: str, force: str, recipe: str) -> list[Point]:
     """Real powered assemblers deliberately stopped by a satisfied item cap."""
     lua = (

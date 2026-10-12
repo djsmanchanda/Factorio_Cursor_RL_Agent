@@ -555,3 +555,8 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
   in179game seconds, grew8→10mall actors, stoneworking, iron1.25→3.748/s.
   Stale rejected-cycle markers now permit funded/completed-dependency work.
   319focused/1258fast pass,3skip/knownfirewall. Lifecycle: private newfreeze.
+
+- 2026-10-12 17:26 IST: Restart restores standing limits from owned live controls,
+  excluding temporary loans; cold35proposal preserves50,53becomes60.
+  337focused/1259fast pass,3skip/knownfirewall; actual private census verified.
+  Lifecycle: frozen private resumption; old historical shrink not reversed.
