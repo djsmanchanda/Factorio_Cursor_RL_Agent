@@ -628,3 +628,7 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
   and owned coal power service on transaction retry.143 focused/1296 fast
   pass,3 skip/inherited firewall. Lifecycle:private Lua deployment/server
   reload,new freeze,end-only helper; plastic/science still unverified.
+
+- 2026-10-13 04:07 IST: Campaign start notifications carry lifecycle acknowledgement only;
+  end-only DeepSeek reviews preserved.46focused/1297fast pass,3skip/inherited
+  firewall; fail-before/pass-after verified. Lifecycle:new supervisor freeze.

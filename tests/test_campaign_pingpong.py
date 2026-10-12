@@ -12,6 +12,32 @@ from tools import opencode_campaign_orchestrator as orch
 pytestmark = pytest.mark.fast
 
 
+def test_run_notification_does_not_request_active_gameplay_review(tmp_path, monkeypatch):
+    from tools import campaign_pingpong as pp
+
+    c = replace(config(tmp_path), code_root=tmp_path / 'episode/code',
+                world_root=tmp_path / 'active-world')
+    c.code_root.parent.mkdir()
+    (c.code_root.parent / 'freeze.json').write_text(json.dumps({'revision': 'frozen'}))
+    state = orch.State(active_cycle=1, active_episode_id='owned-run',
+                       primary_session_id='saved-deepseek', deadline_utc='deadline')
+    messages = []
+    def primary(_config, actual_state, message, _sequence):
+        assert actual_state.primary_session_id == 'saved-deepseek'
+        messages.append(message)
+        return json.dumps({'type': 'text', 'part': {'text': 'Acknowledged; waiting for RUN END.'}})
+    monkeypatch.setattr(orch, '_primary_turn', primary)
+    pp.notify_run(c, state)
+    pp.notify_run(c, state)
+    assert len(messages) == 1
+    assert 'Do not inspect gameplay evidence' in messages[0]
+    assert str(c.world_root) not in messages[0]
+    assert 'latest-context.md' not in messages[0]
+    assert 'after natural end' in messages[0]
+    record = pp.read(c.code_root.parent / 'deepseek-run-notification.json')
+    assert record['delivered'] and record['session_id'] == 'saved-deepseek'
+
+
 def config(tmp_path):
     args = orch._parser().parse_args([
         '--runtime', 'laya', '--agent-topology', 'deepseek-haiku',

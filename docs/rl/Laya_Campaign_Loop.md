@@ -162,6 +162,11 @@ real ID is persisted as soon as the transport emits it; corrections use only
 `--resume ID`. Saved native transcripts verify actual effort/model/provider.
 Only the controller stages/commits. Haiku receives the saved planner ID,
 findings, previous change/outcome, plan/prediction and verification contracts.
+Run-start messages request acknowledgement only, without active gameplay
+evidence. The user requests completed-run reviews; neither DeepSeek nor the
+owning thread inspects active gameplay. Automated controller status snapshots
+remain lifecycle evidence, with no live model review.
+
 Every completion packet is relayed verbatim through OpenCode to that saved ID,
 with acknowledged delivery recorded before review. The subsequent run
 notification adds its verified commit and frozen run identity to the same ID.

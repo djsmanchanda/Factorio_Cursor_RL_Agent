@@ -836,3 +836,13 @@ deterministic inactive. Matching side-by-side GUI artifacts installed; GUI
 client restart remains required before joining. Production and separate
 deterministic server untouched. Helper enabled with end-only default; no
 active-run gameplay inspection. Outcome pending.
+
+### 2026-10-13 04:07 IST — end-only review contract applies to improvement campaigns
+
+The new six-hour DeepSeek/Haiku5.5 campaign retains completed-run-only model
+reviews. Campaign start notifications now request lifecycle acknowledgement
+without active-world/context pointers or gameplay observation. DeepSeek planning
+and Haiku implementation occur after natural RUN END. One regression fails
+against previous HEAD and passes with the fix;46 focused tests pass,1297fast
+pass/3skip with only the unchanged four-import firewall baseline. Lifecycle:
+freeze the verified supervisor before launching a new isolated campaign.

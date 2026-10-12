@@ -263,12 +263,11 @@ def notify_run(config, state) -> None:
         return
     commit = read(Path(config.code_root).parent / "freeze.json").get("revision")
     message = (f"NEW RUN {state.active_episode_id}, cycle {state.active_cycle}, commit {commit}. "
-               f"Observe this same owned run; do not edit or fix while active. Frozen world {config.world_root}; "
-               f"freeze {Path(config.code_root).parent / 'freeze.json'}; bounded context {config.state_root / 'logs/latest-context.md'}. "
-               f"Previous cycles/changes/outcomes {config.state_root / 'logs/campaign-loop'}. "
+               "This is a lifecycle notification only. Do not inspect gameplay evidence, "
+               "observe, edit or fix while the run is active. "
                f"Original deadline {state.deadline_utc}. Final validation={state.final_validation_started}. "
                "Acknowledge briefly; terminal evidence/plan request follows after natural end.")
-    # Run notifications are observation even if a natural episode crossed D during startup.
+    # Lifecycle acknowledgement is allowed after D; gameplay review waits for RUN END.
     saved_deadline = orch._COMMAND_DEADLINE
     orch._COMMAND_DEADLINE = None
     try:
