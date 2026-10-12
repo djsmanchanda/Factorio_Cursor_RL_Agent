@@ -79,7 +79,7 @@ def main(argv=None) -> int:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--stepped", action="store_true", help="Paused fixed-tick stepping instead of live play")
     p.add_argument("--speed", type=float, default=1.0, help="Live game speed")
-    p.add_argument("--no-helper", action="store_true", help="Disable the live/final Laya Helper")
+    p.add_argument("--no-helper", action="store_true", help="Disable the end-of-run Laya Helper")
     p.add_argument("--helper-report-root", type=Path, help="Mutable helper findings directory outside frozen code")
     p.add_argument("--helper-data-root", type=Path, help="Mutable helper session/transcript directory")
     p.add_argument("--run-index", type=Path, help="Shared run index for helper comparisons across frozen copies")
@@ -170,11 +170,6 @@ def main(argv=None) -> int:
                   variant=f"{tag['variant_id']} {tag['variant_hash'][:19]}", experiment=args.experiment or "-",
                   window=f"goal={args.research_goal or settings.goal_technology or '-'} proxy={settings.until_phase or '-'} accepted={args.until_accepted or '-'} max_ticks={settings.max_game_ticks or '-'}",
                   game=f"127.0.0.1:{manifest['game_port']}", root=root, log=paths["log"])
-        if not args.no_helper:  # Live observer from RUN START; it writes the final review after RUN END.
-            helper_options = {name: value for name, value in {
-                "report_root": args.helper_report_root, "data_root": args.helper_data_root,
-                "run_index_path": args.run_index}.items() if value is not None}
-            log("LAYA HELPER: observing " + launch_helper(run_id, paths["log"], root.resolve(), **helper_options))
         try:
             if live_error is not None:
                 raise live_error
@@ -230,6 +225,15 @@ def main(argv=None) -> int:
     if resume:index['resume_checkpoint']={'path':str(args.resume_bundle),'save_sha256':resume['files']['source.zip']}
     with RUN_INDEX.open("a") as out:
         out.write(json.dumps(index) + "\n")
+    if not args.no_helper:
+        helper_options = {name: value for name, value in {
+            "report_root": args.helper_report_root, "data_root": args.helper_data_root,
+            "run_index_path": args.run_index}.items() if value is not None}
+        # The complete run is indexed before the helper can read any evidence.
+        try:
+            log("LAYA HELPER: reviewing completed run " + launch_helper(run_id, paths["log"], **helper_options))
+        except Exception as error:
+            log(f"LAYA HELPER: review launch failed: {type(error).__name__}: {error}")
     try:
         entry = record_laya_run(index)
         print(f"RUN LEDGER: {entry['outcome']} highest={entry['highest_milestone']} -> {LEDGER}")

@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "purpose": "Read-only live observation and final DeepSeek review of each Laya run (tools/laya_helper_agent.py).",
+  "purpose": "Read-only DeepSeek review after each Laya run ends and its full evidence is indexed (tools/laya_helper_agent.py).",
   "model": "opencode-go/deepseek-v4.1-flash",
   "variant": "high",
   "deterministic_reference": {

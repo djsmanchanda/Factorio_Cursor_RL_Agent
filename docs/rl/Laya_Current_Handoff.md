@@ -780,3 +780,24 @@ Stopped private runner gracefully; next Python freeze,no Lua deployment.
 Plastic/advanced output remains at baseline392/297,coal0; no science yet.
 
 Final power fast gate:1,278passed,three skipped,only inherited four-import firewall failure.
+
+### 2026-10-12 22:21 IST — user changed supervision to end-of-run helper review
+
+User explicitly requested no observation during runs and approved Laya's
+built-in DeepSeek helper for end-of-run reviews, overriding Codex/Luna-only
+delegation for this review path. T3 delegate_task/task_status remain absent.
+Default runner helper launch moved after RUN END and completed-run indexing;
+no observe-root is passed. Launch failures do not fail the completed gameplay
+run.38focused helper/lifecycle tests pass, including no active-run launch and
+no-helper. Started the final review of persistent-laya-s50616-1791818809 via
+laya-helper-a683a46a82a0a7ab.service; no active gameplay runner exists.
+
+Last run endedstalled235seconds/36decisions. Before the instruction changed,
+post-run physical inspection established three crude-filled pumpjacks, four
+empty refineries, coal0 and no plastic/science. Current2.1.21APIremovedfluidbox
+in favor of fluids_count/get_fluid/get_fluid_box_pipe_connections. Planned
+pump connectors also lie2tiles sideways from actual connectors; mirrored
+refinery pipe geometry was emitted without entity mirroring. Geometry/API
+fixes remain to be implemented; do not personally sample subsequent active runs.
+
+Final end-only helper fast gate:1,280passed,three skipped,only inherited four-import firewall failure. Helper completed; audit requested for cross-run coverage citations.

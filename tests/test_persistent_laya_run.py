@@ -183,3 +183,36 @@ def test_prepare_preflights_mod_set_before_creating_partial_root(tmp_path, monke
     with pytest.raises(laya_saved_world.SavedWorldError, match="missing required mods.*factorio_laya_agent"):
         run_laya_saved_world.prepare(args)
     assert not root.exists()
+
+
+@pytest.mark.parametrize('helper_enabled',[True,False])
+def test_helper_starts_only_after_run_end_and_completed_index(world,tmp_path,monkeypatch,helper_enabled):
+    monkeypatch.setattr(run_laya_clean,'owned_root',lambda _:world)
+    class Adapter:
+        speed=2;observed_speed=2
+        def __init__(self,*a): pass
+        def go_live(self): pass
+        def observe_speed(self): pass
+        def tick(self): return 100
+        def close(self): pass
+    monkeypatch.setattr(run_laya_clean,'LiveWorld',Adapter)
+    calls=[]
+    def controller(*a,**k):
+        assert calls==[]
+        return {'stop':'decision_limit','decisions':1,'failures':0,'phases_reached':[]}
+    monkeypatch.setattr(run_laya_clean,'run',controller)
+    index=tmp_path/'completed-runs.jsonl'
+    monkeypatch.setattr(run_laya_clean,'RUN_INDEX',index)
+    def helper(run_id,log,**kwargs):
+        assert not (world/'laya-runner.pid.json').exists()
+        assert log.read_text().rstrip().endswith('RUN END')
+        assert json.loads(index.read_text().splitlines()[-1])['run_id']==run_id
+        calls.append(run_id)
+        return 'review-service'
+    monkeypatch.setattr(run_laya_clean,'launch_helper',helper)
+    monkeypatch.setattr(run_laya_clean,'record_laya_run',lambda _: {'outcome':'test','highest_milestone':'C0'})
+    argv=['run','--root',str(world),'--source-save',str(world/'baseline.zip'),
+          '--policy','exploration','--decisions','1','--run-index',str(index)]
+    if not helper_enabled:argv.append('--no-helper')
+    assert run_laya_clean.main(argv)==0
+    assert len(calls)==int(helper_enabled)

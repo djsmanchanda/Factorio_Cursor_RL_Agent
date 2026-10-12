@@ -618,3 +618,8 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
   despite generated central anchor. Shared stagepower now connects every
   stranded consumer.111focused/1278fast passes,3skip/inherited firewall.
   Lifecycle:new private freeze,no Lua deploy; product/science outcome pending.
+
+- 2026-10-12 22:24 IST: User now wants end-only reviews and explicitly approved built-in
+  DeepSeek. Helper launches after RUN END/index,never during gameplay.38focused/
+  1280fast passes,3skip/inherited firewall. Current completed-run helper returned;
+  older-run coverage citation needs correction. Lifecycle: next frozen runner.
