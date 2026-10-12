@@ -441,3 +441,16 @@ last iron shortage had available1/required26; completed iron/copper starter
 receipts now expose op.foundation.iron-plate.227 focused pass; fast1243 pass/3skip,
 only unchanged four-import firewall failure. Next lifecycle is frozen private
 resumption for live expansion evidence; no manual save repair or Lua deployment.
+
+### 2026-10-12 16:49 IST — funded parent dispatch repairs aggregate deadlock
+
+Stopped private run persistent-laya-s50616-1791802712 (54ea702) after
+>750wall seconds/>225decisions. Seven longhands existed, but global target8
+blocked inserter/assembler/splitter cells that each owned complete ready kits.
+Inserter cell had AM1/circuit/gear/iron plus its two longhands fully reserved;
+regular inserter stock was zero and longhand production needed one. Queue now
+uses the exact receipt stage owner to dispatch funded jobs independently of
+shared aggregate supply completion. Geometry and pending-entity waits remain
+protected; shared operations still validate materials.230focused/1246fast pass,
+3skip and unchanged four-import firewall failure. New frozen private-world
+resumption follows; personally verify actual crafting and construction.

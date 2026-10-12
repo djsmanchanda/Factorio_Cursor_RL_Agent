@@ -233,6 +233,7 @@ class DeterministicSession:
             owner = (job.checkpoint.get("receipt", {}).get("details") or {}).get("stage")
             if owner in economics.get("projects", {}):
                 proof["reserved"] = economics["projects"][owner]["reserved"]
+                proof["funded"] = economics["projects"][owner]["state"] == "ready"
             owned[job.job_id] = proof
         return {"tick": facts["tick"], "stock": stock, "owned": owned,
                 "claims": {item: [(owner, project["reserved"].get(item, 0))

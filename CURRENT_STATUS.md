@@ -526,3 +526,8 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
   stages and active raw queue bills into options. Real saved-state replay1/26
   iron now exposes its foundation.227 focused/1243fast pass; known firewall
   failure only. Lifecycle: frozen private resumption; live growth awaited.
+
+- 2026-10-12 16:49 IST: Removed aggregate precursor deadlock for individually funded
+  queue jobs, using exact reservation ownership.230 focused/1246fast pass,3skip;
+  unchanged four-import firewall failure. Lifecycle: frozen private-world
+  resumption; actual manufacturing recovery still requires observation.

@@ -626,3 +626,52 @@ def test_live_raw_input_bills_reach_options_without_resurrecting_finished_kit(tm
     assert q.supply_targets({'transport-belt':20})=={'transport-belt':20,'iron-plate':26}
     q.record(slot,{'ok':True,'operation':'mall_slot','params':slot.params,'code':'producing'},snapshot(),can_produce=lambda _:False)
     assert q.supply_targets({'transport-belt':20})=={'transport-belt':20}
+
+
+def test_funded_owned_cell_runs_with_seven_supports_even_while_aggregate_goal_is_eight(tmp_path):
+    q=queue(tmp_path)
+    cell=q.enqueue('mall_slot',{'item':'inserter'},priority=100,tick=0)
+    q.record(cell,{'ok':False,'code':'material_shortage','details':{'required':{'long-handed-inserter':8}}},
+             snapshot(),can_produce=lambda _:True)
+    supply=q.jobs[cell.dependencies[0]]
+    funding=snapshot(120,stock={'long-handed-inserter':7},
+                     owned={cell.job_id:{'funded':True,'reserved':{'long-handed-inserter':2}}})
+    q.reconcile(funding)
+    assert supply.state!='complete' and supply.target==8
+    assert cell in q.ready(funding) and cell.reserved=={'long-handed-inserter':2}
+    calls=[]
+    def execute(job,params):
+        calls.append(job.operation)
+        return {'ok':True,'operation':job.operation,'params':params,'code':'producing'}
+    q.pulse(funding,execute,can_produce=lambda _:True)
+    assert 'mall_slot' in calls
+
+
+def test_funding_must_belong_to_the_job_and_does_not_reopen_geometry_failure(tmp_path):
+    q=queue(tmp_path)
+    j=q.enqueue('mall_slot',{'item':'inserter'},priority=100,tick=0)
+    q.record(j,{'ok':False,'code':'material_shortage','details':{'required':{'long-handed-inserter':8}}},
+             snapshot(),can_produce=lambda _:True)
+    foreign=snapshot(120,stock={'long-handed-inserter':7},owned={'foreign':{'funded':True}})
+    q.reconcile(foreign)
+    assert j not in q.ready(foreign)
+    j.reason='geometry:mall_slot_unbuildable'
+    j.blocked_signature=q.signature(j,foreign)
+    owned=snapshot(120,stock={'long-handed-inserter':7},owned={j.job_id:{'funded':True}})
+    q.reconcile(owned)
+    assert j not in q.ready(owned)
+    j.reason='material_shortage'
+    j.checkpoint['pending_entities']=[{'entity':'inserter','position':[1,2]}]
+    q.reconcile(owned)
+    assert j not in q.ready(owned)
+
+
+def test_snapshot_uses_exact_ready_reservation_owner_for_dispatch(tmp_path):
+    s=object.__new__(DeterministicSession)
+    s.queue=queue(tmp_path)
+    j=s.queue.enqueue('mall_slot',{'item':'inserter'},priority=100,tick=0)
+    j.checkpoint['receipt']={'details':{'stage':'paired_mall_inserter'}}
+    data={'material_stock':{'long-handed-inserter':7},
+          'projects':{'paired_mall_inserter':{'state':'ready','reserved':{'long-handed-inserter':2}}}}
+    proof=s._queue_snapshot({'tick':120},data)['owned'][j.job_id]
+    assert proof['funded'] is True and proof['reserved']=={'long-handed-inserter':2}

@@ -159,6 +159,12 @@ class WorkQueue:
             # Credit is a monotonic sum from the owning job's lane/delivery record.
             job.delivered = max(job.delivered, int(evidence.get('delivered', 0)))
             job.reserved = dict(evidence.get('reserved', job.reserved))
+            # A complete owned kit can precede a shared aggregate supply goal.
+            # The operation still validates physical construction and materials.
+            if (evidence.get('funded') is True and job.state == 'blocked'
+                    and not job.reason.startswith('geometry:')
+                    and not job.checkpoint.get('pending_entities')):
+                job.state, job.reason, job.blocked_signature, job.retry_tick = 'ready', 'owned_bill_funded', None, self.tick
             if job.checkpoint.get('pending_entities') and evidence.get('pending_ready') is True:
                 job.checkpoint.pop('pending_entities')
                 job.state, job.reason, job.retry_tick = 'ready', '', self.tick
@@ -181,7 +187,8 @@ class WorkQueue:
                       and (j.kind != 'spare' or not any(
                           higher.state != 'complete' and higher.priority > j.priority
                           for higher in self.jobs.values()))
-                      and all(self.jobs[d].state == 'complete' for d in j.dependencies)]
+                      and (snapshot.get('owned', {}).get(j.job_id, {}).get('funded') is True
+                           or all(self.jobs[d].state == 'complete' for d in j.dependencies))]
         return sorted(candidates, key=lambda j: (
             j.state == 'blocked',
             j.checkpoint.get('last_attempt_tick', -1) if j.state == 'blocked' else 0,

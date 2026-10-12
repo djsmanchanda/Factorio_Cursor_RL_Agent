@@ -403,3 +403,8 @@ job or carry prior decision choices/checkpoint claims into the new run. Active
 measured queue material bills augment the legacy mall target map, so raw plate
 shortages cannot disappear from the decision layer merely because the mall
 omits raw products. Resolved/completed bills leave that target map again.
+
+An exact ready reservation project can dispatch its owning queue job before a
+shared aggregate precursor target is complete. This avoids waiting for eight
+support inserters when a cell already owns its required two. Funding does not
+bypass pending-entity waits, geometry blockers, or shared execution validators.
