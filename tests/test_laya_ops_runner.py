@@ -1237,6 +1237,10 @@ def test_unsubmitted_foundation_continues_after_its_starter_meets_demand(pending
     assert continuation["features"]["waiting"]
     assert "op.starter.stone-brick" not in options
     assert "op.extend.copper-plate" not in options
+    parallel = {o["option_id"] for o in compile_options(board, results,
+        bootstrap_districts=districts, continuous_queue=True)["options"]}
+    assert {"op.foundation.copper-plate", "op.starter.stone-brick"} <= parallel
+    assert "op.starter.copper-plate" not in parallel
     districts["copper-plate"].update(replacement_submitted=True, construction_pending=False)
     ids = {o["option_id"] for o in compile_options(board, results, bootstrap_districts=districts)["options"]}
     assert "op.foundation.copper-plate" not in ids

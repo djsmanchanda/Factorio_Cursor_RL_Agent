@@ -543,3 +543,58 @@ def test_mall_inputs_cannot_hoard_inserters_before_its_transfer_arms_are_built(m
     assert len(configured)==1
     assert configured[0]['action_type']=='configure_entity'
     assert any(r['name']=='inserter' for r in configured[0]['logistic_sections'][0]['requests'])
+
+
+def test_new_remaining_mine_shortage_does_not_reuse_its_completed_drill_bill(tmp_path):
+    q=queue(tmp_path)
+    mine=q.enqueue('foundation',{'recipe':'copper-plate'},priority=100,tick=0)
+    drills=q.enqueue('produce',{'item':'electric-mining-drill','stock_target':1},priority=101,tick=0,parent=mine.job_id)
+    drills.state,drills.delivered='complete',2
+    q.record(mine,{'ok':False,'code':'material_shortage','details':{'required':{'electric-mining-drill':1}}},
+             snapshot(),can_produce=lambda _:True)
+    assert drills.state=='ready' and drills.delivered==2 and drills.target==3
+    calls=[]
+    q.pulse(snapshot(),lambda j,p:(calls.append(p) or {'ok':True,'code':'producing'}),can_produce=lambda _:True)
+    assert calls==[{'item':'electric-mining-drill','stock_target':1}]
+
+
+def test_installed_dependency_wakes_consumer_even_when_transferable_stock_stays_zero(tmp_path):
+    q=queue(tmp_path)
+    mine=q.enqueue('foundation',{'recipe':'iron-plate'},priority=100,tick=0)
+    q.record(mine,{'ok':False,'code':'material_shortage','details':{'required':{'electric-mining-drill':6}}},
+             snapshot(),can_produce=lambda _:True)
+    drills=q.jobs[mine.dependencies[0]]
+    q.reconcile(snapshot())
+    installed=snapshot(120,owned={drills.job_id:{'delivered':6}})
+    q.reconcile(installed)
+    q.reconcile(installed)
+    assert mine in q.ready(installed)
+    assert drills.state=='complete'
+    assert q.ready(installed)==queue(tmp_path,tick=120).ready(installed)
+
+
+def test_toolkit_numeric_required_becomes_exact_precursor_batch(tmp_path):
+    q=queue(tmp_path)
+    urgent=q.enqueue('mall_slot',{'item':'fast-inserter'},priority=100,tick=0)
+    q.record(urgent,{'ok':False,'code':'rotating_mall_prerequisite_handoff',
+                    'details':{'prerequisite':'electronic-circuit','required':2}},snapshot(),can_produce=lambda _:True)
+    child=q.jobs[urgent.dependencies[0]]
+    assert child.target==2 and child.priority > urgent.priority
+
+
+def test_existing_recipe_does_not_prevent_parallel_assignment_to_a_built_idle_lane(tmp_path,monkeypatch):
+    from orchestrator import autonomous_builder as ab,mall_builder as mall
+    from planners.recipe_data import MACHINE_CAPABILITIES
+    install_live_recipe_fixture(monkeypatch)
+    monkeypatch.setitem(MACHINE_CAPABILITIES,'assembling-machine-1',{'ingredient_count':6,'categories':('electronics',)})
+    s=object.__new__(DeterministicSession)
+    s.queue,s.client,s.reference_point,s.emit,s.reached_phases=queue(tmp_path),SimpleNamespace(command=lambda _: ''),(0,0),lambda _:None,['C0','C1']
+    production=s.queue.enqueue('produce',{'item':'electronic-circuit','stock_target':18},priority=100,tick=0)
+    monkeypatch.setattr(mall,'idle_mall_allocations',lambda *a:[((59,42),'south','assembling-machine-1')])
+    monkeypatch.setattr(ab.live_base,'find_line',lambda *a:SimpleNamespace(machine_count=1))
+    monkeypatch.setattr(ab,'_MATERIAL_RESERVATION_LEDGER',SimpleNamespace(allocatable_stock=lambda stock:dict(stock)))
+    s._queue_assign_idle_malls({'tick':120},{'material_stock':{'iron-plate':100,'copper-cable':60}})
+    capacity=next(j for j in s.queue.jobs.values() if j.operation=='mall_capacity')
+    assert capacity.params=={'item':'electronic-circuit','minimum_machines':2}
+    assert capacity.checkpoint['mall_allocation:nauvis:player:electronic-circuit']==[[59,42],'south']
+    assert capacity.priority > production.priority

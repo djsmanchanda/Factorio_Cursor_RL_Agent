@@ -381,3 +381,21 @@ other loans; unexpected adapter failures still propagate.220 focused tests pass;
 fast1236 pass/3skip, unchanged four-import firewall failure only. Lifecycle:
 new frozen runner resumes the preserved failed private world to exercise actual
 recovery; no manual game mutation, mod deployment or production action.
+
+### 2026-10-12 16:06 IST — fresh remaining bills and ready parallel work verified
+
+Resumed frozen35bb515 run persistent-laya-s50616-1791800694 survived the prior
+maintenance crash, made a fast inserter and more circuits/inserters; stopped
+personally at281seconds/32decisions on diagnosed slow growth, not a timeout.
+C1 end failed only stone_starter_ready; acceptedC0. Copper still required one
+drill but its completed target1 job retained delivered2 and was never reopened.
+Idle assignment also skipped recipes with an existing producer, numeric
+precursor `required` was lost, and the old active-foundation menu hid stone.
+
+Fresh measured shortages reopen the remaining bill, completed dependencies wake
+consumers with zero transferable stock, numeric quantities propagate, and funded
+idle capacity can parallelize existing recipes. Queue-mode options expose other
+starters without breaking a district's own pioneer identity.224 focused pass;
+fast1240 pass/3skip, only unchanged four-import firewall failure. Lifecycle:
+fresh frozen private validation; no mod deployment, save rescue or production
+mutation. Sustained acceleration still requires live evidence.

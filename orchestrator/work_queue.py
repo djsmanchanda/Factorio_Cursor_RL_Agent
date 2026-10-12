@@ -145,6 +145,16 @@ class WorkQueue:
         stock = snapshot.get('stock')
         owned = snapshot.get('owned', {})
         for job in self.jobs.values():
+            dependencies = [[d, self.jobs[d].state, self.jobs[d].delivered, self.jobs[d].target]
+                            for d in job.dependencies]
+            previous = job.checkpoint.get('dependency_progress')
+            if (previous is not None and previous != dependencies and job.state == 'blocked'
+                    and dependencies and all(self.jobs[d].state == 'complete' for d in job.dependencies)):
+                # Delivered material may already be installed, so transferable
+                # stock can stay zero. Recheck the consumer's actual build.
+                job.state, job.blocked_signature, job.retry_tick = 'ready', None, self.tick
+            if dependencies or previous is not None:
+                job.checkpoint['dependency_progress'] = dependencies
             evidence = owned.get(job.job_id, {})
             # Credit is a monotonic sum from the owning job's lane/delivery record.
             job.delivered = max(job.delivered, int(evidence.get('delivered', 0)))
@@ -193,8 +203,7 @@ class WorkQueue:
                 if int((snapshot.get("stock") or {}).get(item, 0)) >= count:
                     continue
                 if can_produce(item):
-                    self.enqueue('produce', {'item': item, 'stock_target': count}, priority=job.priority+1,
-                                 tick=self.tick, parent=job.job_id)
+                    self._supply(job, item, count)
                 else:
                     job.reason = f'unsupported_supply:{item}'
         elif not receipt.get('ok'):
@@ -202,8 +211,8 @@ class WorkQueue:
             # Explicit toolkit predecessor evidence is stronger than a recipe forecast.
             precursor = details.get('predecessor') or details.get('rung') or details.get('prerequisite')
             if precursor and can_produce(precursor):
-                self.enqueue('produce', {'item': precursor, 'stock_target': int(details.get('required_stock') or 1)},
-                             priority=job.priority, tick=self.tick, parent=job.job_id)
+                count = details.get('required_stock') or details.get('required') or 1
+                self._supply(job, precursor, int(count) if isinstance(count, (int, float)) else 1)
             if code.endswith('_unbuildable'):
                 job.reason = f'geometry:{code}'
                 job.blocked_signature = self.signature(job, snapshot)
@@ -213,6 +222,16 @@ class WorkQueue:
         else:
             job.state, job.reason = 'complete', 'operation verified'
         self.save()
+
+    def _supply(self, parent, item, count):
+        """A fresh measured shortage cannot be paid by an older delivered batch."""
+        count = max(1, count)
+        existing = self.jobs.get(self.identity('produce', {'item':item}))
+        if existing is not None and existing.state == 'complete' and parent.job_id in existing.parents:
+            count += existing.delivered
+            existing.state, existing.blocked_signature, existing.retry_tick = 'ready', None, self.tick
+        return self.enqueue('produce', {'item':item, 'stock_target':count}, priority=parent.priority+1,
+                            tick=self.tick, parent=parent.job_id)
 
     def pulse(self, snapshot, execute, *, can_produce, preempt=lambda _a, _b: False, max_jobs=4):
         self.reconcile(snapshot)

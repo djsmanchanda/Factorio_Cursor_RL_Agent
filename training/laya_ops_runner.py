@@ -573,7 +573,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                     goal_status: Mapping | None = None, labs: int | None = None,
                     layout: Sequence[int] | None = None, queued_targets: Mapping | None = None,
                     material_stock: Mapping | None = None, pending_precursors: Sequence[str] = (),
-                    reached_phases: Sequence[str] = ()) -> dict:
+                    reached_phases: Sequence[str] = (), continuous_queue: bool = False) -> dict:
     """Operations worth offering now, each tagged with the need it serves and the facts rules weigh.
 
     ``allocation`` is the owner-attributed reservation claim (see ``reservation_allocation``); it clears
@@ -630,9 +630,9 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
         # a lifecycle conflict. Skip it and let the policy reconcile or serve other work instead.
         if district_state in ACTIVE_DISTRICT_STATES:
             legal = tuple(operation for operation in legal if operation != "starter")
-        if active_builds and plate not in active_builds:
+        if active_builds and plate not in active_builds and not continuous_queue:
             legal = ()  # Finish this owned bootstrap construction before opening another.
-        elif active_builds:
+        elif plate in active_builds:
             legal = tuple(operation for operation in legal if operation != "extend")
         if plate in provisioning:
             legal = ("foundation",)  # Resume the stored transaction, not a new plan.
@@ -1021,6 +1021,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                              goal_status=goal_status, labs=_lab_count(facts), reached_phases=reached,
                                              layout=layout_signature(facts),
                                              queued_targets=(economics or {}).get("mall_targets"),
+                                             continuous_queue=queue_enabled,
                                              material_stock=(economics or {}).get("material_stock"),
                                              pending_precursors=tuple({part for parts in
                                                  ((economics or {}).get("precursors") or {}).values() for part in parts})),

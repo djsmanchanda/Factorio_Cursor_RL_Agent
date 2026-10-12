@@ -390,7 +390,8 @@ class DeterministicSession:
                 continue
             key = f"mall_allocation:{SURFACE}:{FORCE}:{job.item}"
             assigned = job.checkpoint.get(key)
-            if live_base.find_line(self.client, SURFACE, FORCE, job.item, spec["machine"]) is not None:
+            existing = live_base.find_line(self.client, SURFACE, FORCE, job.item, spec["machine"])
+            if existing is not None and job.operation != "produce":
                 continue
             missing = [(i, math.ceil(n)) for i,n in zip(spec["ingredients"], spec["amounts"], strict=True)
                        if free.get(i, 0) < math.ceil(n)]
@@ -411,6 +412,12 @@ class DeterministicSession:
             if selected is None:
                 continue
             origin, side, _machine = selected
+            if existing is not None:
+                # A live lender/source does not make an installed empty lane
+                # useless. A real finite deficit warrants parallel capacity.
+                job = self.queue.enqueue("mall_capacity", {"item":job.item,
+                    "minimum_machines":existing.machine_count+1}, priority=job.priority+1,
+                    tick=tick, kind="capacity")
             job.checkpoint[key] = [list(origin), side]
             claims[f"{SURFACE}:{FORCE}:{origin[0]}:{origin[1]}:{side}"] = job.item
             job.state, job.reason, job.blocked_signature, job.retry_tick = "ready", "idle_mall_assignment", None, tick

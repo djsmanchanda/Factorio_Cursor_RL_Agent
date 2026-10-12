@@ -511,3 +511,8 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
   on craft_boundary_wait in maintenance. Loan maintenance yields that exact
   normal wait and advances peers.220 focused/1236fast pass, known firewall
   baseline only. Lifecycle: new frozen runner on preserved private world.
+
+- 2026-10-12 16:06 IST: Fixed completed supply reuse for new measured remaining
+  bills, zero-stock delivery wakeups, precursor quantities, parallel idle recipe
+  capacity and queue-mode starter visibility.224 focused/1240fast pass; unchanged
+  firewall failure only. Lifecycle: fresh frozen private validation.

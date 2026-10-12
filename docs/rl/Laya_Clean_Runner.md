@@ -380,3 +380,13 @@ borrower search or pay for an already-installed assembler a second time.
 The user's supplied four-slot cross blueprint is now the shared district
 geometry beyond the opening bank. Up/down slots remain executor-assignable
 throughout expansion; long-handed support shortages enter the precursor queue.
+
+A fresh measured shortage from the same consumer reopens its fulfilled supply
+job for the remaining bill while retaining earlier owned delivery credit. Toolkit
+numeric `required` and `required_stock` both carry the real precursor quantity.
+Completing a supply dependency wakes the consumer even when its output has
+already been installed and transferable stock stayed zero. An unmet finite batch
+can assign a funded empty lane as parallel `mall_capacity` even if another
+producer or lender currently runs that recipe. The queued ops menu keeps other
+starter goals selectable while an owned foundation waits; execution reservations
+still decide which construction can actually proceed.
