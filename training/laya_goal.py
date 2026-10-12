@@ -17,10 +17,34 @@ progress, funded work and loans -- not arbitrary surplus output.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 
 GOAL_VERSION = "laya-goal-v1"
 DEFAULT_TECHNOLOGY = "mining-productivity-4"
+
+
+def mission_product_targets(status: Mapping | None, admitted_phases: Sequence[str] = ()) -> dict[str, int]:
+    """Expose the research supply frontier independently of rate-proxy order."""
+    technology = (status or {}).get("technology") or {}
+    if technology.get("target_completed") is True or technology.get("enabled") is not True:
+        return {}
+    packs = technology.get("science_packs") or {}
+    totals = technology.get("science_pack_totals") or {}
+    if not packs:
+        return {}  # Unknown research demand cannot invent a science bill.
+    # The scenario forbids labs before these products actually run. Keep their
+    # goals visible even when full plate chests stop an earlier rate proxy.
+    from training.laya_mission import phase
+    prerequisites = {}
+    for phase_id in ("C4", "C6"):
+        if phase_id not in admitted_phases:
+            prerequisites.update({item: max(1, math.ceil(rate * 60))
+                                  for item, rate in phase(phase_id)["targets"].items()})
+    if prerequisites:
+        return prerequisites
+    return {item: int(totals[item]) for item in packs
+            if isinstance(totals.get(item), (int, float)) and totals[item] > 0}
 
 
 def research_goal_satisfied(status: Mapping | None) -> bool:

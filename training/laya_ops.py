@@ -597,7 +597,16 @@ class DeterministicSession:
                 c, b, SURFACE, FORCE, (x, y), emit, purpose=purpose),
             # Queue the goal technology on this force through the mod's own research command.
             "research": lambda technology: self._set_research(technology),
+            "labs": self._build_research_labs,
         }
+
+    def _build_research_labs(self, science_packs, minimum_labs=4):
+        from training.laya_mission import product_phase_ready
+        if not product_phase_ready('lab', getattr(self, 'reached_phases', ())):
+            raise ab.ProductionPrerequisiteDeferred('Research labs need plastic and advanced-circuit output',
+                code='production_prerequisite_deferred',state='supply_wait')
+        return ab.build_research_labs(self.client,self.bridge,SURFACE,FORCE,self.reference_point,science_packs,
+                                     self.emit,minimum_labs=minimum_labs)
 
     def _set_research(self, technology: str) -> dict:
         """Set the research target via the mod's set_research; the report names the canonical target."""

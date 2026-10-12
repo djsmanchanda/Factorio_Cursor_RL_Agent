@@ -28,6 +28,17 @@ PRODUCT_PHASE_PREREQUISITES = {"lab": frozenset({"C4", "C6"})}
 def product_phase_ready(item: str | None, reached: Sequence[str]) -> bool:
     return PRODUCT_PHASE_PREREQUISITES.get(item, frozenset()) <= set(reached)
 
+
+def production_admission(facts: Mapping, reached: Sequence[str] = (), *, baseline: Mapping | None = None) -> tuple[str, ...]:
+    """User admission needs observed product output, not unrelated rate phases."""
+    ready = set(reached)
+    production = facts.get("production") or {}
+    for phase_id in set().union(*PRODUCT_PHASE_PREREQUISITES.values()):
+        if all(int(production.get(item, 0)) > int((baseline or {}).get(item, 0))
+               for item in phase(phase_id)["targets"]):
+            ready.add(phase_id)
+    return tuple(sorted(ready))
+
 PHASES: tuple[dict, ...] = (
     # User priority 2026-10-03: iron and copper starters before the mall or stone.
     {"phase_id": "C0", "name": "iron_copper_starter",

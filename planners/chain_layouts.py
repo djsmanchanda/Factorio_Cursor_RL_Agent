@@ -361,6 +361,7 @@ class ChainLayoutMixin:
         origin_y: int = 0,
         belt_type: str = "transport-belt",
         inserter_type: str = "fast-inserter",
+        science_packs: tuple[str, ...] = (),
     ) -> dict:
         """Row of labs fed science packs by a belt - the end of every chain.
 
@@ -389,11 +390,19 @@ class ChainLayoutMixin:
             return {"x": ox + x, "y": oy + y}
 
         ghosts: List[dict] = []
-        for x in range(CHAINED_BELT_WEST, length):
-            ghosts.append({"action_type": "place_ghost", "entity": belt_type,
-                           "position": at(x + 0.5, 0.5), "direction": "east"})
+        if not science_packs:
+            for x in range(CHAINED_BELT_WEST, length):
+                ghosts.append({"action_type": "place_ghost", "entity": belt_type,
+                               "position": at(x + 0.5, 0.5), "direction": "east"})
         for i in range(lab_count):
             center = i * MACHINE_WIDTH + 1.5
+            if science_packs:
+                # Reuse the belt row's declared inserter pickup port. A small
+                # per-pack buffer lets independently made science reach labs.
+                ghosts.append({"action_type": "place_ghost", "entity": "requester-chest",
+                               "position": at(center, 0.5),
+                               "logistic_sections": [{"group": "research-science", "multiplier": 1,
+                                   "requests": [{"name": item, "count": 10} for item in sorted(set(science_packs))]}]})
             ghosts.append({"action_type": "place_ghost", "entity": "lab",
                            "position": at(center, 3.5)})
             ghosts.append({"action_type": "place_ghost", "entity": inserter_type,

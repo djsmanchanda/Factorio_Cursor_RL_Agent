@@ -60,6 +60,8 @@ class WorkQueue:
             self.jobs = {j['job_id']: WorkJob(**j) for j in payload['jobs']}
             self.runtime = payload.get('runtime', {})
             if tick < payload['tick']:
+                self.runtime.pop('production_baseline', None)
+                self.runtime.pop('product_admission', None)
                 # A copied/reset world's clock cannot postpone all its work.
                 for job in self.jobs.values():
                     job.retry_tick = tick

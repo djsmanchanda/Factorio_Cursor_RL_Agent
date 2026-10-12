@@ -135,9 +135,11 @@ changes need shared training/inference representation and a recorded comparison.
 C0/C1/C2/C3/C4/C6/S1. They use production counters and a 95% rate threshold;
 the measurement can be shorter than its requested window. Reached phases are
 retained. S1 tests science-pack production, not completed research.
-Lab production and lab mall-slot options are absent until both measured C4 and
-C6 are retained. This scenario admission applies before shortage ranking and
-to final options; recipe availability or existing stock does not satisfy it.
+Lab production, mall-slot and construction options are absent until plastic and
+advanced-circuit production above this world's recorded baseline is observed,
+or current deterministic C4/C6 evidence verifies it. Admission persists with
+the world's queue and remains separate from rate-proxy reporting. Starting-save
+historical counters, recipe availability and banked stock cannot satisfy it.
 Shared standing mall limits never decrease and grow by at least 20% when
 increased; exact finite loan budgets remain separate.
 
@@ -449,3 +451,21 @@ A capacity job advances its saved allocation after that exact half appears
 in the configured producer census and more machines are required. An existing
 producer elsewhere cannot release an unfinished half; subsequent kit pricing
 uses the next claimed half instead of rebuilding the completed one.
+
+Research runs compile a mission supply frontier from the live technology report,
+independently of the current rate proxy. Plastic and advanced-circuit goals
+remain visible while plate outputs are backed up or independent construction
+waits. After chemical admission, the technology's exact science-pack totals
+become production goals. Laya chooses their order; those goals supply real
+construction and precursor demand. Explicit mission production does not also
+request a new standing mall cell.
+
+The shared research-lab operation reuses the existing lab-row geometry with
+requesters at its input ports. It uses real bot-funded labs, inserters, chests
+and poles; preserves its site and plan on retries; verifies power, construction
+and logistic coverage; then enables small buffers for the required science
+types. A lab item in storage is not a working research installation.
+
+Chemical admission and its production baseline persist in the same world queue.
+A rolled-back world clock discards them. The rate-proxy list is still reported
+separately; goal completion remains the live target_completed research flag.

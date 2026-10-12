@@ -1333,3 +1333,67 @@ def test_committed_plate_bill_exposes_expansion_even_after_phase_rate_is_met():
     assert option['features']['goal_need'] and option['features']['committed_stock_shortfall']==24
     full=compile_options(board,started,queued_targets={'iron-plate':26},material_stock={'iron-plate':26},continuous_queue=True)
     assert 'op.foundation.iron-plate' not in {o['option_id'] for o in full['options']}
+
+
+def test_research_frontier_offers_chemical_goals_when_plate_proxy_is_backed_up():
+    from training.laya_goal import mission_product_targets
+    status={'technology':{'enabled':True,'target_completed':False,
+                          'science_packs':{'chemical-science-pack':1},
+                          'science_pack_totals':{'chemical-science-pack':2000}}}
+    targets=mission_product_targets(status)
+    board={'needs':[{'item':'iron-plate','condition':'output_backed_up','goal_required_per_s':.5},
+                    {'item':'copper-plate','condition':'output_backed_up','goal_required_per_s':.5}]}
+    results=[{'ok':True,'operation':'starter','params':{'recipe':plate}} for plate in ['iron-plate','copper-plate']]
+    menu=compile_options(board,results,recipes=GOAL_RECIPES,stock={'iron-plate':4800,'copper-plate':4800},
+                         continuous_queue=True,mission_targets=targets,
+                         bootstrap_districts={'iron-plate':{'replacement_submitted':True,'construction_pending':True}})
+    options={o['option_id']:o for o in menu['options']}
+    assert options['op.produce.plastic-bar']['params']['stock_target']==30
+    assert options['op.produce.advanced-circuit']['params']['stock_target']==15
+    assert 'op.mall_slot.advanced-circuit' not in options  # A mission goal does not demand another cell.
+
+
+def test_production_admission_unlocks_research_supply_without_claiming_rate_phases():
+    from training.laya_goal import mission_product_targets
+    from training.laya_mission import production_admission
+    status={'technology':{'enabled':True,'target_completed':False,
+                          'science_packs':{'chemical-science-pack':1,'production-science-pack':1},
+                          'science_pack_totals':{'chemical-science-pack':2000,'production-science-pack':2000}}}
+    reached=[]
+    assert production_admission({'production':{}},reached)==()
+    assert mission_product_targets(status,production_admission({'production':{'plastic-bar':1}},reached))=={'advanced-circuit':15}
+    admission=production_admission({'production':{'plastic-bar':1,'advanced-circuit':1}},reached)
+    assert admission==('C4','C6') and reached==[]
+    assert mission_product_targets(status,admission)=={'chemical-science-pack':2000,'production-science-pack':2000}
+    board={'needs':[]}
+    results=[{'ok':True,'operation':'starter','params':{'recipe':plate}} for plate in ['iron-plate','copper-plate']]
+    recipes={**GOAL_RECIPES,'chemical-science-pack':{'ingredients':[{'name':'advanced-circuit','amount':3}]},
+             'production-science-pack':{'ingredients':[{'name':'advanced-circuit','amount':3}]}}
+    menu=compile_options(board,results,recipes=recipes,continuous_queue=True,mission_targets=mission_product_targets(status,admission),reached_phases=admission)
+    produces={o['product']:o['params']['stock_target'] for o in menu['options'] if o['family']=='produce'}
+    assert produces=={'chemical-science-pack':2000,'production-science-pack':2000}
+
+
+def test_unknown_or_completed_research_demand_does_not_invent_supply_goals():
+    from training.laya_goal import mission_product_targets
+    assert mission_product_targets(None)=={}
+    assert mission_product_targets({'technology':{'enabled':True,'science_packs':{}}})=={}
+    assert mission_product_targets({'technology':{'enabled':True,'target_completed':True,'science_packs':{'chemical-science-pack':1}}})=={}
+
+
+def test_goal_queue_exposes_lab_construction_only_after_chemical_admission():
+    status={'technology':{'state':'current','enabled':True,'science_packs':{'chemical-science-pack':1}}}
+    def ids(admission):
+        return {o['option_id'] for o in compile_options({'needs':[]},[],recipes=GOAL_RECIPES,
+            research_goal='mining-productivity-4',goal_status=status,labs=0,
+            continuous_queue=True,reached_phases=admission)['options']}
+    assert 'op.labs' not in ids(()) and 'op.labs' not in ids(('C4',))
+    assert 'op.labs' in ids(('C4','C6'))
+
+
+def test_seed_save_historical_counters_cannot_admit_labs_without_new_production():
+    from training.laya_mission import production_admission
+    baseline={'plastic-bar':4000,'advanced-circuit':2000}
+    assert production_admission({'production':baseline},baseline=baseline)==()
+    assert production_admission({'production':{'plastic-bar':4001,'advanced-circuit':2000}},baseline=baseline)==('C4',)
+    assert production_admission({'production':{'plastic-bar':4001,'advanced-circuit':2001}},baseline=baseline)==('C4','C6')

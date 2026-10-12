@@ -26,10 +26,19 @@ the current guided sampler's weights.
 | `mission.science` | After advanced circuits, manufacture and deliver the required science packs to labs and complete mining-productivity-4 research. |
 | `mission.no-gifts` | Use only the starter kit and items the factory manufactures; never borrow player inventory or gifted items. |
 
-The current scenario prohibits lab production options until both plastic (C4)
-and advanced-circuit (C6) production rate phases have been measured. Unlocked
-recipes, banked lab stock and construction shortages cannot bypass admission.
-This explicit user constraint is enforced across produce and mall-slot options.
+The scenario prohibits lab production and construction until plastic and
+advanced circuits have actually been produced in this world. Admission uses
+production above the recorded world baseline, or verified current C4/C6
+checkpoint evidence; it persists across runner resumption. Historical counters
+carried by the starting save, unlocked recipes and banked stock cannot admit labs.
+Admission does not claim a rate proxy was reached.
+
+The live research objective supplies the pending mission work. Plate rate
+proxies are observations, not a gate hiding plastic, advanced circuits or
+science. Before lab admission, the chemical production goals remain available;
+after admission, the live technology's science bill and lab construction remain
+available alongside independent blocked construction. Laya orders these goals;
+the executor supplies their actual prerequisites and construction bills.
 
 Standing mall limits only increase, by at least 20% per increase (rounded up).
 Phase producers below their measured rate goal can run ungated; a met peer

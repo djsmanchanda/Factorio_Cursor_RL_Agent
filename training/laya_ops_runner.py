@@ -34,9 +34,9 @@ from training.laya_clean_runner import (ROOT, Settings, _append, _goal_gap, _sta
 from training.laya_factory_status import BACKPRESSURE_CONDITIONS, compact_status, compile_status
 from training.laya_saved_world import speed_status
 from training.laya_mall_slots import RAW, obtainable
-from training.laya_mission import current_phase, phase_reached, product_phase_ready
+from training.laya_mission import current_phase, phase_reached, product_phase_ready, production_admission
 from training.laya_goal import (
-    GOAL_VERSION, goal_evidence, observation_window, research_goal_satisfied, useful_state,
+    GOAL_VERSION, goal_evidence, observation_window, research_goal_satisfied, useful_state, mission_product_targets,
 )
 
 PLATES = {"iron-plate": "iron-ore", "copper-plate": "copper-ore", "stone-brick": "stone"}
@@ -313,6 +313,7 @@ CONTEXT_CHARS = 16000  # brief + doc rules; rules past what fits are left out, l
 # Doc rules that act on each brief line: the brief carries the values, the rules the strategy, so neither repeats
 # the other. A line names only the rules shown in the same decision.
 USES = {"GOAL": ("mission.goal", "mission.science"),
+        "MISSION WORK": ("mission.goal", "mission.science", "mission.inputs-first"),
         "NOW": ("mission.phase-goals-first", "mission.serve-bottleneck"),
         "MAJOR": ("mission.ops-foundation", "mission.ops-extend", "mission.ops-retire-starter",
                   "mission.ops-starters-before-foundations"),
@@ -350,6 +351,9 @@ def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, pha
     from training.laya_mission import MISSION_ID, PHASES
     ids = [p["phase_id"] for p in PHASES]
     sections = {"GOAL": [f"{MISSION_ID.removeprefix('mod-playground-')} via {' > '.join(ids)}"]}
+    if (economics or {}).get("mission_targets"):
+        sections["MISSION WORK"] = [f"{item}: {count} required"
+                                    for item, count in sorted(economics["mission_targets"].items())]
     if phase and board:
         needs = {n["item"]: n for n in board["needs"]}
         sections["NOW"] = [f"{phase['phase_id']} {phase['name']}: " + "; ".join(
@@ -573,7 +577,8 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                     goal_status: Mapping | None = None, labs: int | None = None,
                     layout: Sequence[int] | None = None, queued_targets: Mapping | None = None,
                     material_stock: Mapping | None = None, pending_precursors: Sequence[str] = (),
-                    reached_phases: Sequence[str] = (), continuous_queue: bool = False) -> dict:
+                    reached_phases: Sequence[str] = (), continuous_queue: bool = False,
+                    mission_targets: Mapping[str, int] | None = None) -> dict:
     """Operations worth offering now, each tagged with the need it serves and the facts rules weigh.
 
     ``allocation`` is the owner-attributed reservation claim (see ``reservation_allocation``); it clears
@@ -587,6 +592,8 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     backpressured = {n["item"] for n in board["needs"] if n["condition"] in BACKPRESSURE_CONDITIONS}
     goal = {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
     goal_rate = {n["item"]: float(n.get("goal_required_per_s") or 0) for n in board["needs"]}
+    mission_targets = dict(mission_targets or {})
+    goal.update(mission_targets)
     stuck = unchanged_failures(results, stock or {}, allocation, layout)
     sources: dict[str, set] = {}
     stages, codes, short = plate_stages(results), last_codes(results, tick), shortages(results, sources)
@@ -715,11 +722,11 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     if recipes:
         for item in sorted(goal):
             if (item in PLATES or item in RAW or codes.get(("produce", item)) == "ok"
-                    or (active_builds and item not in short and item not in pending_precursors)
+                    or (active_builds and not continuous_queue and item not in short and item not in pending_precursors)
                     or item in producible):
                 continue
             if plates_in(item, recipes) <= started:
-                producible[item] = max(1, int(math.ceil(goal_rate.get(item, 1.0) * 60)))
+                producible[item] = mission_targets.get(item, max(1, int(math.ceil(goal_rate.get(item, 1.0) * 60))))
     # A short item may also get its own standing slot, as the deterministic runner's demand-owned slots do
     # (live 2026-10-10: splitter was only ever offered as a borrowed batch, 112 offers, no standing producer).
     # The tooling's slot-capacity and funding gates still decide whether the slot can be placed.
@@ -727,7 +734,8 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                   if product_phase_ready(item, reached_phases)}
     core = set(baseline_build_order())
     for item in sorted(producible):
-        if item not in core and codes.get(("mall_slot", item)) != "ok" and plates_in(item, recipes or {}):
+        if (item not in core and item not in mission_targets
+                and codes.get(("mall_slot", item)) != "ok" and plates_in(item, recipes or {})):
             mall_slot(item)
     ranked = sorted(producible.items(), key=lambda kv: -kv[1])
     ordered = [kv for kv in ranked if kv[0] in goal] + ([kv for kv in ranked if kv[0] not in goal] if slots else [])
@@ -736,7 +744,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
         options.append({
             "option_id": f"op.produce.{item}", "family": "produce", "product": item, "need_id": f"stock:{item}",
             "summary": f"produce {item} ({'goal' if goal_item else 'short'} {missing})",
-            "params": {"item": item, "stock_target": targets.get(item, missing)},
+            "params": {"item": item, "stock_target": mission_targets.get(item, targets.get(item, missing))},
             # Items a goal plate's operation is blocked on serve that goal.
             "features": {"last_code": codes.get(("produce", item), "new"), "shortage": missing,
                          "waiting": in_progress(codes.get(("produce", item))),
@@ -781,6 +789,13 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                              "waiting": in_progress(codes.get(("produce", "lab"))),
                              "unchanged_failure": ("produce", "lab") in stuck, "batch_active": batch_active,
                              "goal_need": True}})
+        if (continuous_queue and labs == 0 and recipes
+                and product_phase_ready("lab", reached_phases)
+                and ((goal_status or {}).get("technology") or {}).get("science_packs")):
+            options.append({"option_id": "op.labs", "family": "labs", "product": "lab",
+                            "need_id": "research:labs", "summary": "build and supply research labs",
+                            "params": {"science_packs": sorted(goal_status["technology"]["science_packs"]),
+                                       "minimum_labs": 4}, "features": {"goal_need": True}})
     # Apply the mission's product admission to every path, including automatic
     # lab provisioning and baseline slots. A shortage cannot bypass it.
     options = [option for option in options
@@ -821,6 +836,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
             plate_net[plate] = None if produced is None or consumed is None else round(produced - consumed, 4)
             force_consumption[plate] = consumed
     facts = {
+        "mission_targets": mission_targets,
         "measured_plate_net": plate_net,
         "measured_force_consumption": force_consumption,
         "shortfall_feasible": (None if not recipes else {item: item in producible for item in short}),
@@ -897,6 +913,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     measured_rate_phase = None
     measured_rate_targets = {}
     goal_status = None
+    production_baseline = (session.queue.runtime.get('production_baseline') if queue_enabled else None)
+    admitted = set(session.queue.runtime.get('product_admission', ())) if queue_enabled else set()
 
     def check_acceptance(event: str) -> None:
         """Deterministic milestone predicates beside the rate proxies (audit finding 7)."""
@@ -1019,12 +1037,25 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         allocation = reservation_allocation(economics) if economics is not None else None
         planning_results = session.queue.planning_receipts() + results if queue_enabled else results
         queued_targets = (economics or {}).get("mall_targets")
+        if production_baseline is None:
+            production_baseline = dict(facts.get('production') or {})
+        verified = [pid for pid in ('C4','C6') if summary.get('acceptance', {}).get(pid) == 'passed']
+        admission = production_admission(facts, tuple(admitted | set(reached) | set(verified)),
+                                         baseline=production_baseline)
+        admitted.update(pid for pid in admission if pid in {'C4','C6'})
+        if queue_enabled:
+            session.queue.runtime.update(production_baseline=production_baseline, product_admission=sorted(admitted))
+            session.queue.save()
+        mission_targets = mission_product_targets(goal_status, admission) if goal else {}
+        if economics is not None:
+            economics = {**economics, "mission_targets": mission_targets}
         if queue_enabled:
             queued_targets = session.queue.supply_targets(queued_targets)
         menu = with_economics(compile_options(board, planning_results, facts["tick"], facts.get("recipes"), stock,
                                              bootstrap_districts=districts, allocation=allocation,
                                              measurement=measurement, research_goal=goal,
-                                             goal_status=goal_status, labs=_lab_count(facts), reached_phases=reached,
+                                             goal_status=goal_status, labs=_lab_count(facts), reached_phases=admission,
+                                             mission_targets=mission_targets,
                                              layout=layout_signature(facts),
                                              queued_targets=queued_targets,
                                              continuous_queue=queue_enabled,
@@ -1040,7 +1071,12 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             reserved.update(project["reserved"])
         compact = compact_status(board)
         catalog = OPS_CATALOG if settings.catalog == Settings().catalog else settings.catalog
-        guidance = load_guideline_context(ROOT, phase["scopes"], catalog=catalog, max_rules=32)
+        from training.laya_mission import PHASES
+        scopes = set(phase["scopes"])
+        for step in PHASES:
+            if set(step["targets"]) & set(mission_targets):
+                scopes.update(step["scopes"])
+        guidance = load_guideline_context(ROOT, tuple(sorted(scopes)), catalog=catalog, max_rules=32)
         # The brief comes first and has its room reserved; the doc rules fill what is left.
         shown = {g["rule_id"] for g in guidance["guidelines"]}
         told = brief(results, board, phase, summary.get("phase_ticks", {}), samples[0][0], shown,
@@ -1051,6 +1087,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                          {g["rule_id"] for g in rules}, economics=economics)
         state = {"brief": told,
                  "observation_digest": {"factory_status": compact, "mission_phase": phase["phase_id"],
+                                        "mission_targets": mission_targets,
                                         "saved_world": {"provider_stock": {"network": stock},
                                                         "reserved_stock": {"network": dict(reserved)},
                                                         "bootstrap_districts": districts}},
@@ -1076,7 +1113,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             try:
                 if chosen["family"] != "wait":
                     session.enqueue_choice(chosen, facts["tick"])
-                queue_receipts = session.execute_queue(facts, economics or {}, reached)
+                queue_receipts = session.execute_queue(facts, economics or {}, admission)
                 for queued in queue_receipts:
                     queued["tick"] = facts["tick"]
                     _append(journal, {"run_id": run_id, "event": "executor", **queued})
@@ -1166,6 +1203,9 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             # declared observation window. A pending status alone does not reset it.
             relevant = set(short) | set((board.get("construction") or {}).get("shortfall") or {})
             relevant |= {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
+            relevant |= set(mission_targets)
+            if queue_enabled:
+                relevant |= {job.item for job in session.queue.jobs.values() if job.state != "complete" and job.item}
             after_stock: dict[str, int] = {}
             for network in (after.get("networks") or {}).values():
                 for name, count in (network.get("items") or {}).items():

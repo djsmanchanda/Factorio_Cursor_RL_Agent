@@ -572,3 +572,9 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
   passes, 1,259 fast passes, three skips and the known firewall failure.
   Lifecycle: runner stopped; private world/server preserved. Sustained general
   acceleration remains unproven.
+
+- 2026-10-12 18:28 IST: Research demand now exposes chemical/science goals independently
+  of plate rate proxies. Actual saved-state replay exposes plastic30/advanced15
+  and correctly excludes labs. Added shared bot-funded lab delivery with exact
+  resumption and network/power checks. Lifecycle: new frozen private runner;
+  live chemical/science/research progress remains to be verified.

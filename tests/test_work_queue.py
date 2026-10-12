@@ -797,3 +797,11 @@ def test_exact_funded_seed_breaks_cycle_but_an_unfunded_empty_dependency_set_doe
     job.reason='dependency_cycle:'+job.job_id
     assert job not in q.ready(snapshot())
     assert job in q.ready(snapshot(owned={job.job_id:{'funded':True}}))
+
+
+def test_world_clock_rollback_discards_old_chemical_admission(tmp_path):
+    q=queue(tmp_path,tick=100)
+    q.runtime.update(production_baseline={'plastic-bar':4000},product_admission=['C4','C6'])
+    q.save()
+    restored=queue(tmp_path,tick=0)
+    assert 'production_baseline' not in restored.runtime and 'product_admission' not in restored.runtime

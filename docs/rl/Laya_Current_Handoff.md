@@ -599,3 +599,36 @@ unavailable; observation was personal and no substitute agents were spawned.
 
 The next continuation should diagnose both geometry failures and the cold
 rate-proxy/stock-full option frontier before another private freeze.
+
+### 2026-10-12 18:28 IST — research objective now drives the queue frontier
+
+User clarified that completed mall reserves are not the mission: the factory
+must advance through plastic, other products, science and completed research.
+Read deterministic priority_list.py, _serve_ready_pass, _advance_the_goal and
+the deterministic research runner/log. Its live science goal generates
+construction demand; Laya only exposed targets from the current rate board.
+
+The compiler now offers live research-derived mission work independently of
+plate rate proxies and unrelated blocked builds. Before lab admission this
+exposes plastic/advanced circuits; afterward it exposes exact science totals.
+Actual preserved-world replay: old chemical menu empty; new menu plastic30 and
+advanced15, with no lab options. Live goal report requires 2,000 each of red,
+green, chemical and production science for mining-productivity-4.
+
+Starting-save force statistics already include historical chemical output, so
+admission compares new production against a persistent world baseline, or
+verified current deterministic C4/C6 evidence. This does not claim a rate
+proxy. Added a shared real lab construction/delivery operation using existing
+lab-row geometry, bot-funded bills, stable resumption, power and network checks.
+Lab item production alone was previously the only offered lab operation.
+
+Focused verification:347 passes before the final clock-rollback regression;
+127 runner/queue/lab tests pass with that regression. Fast gate results are
+recorded after completion. The only existing blocker is the four-import
+firewall baseline; the new shared operation uses the existing library facade
+and adds no training import violation. No Lua mod deployment is required:
+Python/planner changes need a new frozen private runner. Real research delivery
+and completion are not yet verified live.
+
+Final fast verification: 1,269 passed, three skipped; only the unchanged
+four-import firewall baseline failed. New shared lab/mission regressions pass.

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Callable
 
 from orchestrator import extraction_state, live_base, resource_patches, stage_extraction
+from orchestrator.stage_research import build_research_labs
 from orchestrator.build_decisions import (
     _heaviest_source,
     _mineable,
