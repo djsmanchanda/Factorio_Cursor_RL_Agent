@@ -54,8 +54,8 @@ def _local_chain_positions(
         )
         chosen = next((
             point for point in candidates
-            if math.dist(previous, point) <= link_distance
-            and (following is None or math.dist(point, following) <= link_distance)
+            if _service_distance(previous, point, True) <= link_distance
+            and (following is None or _service_distance(point, following, True) <= link_distance)
             and (
                 following is not None
                 or _service_distance(point, target, service_square) <= service_radius
@@ -126,7 +126,7 @@ def _alternate_chain_positions(
             next_states: dict[Point, tuple[float, Point, list[Point]]] = {}
             for candidate in candidates(ideal, radius):
                 for score, previous, path in states:
-                    if math.dist(previous, candidate) > link_distance:
+                    if _service_distance(previous, candidate, True) > link_distance:
                         continue
                     if index == len(ideals) - 1 and (
                         _service_distance(candidate, target, service_square)

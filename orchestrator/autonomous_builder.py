@@ -48,6 +48,7 @@ from orchestrator.baseline_production import (
     STEEL_IRON_CAPACITY_FLOOR,
 )
 from orchestrator.game_bridge import GameBridge, load_json
+from orchestrator.execution_slice import cooperative
 from orchestrator.controller_budget import (
     BudgetExhausted, begin_run_budget, consume_diagnosis,
     consume_remediation, consume_wait, end_run_budget,
@@ -656,21 +657,11 @@ def _bootstrap_replacement_vertical_mirror(state: BootstrapDistrictState) -> boo
     )
 
 
-def _replacement_delivered(
+def _replacement_produced(
     client: RconClient, surface: str, state: BootstrapDistrictState,
 ) -> bool:
-    """Measured replacement output and at least one plate in its own provider.
-
-    Any working unit counts; the rest of the six-furnace blueprint may still
-    be ghosts or idle.
-    """
-    return bool(
-        state.replacement_provider is not None
-        and _measured_bootstrap_replacement_output(client, surface, state.recipe, state) > 0
-        and live_base.chest_contents(
-            client, surface, state.replacement_provider,
-        ).get(state.recipe, 0) > 0
-    )
+    """Owned replacement crafts suffice; unfinished output transport is separate work."""
+    return _measured_bootstrap_replacement_output(client, surface, state.recipe, state) > 0
 
 
 def _retire_starter_after_first_output(
@@ -678,14 +669,14 @@ def _retire_starter_after_first_output(
     state: BootstrapDistrictState, emit: Callable[[str], None], *,
     vertical_mirror: bool | None = None, require_direct_starter: bool = False,
 ) -> bool:
-    """Retire the starter's machinery once the replacement first delivers.
+    """Retire the starter's machinery once the owned replacement first produces.
 
     ``require_direct_starter`` lets the per-pass caller skip districts with no
     direct starter (e.g. the mall-first opening) before any power work.
     """
     if state.lifecycle_state not in {"provisioning", "validating"}:
         return False
-    if not _replacement_delivered(client, surface, state):
+    if not _replacement_produced(client, surface, state):
         return False
     source = state.transport_source or state.replacement_provider
     if require_direct_starter:
@@ -760,6 +751,8 @@ def _wait_for_logistic_service(
         served = live_base.logistic_network_ids(client, surface, list(chests))
         if served and all(network is not None for network in served.values()):
             return True
+        if cooperative():
+            return False
         time.sleep(3.0)
     emit(
         "    covering roboport still has not charged after "
@@ -775,6 +768,8 @@ def _wait_for_construction_network(
 ) -> bool:
     """Wait once for a geometrically covering roboport to become usable."""
     if area is None:
+        return False
+    if cooperative():
         return False
     initial = live_base.ghost_blockages(client, surface, force, area)
     initial_outside = sum(
@@ -1303,7 +1298,7 @@ def bring_stage_up(
         attempt += 1
         consume_remediation(f"{name}#round{attempt}")
         remaining = _wait_for_ghosts(
-            client, surface, force, area, timeout_seconds=interval,
+            client, surface, force, area, timeout_seconds=(0.0 if cooperative() else interval),
         )
         if on_observation is not None:
             on_observation()
@@ -1321,6 +1316,8 @@ def bring_stage_up(
         if issue is None:
             emit(f"  [{name} #{attempt}/{total_rounds}] {remaining} ghost(s) left, no blockage "
                  "found -- bots still working")
+            if cooperative():
+                raise ProductionPrerequisiteDeferred(f"{name}: bots constructing", code="queued_construction_wait", state="constructing")
             continue
         description, remedy = issue
         emit(f"  [{name} #{attempt}/{total_rounds}] OPEN: {description} -> remedy: {remedy}")
@@ -1336,6 +1333,8 @@ def bring_stage_up(
                 *remedy_args, reserved_tiles=reserved_tiles,
             )
         acted_ever |= bool(acted)
+        if cooperative():
+            raise ProductionPrerequisiteDeferred(f"{name}: {description}", code="queued_construction_wait", state="constructing", details={"remedy": remedy})
     if rebuilt_stale and remaining:
         pending = live_base.ghost_blockages(client, surface, force, area)
         if pending:
@@ -1905,14 +1904,13 @@ def _bring_modular_refinery_up(
     )
     machines = _modular_machine_positions(plan, recipe)
     reserved = planned_footprint_tiles(plan)
-    def retire_delivered_starter():
+    def retire_producing_starter():
         state = _bootstrap_state(recipe)
         if (state is None or state.lifecycle_state not in {"provisioning", "validating"}
                 or state.replacement_origin != origin
                 or state.replacement_provider != interface.provider):
             return
-        if (_measured_bootstrap_replacement_output(client, surface, recipe, state) <= 0
-                or live_base.chest_contents(client, surface, interface.provider).get(recipe, 0) <= 0):
+        if _measured_bootstrap_replacement_output(client, surface, recipe, state) <= 0:
             return
         _ensure_power_anchor_on_generated_network(client, bridge, surface, force,
             interface.power_anchor, "first-output replacement", emit)
@@ -1935,7 +1933,7 @@ def _bring_modular_refinery_up(
         client, bridge, surface, force, f"modular refinery for {recipe}",
         origin, _plan_area(plan), interface.power_anchor, machines, emit,
         logistic_chest_positions=[interface.provider],
-        on_observation=retire_delivered_starter,
+        on_observation=retire_producing_starter,
     )
     _ensure_power_anchor_on_generated_network(
         client, bridge, surface, force, interface.power_anchor,
@@ -2574,7 +2572,7 @@ def _retire_standing_bootstrap_cells(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, ore: str, ore_output: Point, emit: Callable[[str], None],
 ) -> int:
-    """Retire temporary producers after replacement craft and chest evidence.
+    """Retire temporary producers after owned replacement craft evidence.
 
     The caller invokes this only after the direct refinery is healthy. Keeping
     the temporary path until then preserves the only working plate source when
@@ -2622,14 +2620,10 @@ def _retire_standing_bootstrap_cells(
             measured = _measured_bootstrap_replacement_output(
                 client, surface, recipe, lifecycle,
             )
-            delivered = (
-                measured > 0 and lifecycle.replacement_provider is not None
-                and live_base.chest_contents(client, surface, lifecycle.replacement_provider).get(recipe, 0) > 0
-            )
-            if measured <= 0 or not delivered:
+            if measured <= 0:
                 emit(
                     f"BOOTSTRAP DISTRICT: {recipe} replacement has no measured "
-                    "output in its provider; keeping its pioneer"
+                    "owned output; keeping its pioneer"
                 )
                 consume_wait(f"measured_{recipe}_replacement_output")
                 return 0
@@ -3002,9 +2996,9 @@ def _advance_bootstrap_starter_retirements(
 ) -> None:
     """Every control pass: retire delivered starters, then drain-and-reclaim their providers.
 
-    This uses the same delivered-output evidence as ``retire_starter``, so the
-    machinery goes on the first pass after one replacement unit's plate
-    reaches its provider, whether or not that operation is chosen.
+    This uses the same owned-craft evidence as ``retire_starter``.
+    Machinery retires after one replacement unit produces, independent
+    of provider delivery or whether that operation is selected.
     """
     ledger = _BOOTSTRAP_DISTRICT_LEDGER
     if ledger is None or not callable(getattr(client, "command", None)):
@@ -5766,7 +5760,7 @@ def _repair_stalled_line(
             f"machine(s) after remediation: {sample}"
         )
         consume_wait(f"{item}#repair_settle")
-        time.sleep(5)
+        time.sleep(0 if cooperative() else 5)
     return None
 
 
@@ -7033,7 +7027,7 @@ def _submit_bootstrap_loan(
             loan.requester_position,
         )
         consume_wait(f"bootstrap_loan_{loan.target_item}")
-        time.sleep(_BOOTSTRAP_LOAN_POLL_SECONDS)
+        time.sleep(0 if cooperative() else _BOOTSTRAP_LOAN_POLL_SECONDS)
         after = _bootstrap_loan_products_finished(client, surface, loan)
         if after is not None and products_finished is not None and after > products_finished:
             _BOOTSTRAP_LOAN_PROGRESS_REVISION += 1
@@ -8707,6 +8701,7 @@ def _refresh_logistic_chest_budget(
     client: RconClient, surface: str, force: str,
     ledger: MaterialReservationLedger | None,
     emit: Callable[[str], None] | None = None,
+    *, dependency_items: Sequence[str] | None = None,
 ) -> None:
     """Hold finite kit chests for required startup dependencies this pass.
 
@@ -8718,6 +8713,8 @@ def _refresh_logistic_chest_budget(
         return
     try:
         pending = _pending_startup_dependencies(client, surface, force)
+        if dependency_items is not None:
+            pending = tuple(item for item in pending if item in dependency_items)
         plan = plan_dependency_chest_budget(
             pending,
             bill_for=lambda item: _startup_dependency_project(item)[1],
@@ -8862,7 +8859,7 @@ def ensure_produced(
     minimum_machines: int = 1, allow_promotion: bool = True,
     stock_gate_target: int | None = None, storage_limit: int | None = None,
     fill_provider: bool = False, blocking_stock_target: int | None = None,
-    temporary_mall: bool = False,
+    temporary_mall: bool = False, standing_mall: bool = False,
 ) -> Point | None:
     """Returns the item's real output chest position if it's already producing;
     otherwise builds exactly ONE missing stage (the deepest unmet ingredient
@@ -8871,7 +8868,7 @@ def ensure_produced(
         promoted = _promote_compact_steel(client, bridge, surface, force, reference_point, emit)
         if promoted is not None:
             MANAGED_INTERMEDIATE_SOURCES[item] = promoted
-    if item in MANAGED_INTERMEDIATE_SOURCES:
+    if item in MANAGED_INTERMEDIATE_SOURCES and not standing_mall:
         if not upgrade_bootstrap:
             _refresh_owned_standing_gates(client, bridge, surface, force, emit, requested={item: stock_target})
         _complete_material_producer(item)
@@ -8943,7 +8940,7 @@ def ensure_produced(
         upgrade_bootstrap = False
         temporary_mall = True
     temporary_precore = False
-    if not upgrade_bootstrap:
+    if not upgrade_bootstrap and not standing_mall:
         temporary_precore = _is_pre_core_temporary_mall_item(
             client, surface, force, item,
         )
@@ -8971,7 +8968,7 @@ def ensure_produced(
                 stock_gate_target or 0, temporary_target,
             )
             fill_provider = False
-    if not upgrade_bootstrap and _MATERIAL_RESERVATION_LEDGER is not None:
+    if not upgrade_bootstrap and not standing_mall and _MATERIAL_RESERVATION_LEDGER is not None:
         loan_wait = _service_bootstrap_loan(
             client, bridge, surface, force, item, reference_point, emit,
         )
@@ -9235,6 +9232,8 @@ def _rationed_mall_spare_target(
     client: RconClient, surface: str, force: str, item: str, required: int,
 ) -> int:
     """Bound optional rotating-slot output without delaying its current bill."""
+    if cooperative() and (_BLOCKING_MALL_ITEMS - {item}):
+        return required
     spare = max(
         math.ceil(required * _RATIONED_MALL_SPARE_FRACTION),
         _rationed_mall_wip_gap(client, surface, force, item),
@@ -11443,7 +11442,7 @@ def _prep_plate_extraction(
                 f"{deferred}; holding startup instead of advancing the goal"
             )
             consume_wait(f"{deferred.state}_{short_plate}_foundation")
-            time.sleep(_PENDING_FOUNDATION_POLL_SECONDS)
+            time.sleep(0 if cooperative() else _PENDING_FOUNDATION_POLL_SECONDS)
             return True
         deferred_targets[short_plate] = wanted_furnaces
         emit(f"  PREP DEFERRED: {short_plate} extraction -- {deferred}")
@@ -11630,7 +11629,7 @@ def _prep_plate_foundation(
                     f"replacement waits: {deferred}; holding startup"
                 )
                 consume_wait(f"submitted_{plate}_foundation")
-                time.sleep(_PENDING_FOUNDATION_POLL_SECONDS)
+                time.sleep(0 if cooperative() else _PENDING_FOUNDATION_POLL_SECONDS)
                 return True
             except MaterialShortage as shortage:
                 # A submitted district owns its exact ghosts, but it does not
@@ -11667,7 +11666,7 @@ def _prep_plate_foundation(
                     "complete but has not produced yet; keeping its starter"
                 )
                 consume_wait(f"healthy_{plate}_foundation")
-                time.sleep(_PENDING_FOUNDATION_POLL_SECONDS)
+                time.sleep(0 if cooperative() else _PENDING_FOUNDATION_POLL_SECONDS)
                 return True
             _retire_standing_bootstrap_cells(
                 client, bridge, surface, force, plate, ore,
@@ -11705,7 +11704,7 @@ def _prep_plate_foundation(
                 "re-observing the bot-built roboport wave before retrying"
             )
             consume_wait(f"coverage_{plate}_starter")
-            time.sleep(_PENDING_FOUNDATION_POLL_SECONDS)
+            time.sleep(0 if cooperative() else _PENDING_FOUNDATION_POLL_SECONDS)
         except MaterialShortage as error:
             add_demands(mall_targets, error)
             emit(
@@ -11983,7 +11982,7 @@ def _core_mall_wait_spent_pass(
     """Yield supply waits to ready peers; re-observe changed cells and coverage."""
     if deferred is not None and deferred.code == "roboport_coverage_construction_wait":
         consume_wait(wait_key)
-        time.sleep(_PENDING_FOUNDATION_POLL_SECONDS)
+        time.sleep(0 if cooperative() else _PENDING_FOUNDATION_POLL_SECONDS)
         return True
     return _BOOTSTRAP_LOAN_CONFIGURATION_REVISION != configuration_before
 

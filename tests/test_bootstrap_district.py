@@ -20,7 +20,7 @@ from orchestrator import autonomous_builder as builder
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_first_delivery_retires_before_remaining_ghost_wait(monkeypatch):
+def test_first_craft_with_empty_provider_retires_before_remaining_ghost_wait(monkeypatch):
     from planners.smelter_block import generate_managed_refinery_plan, refinery_interfaces
     origin = (20.0, 30.0)
     interface = refinery_interfaces(6, origin_x=20, origin_y=30, variant="basic")
@@ -29,7 +29,7 @@ def test_first_delivery_retires_before_remaining_ghost_wait(monkeypatch):
         replacement_provider=interface.provider, ore="iron-ore", transport_source=(0,0))
     monkeypatch.setattr(builder, "_bootstrap_state", lambda *_a: state)
     monkeypatch.setattr(builder, "_measured_bootstrap_replacement_output", lambda *_a: 1)
-    monkeypatch.setattr(builder.live_base, "chest_contents", lambda *_a: {"iron-plate": 1})
+    monkeypatch.setattr(builder.live_base, "chest_contents", lambda *_a: {})
     monkeypatch.setattr(builder.live_base, "entity_status_name", lambda *_a: "working")
     monkeypatch.setattr(builder, "_ensure_power_anchor_on_generated_network", lambda *_a: None)
     events = []
@@ -468,10 +468,10 @@ def test_controller_releases_pioneer_only_after_exact_replacement_output(
     )
 
     state = ledger.load("iron-plate")
-    assert removed == int(delivered)
-    assert retirements == (["direct_iron-plate_starter"] if delivered else [])
-    assert state is not None and state.lifecycle_state == ("released" if delivered else "provisioning")
-    assert state.measured_output_count == (3 if delivered else 0)
+    assert removed == 1
+    assert retirements == ["direct_iron-plate_starter"]
+    assert state is not None and state.lifecycle_state == "released"
+    assert state.measured_output_count == 3
 
 
 def test_controller_keeps_pioneer_when_replacement_has_not_produced(

@@ -116,7 +116,8 @@ identifies inherited decisions and missing observations.
 | `mission.ops-starters-before-foundations` | Prefer finishing iron, copper and stone starters before foundations consume their reserved drills. |
 | `mission.ops-foundation` | Prefer a mine and six-furnace foundation after its plate starter produces; reconcile the same transaction on retries. |
 | `mission.ops-extend` | Extend an open refinery in place by one six-furnace module, with its mine, while its plate is still short. |
-| `mission.ops-retire-starter` | Retire a starter only after its replacement delivers plates; recover entities and contents with bots. |
+| `mission.ops-retire-starter` | Retire a starter as soon as its owned replacement produces plates; preserve unfinished replacement construction and recover entities and contents with bots. |
+| `mission.ops-fast-inserter-early` | Prefer an early fast-inserter reserve to support replacement output before expanding mines. |
 | `mission.ops-mall-slots` | Prefer gear, cable and circuit producers, then belt capacity, before foundations; preserve their construction budget. |
 | `mission.ops-no-idle-loans` | A borrowed cell is a finite batch, not a standing producer; request it for a current shortfall and account for displaced output. |
 | `mission.ops-steel-fence` | Reserve the funded steel seed's poles before competing builds consume them. |

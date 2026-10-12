@@ -74,11 +74,12 @@ gated separately and is not changed by the release.
 - A starter drill is temporary bootstrap capacity, not a one-drill persistent
   resource district. Exclude it from managed-mine discovery and phase counts
   while the independent six-drill belt collector and refinery are built.
-- Migration is build -> first delivered output -> retire. The bootstrap may
-  retire once an owned replacement furnace completes a craft and the matching
-  item is observed in its exact provider chest, with generated power verified.
+- Migration is build -> first owned craft -> retire. The bootstrap may
+  retire once an owned replacement furnace completes a craft, with generated
+  power verified. Provider delivery and an unfinished output inserter do not
+  delay retirement.
   Remaining drills, furnaces, or inserters need not be complete; their ghosts,
-  reservations, and mall bills remain active. Check delivery during construction
+  reservations, and mall bills remain active. Check owned craft output during construction
   polling, not only after the full blueprint finishes. Then the starter drill, furnace,
   inserter, and provider chest receive exact deconstruction orders. Retirement
   waits for construction bots to recover those entities and their contents into
@@ -114,7 +115,7 @@ gated separately and is not changed by the release.
 - A migration is incomplete while any recognized starter drill, furnace or
   inserter remains. Producing plates somewhere else is not sufficient evidence.
 - Starter machinery retires on the first control pass after the replacement
-  has measured output and at least one plate in its own provider; one working
+  has measured owned output; one working
   unit of the six suffices. The teardown is persisted before it is ordered, so
   a bot timeout resumes on a later pass instead of failing. The starter's
   passive provider is not torn down with it (district state version 2,
@@ -737,3 +738,8 @@ Standing gate maintenance receives the full current construction queue, not
 only admitted reservations and active loans. Recipe and declared cell-bill
 ancestors of binding consumers receive required-stock treatment, so a circuit
 reserve cannot stay at five while drills/inserters/splitters need eighteen.
+
+Roboport logistics covers a50×50 square and construction a110×110 square.
+Coverage, nearest-port selection and chain linking use Chebyshev distance.
+49-tile links leave one tile of overlap under the50-tile engine limit; local
+relocation still checks footprints, reserved tiles, power and connectivity.

@@ -1,0 +1,280 @@
+# Path: tests/test_work_queue.py | Purpose: Protect delivered accounting, continuation, priority, and isolation.
+from pathlib import Path
+from types import SimpleNamespace
+
+from orchestrator.work_queue import WorkQueue
+from orchestrator.execution_slice import execution_slice
+from training.laya_ops import DeterministicSession
+
+
+def queue(tmp_path, tick=0):
+    return WorkQueue(tmp_path/'queue.json', world_id='private-episode', tick=tick)
+
+
+def snapshot(tick=0, stock=None, owned=None):
+    return {'tick': tick, 'stock': stock or {}, 'owned': owned or {}, 'claims': {}, 'layout': [4, 1]}
+
+
+def test_31_assemblers_fulfil_29_without_running_or_refilling(tmp_path):
+    q = queue(tmp_path)
+    job = q.enqueue('produce', {'item': 'assembling-machine-1', 'stock_target': 29}, priority=50, tick=0)
+    calls = []
+    q.pulse(snapshot(stock={'assembling-machine-1': 31}), lambda *a: calls.append(a), can_produce=lambda _: True)
+    assert job.state == 'complete' and calls == []
+    q = queue(tmp_path, tick=100)
+    assert q.jobs[job.job_id].state == 'complete'
+    q.pulse(snapshot(100), lambda *a: calls.append(a), can_produce=lambda _: True)
+    assert calls == []  # A finite bill is not a standing refill policy.
+
+
+def test_four_installed_of_six_drills_only_requests_two(tmp_path):
+    q = queue(tmp_path)
+    drills = q.enqueue('produce', {'item': 'electric-mining-drill', 'stock_target': 6}, priority=100, tick=0)
+    calls = []
+    def execute(job, params):
+        calls.append(params)
+        return {'ok': True, 'operation': job.operation, 'params': params, 'code': 'producing'}
+    q.pulse(snapshot(owned={drills.job_id: {'delivered': 4}}), execute, can_produce=lambda _: True)
+    assert calls == [{'item': 'electric-mining-drill', 'stock_target': 2}]
+    assert queue(tmp_path).jobs[drills.job_id].delivered == 4
+
+
+def test_blocked_job_yields_to_ready_peer_and_prerequisite(tmp_path):
+    q = queue(tmp_path)
+    mine = q.enqueue('foundation', {'recipe': 'iron-plate'}, priority=100, tick=0)
+    cable = q.enqueue('mall_slot', {'item': 'copper-cable'}, priority=50, tick=0)
+    served = []
+    def execute(job, params):
+        served.append(job.item)
+        if job is mine:
+            return {'ok': False, 'code': 'material_shortage', 'details': {'required': {'electric-mining-drill': 6}}}
+        return {'ok': True, 'code': 'submitted'}
+    q.pulse(snapshot(), execute, can_produce=lambda _: True)
+    assert served == ['iron-plate', 'electric-mining-drill', 'copper-cable']
+    assert cable.state == 'complete'
+    assert q.jobs[mine.dependencies[0]].priority >= mine.priority
+
+
+def test_surplus_churn_does_not_retry_unchanged_missing_provider(tmp_path):
+    q = queue(tmp_path)
+    job = q.enqueue('mall_slot', {'item': 'inserter'}, priority=50, tick=0)
+    q.record(job, {'ok': False, 'code': 'material_shortage', 'details': {'required': {'passive-provider-chest': 1}}},
+             snapshot(), can_produce=lambda _: False)
+    q.reconcile(snapshot(600, {'iron-plate': 5000}))
+    assert q.ready(snapshot()) == []
+    q.reconcile(snapshot(601, {'passive-provider-chest': 1}))
+    assert q.ready(snapshot()) == [job]
+
+
+def test_completed_prerequisite_is_not_dispatched_with_existing_stock(tmp_path):
+    q = queue(tmp_path)
+    parent = q.enqueue('mall_slot', {'item': 'inserter'}, priority=100, tick=0)
+    calls = []
+    def execute(job, params):
+        calls.append(job.item)
+        return {'ok': False, 'code': 'material_shortage',
+                'details': {'required': {'assembling-machine-1': 1, 'passive-provider-chest': 1}}}
+    q.pulse(snapshot(stock={'assembling-machine-1': 31}), execute, can_produce=lambda i: i=='assembling-machine-1')
+    assert calls == ['inserter'] and parent.state == 'blocked'
+
+
+def test_preemption_preserves_checkpoint_claims_and_resumes(tmp_path):
+    q = queue(tmp_path)
+    lower = q.enqueue('produce', {'item': 'assembling-machine-1', 'stock_target': 10}, priority=20, tick=0)
+    lower.state, lower.reserved, lower.checkpoint = 'running', {'iron-plate': 12}, {'credit': 3}
+    urgent = q.enqueue('produce', {'item': 'electric-mining-drill', 'stock_target': 2}, priority=100, tick=0)
+    def execute(job, params):
+        return {'ok': True, 'code': 'producing'}
+    q.pulse(snapshot(), execute, can_produce=lambda _: True, preempt=lambda a,b: a is lower and b is urgent,
+            max_jobs=1)
+    assert lower.state == 'paused' and lower.reserved == {'iron-plate': 12} and lower.checkpoint == {'credit': 3}
+    loaded = queue(tmp_path, tick=120)
+    assert loaded.jobs[lower.job_id].state == 'paused'
+    loaded.jobs[urgent.job_id].state = 'complete'
+    calls = []
+    loaded.pulse(snapshot(120), lambda j,p: (calls.append(j.job_id) or {'ok': True}), can_produce=lambda _: True)
+    assert calls == [lower.job_id]
+
+
+def test_fresh_clock_resets_retry_but_keeps_credit_and_world_isolation(tmp_path):
+    q = queue(tmp_path, tick=9000)
+    job = q.enqueue('produce', {'item': 'inserter', 'stock_target': 6}, priority=100, tick=9000)
+    job.retry_tick, job.delivered = 9120, 4
+    q.save()
+    loaded = queue(tmp_path, tick=0)
+    assert loaded.jobs[job.job_id].retry_tick == 0 and loaded.jobs[job.job_id].delivered == 4
+    import pytest
+    with pytest.raises(ValueError, match='world'):
+        WorkQueue(q.path, world_id='production', tick=0)
+
+
+def test_reorder_inherits_priority_and_cycle_is_visible(tmp_path):
+    q = queue(tmp_path)
+    goal = q.enqueue('produce', {'item': 'plastic-bar', 'stock_target': 30}, priority=50, tick=0)
+    precursor = q.enqueue('produce', {'item': 'pipe', 'stock_target': 20}, priority=50, tick=0, parent=goal.job_id)
+    assert q.enqueue('produce', goal.params, priority=50, tick=0, parent=precursor.job_id) is None
+    assert precursor.reason.startswith('dependency_cycle:')
+    q.promote(goal.job_id, tick=0)
+    assert precursor.priority == goal.priority > 50
+
+
+def test_spares_wait_until_urgent_work_is_clear(tmp_path):
+    q = queue(tmp_path)
+    q.enqueue('produce', {'item': 'inserter', 'stock_target': 2}, priority=5, tick=0, kind='spare')
+    q.enqueue('produce', {'item': 'electric-mining-drill', 'stock_target': 6}, priority=100, tick=0)
+    calls = []
+    q.pulse(snapshot(), lambda j,p: (calls.append(j.kind) or {'ok': True}), can_produce=lambda _: True)
+    assert calls == ['production']
+
+
+def test_loan_output_is_not_counted_twice_as_stock_and_delivery(tmp_path):
+    session = object.__new__(DeterministicSession)
+    session.queue = queue(tmp_path)
+    job = session.queue.enqueue('produce', {'item': 'electric-mining-drill', 'stock_target': 6}, priority=100, tick=0)
+    loan = {'target_item': job.item, 'step_recipe': job.item, 'crafts_done': 4,
+            'machine_position': [1, 1], 'step_baseline_finished': 0}
+    facts = {'tick': 0, 'machines': [], 'poles': []}
+    snap = session._queue_snapshot(facts, {'material_stock': {job.item: 4}, 'loans': [loan]})
+    session.queue.reconcile(snap)
+    assert job.delivered == 0 and job.state != 'complete'
+    snap = session._queue_snapshot(facts, {'material_stock': {job.item: 0}, 'loans': [loan]})
+    session.queue.reconcile(snap)
+    assert job.delivered == 4 and job.state != 'complete'
+
+
+def test_cooperative_wait_surveys_once_without_sleep(monkeypatch):
+    from orchestrator import stage_services as services
+    client = SimpleNamespace(command=lambda _: '4')
+    monkeypatch.setattr(services.time, 'sleep', lambda _: (_ for _ in ()).throw(AssertionError('slept')))
+    with execution_slice():
+        assert services._wait_for_ghosts(client, 'private', 'player', ((0,0),(10,10))) == 4
+
+
+def test_wait_choices_keep_executor_advancing_and_record_each_lane(tmp_path):
+    import json
+    from training.laya_guided_policy import GuidedPolicy
+    from training.laya_ops_runner import run
+    from tests.test_laya_ops_runner import FakeWorld, FakeSession
+    class Session(FakeSession):
+        episode_id = 'private-episode'
+        def enable_queue(self, **kwargs):
+            self.queue = WorkQueue(tmp_path/'queue.json', tick=1000, **kwargs)
+            self.queue.enqueue('produce', {'item': 'electric-mining-drill', 'stock_target': 6}, priority=100, tick=1000)
+            self.queue.enqueue('mall_slot', {'item': 'copper-cable'}, priority=50, tick=1000)
+        def queue_menu(self, menu):
+            return {**menu, 'options': [o for o in menu['options'] if o['family']=='wait']}
+        def _queue_snapshot(self, facts, economics):
+            return snapshot(facts['tick'])
+        def execute_queue(self, facts, economics, reached):
+            return self.queue.pulse(snapshot(facts['tick']), lambda j,p: self.run(j.operation, **p),
+                                    can_produce=lambda _: True)
+    world, session = FakeWorld(), Session()
+    summary = run(world, GuidedPolicy(3), journal=tmp_path/'journal.jsonl', decisions=3,
+                  measure_ticks=600, seed=3, run_id='queue-test', session=session)
+    rows = [json.loads(line) for line in (tmp_path/'journal.jsonl').read_text().splitlines()]
+    assert summary['failures'] == 0
+    assert session.calls[:2] == [('produce', {'item': 'electric-mining-drill', 'stock_target': 6}),
+                                  ('mall_slot', {'item': 'copper-cable'})]
+    assert len([r for r in rows if r['event']=='executor']) >= 2
+    assert all(r['choice']['option_id'].startswith('wait.') for r in rows if r['event']=='decision')
+    assert 'work_queue' in summary
+
+
+def test_recipe_handoff_waits_for_boundary_then_restores_active_flag():
+    import subprocess
+    import pytest
+    from orchestrator.stage_services import _hold_recipe_changes, StuckError
+    class LuaClient:
+        progress, active = 0.5, True
+        def command(self, text):
+            lua = (
+                f"e={{active={str(self.active).lower()},crafting_progress={self.progress}}};"
+                "function e.get_recipe() return {name='inserter'} end;"
+                "game={surfaces={private={find_entities_filtered=function() return {e} end}}};"
+                "rcon={print=function(v) print(v) end};helpers={};"
+                "helpers.json_to_table=function(v) if string.find(v,'recipe') then "
+                "return {{x=1,y=1,recipe='electric-mining-drill'}} else return {{x=1,y=1,active=true}} end end;"
+                "helpers.table_to_json=function(t) if #t==0 then return '[]' else "
+                "return '[{\"x\":1,\"y\":1,\"active\":true}]' end end;"
+                + "(function() " + text[4:] + " end)();print('ACTIVE='..tostring(e.active))"
+            )
+            result = subprocess.run(['lua','-'], input=lua, text=True, capture_output=True, check=True)
+            lines = result.stdout.splitlines()
+            self.active = lines[-1] == 'ACTIVE=true'
+            return lines[0] if len(lines)>1 else ''
+    client = LuaClient()
+    plan = {'phases': [{'actions': [{'action_type': 'configure_entity', 'entity': 'assembling-machine-1',
+                                     'position': {'x':1,'y':1}, 'recipe':'electric-mining-drill'}]}]}
+    with execution_slice():
+        with pytest.raises(StuckError, match='completed craft'):
+            with _hold_recipe_changes(client, 'private', 'player', plan):
+                raise AssertionError('entered before boundary')
+        assert client.active is True
+        client.progress = 0
+        with _hold_recipe_changes(client, 'private', 'player', plan):
+            assert client.active is False
+        assert client.active is True
+
+
+def install_live_recipe_fixture(monkeypatch):
+    import json
+    from copy import deepcopy
+    from planners.recipe_data import LINE_RECIPES, install_catalog_line_recipes
+    root = Path(__file__).resolve().parents[1]
+    original = deepcopy(LINE_RECIPES)
+    install_catalog_line_recipes(json.loads((root/'tests/fixtures/player_recipe_catalog.json').read_text()))
+    installed = deepcopy(LINE_RECIPES)
+    LINE_RECIPES.clear()
+    LINE_RECIPES.update(original)
+    for item, spec in installed.items():
+        monkeypatch.setitem(LINE_RECIPES, item, spec)
+
+
+def test_backlog_automatically_queues_a_real_capacity_operation(tmp_path, monkeypatch):
+    from orchestrator import autonomous_builder as ab
+    from orchestrator import live_base
+    install_live_recipe_fixture(monkeypatch)
+    session = object.__new__(DeterministicSession)
+    session.queue = queue(tmp_path)
+    session.client, session.reference_point, session.emit = object(), (0,0), lambda _:None
+    parent = session.queue.enqueue('foundation', {'recipe':'iron-plate'}, priority=100, tick=0)
+    parent.retry_tick = 1000
+    for item in ('electric-mining-drill', 'fast-inserter'):
+        session.queue.enqueue('produce', {'item':item,'stock_target':6}, priority=100, tick=0, parent=parent.job_id)
+    ledger = SimpleNamespace(projects={}, dependency_budget={}, allocatable_stock=lambda s: s)
+    monkeypatch.setattr(ab, '_MATERIAL_RESERVATION_LEDGER', ledger)
+    monkeypatch.setattr(ab, '_refresh_logistic_chest_budget', lambda *a,**k:None)
+    monkeypatch.setattr(live_base, 'find_line', lambda *a: None)
+    calls = []
+    session.run = lambda op, **params: (calls.append((op,params)) or
+                                      {'ok':False,'code':'queued_construction_wait','params':params,'operation':op})
+    session._queue_preempt = lambda *a:False
+    session.execute_queue({'tick':0}, {'material_stock':{},'free_slots':4}, reached=['C0','C1'])
+    assert ('mall_capacity', {'item':'electric-mining-drill','minimum_machines':1}) in calls
+
+
+def test_queue_schema_round_trip_and_lab_admission(tmp_path, monkeypatch):
+    install_live_recipe_fixture(monkeypatch)
+    import json
+    from jsonschema import Draft7Validator
+    q = queue(tmp_path)
+    q.enqueue('produce', {'item':'fast-inserter','stock_target':6}, priority=80, tick=0)
+    root = Path(__file__).resolve().parents[1]
+    Draft7Validator(json.loads((root/'schemas/laya_work_queue.schema.json').read_text())).validate(json.loads(q.path.read_text()))
+    session = object.__new__(DeterministicSession)
+    session.reached_phases = ['C0','C1','C2']
+    assert not session._queue_can_produce('lab')
+    session.reached_phases += ['C4','C6']
+    assert session._queue_can_produce('lab')
+
+
+def test_new_consumer_cannot_reuse_old_delivery_credit(tmp_path):
+    q = queue(tmp_path)
+    mine = q.enqueue('foundation', {'recipe':'iron-plate'}, priority=100, tick=0)
+    drills = q.enqueue('produce', {'item':'electric-mining-drill','stock_target':6}, priority=100, tick=0, parent=mine.job_id)
+    drills.state, drills.delivered = 'complete', 6
+    drills.checkpoint['lane_credits'] = {'old-lane':6}
+    another = q.enqueue('foundation', {'recipe':'copper-plate'}, priority=100, tick=120)
+    next_batch = q.enqueue('produce', drills.params, priority=100, tick=120, parent=another.job_id)
+    assert next_batch.state == 'ready' and next_batch.delivered == 0
+    assert next_batch.checkpoint['lane_floors'] == {'old-lane':6}

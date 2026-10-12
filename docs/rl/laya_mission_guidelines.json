@@ -3,6 +3,30 @@
   "purpose": "Clean Laya runner mission catalog: the hard plan-legality rule plus the user's mod_playground strategy (docs/rl/Laya_Strategy_Guidelines.md). Scopes are mission.* so other runners never select these rules. 'prefer' entries weight the guided policy: when a decision feature matches, multiply the option weight.",
   "rules": [
     {
+      "rule_id": "mission.ops-fast-inserter-early",
+      "kind": "soft",
+      "scopes": [
+        "mission.opening",
+        "mission.mine",
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Prefer an early fast-inserter reserve to support replacement output before expanding mines.",
+      "prefer": [
+        {
+          "when": {
+            "product": "fast-inserter",
+            "phase": [
+              "C0",
+              "C1",
+              "C2"
+            ]
+          },
+          "weight": 3.0
+        }
+      ]
+    },
+    {
       "rule_id": "rule.plan-legality",
       "kind": "hard",
       "scopes": [
@@ -735,7 +759,7 @@
         "mission.decide"
       ],
       "source": "docs/rl/Laya_Strategy_Guidelines.md",
-      "quote": "Retire a starter only after its replacement delivers plates; recover entities and contents with bots.",
+      "quote": "Retire a starter as soon as its owned replacement produces plates; preserve unfinished replacement construction and recover entities and contents with bots.",
       "prefer": [
         {
           "when": {

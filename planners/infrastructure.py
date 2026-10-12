@@ -40,8 +40,8 @@
 #   Each roboport owns a logistic square of radius 25 and a construction square
 #   of radius 55. Two roboports join the same logistic network when their
 #   logistic squares touch, i.e. Chebyshev separation <= 2 * 25 = 50. We plan
-#   and validate against a conservative ROBOPORT_LINK_DISTANCE of 46 so a
-#   rounded tile never lands on the cliff edge, and chain at spacing 40.
+#   and validate against a conservative ROBOPORT_LINK_DISTANCE of 49 so a
+#   rounded tile never lands on the cliff edge, and chain at spacing 49.
 # ---------------------------------------------------------------------------
 
 from __future__ import annotations
@@ -87,8 +87,8 @@ ROBOPORT_ENTITY = "roboport"
 ROBOPORT_SIZE = 4
 ROBOPORT_LOGISTIC_RADIUS = 25.0
 ROBOPORT_CONSTRUCTION_RADIUS = 55.0
-ROBOPORT_LINK_DISTANCE = 46.0  # conservative; the hard game limit is 2*25 = 50
-ROBOPORT_SPACING = 40
+ROBOPORT_LINK_DISTANCE = 49.0  # conservative; the hard game limit is 2*25 = 50
+ROBOPORT_SPACING = 49
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _PLACEMENTS = {"place_entity", "place_ghost"}

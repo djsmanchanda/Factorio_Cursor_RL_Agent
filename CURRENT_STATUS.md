@@ -439,3 +439,14 @@ Two regressions fail before/pass after;274 focused passes; saved live-recipe
 replay raises circuit gate5→18; fast gate1206 passes/3 skips, only the
 unchanged four-import firewall failure. Lifecycle: new frozen Python runner
 required; no mod deployment. Sustained scale improvement remains unproven.
+
+### 2026-10-12 13:55 IST — continuous Laya work queue and bootstrap throughput fixes
+
+Laya now enqueues/reorders durable goals; the executor services several ready
+production/construction jobs, causal prerequisites, funded capacity requests,
+craft-boundary handoffs and owned output credits. Future chest forecasts protect
+only the executable frontier. Owned replacement crafts allow starter retirement;
+opening stock includes fast inserters; roboport coverage/linking uses square
+metrics and49-tile spacing.207 focused passes; fast gate1224 passes/3 skips and
+only the unchanged four-import firewall failure. Lifecycle: launch a new frozen
+Python runner; no Lua deployment. Sustained scale improvement awaits live evidence.

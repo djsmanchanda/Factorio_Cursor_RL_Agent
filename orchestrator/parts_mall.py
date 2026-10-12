@@ -6,6 +6,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Mapping
 
+from orchestrator.execution_slice import cooperative
 from orchestrator import live_base
 from orchestrator.work_state import WorkStateSignal
 from tools.rcon_client import RconClient
@@ -27,6 +28,7 @@ STARTER_MALL_TARGETS = (
     ("transport-belt", 200),
     ("underground-belt", 20),
     ("inserter", 20),
+    ("fast-inserter", 6),  # Collect replacement output before mine scale-up.
     ("assembling-machine-1", 6),
 )
 # Generation stock is demand-driven only after advanced-circuit output proves
@@ -175,6 +177,8 @@ def wait_for_stock(
         if have >= target:
             emit(f"  MALL READY: {item} stock reached {have}/{target}")
             return True
+        if cooperative():
+            return False
         now = time.monotonic()
         if have > best_have:
             best_have = have

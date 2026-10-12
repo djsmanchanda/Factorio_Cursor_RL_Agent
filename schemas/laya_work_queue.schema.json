@@ -1,0 +1,137 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "Path: schemas/laya_work_queue.schema.json | Purpose: Persist isolated Laya goals and executor state.",
+  "type": "object",
+  "required": [
+    "version",
+    "world_id",
+    "tick",
+    "jobs"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "world_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tick": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "jobs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "params": {
+            "type": "object"
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "created_tick": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "kind": {
+            "enum": [
+              "production",
+              "construction",
+              "capacity",
+              "spare"
+            ]
+          },
+          "state": {
+            "enum": [
+              "ready",
+              "running",
+              "blocked",
+              "paused",
+              "complete"
+            ]
+          },
+          "parents": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dependencies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "required": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "delivered": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reserved": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "checkpoint": {
+            "type": "object"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "retry_tick": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "blocked_signature": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "job_id",
+          "operation",
+          "params",
+          "priority",
+          "created_tick",
+          "sequence",
+          "kind",
+          "state",
+          "parents",
+          "dependencies",
+          "required",
+          "delivered",
+          "reserved",
+          "checkpoint",
+          "reason",
+          "retry_tick",
+          "blocked_signature"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}

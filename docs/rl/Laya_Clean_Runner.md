@@ -107,8 +107,8 @@ released, including after satisfied rates, later proxy phases and shortage
 returns. Local foundation receipts provide a fallback when no district fact
 is available; a scoped district fact takes precedence. Submission does not
 certify readiness. The existing tool still checks owned geometry, construction,
-replacement output in its provider and bot deconstruction. Every operation
-pass also applies that same evidence, so a delivered replacement's starter
+owned replacement craft output and bot deconstruction. Every operation
+pass also applies that same evidence, so a producing replacement's starter
 machinery retires even when `retire_starter` is not chosen, and a retained
 starter provider is reclaimed once empty ([planning](../deterministic/planning.md)). New starter,
 foundation and extension capacity remains demand-driven. The policy chooses
@@ -316,3 +316,37 @@ Only current phase products below their measured rate goal run ungated. A met
 peer rejoins its standing limit while the phase's remaining products advance;
 falling below the goal reopens measured production. This prevents an unfinished
 stone goal from leaving gear/cable output unbounded throughout construction.
+
+## Ops queue contract (October 12, 2026)
+
+The deterministic action path now uses a durable queue. Laya selects enqueue
+and reorder choices from the legal operation menu; wait choices continue the
+executor. Each pass advances several ready jobs, services physical loan and
+construction continuations, then observes again after 120 game ticks. Shared
+operations run cooperatively, returning a typed pending state after one survey
+or remedy instead of holding the controller through a long build window.
+
+Queue state is stored under the world's `server/logs/laya-work-queue.json`
+([schema](../../schemas/laya_work_queue.schema.json)). The journal records each
+executor receipt separately from the strategic choice; status and summary expose
+job priority, state, dependencies, delivered credit, reservations and blocker.
+World reset archives the ledger; runner restart retains it.
+
+A finite production job completes from usable stock plus its owned dispersed
+output, never global production counters. Still-held output is not also delivery
+credit. Four delivered drills of a six-drill bill leave two. Meeting an assembler
+stock bill of29 with31 usable items completes it without another production call.
+Optional spare output yields when more urgent committed work remains. Standing
+producers retain their monotonic limits and measured phase gates.
+
+Distinct unmet committed product jobs can request another standing mall lane.
+This operation bypasses rotational-batch routing while keeping the shared funded
+bill, slot cap and geometry validators. Future chemistry forecasts cannot hoard
+chests away from current executable work. Unsupported supply and dependency cycles
+remain visible blockers; they do not license manual placement or item grants.
+
+Preemption verifies a fully funded urgent input bill and atomically checks the
+exact loan machine's recipe, force and zero craft progress before holding it.
+Its completed output and input claims persist while the lender is restored. An
+in-flight craft is left running until an observed boundary. A restarted controller
+releases only its recorded machine holds before resuming queue reconciliation.

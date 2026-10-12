@@ -241,8 +241,6 @@ def test_chain_ends_with_the_chest_actually_inside_the_supply_area(target: tuple
     chain = roboport_chain(source, target, _ROBOPORT_LOGISTIC_RADIUS)
     assert chain, "a gap was reported but no roboport was proposed"
     assert service_distance(chain[-1], target, square=True) <= _ROBOPORT_LOGISTIC_RADIUS
-    # Euclidean too, so the result holds under the conservative measure as well.
-    assert math.dist(chain[-1], target) <= _ROBOPORT_LOGISTIC_RADIUS
 
 
 @pytest.mark.parametrize("target", [(40.0, 0.0), (200.0, 0.0), (-120.0, 90.0), (30.0, 30.0)])
@@ -251,7 +249,7 @@ def test_every_chain_hop_stays_within_roboport_link_distance(target: tuple[float
     source = (0.0, 0.0)
     previous = source
     for hop in roboport_chain(source, target, _ROBOPORT_LOGISTIC_RADIUS):
-        assert math.dist(previous, hop) <= _ROBOPORT_LINK_DISTANCE
+        assert service_distance(previous, hop, square=True) <= _ROBOPORT_LINK_DISTANCE
         previous = hop
 
 
@@ -268,8 +266,8 @@ def test_chain_never_places_a_roboport_on_top_of_the_chest() -> None:
 
 @pytest.mark.parametrize(
     "target,radius,square",
-    [((101.0, -21.0), _ROBOPORT_CONSTRUCTION_RADIUS, False),
-     ((84.5, -41.5), _ROBOPORT_CONSTRUCTION_RADIUS, False),
+    [((101.0, -21.0), _ROBOPORT_CONSTRUCTION_RADIUS, True),
+     ((101.5, -57.5), _ROBOPORT_CONSTRUCTION_RADIUS, True),
      ((39.5, 31.5), _ROBOPORT_LOGISTIC_RADIUS, True)],
 )
 def test_one_needed_port_is_pushed_toward_the_gap_not_clustered(
@@ -294,13 +292,13 @@ def test_chain_ports_are_spread_along_the_route(target: tuple[float, float]) -> 
     chain = roboport_chain(source, target, _ROBOPORT_CONSTRUCTION_RADIUS)
     previous = source
     for hop in chain:
-        gap = math.dist(previous, hop)
+        gap = service_distance(previous, hop, square=True)
         assert gap <= _ROBOPORT_LINK_DISTANCE
         assert gap >= _ROBOPORT_LINK_DISTANCE - 12 or hop is chain[-1], (
             "an interior hop wasted a port by sitting on its predecessor"
         )
         previous = hop
-    assert math.dist(chain[-1], target) <= _ROBOPORT_CONSTRUCTION_RADIUS
+    assert service_distance(chain[-1], target, square=True) <= _ROBOPORT_CONSTRUCTION_RADIUS
 
 
 def test_chain_relocates_a_roboport_off_a_stage_footprint(monkeypatch) -> None:
@@ -1116,3 +1114,10 @@ def test_roboport_power_hookup_routes_around_reserved_corridor(monkeypatch) -> N
     assert powered and powered[0]["position"] == (45.0, 5.0)
     assert powered[0]["reserved_tiles"] == {(1, 2), (3, 4)}
     assert deferred.value.code == "roboport_coverage_construction_wait"
+
+
+def test_square_corner_coverage_and_diagonal_link_spacing():
+    assert roboport_chain((0, 0), (54.9, 54.9), 55) == []
+    chain = roboport_chain((0, 0), (150, 150), 25)
+    assert chain[:2] == [(49., 49.), (98., 98.)]
+    assert service_distance(chain[-1], (150, 150), square=True) <= 25

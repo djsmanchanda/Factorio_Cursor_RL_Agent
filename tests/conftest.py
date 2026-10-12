@@ -49,7 +49,7 @@ _DETERMINISTIC_HINTS = (
 # highest-value safety/contracts across all domains; breadth remains in the
 # scheduled/manual full suite instead of masquerading as fast validation.
 _FAST_FILES = {
-    "test_action_catalog.py", "test_bootstrap_district.py",
+    "test_action_catalog.py", "test_bootstrap_district.py", "test_work_queue.py",
     "test_campaign_runtime.py", "test_campaign_writable_root.py", "test_laya_campaign_runner_budget.py", "test_capacity_model.py", "test_construction_stock.py",
     "test_factory_invariants.py", "test_fluid_routing.py",
     "test_fluid_systems.py", "test_infrastructure.py",

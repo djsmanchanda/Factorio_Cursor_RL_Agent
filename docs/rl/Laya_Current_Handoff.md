@@ -266,3 +266,20 @@ Two regressions fail before/pass after;274 focused passes; saved live-recipe
 replay raises circuit gate5→18; fast gate1206 passes/3 skips, only the
 unchanged four-import firewall failure. Lifecycle: new frozen Python runner
 required; no mod deployment. Sustained scale improvement remains unproven.
+
+## 2026-10-12 13:55 IST — user-confirmed queue executor implementation
+
+The user confirmed Laya goal/order management with continuous production and
+construction execution, causal precursor priority, automatic justified mall
+capacity, safe funded preemption, owned delivery credits and optional spares.
+The isolated `t3/laya-deepseek-haiku-6h` worktree implements that contract; see
+[runner queue contract](Laya_Clean_Runner.md#ops-queue-contract-october-12-2026).
+207 focused checks pass; fast gate1224 passes/3 skips retains only the unchanged
+four-import firewall baseline. No merge, push, adoption or production authority.
+
+The preceding private run `persistent-laya-s50616-1791788415`, frozen3b5e011,
+ended after2483wall seconds/160 decisions on measured useful-state stall. Final
+proxies C0–C3; final shared accepted C0/C2; no plastic/advanced circuits/research
+completion. The final window repeatedly retried inserter cells against provider
+chest holds. Archived evidence remains separate from the upcoming queue run.
+New lifecycle: frozen private fresh episode on34992/27992, observed personally.

@@ -875,6 +875,10 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     from training.laya_ops import DeterministicSession
     goal = goal or settings.goal_technology
     session = session or DeterministicSession(adapter.root, emit=lambda line: emit(f"  TOOL {line}"))
+    enable_queue = getattr(session, "enable_queue", None)
+    queue_enabled = callable(enable_queue)
+    if queue_enabled:
+        enable_queue(world_id=session.episode_id)
     records = journal.parent / "decision-states.jsonl"
     reached: list[str] = []
     results: list[dict] = []
@@ -946,7 +950,12 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             )
         prepare = getattr(session, "prepare_decision", None)
         if callable(prepare):
-            prepare()
+            if queue_enabled:
+                from orchestrator.execution_slice import execution_slice
+                with execution_slice():
+                    prepare()
+            else:
+                prepare()
         facts = adapter.query()
         samples.append((facts["tick"], dict(facts["production"]), dict(facts["consumption"])))
         measurement = rolling_measurement(samples, settings.rate_window_ticks) or measurement
@@ -1016,6 +1025,9 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                              pending_precursors=tuple({part for parts in
                                                  ((economics or {}).get("precursors") or {}).values() for part in parts})),
                               results, economics, stock=stock if economics is not None else None)
+        if queue_enabled:
+            session.queue.reconcile(session._queue_snapshot(facts, economics or {}))
+            menu = session.queue_menu(menu)
         reserved: Counter = Counter()
         for project in ((economics or {}).get("projects") or {}).values():
             reserved.update(project["reserved"])
@@ -1036,6 +1048,9 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                                         "reserved_stock": {"network": dict(reserved)},
                                                         "bootstrap_districts": districts}},
                  "guidelines": rules}
+        if queue_enabled:
+            state["work_queue"] = [{k: j[k] for k in ("job_id", "operation", "priority", "state", "reason")}
+                                   for j in session.queue.describe() if j["state"] != "complete"]
         choice = policy.choose(state, menu)
         chosen = next(o for o in menu["options"] if o["option_id"] == choice["option_id"])
         emit(f"DECISION {index} phase={phase['phase_id']} tick={facts['tick']} need={chosen['need_id']} "
@@ -1049,20 +1064,41 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         if chosen["family"] == "retire_starter":
             check_acceptance(f"before retirement {index}")
         tool_start_tick = _live_tick(adapter, facts["tick"])
-        if chosen["family"] == "wait":
-            adapter.advance(chosen["wait_ticks"])
-            result = {"ok": True, "operation": "wait", "params": {"ticks": chosen["wait_ticks"]}}
-        else:
+        queue_receipts = []
+        if queue_enabled:
             try:
-                result = session.run(chosen["family"], **chosen["params"])
-            except Exception as error:  # A tooling bug is recorded and the run continues; three in a row stop it.
+                if chosen["family"] != "wait":
+                    session.enqueue_choice(chosen, facts["tick"])
+                queue_receipts = session.execute_queue(facts, economics or {}, reached)
+                for queued in queue_receipts:
+                    queued["tick"] = facts["tick"]
+                    _append(journal, {"run_id": run_id, "event": "executor", **queued})
+                result = {"ok": True, "operation": "queue", "params": chosen.get("params", {}),
+                          "code": "queue_advanced", "progress": any(r.get("progress") for r in queue_receipts)}
+                # Preserve actual operation outcomes for phase legality/history.
+                results.extend(queue_receipts)
+                adapter.advance(120)
+            except Exception as error:
                 error_path = journal.parent / f"tool-error-{index:04d}-{uuid.uuid4().hex[:8]}.log"
-                error_path.write_text(f"run_id={run_id} operation={chosen['family']} params={chosen['params']}\n"
-                                      + traceback.format_exc())
-                result = {"ok": False, "operation": chosen["family"], "params": chosen["params"],
-                          "code": "tool_error", "message": f"{type(error).__name__}: {error}"[:400],
-                          "traceback_file": str(error_path)}
+                error_path.write_text(traceback.format_exc())
+                result = {"ok": False, "operation": "queue", "params": {}, "code": "tool_error",
+                          "message": f"{type(error).__name__}: {error}"[:400], "traceback_file": str(error_path)}
                 summary["failures"] += 1
+        else:
+            if chosen["family"] == "wait":
+                adapter.advance(chosen["wait_ticks"])
+                result = {"ok": True, "operation": "wait", "params": {"ticks": chosen["wait_ticks"]}}
+            else:
+                try:
+                    result = session.run(chosen["family"], **chosen["params"])
+                except Exception as error:  # A tooling bug is recorded and the run continues; three in a row stop it.
+                    error_path = journal.parent / f"tool-error-{index:04d}-{uuid.uuid4().hex[:8]}.log"
+                    error_path.write_text(f"run_id={run_id} operation={chosen['family']} params={chosen['params']}\n"
+                                          + traceback.format_exc())
+                    result = {"ok": False, "operation": chosen["family"], "params": chosen["params"],
+                              "code": "tool_error", "message": f"{type(error).__name__}: {error}"[:400],
+                              "traceback_file": str(error_path)}
+                    summary["failures"] += 1
         result["tick"] = facts["tick"]
         if result.get("code") == "material_shortage":  # Preserve known snapshots for retry comparison.
             required = (result.get("details") or {}).get("required") or {}
@@ -1091,6 +1127,9 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                     "menu": {o["option_id"]: o["summary"] for o in menu["options"]},
                                     "decisions": index + 1, "failures": summary["failures"],
                                     "authority": policy.authority, "speed": speed_status(adapter)}
+        if queue_enabled:
+            status_payload["work_queue"] = session.queue.describe()
+            summary["work_queue"] = session.queue.describe()
         summary["decisions"] = index + 1
         if chosen["family"] == "retire_starter":
             check_acceptance(f"after retirement {index}")

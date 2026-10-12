@@ -6,7 +6,9 @@
 
 The target controller is the fine-tuned Laya autonomous director defined in
 `docs/rl/Laya_director_final_plan.md`.  Laya owns strategic policy: goal order,
-operation choice, site/scale alternatives, waiting, interruption, and recovery.
+goal order and site/scale alternatives. The continuously serviced work queue
+owns admitted production and construction, prerequisite supply, funded capacity
+growth, safe interruption, completion accounting and mechanical retries.
 The existing deterministic workflow remains the usable incumbent, including its
 Operations Console, until Laya proves better under matched starting conditions.
 Evaluation freezes a versioned incumbent snapshot; it does not retire the
@@ -87,3 +89,27 @@ The coexistence contract and current implementation sequence are in
 `docs/rl/Laya_Implementation_Plan.md`. Matched comparisons must include starting
 save/state, inventory, research, budgets, objectives and runtime versions; an
 earlier easier bootstrap is not valid replacement evidence.
+
+## Continuous ops executor (October 12, 2026)
+
+The user confirmed goal/order management by Laya and continuous execution of
+production and construction. Ops choices enqueue a goal or promote an existing
+goal with its prerequisites. The executor advances up to four independent ready
+jobs per pass and yields construction polling to other jobs. Commands remain
+serialized; production and construction bots work concurrently in the world.
+The independent deterministic runtime retains its existing decision layer.
+
+`orchestrator/work_queue.py` persists scoped jobs, dependencies, priorities,
+credits, physical claims, blockers and checkpoints. It reuses priority aging
+from `priority_list.py` without inheriting its fixed recipe ratings. The adapter
+in `training/laya_ops.py` uses the shared material ledger, loan counters, capacity
+allocator, geometry and hard validators. It does not invoke the deterministic
+mission cascade. The choosing wrappers still contain migration debt.
+
+Only current executable dependencies receive forecast chest protection; committed
+material reservations remain authoritative. A blocked job cannot monopolize
+ready peers. Distinct committed producer deficits justify a capacity job, which
+must pass the same funded bill, slot-cap and placement checks as any other cell.
+A funded urgent batch may pause a lower-priority batch at a measured craft
+boundary; an in-flight craft postpones preemption. Scope, credits and ownership
+survive restart. Finite job targets are separate from standing stock limits.

@@ -18,6 +18,8 @@ become observations instead of crashing the run.  The world must be live
 
 from __future__ import annotations
 
+from planners.recipe_data import LINE_RECIPES
+
 import json
 import math
 from collections.abc import Callable, Mapping
@@ -42,7 +44,7 @@ PROFILE = "reduced-v1"  # no seed stock: every construction item is produced in 
 # What each operation promises when it returns normally (training/laya_ops_runner reads ``code``):
 # produce/mall_slot/steel promise a producing output; ensure_produced returns None after building only ONE
 # missing stage, which is progress but not the requested postcondition.
-PRODUCING_OPERATIONS = {"produce", "mall_slot", "steel"}
+PRODUCING_OPERATIONS = {"produce", "mall_slot", "mall_capacity", "steel"}
 SUBMITTING_OPERATIONS = {"starter", "foundation", "extend"}  # their layout is submitted (bots build it)
 # Outcomes that mean "the tooling is running a finite bootstrap-loan batch":
 # the receipt must carry its own progress facts so a stopper can tell a newly
@@ -144,12 +146,214 @@ class DeterministicSession:
         # process only; each entry is one borrowed cell's last observed digest.
         self._loan_batch_seen: dict[tuple, tuple] = {}
 
+    def enable_queue(self, *, world_id: str):
+        from orchestrator.work_queue import WorkQueue
+        tick = int(self.client.command("/sc rcon.print(game.tick)").strip())
+        self.queue = WorkQueue(self.script_output.parent / "logs" / "laya-work-queue.json",
+                               world_id=world_id, tick=tick)
+        self._queue_dependencies = ()
+
+    def queue_menu(self, menu):
+        """Expose enqueue/reorder authority using the same feasible-operation menu."""
+        from orchestrator.work_queue import WorkQueue
+        options = []
+        for option in menu["options"]:
+            if option["family"] == "wait":
+                options.append({**option, "wait_ticks": min(option["wait_ticks"], 120)})
+                continue
+            job = self.queue.jobs.get(WorkQueue.identity(option["family"], option["params"]))
+            if job is not None and job.state != "complete":
+                options.append({**option, "option_id": "queue.promote." + job.job_id,
+                                "family": "queue_promote", "params": {"job_id": job.job_id},
+                                "summary": "prioritize " + option["summary"]})
+            elif (job is None or option["family"] == "extend" or
+                  int(option["params"].get("stock_target", 0)) > job.target):
+                options.append({**option, "summary": "queue " + option["summary"]})
+        # Owned continuations remain reorderable even after phase/menu changes.
+        seen = {o["params"].get("job_id") for o in options if o["family"] == "queue_promote"}
+        for job in self.queue.jobs.values():
+            if job.state != "complete" and not job.parents and job.job_id not in seen:
+                options.append({"option_id": "queue.promote." + job.job_id, "family": "queue_promote",
+                                "need_id": "queue:" + job.job_id, "product": job.item,
+                                "summary": f"prioritize {job.operation} {job.item or ''}",
+                                "params": {"job_id": job.job_id},
+                                "features": {"goal_need": True, "waiting": job.state == "blocked",
+                                             "unchanged_failure": job.blocked_signature is not None}})
+        return {**menu, "options": options}
+
+    def enqueue_choice(self, chosen, tick):
+        if chosen["family"] == "queue_promote":
+            self.queue.promote(chosen["params"]["job_id"], tick=tick)
+            return
+        params, operation = dict(chosen["params"]), chosen["family"]
+        # Extending an already completed module is a new authorized transaction.
+        identity = self.queue.identity(operation, params)
+        previous = self.queue.jobs.get(identity)
+        if previous is not None and previous.state == "complete" and operation == "extend":
+            previous.state, previous.retry_tick = "ready", tick
+        priority = 100 if chosen.get("features", {}).get("goal_need") else 50
+        if operation == "produce" and params.get("item") == "fast-inserter":
+            priority = max(priority, 80)
+        self.queue.enqueue(operation, params, priority=priority, tick=tick)
+
+    def _queue_snapshot(self, facts, economics):
+        stock = economics.get("material_stock")
+        owned = {}
+        loans = economics.get("loans") or []
+        for job in self.queue.jobs.values():
+            proof = {"reserved": {}}
+            current_stock = int((stock or {}).get(job.item, 0))
+            # A single finite item job serves its parents' aggregate bill. Loan
+            # craft counters are scoped to its own machine and step baseline.
+            lane_credits = job.checkpoint.setdefault("lane_credits", {})
+            for loan in loans:
+                if loan.get("target_item") != job.item or loan.get("step_recipe") != job.item:
+                    continue
+                if loan.get("crafts_done") is None:
+                    continue
+                lane = json.dumps([loan.get("machine_position"), loan.get("step_baseline_finished")])
+                amount = float(LINE_RECIPES.get(job.item, {}).get("product_amount", 1))
+                lane_credits[lane] = max(lane_credits.get(lane, 0),
+                                        int(loan["crafts_done"] * amount)-job.checkpoint.get("lane_floors", {}).get(lane, 0))
+            produced = sum(lane_credits.values())
+            # Credit only the dispersed portion, never count the same output
+            # again as both crafted and still held stock.
+            proof["delivered"] = max(job.delivered, produced-current_stock)
+            proof["stock"] = current_stock
+            if job.operation == "retire_starter":
+                proof["complete"] = (economics.get("bootstrap_districts", {}).get(job.item, {})
+                                      .get("lifecycle_state") == "released")
+            owner = (job.checkpoint.get("receipt", {}).get("details") or {}).get("stage")
+            if owner in economics.get("projects", {}):
+                proof["reserved"] = economics["projects"][owner]["reserved"]
+            owned[job.job_id] = proof
+        return {"tick": facts["tick"], "stock": stock, "owned": owned,
+                "claims": {item: [(owner, project["reserved"].get(item, 0))
+                                  for owner, project in economics.get("projects", {}).items()
+                                  if project["reserved"].get(item, 0) > 0]
+                           for item in {i for p in economics.get("projects", {}).values() for i in p["reserved"]}},
+                "dependency_budget": economics.get("dependency_budget", {}),
+                "layout": [len(facts.get("machines", [])), len(facts.get("poles", []))]}
+
+    def _queue_can_produce(self, item):
+        from training.laya_mission import product_phase_ready
+        return (item in LINE_RECIPES and item not in {"iron-plate", "copper-plate", "stone-brick"}
+                and product_phase_ready(item, getattr(self, "reached_phases", ())))
+
+    def _queue_preempt(self, lower, urgent):
+        """Atomically hold an idle craft boundary, retain its credits and claims."""
+        if urgent.operation != "produce" or not self._queue_can_produce(urgent.item):
+            return False
+        stock = live_base.transferable_items(self.client, SURFACE, FORCE)
+        ledger = ab._MATERIAL_RESERVATION_LEDGER
+        free = ledger.allocatable_stock(stock)
+        spec = LINE_RECIPES[urgent.item]
+        crafts = max(1, math.ceil((urgent.target-urgent.delivered-free.get(urgent.item, 0)) /
+                                 float(spec.get("product_amount", 1))))
+        if any(free.get(i, 0) < math.ceil(n*crafts) for i,n in
+               zip(spec["ingredients"], spec["amounts"], strict=True)):
+            return False
+        loan = next((l for l in mall_bootstrap.active_bootstrap_loans(self.client, SURFACE, FORCE)
+                     if l.target_item == lower.item), None)
+        if loan is None:
+            return False
+        # One RCON transaction checks recipe, force and craft boundary before
+        # disabling. No reset or recipe change is allowed during a craft.
+        position = loan.machine_position
+        lua = ("local s=game.surfaces[" + json.dumps(SURFACE) + "];"
+               "local e=s.find_entities_filtered{position={" + str(position[0])+","+str(position[1]) +
+               "},radius=0.1,type='assembling-machine',force="+json.dumps(FORCE)+",limit=1}[1];"
+               "if e and e.get_recipe() and e.get_recipe().name=="+json.dumps(loan.step_recipe or loan.current_recipe)+
+               " and e.crafting_progress==0 then e.active=false;rcon.print('held') else rcon.print('boundary_wait') end")
+        lower.checkpoint["hold_position"] = list(position)
+        self.queue.save()
+        if self.client.command("/sc " + lua).strip() != "held":
+            lower.checkpoint.pop("hold_position", None)
+            lower.checkpoint["preemption_wait"] = {"for": urgent.job_id, "reason": "craft in progress"}
+            self.queue.save()
+            return False
+        lower.checkpoint.pop("preemption_wait", None)
+        claims = ledger.projects.get("loan_inputs_" + lower.item)
+        lower.state = "paused"
+        self.queue.save()
+        ab._restore_bootstrap_loan(self.client, self.bridge, SURFACE, FORCE, loan, self.emit,
+                                  reference_point=self.reference_point, reason="higher-priority funded queue job")
+        if claims is not None:
+            ledger.declare(claims.project_id, claims.required, stock, target_item=claims.target_item,
+                           priority=claims.priority, hold_until_producing=True)
+        self._queue_release_hold(lower)
+        return True
+
+    def _queue_release_hold(self, job):
+        position = job.checkpoint.get("hold_position")
+        if position is None:
+            return
+        lua = ("local e=game.surfaces["+json.dumps(SURFACE)+"].find_entities_filtered{position={"+
+               str(position[0])+","+str(position[1])+"},radius=0.1,type='assembling-machine',force="+
+               json.dumps(FORCE)+",limit=1}[1];if e then e.active=true end")
+        self.client.command("/sc " + lua)
+        job.checkpoint.pop("hold_position", None)
+        self.queue.save()
+
+    def execute_queue(self, facts, economics, reached):
+        from orchestrator.execution_slice import execution_slice
+        self.reached_phases = tuple(reached)
+        # Recovery from an interrupted atomic hold is local to its owned lane.
+        for job in self.queue.jobs.values():
+            if "hold_position" in job.checkpoint:
+                self._queue_release_hold(job)
+        active = [j for j in self.queue.jobs.values() if j.state != "complete"]
+        self._queue_dependencies = tuple({j.item for j in active if j.item
+                                          and all(self.queue.jobs[d].state == "complete" for d in j.dependencies)})
+        ab._BLOCKING_MALL_ITEMS.update(j.item for j in active if j.parents and j.item)
+        ledger = ab._MATERIAL_RESERVATION_LEDGER
+        ab._refresh_logistic_chest_budget(self.client, SURFACE, FORCE, ledger, self.emit,
+                                         dependency_items=self._queue_dependencies)
+        stock = economics.get("material_stock")
+        if stock is not None:
+            ledger.allocatable_stock(stock)  # rebalance after forecast holds change
+        economics = {**economics, "dependency_budget": dict(ledger.dependency_budget),
+                     "projects": {p.project_id: {"state": p.state, "reserved": dict(p.reserved)}
+                                  for p in ledger.projects.values() if ledger._active(p)}}
+        snapshot = self._queue_snapshot(facts, economics)
+        # Distinct committed item deficits, not surplus stock, justify another
+        # lane. Exact kit/material/geometry admission stays in shared tooling.
+        waiting = [j for j in active if j.operation == "produce" and j.parents
+                   and not j.dependencies and int((stock or {}).get(j.item, 0))+j.delivered < j.target]
+        if len({j.item for j in waiting}) >= 2 and (economics.get("free_slots") or 0) > 0:
+            demanded = sorted(waiting, key=lambda j: (-j.priority, j.sequence))[0]
+            existing = live_base.find_line(self.client, SURFACE, FORCE, demanded.item,
+                                            LINE_RECIPES[demanded.item]["machine"])
+            self.queue.enqueue("mall_capacity", {"item": demanded.item,
+                                                 "minimum_machines": 1+(existing.machine_count if existing else 0)},
+                               priority=demanded.priority+1, tick=facts["tick"], kind="capacity")
+        def execute(job, params):
+            with execution_slice():
+                result = self.run(job.operation, **params)
+            if result.get("loan_batch") is not None:
+                self._queue_snapshot(facts, {"material_stock": stock, "loans": [result["loan_batch"]]})
+            self.emit(f"QUEUE {job.job_id} priority={job.priority}: {result.get('code')}")
+            return result
+        with execution_slice():
+            receipts = self.queue.pulse(snapshot, execute, can_produce=self._queue_can_produce,
+                                        preempt=self._queue_preempt)
+        return receipts
+
     def set_rate_targets(self, targets: Mapping[str, float]) -> None:
         """Declare the phase's measured products to shared stock maintenance."""
         self.rate_targets = {item for item, rate in targets.items() if rate > 0}
 
     def prepare_decision(self):
         """Use the deterministic queue's current survey and completed-loan handoff."""
+        if hasattr(self, "queue"):
+            loans = []
+            for loan in mall_bootstrap.active_bootstrap_loans(self.client, SURFACE, FORCE):
+                facts = self._loan_batch_facts(loan)
+                loans.append(facts)
+            tick = int(self.client.command("/sc rcon.print(game.tick)").strip())
+            self._queue_snapshot({"tick": tick}, {"material_stock": live_base.transferable_items(
+                self.client, SURFACE, FORCE), "loans": loans})
+            self.queue.save()
         ab._survey_pass(self.client, SURFACE, FORCE, self.mall_targets, self.priorities)
         ab._release_completed_construction_loans(self.client, self.bridge, SURFACE, FORCE,
                                                  self.reference_point, self.emit)
@@ -259,11 +463,14 @@ class DeterministicSession:
                                                          stock_target=1, minimum_machines=1, allow_promotion=False),
             # Fence the steel starter's poles in the material ledger before other work spends them
             # (poles need steel: without the fence the foundation/steel cycle cannot start).
+            "mall_capacity": lambda item, minimum_machines=1: ab.ensure_produced(
+                c, b, SURFACE, FORCE, item, ref, emit, upgrade_bootstrap=False,
+                minimum_machines=minimum_machines, allow_promotion=False, standing_mall=True),
             "reserve_steel_seed": lambda: ab._reserve_steel_starter_power_seed(c, SURFACE, FORCE, self.mall_targets, emit),
             # The compact steel seed beside the iron line (gated by the tooling on the iron foundation).
             "steel": lambda stock_target=10: ab.ensure_produced(c, b, SURFACE, FORCE, "steel-plate", ref, emit,
                                                                 stock_target=max(1, int(stock_target))),
-            # Finish a submitted refinery and retire its plate's starter once the refinery delivers.
+            # Finish a submitted refinery and retire its plate's starter once the refinery produces.
             "retire_starter": self._retire_starter,
             # Roboport chain toward a position (construction or logistic reach).
             "coverage": lambda x, y, purpose="construction": stage_services.extend_roboport_coverage(
@@ -295,7 +502,7 @@ class DeterministicSession:
         return self.research_status(technology)
 
     def _retire_starter(self, recipe: str) -> dict:
-        """The tooling retires the starter only after the refinery's measured output and chest evidence."""
+        """The tooling retires the starter after the refinery's owned measured output."""
         state = ab._bootstrap_state(recipe)
         if state is None or state.replacement_origin is None:
             return {"lifecycle": getattr(state, "lifecycle_state", None), "submitted": False}
@@ -315,11 +522,14 @@ class DeterministicSession:
         projects = getattr(ab._MATERIAL_RESERVATION_LEDGER, "projects", {}) or {}
         before = funded_plan_signature(projects)
         try:
-            ab._refresh_logistic_chest_budget(self.client, SURFACE, FORCE, ab._MATERIAL_RESERVATION_LEDGER, self.emit)
+            budget_args = ({"dependency_items": self._queue_dependencies}
+                           if hasattr(self, "_queue_dependencies") else {})
+            ab._refresh_logistic_chest_budget(self.client, SURFACE, FORCE, ab._MATERIAL_RESERVATION_LEDGER,
+                                            self.emit, **budget_args)
             ab._refresh_owned_standing_gates(self.client, self.bridge, SURFACE, FORCE, self.emit,
                                             rate_targets=getattr(self, "rate_targets", ()),
                                             requested=getattr(self, "mall_targets", {}))
-            # Starter teardown follows delivered replacement output on every pass, not only when chosen.
+            # Starter teardown follows owned replacement output on every pass, not only when chosen.
             ab._advance_bootstrap_starter_retirements(self.client, self.bridge, SURFACE, FORCE, self.emit)
             result = self._operations()[operation](**params)
         except WorkStateSignal as signal:

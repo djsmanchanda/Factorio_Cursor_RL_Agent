@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import copy
+import json
+from contextlib import contextmanager
 import heapq
 import math
 import time
@@ -12,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from core.science_recipe_graph import validate_current_builder_target
+from orchestrator.execution_slice import cooperative
 from orchestrator.controller_budget import consume_plan_submission, consume_wait
 from orchestrator import extraction_state, live_base, resource_patches
 from orchestrator.game_bridge import GameBridge, load_json
@@ -75,7 +78,7 @@ _INFRASTRUCTURE_DIAGNOSIS_SECONDS = 10.0
 # Live-verified this session: roboport construction radius 55, link (chain)
 # radius conservatively 46 (hard game limit ~50).
 _ROBOPORT_CONSTRUCTION_RADIUS = 55.0
-_ROBOPORT_LINK_DISTANCE = 46.0
+_ROBOPORT_LINK_DISTANCE = 49.0
 # Live-verified on 2.0.77 (prototypes.entity['roboport'].logistic_radius): a
 # roboport serves LOGISTIC chests only within 25 tiles -- under half its
 # construction reach. Coverage checked against construction radius alone
@@ -83,16 +86,10 @@ _ROBOPORT_LINK_DISTANCE = 46.0
 # passive provider supplies nothing, a requester never fills, and the only
 # symptom is a downstream stage stuck at item_ingredient_shortage.
 _ROBOPORT_LOGISTIC_RADIUS = 25.0
-# (radius, service area is a square) per coverage purpose. The logistic supply
-# area is genuinely square -- live-probed with
-# `roboport.logistic_cell.is_in_logistic_range`: for the roboport at (3,-1),
-# (28,-1) is in range and (28.5,-1) is not, while the far corner (27.9,23.9)
-# is still in. So Chebyshev distance is the exact test. Construction coverage
-# keeps the Euclidean measure it was live-verified with; Euclidean >=
-# Chebyshev, so it can only ever add a roboport that was not strictly needed,
-# never skip one that was.
+# Both engine service areas are square (2.1.21 live corner probes).
+# A 49-tile Chebyshev hop leaves one tile of overlap inside the 50-tile link.
 _ROBOPORT_SERVICE_AREAS = {
-    "construction": (_ROBOPORT_CONSTRUCTION_RADIUS, False),
+    "construction": (_ROBOPORT_CONSTRUCTION_RADIUS, True),
     "logistic": (_ROBOPORT_LOGISTIC_RADIUS, True),
 }
 _POWER_BRIDGE_SETTLE_SECONDS = 3.0
@@ -348,7 +345,7 @@ def _await_bot_built_infrastructure(
                     + "; returning the bill to the mall"
                 )
                 raise MaterialShortage(owner, shortages, available)
-        if now >= deadline:
+        if now >= deadline or cooperative():
             raise StuckError(
                 "bot-built infrastructure did not finish inside the construction "
                 "window: " + ", ".join(
@@ -541,6 +538,39 @@ def construction_supply_chain_is_scheduled(
         return False
 
 
+@contextmanager
+def _hold_recipe_changes(client, surface, force, plan):
+    """Atomic boundary check: all changes hold, or no machine is modified."""
+    changes = [a for p in plan.get("phases", []) for a in p.get("actions", [])
+               if a.get("action_type") == "configure_entity" and a.get("recipe")
+               and str(a.get("entity", "")).startswith("assembling-machine")]
+    held = []
+    if cooperative() and changes and callable(getattr(client, "command", None)):
+        records = [{"x": a["position"]["x"], "y": a["position"]["y"], "recipe": a["recipe"]} for a in changes]
+        lua = ("local s=game.surfaces["+json.dumps(surface)+"];local todo={};"
+               "for _,a in ipairs(helpers.json_to_table("+json.dumps(json.dumps(records))+
+               ")) do local e=s.find_entities_filtered{position={a.x,a.y},radius=0.1,type='assembling-machine',force="+
+               json.dumps(force)+",limit=1}[1];if e then local r=e.get_recipe();"
+               "if not r or r.name~=a.recipe then if e.crafting_progress~=0 then rcon.print('BOUNDARY_WAIT');return end;"
+               "todo[#todo+1]={e=e,x=a.x,y=a.y,active=e.active} end end end;local held={};"
+               "for _,v in ipairs(todo) do v.e.active=false;held[#held+1]={x=v.x,y=v.y,active=v.active} end;"
+               "rcon.print(helpers.table_to_json(held))")
+        reply = client.command("/sc " + lua).strip()
+        if reply == "BOUNDARY_WAIT":
+            raise StuckError("recipe handoff awaits a completed craft", code="craft_boundary_wait",
+                             classification="intended_difficulty", state="producing")
+        held = json.loads(reply)
+    try:
+        yield
+    finally:
+        if held:
+            lua = ("local s=game.surfaces["+json.dumps(surface)+"];for _,a in ipairs(helpers.json_to_table("+
+                   json.dumps(json.dumps(held))+")) do local e=s.find_entities_filtered{position={a.x,a.y},"
+                   "radius=0.1,type='assembling-machine',force="+json.dumps(force)+
+                   ",limit=1}[1];if e then e.active=a.active end end")
+            client.command("/sc " + lua)
+
+
 def _submit(
     client: RconClient, bridge: GameBridge, surface: str, plan: dict, name: str,
     emit: Callable[[str], None], *, max_retries: int = 2,
@@ -664,7 +694,8 @@ def _submit(
     )
     for attempt in range(max_retries + 1):
         consume_plan_submission(f"{name}#retry{attempt}")
-        report = load_json(bridge.build_layout(authorization, plan))
+        with _hold_recipe_changes(client, surface, plan.get("force", "player"), plan):
+            report = load_json(bridge.build_layout(authorization, plan))
         if expected_placements and report.get("attempted_placements") == 0:
             raise StuckError(
                 f"{name}: execution attempted zero placements; refusing silent churn"
@@ -767,7 +798,7 @@ def _wait_for_ghosts(client: RconClient, surface: str, force: str, area: tuple[P
     consume_wait("ghost_construction")
     started = time.monotonic()
     last_change = time.monotonic()
-    while remaining and time.monotonic() < deadline:
+    while remaining and time.monotonic() < deadline and not cooperative():
         time.sleep(poll_seconds)
         current = int(client.command("/sc " + lua).strip())
         if current != remaining:
@@ -845,7 +876,7 @@ def _diagnose_machines(
             if statuses.get(tuple(position)) not in _HEALTHY_STATUSES
             and tuple(position) not in progressed
         ]
-        if producing or not stuck or time.monotonic() >= deadline:
+        if producing or not stuck or time.monotonic() >= deadline or cooperative():
             break
         time.sleep(poll_seconds)
 
@@ -861,6 +892,10 @@ def _diagnose_machines(
                  "worth repairing, not worth stopping for")
         return []
 
+    if cooperative() and stuck:
+        raise StuckError("stage awaiting measured production", code="queued_production_wait",
+                         classification="intended_difficulty", state="supply_wait",
+                         details={"machines": [[list(p), status] for p, status in stuck]})
     for position, status in stuck:
         if status in _SUPPLY_WAIT_STATUSES:
             emit(f"  STUCK: machine at {position} is {status} and the line produced nothing "
@@ -882,7 +917,7 @@ def _await_built_status(
     deadline = time.monotonic() + timeout_seconds
     while True:
         status = live_base.entity_status_name(client, surface, position)
-        if status is not None or time.monotonic() >= deadline:
+        if status is not None or time.monotonic() >= deadline or cooperative():
             return status
         consume_wait(f"ghost_build@{position}")
         time.sleep(poll_seconds)
@@ -1537,18 +1572,17 @@ def roboport_chain(source: Point, target: Point, radius: float) -> list[Point]:
     instead put each new port a few tiles from its predecessor whenever the
     gap barely exceeded the radius, stacking full supply areas on top of each
     other for no reach (observed live: ports at (45,-1), (47,-5), (49,-9)).
-    Distances along the chain are Euclidean, which is >= the Chebyshev
-    distance the square service area actually uses -- so remaining Euclidean
-    distance <= radius guarantees square coverage too. A port never stands ON
+    Distances along the chain use Chebyshev distance, matching both square
+    service areas and the engine link test. A port never stands ON
     the target: a logistic chest IS the target.
     """
-    total = math.dist(source, target)
+    total = service_distance(source, target, square=True)
     if total == 0 or total <= radius:
         return []
     # How far along the route the last port must sit for `target` to be inside
     # its service area.
     reach = total - radius + _COVERAGE_MARGIN
-    step = _ROBOPORT_LINK_DISTANCE - 4  # slack so a rounded tile never lands on the link cliff edge
+    step = _ROBOPORT_LINK_DISTANCE
     cap = total - _COVERAGE_MARGIN  # never stand on the chest itself
     hops = max(1, math.ceil(reach / step))
     unit = ((target[0] - source[0]) / total, (target[1] - source[1]) / total)
@@ -1673,7 +1707,7 @@ def extend_roboport_coverage(
             for position in live_base.roboport_ghost_positions(
                 client, surface, force,
             )
-            if math.dist(position, nearest) <= _ROBOPORT_LINK_DISTANCE
+            if service_distance(position, nearest, square=True) <= _ROBOPORT_LINK_DISTANCE
             and math.dist(position, target_position) < math.dist(
                 nearest, target_position,
             )
@@ -1813,7 +1847,7 @@ def extend_roboport_coverage(
         verified, target_position, square=square,
     ) <= radius:
         return True
-    time.sleep(_COVERAGE_VERIFY_SETTLE_SECONDS)
+    time.sleep(0 if cooperative() else _COVERAGE_VERIFY_SETTLE_SECONDS)
     verified = live_base.nearest_roboport(client, surface, force, target_position)
     if verified is not None and service_distance(
         verified, target_position, square=square,

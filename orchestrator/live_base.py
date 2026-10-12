@@ -1948,7 +1948,7 @@ def nearest_roboport(client: RconClient, surface: str, force: str, near: Point) 
         "local nx,ny=" + str(near[0]) + "," + str(near[1]) + ";"
         "local best=nil;local bd=1e18;"
         "for _,e in pairs(s.find_entities_filtered{name='roboport',force=f}) do "
-        "local d=(e.position.x-nx)^2+(e.position.y-ny)^2;if d<bd then bd=d;best=e.position end end;"
+        "local d=math.max(math.abs(e.position.x-nx),math.abs(e.position.y-ny));if d<bd then bd=d;best=e.position end end;"
         "if not best then rcon.print('NONE') return end;"
         "rcon.print(best.x..' '..best.y)"
     )

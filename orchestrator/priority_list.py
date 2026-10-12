@@ -28,6 +28,11 @@ _DEFAULT_RATINGS = {
 }
 
 
+def age_bonus(elapsed_ticks: int) -> int:
+    """Shared fairness mechanics; caller owns priorities and goal order."""
+    return min(_MAX_AGE_BONUS, max(0, elapsed_ticks) // _AGE_STEP_TICKS)
+
+
 @dataclass
 class PriorityItem:
     item: str
@@ -41,7 +46,7 @@ class PriorityItem:
 
     def rating(self, tick: int) -> int:
         age = max(0, tick - self.created_tick)
-        return min(100, self.base_rating + min(_MAX_AGE_BONUS, age // _AGE_STEP_TICKS))
+        return min(100, self.base_rating + age_bonus(age))
 
     def elapsed_ticks(self, tick: int) -> int:
         return max(0, tick - self.created_tick)
