@@ -195,6 +195,31 @@ def test_no_produce_for_items_whose_plate_has_no_starter_yet():
     assert "op.produce.transport-belt" in ids and "op.produce.splitter" not in ids  # splitter needs copper
 
 
+def test_mined_inputs_wait_for_the_plates_of_their_mine_line():
+    # Live 20261012T225753Z-26670439 decision 0 (cycle 1 identical): produce plastic-bar was offered before any plate had a
+    # starter. Coal and petroleum have no recipe, so the chain named no plate; the tooling's mining_coal then needed belts
+    # (iron) and its plate systems needed drills (iron and copper), which opened both plate systems ahead of their starters.
+    recipes = {"plastic-bar": {"ingredients": [{"name": "petroleum-gas", "amount": 20}, {"name": "coal", "amount": 2}]},
+               "electric-mining-drill": {"ingredients": [{"name": "electronic-circuit", "amount": 3},
+                                                         {"name": "iron-gear-wheel", "amount": 5}, {"name": "iron-plate", "amount": 10}]},
+               "transport-belt": {"ingredients": [{"name": "iron-gear-wheel", "amount": 1}, {"name": "iron-plate", "amount": 1}]},
+               "iron-gear-wheel": {"ingredients": [{"name": "iron-plate", "amount": 2}]},
+               "electronic-circuit": {"ingredients": [{"name": "iron-plate", "amount": 1}, {"name": "copper-cable", "amount": 3}]},
+               "copper-cable": {"ingredients": [{"name": "copper-plate", "amount": 1}]}}
+
+    def options(results):
+        menu = compile_options(BOARD, results, recipes=recipes, mission_targets={"plastic-bar": 30})
+        return {o["option_id"] for o in menu["options"]}
+    iron = {"ok": True, "operation": "starter", "params": {"recipe": "iron-plate"}}
+    copper = {"ok": True, "operation": "starter", "params": {"recipe": "copper-plate"}}
+    assert "op.starter.iron-plate" in options([]) and "op.produce.plastic-bar" not in options([])
+    assert "op.produce.plastic-bar" not in options([iron])  # the copper mine line still needs its starter
+    assert "op.produce.plastic-bar" in options([iron, copper])
+    from training.laya_ops_runner import plates_in
+    assert plates_in("plastic-bar", recipes) == set()  # the recipe chain alone names no plate
+    assert plates_in("plastic-bar", recipes, mined=True) == {"iron-plate", "copper-plate"}
+
+
 def test_mall_side_shortages_are_kept_per_item_and_loans_count_as_progress():
     from training.laya_ops_runner import in_progress
     results = [{"ok": False, "operation": "mall_slot", "params": {"item": "electronic-circuit"}, "code": "material_shortage",

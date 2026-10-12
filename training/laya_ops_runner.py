@@ -560,14 +560,24 @@ def history_features(results: list[dict], key: tuple, family: str) -> dict:
             "stuck": since_build(results) >= STUCK_DECISIONS}
 
 
-def plates_in(item: str, recipes: Mapping, seen: frozenset = frozenset()) -> set[str]:
-    """Plates an item's recipe chain consumes (iron gear -> iron plate; circuit -> iron and copper plate)."""
+# The tooling mines or pumps a raw resource or fluid with a line built from these (mining_coal needs belts; drills need circuits).
+MINE_LINE = ("electric-mining-drill", "transport-belt")
+
+
+def plates_in(item: str, recipes: Mapping, seen: frozenset = frozenset(), *, mined: bool = False) -> set[str]:
+    """Plates an item's recipe chain consumes (iron gear -> iron plate; circuit -> iron and copper plate).
+
+    ``mined`` also counts the plates of the mine line behind a raw resource or fluid (no recipe): a production
+    gate must see them, or the tooling opens those plates' systems ahead of their starters.
+    """
     if item in PLATES:
         return {item}
-    recipe = recipes.get(item)
-    if not recipe or item in seen:
+    if item in seen:
         return set()
-    return set().union(*(plates_in(i["name"], recipes, seen | {item}) for i in recipe.get("ingredients", [])))
+    recipe = recipes.get(item)
+    if not recipe:
+        return set().union(*(plates_in(line, recipes, seen | {item}) for line in MINE_LINE)) if mined else set()
+    return set().union(*(plates_in(i["name"], recipes, seen | {item}, mined=mined) for i in recipe.get("ingredients", [])))
 
 
 def compile_options(board: Mapping, results: list[dict], tick: int | None = None, recipes: Mapping | None = None,
@@ -713,7 +723,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     # untyped_stuck at decision 0).
     # Plates have starter/foundation/extension operations. Their cached produce
     # path reports success without adding capacity; it is not a mall recipe.
-    producible = {i: m for i, m in short.items() if i not in RAW and i not in PLATES and plates_in(i, recipes or {}) <= started
+    producible = {i: m for i, m in short.items() if i not in RAW and i not in PLATES and plates_in(i, recipes or {}, mined=True) <= started
                   and obtainable(recipes, i, stock or {})} if recipes else {i: m for i, m in short.items() if i not in RAW and i not in PLATES}
     # Generic goal produce options: every unsatisfied manufactured mission target (plastic, advanced
     # circuits, science) gets an ``ensure_produced`` option through the shared toolkit.  Unlike a
@@ -725,7 +735,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                     or (active_builds and not continuous_queue and item not in short and item not in pending_precursors)
                     or item in producible):
                 continue
-            if plates_in(item, recipes) <= started:
+            if plates_in(item, recipes, mined=True) <= started:
                 producible[item] = mission_targets.get(item, max(1, int(math.ceil(goal_rate.get(item, 1.0) * 60))))
     # A short item may also get its own standing slot, as the deterministic runner's demand-owned slots do
     # (live 2026-10-10: splitter was only ever offered as a borrowed batch, 112 offers, no standing producer).
