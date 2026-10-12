@@ -315,3 +315,27 @@ def test_session_gate_maintenance_receives_full_construction_queue(monkeypatch):
     assert len(calls) == 2
     assert all(c["requested"] == {"electronic-circuit": 18} for c in calls)
     assert all(c["rate_targets"] == {"copper-cable"} for c in calls)
+
+
+def test_maintenance_services_other_completed_loans_while_one_craft_finishes(monkeypatch):
+    from orchestrator.stage_services import StuckError
+    loans=[SimpleNamespace(target_item=i,production_target=1,target_count=1) for i in ('inserter','electric-mining-drill')]
+    monkeypatch.setattr(b,'active_bootstrap_loans',lambda *a:loans)
+    monkeypatch.setattr(b,'_transferable_or_available_stock',lambda *a:{'inserter':1,'electric-mining-drill':1})
+    monkeypatch.setattr(b,'_bootstrap_loan_minimum_fulfilled',lambda *a:True)
+    monkeypatch.setattr(b,'_bootstrap_loan_products_finished',lambda *a:1)
+    serviced=[]
+    def submit(c,bridge,s,f,loan,*a,**k):
+        serviced.append(loan.target_item)
+        if loan.target_item=='inserter':
+            raise StuckError('waiting for craft',code='craft_boundary_wait',state='producing')
+    monkeypatch.setattr(b,'_submit_bootstrap_loan',submit)
+    messages=[]
+    b._release_completed_construction_loans(object(),object(),'private','player',(0,0),messages.append)
+    assert serviced==['inserter','electric-mining-drill']
+    assert any('waiting for craft' in m for m in messages)
+    def unexpected(*a,**k):
+        raise StuckError('unexpected adapter failure',code='broken_contract')
+    monkeypatch.setattr(b,'_submit_bootstrap_loan',unexpected)
+    with pytest.raises(StuckError,match='unexpected adapter'):
+        b._release_completed_construction_loans(object(),object(),'private','player',(0,0),lambda _:None)

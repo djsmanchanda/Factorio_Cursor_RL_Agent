@@ -506,3 +506,8 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
   missing feeder items. Shared cell input sections now wait for bot construction
   and service readiness.219 focused/1235fast pass; unchanged firewall baseline.
   Lifecycle: new frozen private runner; live speed improvement still unproven.
+
+- 2026-10-12 15:54 IST: Private run now made circuits/inserters/drills but ended
+  on craft_boundary_wait in maintenance. Loan maintenance yields that exact
+  normal wait and advances peers.220 focused/1236fast pass, known firewall
+  baseline only. Lifecycle: new frozen runner on preserved private world.

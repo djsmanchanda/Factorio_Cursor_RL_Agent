@@ -369,3 +369,15 @@ quad construction now defers new input sections until physical bring-up passes.
 219 focused tests pass, including construction-yield/no-input-hoarding replay;
 fast1235 pass/3skip, only unchanged four-import firewall failure. Next lifecycle:
 new frozen private validation; no Lua deployment or manual save repair.
+
+### 2026-10-12 15:54 IST — craft-boundary wait no longer kills maintenance
+
+2dfcde0 run persistent-laya-s50616-1791800251 ended at184seconds on a completed
+loan's craft_boundary_wait escaping maintenance. Before exit it produced real
+circuits, seven long-handed inserters, a regular inserter and three drills;
+construction-input fix is observed, sustained throughput remains unproven.
+Periodic completed-loan service now yields that precise typed wait and services
+other loans; unexpected adapter failures still propagate.220 focused tests pass;
+fast1236 pass/3skip, unchanged four-import firewall failure only. Lifecycle:
+new frozen runner resumes the preserved failed private world to exercise actual
+recovery; no manual game mutation, mod deployment or production action.

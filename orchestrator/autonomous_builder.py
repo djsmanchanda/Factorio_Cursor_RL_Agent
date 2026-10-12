@@ -7195,12 +7195,11 @@ def _release_completed_construction_loans(
                 f"{deferred}; retrying after re-observation"
             )
         except StuckError as error:
-            if "configure_target_missing" not in str(error):
+            if getattr(error, "code", "") != "craft_boundary_wait" and "configure_target_missing" not in str(error):
                 raise
-            # A native upgrade or bot replacement can change the exact entity
-            # identity between the loan survey and its configuration plan.
-            # Re-read the active loan before treating the cell as lost; the
-            # periodic release pass is allowed to yield this race safely.
+            # A partial craft is a normal handoff wait here too. Its drain
+            # checkpoint survives; service other loans while it finishes.
+            # A native upgrade/replacement may also change entity identity.
             emit(
                 f"  MALL BOOTSTRAP LOAN WAIT: {loan.target_item} -- "
                 f"{error}; retrying after cell re-observation"
