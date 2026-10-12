@@ -564,3 +564,11 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
 - 2026-10-12 17:28 IST: Capacity jobs advance from their configured completed half to
   the next shared allocation; unfinished/foreign halves remain owned.
   339focused/1259fast pass,3skip/knownfirewall. Lifecycle: frozen private resume.
+
+- 2026-10-12 17:34 IST: Private live validation grew the mall from eight to 13 actors
+  across the repairs; 30 queue jobs completed and restart limits held. The
+  runner ended after 246 seconds/49 decisions/zero failures at two iron/copper
+  geometry blockers. Deterministic C0/C2 accepted. Verification: 339 focused
+  passes, 1,259 fast passes, three skips and the known firewall failure.
+  Lifecycle: runner stopped; private world/server preserved. Sustained general
+  acceleration remains unproven.

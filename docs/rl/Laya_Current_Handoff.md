@@ -554,3 +554,48 @@ the next half normally; unfinished cells and unrelated producers cannot release
 the allocation.339focused/1259fast pass,3skip/knownfirewall. Commit thennew
 private freeze validates this plus cold-start limit preservation. Pending
 geometric frontier remains iron(-8.5,50.5) andcopper(77.5,-39.5).
+
+### 2026-10-12 17:34 IST — final personally observed validation stopped at construction frontier
+
+Private run persistent-laya-s50616-1791806297 used frozen commit c1fbde2 on
+34992/27992 at speed 2. Its owner was
+laya-persistent-run-20261012T115817Z-7576291d.service; freeze record:
+data/persistent-factorio/runs/20261012T115817Z-7576291d/freeze.json.
+
+Personal observations verified 13 physical mall assemblers, two long-handed
+producers, and 30 completed queue jobs. Only the iron and copper foundation
+jobs remain blocked. Standing limits survived restart: circuits 134, gears 143,
+belts 389, assemblers 29, long-handed inserters 27, fast inserters 24, and cable
+92. Inserters increased from 63 to 76 (rounded-up 20%); drills from 8 to 12.
+
+Earlier validation prefixes on this preserved world measured 121 inserters,
+20 fast inserters, 162 circuits, 158 belts and six splitters in 179 game seconds;
+a later window produced 26 assemblers in 155.817 game seconds. Iron output rose
+from approximately 1.25 to 3.748 plates per game second. These are live mechanism
+results across successive fixes, not a matched cohort or proof of sustained
+general acceleration. Lab options remained absent before plastic and advanced
+circuits.
+
+The final runner ended with stop=stalled, 49 decisions, zero failures, 246 wall
+seconds and 490.8 game seconds. Its terminal deterministic acceptance was C0
+and C2; no rate proxies were reached on this cold resumption. Full raw-output
+stock prevented fresh measured-rate progression despite existing infrastructure.
+
+Growth now waits on two observed shared geometry failures:
+- Iron: direct_belt_approach_wait at (-8.5, 50.5), occupied by existing belts at
+  (-10.5, 50.5) and (-9.5, 50.5).
+- Copper: district_expansion_unbuildable in the owned ore district at
+  (77.5, -39.5).
+
+Manufacturing reserves are largely filled. Repeated construction failures,
+rather than elapsed time alone, establish the slowdown. OC confirmed the runner
+had already stopped before the stop request completed. The private Factorio
+server remains running and its world is preserved.
+
+Verification: 339 focused passes; 1,259 fast passes and three skips, with only
+the unchanged four-import firewall failure. No mod deployment, production
+mutation, merge, push or adoption occurred. T3 delegate_task/task_status remained
+unavailable; observation was personal and no substitute agents were spawned.
+
+The next continuation should diagnose both geometry failures and the cold
+rate-proxy/stock-full option frontier before another private freeze.
