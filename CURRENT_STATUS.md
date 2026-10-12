@@ -632,3 +632,5 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
 - 2026-10-13 04:07 IST: Campaign start notifications carry lifecycle acknowledgement only;
   end-only DeepSeek reviews preserved.46focused/1297fast pass,3skip/inherited
   firewall; fail-before/pass-after verified. Lifecycle:new supervisor freeze.
+
+- 2026-10-12: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: orchestrator/stage_services.py, tests/test_infrastructure.py. Prediction: Next run on seed 50616 from the same pinned save shows zero tool_error tracebacks ending at stage_services.py:1451; decision 10 (retire_starter copper-plate) places power_bridge ghosts or defers with a typed wait instead of stop=hard_failure, and the run passes 79 s wall / tick 247771 unless another failure appears.. Reason: extend_power indexed POLE_SPECS with a non-pole consumer name on a generation-less own network, raising KeyError at decision 10 and stopping the only plate-producing retire path..

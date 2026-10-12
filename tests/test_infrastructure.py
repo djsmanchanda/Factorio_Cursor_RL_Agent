@@ -258,3 +258,43 @@ def test_power_search_can_escape_a_blocked_coarse_hop_lattice():
     assert hops
     assert not {(math.floor(x), math.floor(y)) for x, y in hops} & blocked
     assert all(math.dist(a, b) <= 9 for a, b in zip([start, *hops], [*hops, end]))
+
+
+def test_power_bridge_under_a_non_pole_consumer_terminates_on_a_pole(monkeypatch) -> None:
+    """A support inserter on a dead pole network is bridged without a KeyError.
+
+    The consumer's entity name used to become the stocked-corridor terminal, so
+    POLE_SPECS["inserter"] raised during the 2026-10-12 modular refinery retire.
+    """
+    from orchestrator import autonomous_builder as builder_module
+    from orchestrator import stage_services as ss
+
+    submitted: list[dict] = []
+    client = type("Client", (), {"command": lambda _self, _command: ""})()
+    monkeypatch.setattr(ss, "_PENDING_POWER_BRIDGES", {})
+    monkeypatch.setattr(ss.live_base, "pole_network_id", lambda *_a, **_k: 9)
+    monkeypatch.setattr(
+        ss.live_base, "nearest_powered_pole",
+        lambda *_a, **_k: ((77.5, -70.5), "medium-electric-pole"),
+    )
+    monkeypatch.setattr(ss.live_base, "entity_at", lambda *_a, **_k: {"name": "inserter"})
+    monkeypatch.setattr(ss.live_base, "occupied_tiles", lambda *_a, **_k: set())
+    monkeypatch.setattr(
+        ss.live_base, "transferable_items", lambda *_a, **_k: {"big-electric-pole": 10},
+    )
+    monkeypatch.setattr(ss.live_base, "network_generation_kw", lambda *_a, **_k: 1000.0)
+    monkeypatch.setattr(ss, "_await_bot_built_infrastructure", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        ss, "_submit",
+        lambda _c, _b, _s, plan, _name, _emit, **_k: submitted.append(plan),
+    )
+    monkeypatch.setattr(
+        builder_module, "_top_up_solar_generation", lambda *_a, **_k: False,
+    )
+
+    assert ss.extend_power(
+        client, object(), "nauvis", "player", (83.5, -85.5), lambda _message: None,
+    ) is True
+    actions = submitted[0]["phases"][0]["actions"]
+    assert actions
+    assert {action["entity"] for action in actions} <= set(ss.POLE_SPECS)

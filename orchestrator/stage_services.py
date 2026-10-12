@@ -1428,10 +1428,16 @@ def extend_power(
         # Transmission uses big poles; substations belong to local machine
         # layouts, even when bootstrap stock makes them appear "free".
         trunk = "big-electric-pole"
+        # Only a pole can end the stocked corridor. Any other consumer on the
+        # dead network (an inserter or machine) hooks up as the endpoint pole.
         terminal_names = (
             ("medium-electric-pole", "big-electric-pole")
             if own_network is None
-            else (consumer["name"] if consumer else endpoint_pole,)
+            else (
+                consumer["name"]
+                if consumer is not None and consumer["name"] in POLE_SPECS
+                else endpoint_pole,
+            )
         )
         for terminal_name in terminal_names:
             if stock.get(trunk, 0) <= 0:
