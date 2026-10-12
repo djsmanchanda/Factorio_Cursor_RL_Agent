@@ -236,3 +236,44 @@ def test_vertical_provider_is_recognized_from_declared_cross_offsets(monkeypatch
     assert builder._paired_mall_provider(object(),'nauvis',[machine])==provider
     entities.pop((63.5,43.5))
     assert builder._paired_mall_provider(object(),'nauvis',[machine]) is None
+
+
+def test_capacity_job_advances_from_configured_half_but_preserves_its_unfinished_half():
+    from orchestrator.execution_slice import execution_slice
+    origin=(59,42)
+    key='mall_allocation:nauvis:player:long-handed-inserter'
+    state={key:[list(origin),'south']}
+    runtime={'mall_allocations':{'nauvis:player:59:42:south':'long-handed-inserter'}}
+    with execution_slice(checkpoint=state,runtime=runtime):
+        mall.advance_completed_mall_allocation('nauvis','player','long-handed-inserter',[(60.5,38.5)])
+        assert key in state  # Another producer does not complete this half's ghosts.
+        mall.advance_completed_mall_allocation('nauvis','player','long-handed-inserter',[(63.5,48.5)])
+        assert key not in state
+        assert runtime['mall_allocations']=={}
+
+
+def test_capacity_reservation_advances_completed_slot_before_pricing_next_kit(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    from orchestrator.material_reservations import MaterialReservationLedger
+    from orchestrator.execution_slice import execution_slice
+    ledger=MaterialReservationLedger(tmp_path,episode_id='capacity',surface='nauvis',force='player')
+    monkeypatch.setattr(builder,'_MATERIAL_RESERVATION_LEDGER',ledger)
+    monkeypatch.setattr(builder,'_independent_mall_ready',lambda *a:False)
+    monkeypatch.setattr(builder,'_quad_bootstrap_mall_enabled',lambda *a:False)
+    monkeypatch.setattr(builder,'_seed_vertical_mall_slot_ok',lambda *a:True)
+    stock={'assembling-machine-1':1,'long-handed-inserter':2,'inserter':1,'iron-gear-wheel':1,'iron-plate':1}
+    monkeypatch.setattr(builder,'compact_mall_project_bill',lambda *a,**kw:stock)
+    monkeypatch.setattr(builder.live_base,'transferable_items',lambda *a:stock)
+    monkeypatch.setattr(builder,'_material_sources_and_rates',lambda *a:({},{}))
+    key='mall_allocation:nauvis:player:long-handed-inserter'
+    state={key:[[59,42],'south']}
+    def preview(*a,**kw):
+        assert key not in state
+        return ((50,47),'south')
+    monkeypatch.setattr(builder,'preview_mall_allocation',preview)
+    plan=SimpleNamespace(existing=SimpleNamespace(machine_positions=((63.5,48.5),)),at_size=False,
+                         mall_storage_limit=35,fill_provider=False,mall_request_multiplier=None)
+    with execution_slice(checkpoint=state):
+        builder._reserve_compact_mall_project(object(),'nauvis','player','long-handed-inserter',plan,35,
+                                             lambda _:None,reference_point=REFERENCE)
+    assert ledger.projects['paired_mall_long-handed-inserter'].state=='ready'

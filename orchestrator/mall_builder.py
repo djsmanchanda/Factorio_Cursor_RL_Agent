@@ -253,12 +253,31 @@ def idle_mall_allocations(client, surface, force, reference_point, *, demand_slo
     return result
 
 
+def mall_allocation_machine_position(allocation):
+    origin, side = allocation
+    return (_vertical_slot_position(origin, side) if side in VERTICAL_SIDES
+            else _slot_position(origin, side))
+
+
+def advance_completed_mall_allocation(surface, force, recipe, configured_machine_positions):
+    """A capacity continuation prices its next half after its previous half works."""
+    allocation = saved_mall_allocation(surface, force, recipe)
+    if allocation is None or mall_allocation_machine_position(allocation) not in configured_machine_positions:
+        return
+    checkpoint().pop(f"mall_allocation:{surface}:{force}:{recipe}")
+    runtime = runtime_checkpoint()
+    if runtime is not None:
+        origin, side = allocation
+        key = f"{surface}:{force}:{origin[0]}:{origin[1]}:{side}"
+        if runtime.get("mall_allocations", {}).get(key) == recipe:
+            runtime["mall_allocations"].pop(key)
+    persist_checkpoint()
+
+
 def mall_allocation_is_committed(client, surface, force, allocation):
     if allocation is None:
         return False
-    origin, side = allocation
-    position = (_vertical_slot_position(origin, side) if side in VERTICAL_SIDES
-                else _slot_position(origin, side))
+    position = mall_allocation_machine_position(allocation)
     entity = live_base.entity_at(client, surface, position)
     return bool(entity and entity.get("force") == force
                 and entity.get("ghost_name", entity["name"]) in live_base.ASSEMBLER_TIERS)

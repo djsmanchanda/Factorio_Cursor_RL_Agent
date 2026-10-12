@@ -543,3 +543,14 @@ and restores floors before maintenance/builds. Existing historicalshrink is
 not retroactivelyreversed; future coldrestart preservescurrentestablishedcaps.
 337focused/1259fast pass,3skip/knownfirewall. Actualprivatecensus: gears143,
 circuits134, belts389, inserter63, longhand27, AM1limit29. Newfreeze needed.
+
+### 2026-10-12 17:28 IST — multi-machine capacity continuations advance slots
+
+The preserved longhandcapacity2 repeatedly returned prerequisite_advanced
+while reconstructing its already configured first half at(50,47)right. Shared
+preflight now releases only a saved half present in that recipe producer
+census, when actual size is still below requested size. It then prices/claims
+the next half normally; unfinished cells and unrelated producers cannot release
+the allocation.339focused/1259fast pass,3skip/knownfirewall. Commit thennew
+private freeze validates this plus cold-start limit preservation. Pending
+geometric frontier remains iron(-8.5,50.5) andcopper(77.5,-39.5).

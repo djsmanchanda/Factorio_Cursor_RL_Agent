@@ -7998,6 +7998,9 @@ def _reserve_compact_mall_project(
     ledger = _MATERIAL_RESERVATION_LEDGER
     if ledger is None:
         return
+    if getattr(plan, "existing", None) is not None and not getattr(plan, "at_size", True):
+        from orchestrator.mall_builder import advance_completed_mall_allocation
+        advance_completed_mall_allocation(surface, force, item, plan.existing.machine_positions)
     independent_mall = _independent_mall_ready(client, surface, force)
     quad_mall = bool(
         reference_point is not None

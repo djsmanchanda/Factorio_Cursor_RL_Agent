@@ -560,3 +560,7 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
   excluding temporary loans; cold35proposal preserves50,53becomes60.
   337focused/1259fast pass,3skip/knownfirewall; actual private census verified.
   Lifecycle: frozen private resumption; old historical shrink not reversed.
+
+- 2026-10-12 17:28 IST: Capacity jobs advance from their configured completed half to
+  the next shared allocation; unfinished/foreign halves remain owned.
+  339focused/1259fast pass,3skip/knownfirewall. Lifecycle: frozen private resume.

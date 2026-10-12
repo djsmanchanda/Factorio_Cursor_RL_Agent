@@ -444,3 +444,8 @@ Runner startup restores standing item floors from current owned assembler
 controls before maintenance or new builds. Temporary loan machines are excluded.
 A cold restart therefore preserves the live cap and applies the same minimum
 20% increase for any subsequent rise.
+
+A capacity job advances its saved allocation after that exact half appears
+in the configured producer census and more machines are required. An existing
+producer elsewhere cannot release an unfinished half; subsequent kit pricing
+uses the next claimed half instead of rebuilding the completed one.
