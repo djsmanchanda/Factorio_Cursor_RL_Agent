@@ -2588,3 +2588,28 @@ def test_a_higher_priority_fundable_bill_still_wins_scarce_stock(tmp_path: Path)
 
     assert high.state == "ready"
     assert ledger.projects["low"].state == "supply_wait"
+
+
+@pytest.mark.parametrize('submitted', [False, True])
+def test_vertical_parent_reuses_kit_and_retires_only_unsubmitted_duplicate_alias(tmp_path, monkeypatch, submitted):
+    ledger=_ledger(tmp_path)
+    kit={'assembling-machine-1':1,'long-handed-inserter':2,'electronic-circuit':1,'iron-gear-wheel':1,'iron-plate':1}
+    stock={**kit,'assembling-machine-1':3,'long-handed-inserter':7}
+    ledger.declare('paired_mall_inserter',kit,stock,target_item='inserter',priority=100)
+    alias='seed_vertical_mall_inserter_north'
+    ledger.declare(alias,{'assembling-machine-1':1,'long-handed-inserter':2},stock)
+    if submitted:ledger.mark_constructing(alias,stock)
+    monkeypatch.setattr(builder,'_MATERIAL_RESERVATION_LEDGER',ledger)
+    monkeypatch.setattr(builder,'_independent_mall_ready',lambda *a:False)
+    monkeypatch.setattr(builder,'_quad_bootstrap_mall_enabled',lambda *a:False)
+    monkeypatch.setattr(builder,'_seed_vertical_mall_slot_ok',lambda *a:True)
+    monkeypatch.setattr(builder,'preview_mall_allocation',lambda *a,**kw:((35,31),'south'))
+    monkeypatch.setattr(builder,'compact_mall_project_bill',lambda *a,**kw:kit)
+    monkeypatch.setattr(builder.live_base,'transferable_items',lambda *a:stock)
+    monkeypatch.setattr(builder,'_material_sources_and_rates',lambda *a:({},{}))
+    plan=SimpleNamespace(mall_storage_limit=1,fill_provider=False,mall_request_multiplier=None)
+    builder._reserve_compact_mall_project(object(),'nauvis','player','inserter',plan,None,lambda _:None,
+                                         reference_point=(0,0))
+    assert ledger.projects['paired_mall_inserter'].state=='ready'
+    assert ledger.projects[alias].state==('constructing' if submitted else 'completed')
+    assert ledger.required_stock('long-handed-inserter')==2

@@ -408,3 +408,9 @@ An exact ready reservation project can dispatch its owning queue job before a
 shared aggregate precursor target is complete. This avoids waiting for eight
 support inserters when a cell already owns its required two. Funding does not
 bypass pending-entity waits, geometry blockers, or shared execution validators.
+
+Mall preflight persists and claims a selected half before any ghosts exist.
+All empty halves honor peer claims. Vertical cells submit under the same
+`paired_mall_<item>` reservation as preflight. On resumption, unsubmitted
+duplicate vertical reservation aliases are retired, and conflicting saved
+claims are replanned only when no physical machine or ghost occupies the half.

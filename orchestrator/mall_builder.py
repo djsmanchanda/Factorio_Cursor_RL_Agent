@@ -437,10 +437,20 @@ def preview_mall_allocation(
     saved = saved_mall_allocation(surface, "player", recipe)
     if saved is not None:
         return saved
-    return _choose_slot(
+    allocation = _choose_slot(
         client, surface, recipe, reference_point, demand_slot=demand_slot,
         vertical_ok=vertical_ok,
     )
+    state = checkpoint()
+    if allocation is not None and state is not None:
+        origin, side = allocation
+        state[f"mall_allocation:{surface}:player:{recipe}"] = [list(origin), side]
+        runtime = runtime_checkpoint()
+        if runtime is not None:
+            runtime.setdefault("mall_allocations", {})[
+                f"{surface}:player:{origin[0]}:{origin[1]}:{side}"] = recipe
+        persist_checkpoint()
+    return allocation
 
 
 def mall_allocation_completes_pair(
@@ -1034,12 +1044,16 @@ def _open_seed_vertical_slot(
     origins = list(states) if states is not None else _cell_origins(reference_point)
     states = states if states is not None else _district_state(client, surface, origins)
     vertical_states = vertical_states if vertical_states is not None else _vertical_mall_states(client, surface, origins)
+    claims = (runtime_checkpoint() or {}).get("mall_allocations", {})
     for origin in origins:
         left, right, requester = states.get(origin, ("-", "-", "-"))
         if requester != "requester-chest" or left == "-" or right == "-":
             continue
         top, bottom = vertical_states[origin]
         for side, occupied, shared in (("north", top, left), ("south", bottom, right)):
+            owner = claims.get(f"{surface}:player:{origin[0]}:{origin[1]}:{side}")
+            if owner is not None and owner != recipe:
+                continue
             if occupied != "-" or (recipe is not None and _incompatible_pair(shared, recipe)):
                 continue
             if _vertical_side_clear(client, surface, origin, side):
@@ -1119,6 +1133,8 @@ def _choose_slot(
                     details={'predecessor':'long-handed-inserter','required_stock':2})
         if left_present != right_present and requester_name == "requester-chest":
             side = "right" if left_present else "left"
+            if claims.get(f"{surface}:player:{origin[0]}:{origin[1]}:{side}", recipe) != recipe:
+                continue
             if not _side_clear(client, surface, origin, side):
                 continue
             occupied_recipe = left if left_present else right
@@ -1132,7 +1148,8 @@ def _choose_slot(
             else:
                 other_open.append(candidate)
         elif not left_present and not right_present and requester_name == "requester-chest":
-            if _side_clear(client, surface, origin, "left"):
+            if (claims.get(f"{surface}:player:{origin[0]}:{origin[1]}:left", recipe) == recipe
+                    and _side_clear(client, surface, origin, "left")):
                 return origin, "left"
         elif not left_present and not right_present and requester_name == "-":
             empty_origins.append(origin)
@@ -1149,6 +1166,8 @@ def _choose_slot(
         reference_point,
     )
     for origin in empty_origins:
+        if claims.get(f"{surface}:player:{origin[0]}:{origin[1]}:left", recipe) != recipe:
+            continue
         footprint_min = (origin[0] - 2, origin[1])
         footprint_max = (origin[0] + 12, origin[1] + 7)
         if (
@@ -1336,7 +1355,7 @@ def build_compact_mall_stage(
     allocation_key = f"mall_allocation:{surface}:{force}:{recipe}"
     allocation = saved.get(allocation_key) if saved is not None else None
     if allocation is None:
-        allocation = _choose_slot(
+        allocation = preview_mall_allocation(
             client, surface, recipe, reference_point, demand_slot=demand_slot,
             vertical_ok=vertical_ok,
         )
@@ -1479,7 +1498,7 @@ def _build_seed_vertical_slot(
         _reconcile_built_mall_plan(client, surface, force, plan)
     requests = _defer_mall_requests(plan)
     assert_mall_cell_footprint_free(client, surface, plan, recipe, origin, side)
-    _submit(client, bridge, surface, plan, f"seed_vertical_mall_{recipe}_{side}", emit)
+    _submit(client, bridge, surface, plan, f"paired_mall_{recipe}", emit)
     machine = _vertical_slot_position(origin, side)
     provider = (center[0], center[1] + (-1.0 if side == "north" else 1.0))
     bring_stage_up(

@@ -231,6 +231,10 @@ class DeterministicSession:
                 proof["complete"] = (economics.get("bootstrap_districts", {}).get(job.item, {})
                                       .get("lifecycle_state") == "released")
             owner = (job.checkpoint.get("receipt", {}).get("details") or {}).get("stage")
+            canonical = f"paired_mall_{job.item}"
+            if (owner in {f"seed_vertical_mall_{job.item}_north", f"seed_vertical_mall_{job.item}_south"}
+                    and canonical in economics.get("projects", {})):
+                owner = canonical
             if owner in economics.get("projects", {}):
                 proof["reserved"] = economics["projects"][owner]["reserved"]
                 proof["funded"] = economics["projects"][owner]["state"] == "ready"
@@ -365,11 +369,19 @@ class DeterministicSession:
         self.queue.reconcile(self._queue_snapshot(facts, economics))
         active = [j for j in self.queue.jobs.values() if j.state != "complete"]
         claims = {}
-        for job in active:
-            for key, value in job.checkpoint.items():
+        for job in sorted(active, key=lambda j: j.sequence):
+            for key, value in list(job.checkpoint.items()):
                 if key.startswith(f"mall_allocation:{SURFACE}:{FORCE}:"):
                     origin, side = value
-                    claims[f"{SURFACE}:{FORCE}:{origin[0]}:{origin[1]}:{side}"] = key.rsplit(":", 1)[1]
+                    claim = f"{SURFACE}:{FORCE}:{origin[0]}:{origin[1]}:{side}"
+                    item = key.rsplit(":", 1)[1]
+                    if (claim in claims and claims[claim] != item
+                            and not mall.mall_allocation_is_committed(self.client, SURFACE, FORCE, (origin, side))):
+                        # Old previews could assign several jobs the same empty
+                        # half. Keep the first owner; replan only unbuilt claims.
+                        job.checkpoint.pop(key)
+                        continue
+                    claims.setdefault(claim, item)
         self.queue.runtime["mall_allocations"] = claims
         idle = mall.idle_mall_allocations(self.client, SURFACE, FORCE, self.reference_point)
         free = ab._MATERIAL_RESERVATION_LEDGER.allocatable_stock(stock)

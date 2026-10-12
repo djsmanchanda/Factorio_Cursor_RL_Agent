@@ -531,3 +531,8 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
   queue jobs, using exact reservation ownership.230 focused/1246fast pass,3skip;
   unchanged four-import firewall failure. Lifecycle: frozen private-world
   resumption; actual manufacturing recovery still requires observation.
+
+- 2026-10-12 16:55 IST: Private resumption exposed duplicate vertical kit owners and
+  overlapping empty-slot claims. Shared preview claims slots immediately;
+  vertical construction reuses preflight owner.307 focused/1250fast pass,3skip;
+  known firewall failure. Lifecycle: frozen private-world resumption.

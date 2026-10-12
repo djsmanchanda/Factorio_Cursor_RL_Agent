@@ -8034,6 +8034,15 @@ def _reserve_compact_mall_project(
             reference_point=reference_point,
         )
     stock = live_base.transferable_items(client, surface, force)
+    if not quad_mall and allocation is not None and allocation[1] in {"north", "south"}:
+        # Older vertical submissions declared the same cell kit a second time.
+        # Only an unsubmitted alias is obsolete; committed construction remains.
+        for side in ("north", "south"):
+            alias = f"seed_vertical_mall_{item}_{side}"
+            previous = ledger.projects.get(alias)
+            if (previous is not None and previous.state in {"planned", "ready", "supply_wait"}
+                    and all(count <= bill.get(name, 0) for name, count in previous.required.items())):
+                ledger.complete(alias)
     sources, rates = _material_sources_and_rates(
         client, surface, force, bill, stock,
     )

@@ -454,3 +454,16 @@ shared aggregate supply completion. Geometry and pending-entity waits remain
 protected; shared operations still validate materials.230focused/1246fast pass,
 3skip and unchanged four-import firewall failure. New frozen private-world
 resumption follows; personally verify actual crafting and construction.
+
+### 2026-10-12 16:55 IST — duplicate vertical bills and ghostless claims repaired
+
+90ac900 run persistent-laya-s50616-1791803943 stopped after50wall seconds.
+Funded parents dispatched, but vertical submissions declared separate
+seed_vertical_mall aliases; paired_mall held their real kits. Three recipes
+also held the same unbuilt north slot (59,42). Regular inserters remained0
+and longhands7; manufacturing recovery was not observed. Shared preflight
+now persists slot claims before ghosts, all empty half selection honors them,
+and vertical submission uses its original paired_mall owner. Only unsubmitted
+redundant aliases and unbuilt duplicate claims are reconciled; actual built or
+ghosted work is preserved.307focused/1250fast pass,3skip/knownfour-importfailure.
+Lifecycle: new private freeze resumes preserved world; no Lua deployment.

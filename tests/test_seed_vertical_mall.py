@@ -192,3 +192,25 @@ def test_vertical_order_repeats_after_the_opening_modules(full_seed_pairs, monke
     assert mall._choose_slot(object(),'nauvis','pipe',REFERENCE,vertical_ok=True)==(later,'north')
     vertical[later]=('pipe','-')
     assert mall._choose_slot(object(),'nauvis','pipe',REFERENCE,vertical_ok=True)==(later,'south')
+
+
+def test_preflight_claims_empty_vertical_halves_before_ghost_submission(full_seed_pairs):
+    from orchestrator.execution_slice import execution_slice
+    runtime={}
+    first, second={}, {}
+    with execution_slice(checkpoint=first, runtime=runtime):
+        assert mall.preview_mall_allocation(object(),'nauvis','inserter',REFERENCE,vertical_ok=True)==(SEED_A,'north')
+    with execution_slice(checkpoint=second, runtime=runtime):
+        assert mall.preview_mall_allocation(object(),'nauvis','splitter',REFERENCE,vertical_ok=True)==(SEED_A,'south')
+    assert first['mall_allocation:nauvis:player:inserter']==[list(SEED_A),'north']
+    assert second['mall_allocation:nauvis:player:splitter']==[list(SEED_A),'south']
+
+
+def test_vertical_submission_uses_the_preflight_owner(monkeypatch):
+    names=[]
+    monkeypatch.setattr(mall,'assert_mall_cell_footprint_free',lambda *a:None)
+    monkeypatch.setattr(mall,'_submit',lambda c,b,s,p,name,emit:names.append(name))
+    mall._build_seed_vertical_slot(object(),object(),'nauvis','player','inserter',{},REFERENCE,
+                                  lambda *a,**kw:None,lambda _:None,SEED_A,'north')
+    assert names[0]=='paired_mall_inserter'
+    assert not any(name.startswith('seed_vertical_mall_') for name in names)

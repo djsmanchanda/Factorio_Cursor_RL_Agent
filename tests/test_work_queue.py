@@ -675,3 +675,37 @@ def test_snapshot_uses_exact_ready_reservation_owner_for_dispatch(tmp_path):
           'projects':{'paired_mall_inserter':{'state':'ready','reserved':{'long-handed-inserter':2}}}}
     proof=s._queue_snapshot({'tick':120},data)['owned'][j.job_id]
     assert proof['funded'] is True and proof['reserved']=={'long-handed-inserter':2}
+
+
+def test_legacy_vertical_receipt_uses_its_canonical_kit_not_a_foreign_ready_owner(tmp_path):
+    s=object.__new__(DeterministicSession)
+    s.queue=queue(tmp_path)
+    j=s.queue.enqueue('mall_slot',{'item':'inserter'},priority=100,tick=0)
+    j.checkpoint['receipt']={'details':{'stage':'seed_vertical_mall_inserter_north'}}
+    data={'projects':{'seed_vertical_mall_inserter_north':{'state':'supply_wait','reserved':{}},
+                      'paired_mall_inserter':{'state':'ready','reserved':{'long-handed-inserter':2}}}}
+    assert s._queue_snapshot({'tick':0},data)['owned'][j.job_id]['funded'] is True
+    data['projects'].pop('paired_mall_inserter')
+    data['projects']['paired_mall_splitter']={'state':'ready','reserved':{'long-handed-inserter':2}}
+    assert s._queue_snapshot({'tick':0},data)['owned'][j.job_id]['funded'] is False
+
+
+def test_conflicting_saved_previews_replan_only_unbuilt_later_claim(tmp_path, monkeypatch):
+    from orchestrator import mall_builder as mall
+    from training.laya_ops import ab
+    s=object.__new__(DeterministicSession)
+    s.queue=queue(tmp_path);s.reference_point=(0,0);s.client=SimpleNamespace(command=lambda _:None)
+    first=s.queue.enqueue('mall_slot',{'item':'inserter'},priority=100,tick=0)
+    later=s.queue.enqueue('mall_slot',{'item':'splitter'},priority=100,tick=0)
+    first.checkpoint['mall_allocation:nauvis:player:inserter']=[[35,31],'north']
+    later.checkpoint['mall_allocation:nauvis:player:splitter']=[[35,31],'north']
+    monkeypatch.setattr(mall,'idle_mall_allocations',lambda *a,**kw:[])
+    monkeypatch.setattr(mall,'mall_allocation_is_committed',lambda *a:True)
+    monkeypatch.setattr(ab,'_MATERIAL_RESERVATION_LEDGER',SimpleNamespace(allocatable_stock=lambda stock:stock))
+    s._queue_assign_idle_malls({'tick':0},{'material_stock':{}})
+    assert 'mall_allocation:nauvis:player:splitter' in later.checkpoint
+    monkeypatch.setattr(mall,'mall_allocation_is_committed',lambda *a:False)
+    s._queue_assign_idle_malls({'tick':0},{'material_stock':{}})
+    assert 'mall_allocation:nauvis:player:inserter' in first.checkpoint
+    assert 'mall_allocation:nauvis:player:splitter' not in later.checkpoint
+    assert s.queue.runtime['mall_allocations']['nauvis:player:35:31:north']=='inserter'
