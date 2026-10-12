@@ -710,3 +710,22 @@ with the chest job blocked on advanced circuits.79focused tests pass; fast gate
 running. Stop was graceful; next Python freeze required, no Lua deployment.
 
 Final funded-batch fast gate:1,273passed,three skipped,only inherited four-import firewall failure.
+
+### 2026-10-12 20:32 IST — precursor forecasts cover the whole remaining batch
+
+Run persistent-laya-s50616-1791816954 (37783c9) produced6 iron sticks and
+completed underground-pipe target20 in existing lanes. Final live probe:
+poles9/12,sticks6,undergroundpipes20,pipe242; plastic/advanced transferable0.
+The3missing poles need12sticks, but the predecessor bill requested only4
+(one craft). Batch_funded correctly rejected that partially funded3-craft
+job; its ironstick job had already completed.
+
+Executor now forecasts direct solid precursor quantities for the whole
+remaining output bill of not-yet-configured batches, with product amounts
+and delivered credits. Existing producers/loans retain their own WIP; no
+forecast reclaims it. These become ordinary priority-inheriting supply jobs.
+80focused regressions pass, including9of12poles→12sticks and delivered2→
+only1remainingpole(alreadyfunded). Next private Python freeze after fast gate;
+no mod deploy. Actual plastic/science remains pending.
+
+Final precursor fast gate:1,274passed,three skipped,only inherited four-import firewall failure.

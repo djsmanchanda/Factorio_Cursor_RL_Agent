@@ -598,3 +598,8 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
   evidence so rotation can bypass unfunded cell/chest dependencies; preserves
   unrelated reservations.79focused/1273fast passes,3skip/inherited firewall.
   Lifecycle:new private freeze/no Lua deploy; actual plastic/science pending.
+
+- 2026-10-12 20:32 IST: Live undergroundpipes20,sticks6,poles9/12. Executor forecasts
+  full remaining precursor batches, including credits/outputpercraft and WIP
+  ownership.80focused/1274fast passes,3skip/inherited firewall. Lifecycle:new
+  private freeze; chemical/science pending,no Lua deployment.

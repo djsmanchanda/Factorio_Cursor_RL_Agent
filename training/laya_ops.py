@@ -339,6 +339,7 @@ class DeterministicSession:
     def execute_queue(self, facts, economics, reached):
         from orchestrator.execution_slice import execution_slice
         self.reached_phases = tuple(reached)
+        self._queue_supply_batch_inputs(facts, economics)
         self._queue_assign_idle_malls(facts, economics)
         # Recovery from an interrupted atomic hold is local to its owned lane.
         for job in self.queue.jobs.values():
@@ -385,6 +386,29 @@ class DeterministicSession:
             receipts = self.queue.pulse(snapshot, execute, can_produce=self._queue_can_produce,
                                         preempt=self._queue_preempt)
         return receipts
+
+    def _queue_supply_batch_inputs(self, facts, economics):
+        """Fund a not-yet-configured finite batch, rather than only one craft."""
+        stock = economics.get("material_stock")
+        if stock is None:
+            return
+        producers = {m.get("recipe") for m in facts.get("machines", [])
+                     if m.get("name") in live_base.ASSEMBLER_TIERS}
+        producers.update(l.get("target_item") for l in economics.get("loans") or [])
+        free = ab._MATERIAL_RESERVATION_LEDGER.allocatable_stock(stock)
+        for job in list(self.queue.jobs.values()):
+            if (job.state == "complete" or job.operation != "produce" or job.item in producers
+                    or not self._queue_can_produce(job.item)):
+                continue
+            spec = LINE_RECIPES[job.item]
+            if spec.get("machine") not in live_base.ASSEMBLER_TIERS or spec.get("fluid_ingredients"):
+                continue
+            crafts = math.ceil(max(0, job.target-job.delivered-int(stock.get(job.item, 0))) /
+                               max(float(spec.get("product_amount", 1)), 1))
+            for ingredient, amount in zip(spec["ingredients"], spec["amounts"], strict=True):
+                needed = math.ceil(amount*crafts)
+                if free.get(ingredient, 0) < needed and self._queue_can_produce(ingredient):
+                    self.queue._supply(job, ingredient, needed)
 
     def _queue_assign_idle_malls(self, facts, economics):
         """Fill installed spare capacity from goals/precursors without a policy turn."""

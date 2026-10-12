@@ -257,7 +257,8 @@ def test_backlog_automatically_queues_a_real_capacity_operation(tmp_path, monkey
     session.run = lambda op, **params: (calls.append((op,params)) or
                                       {'ok':False,'code':'queued_construction_wait','params':params,'operation':op})
     session._queue_preempt = lambda *a:False
-    session.execute_queue({'tick':0}, {'material_stock':{},**capacity}, reached=['C0','C1'])
+    stock={item:100 for item in ('electronic-circuit','iron-gear-wheel','iron-plate','inserter')}
+    session.execute_queue({'tick':0}, {'material_stock':stock,**capacity}, reached=['C0','C1'])
     assert ('mall_capacity', {'item':'electric-mining-drill','minimum_machines':1}) in calls
 
 
@@ -889,3 +890,26 @@ def test_funded_batch_runs_while_new_cell_waits_for_chests_and_preserves_claims(
     s.queue.pulse(funded,lambda job,params:calls.append(job.item) or {'ok':True},
                   can_produce=lambda _:True,max_jobs=1)
     assert calls==[item]  # No new chest or assembler is prerequisite to rotation.
+
+
+def test_batch_precursor_bill_scales_with_remaining_output_and_credits(tmp_path,monkeypatch):
+    from orchestrator import autonomous_builder as ab
+    install_live_recipe_fixture(monkeypatch)
+    s=object.__new__(DeterministicSession);s.queue=queue(tmp_path);s.reached_phases=()
+    s.queue.tick=10
+    pole=s.queue.enqueue('produce',{'item':'medium-electric-pole','stock_target':12},priority=100,tick=10)
+    monkeypatch.setattr(ab,'_MATERIAL_RESERVATION_LEDGER',SimpleNamespace(allocatable_stock=lambda stock:stock))
+    facts={'tick':10,'machines':[]}
+    econ={'material_stock':{'medium-electric-pole':9,'iron-stick':6,'steel-plate':100,'copper-cable':100}}
+    s._queue_supply_batch_inputs(facts,econ)
+    sticks=s.queue.jobs[s.queue.identity('produce',{'item':'iron-stick'})]
+    assert sticks.target==12 and sticks.priority>pole.priority and sticks.parents==[pole.job_id]
+    # Existing production already owns its inputs; forecasting must not reclaim
+    # another requester's WIP or add a fresh supply demand while it crafts.
+    facts['machines']=[{'name':'assembling-machine-1','recipe':'medium-electric-pole'}]
+    s.queue.jobs.pop(sticks.job_id);pole.dependencies=[]
+    s._queue_supply_batch_inputs(facts,econ)
+    assert len(s.queue.jobs)==1
+    facts['machines']=[];pole.delivered=2
+    s._queue_supply_batch_inputs(facts,econ)
+    assert len(s.queue.jobs)==1  # Only one remaining pole: six sticks already fund it.
