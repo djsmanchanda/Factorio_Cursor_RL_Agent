@@ -351,3 +351,30 @@ def test_disconnected_logistic_gate_is_repaired_before_disabled_classification(m
     assert b._repair_stalled_line(client,object(),'nauvis','player','inserter',(3,-1),lambda _:None,
                                  plan,mall_provider=(63.5,44.5),upgrade_bootstrap=False)==(63.5,44.5)
     assert covered==[((63.5,48.5),'logistic')]
+
+
+def test_borrower_census_is_one_read_and_keeps_the_last_feedstock_anchor(monkeypatch):
+    """Large live catalogs must not create hundreds of per-recipe RCON probes."""
+    records=[{'recipe':'iron-gear-wheel','x':7.5,'y':10.5,'working':False,'made':20},
+             {'recipe':'iron-gear-wheel','x':7.5,'y':16.5,'working':True,'made':30},
+             {'recipe':'copper-cable','x':7.5,'y':22.5,'working':True,'made':40}]
+    commands=[]
+    client=SimpleNamespace(command=lambda lua:commands.append(lua) or json.dumps(records))
+    monkeypatch.setattr(b.live_base,'available_items',lambda *_:{'iron-gear-wheel':100,'copper-cable':100})
+    monkeypatch.setattr(b.live_base,'find_line',lambda *a,**k: (_ for _ in ()).throw(AssertionError('per-recipe census')))
+    monkeypatch.setattr(b,'locate_mall_cell',lambda point,_:((6,int(point[1]-1.5)),'left'))
+    monkeypatch.setattr(b,'mall_slot_uses_shared_provider',lambda *_:False)
+    def entity(_c,_s,point):
+        if point[0]==7.5:
+            return {'name':'assembling-machine-2' if point[1]==16.5 else 'assembling-machine-1'}
+        return {'name':'requester-chest' if point[1] in (10.5,16.5,22.5) else 'passive-provider-chest'}
+    monkeypatch.setattr(b.live_base,'entity_at',entity)
+    selected=b._borrow_free_mall_cell(client,'private','player','steel-chest',(0,0),
+        allowed_original_recipes=None,allow_shared_provider=True,require_stocked_original=True,
+        excluded_origins=set(),batch_target=1)
+    assert selected[0]=='iron-gear-wheel' and selected[-1] in live_base.ASSEMBLER_TIERS
+    assert len(commands)==1  # The one real copper source remains protected.
+    census=live_base.assembler_line_census(client,'private','player')
+    assert census['iron-gear-wheel'].machine_count==2
+    assert census['iron-gear-wheel'].working_count==1
+    assert census['iron-gear-wheel'].produced_count==50

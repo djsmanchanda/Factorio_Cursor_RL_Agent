@@ -7285,6 +7285,9 @@ def _borrow_free_mall_cell(
         recipe,
     ))
     candidates: list[tuple[int, int, int, str, Point, tuple[int, int], str]] = []
+    census = None
+    if callable(getattr(client, "command", None)):
+        census = live_base.assembler_line_census(client, surface, force)
     for original_recipe in recipes:
         if original_recipe in CORE_MALL_PRODUCERS:
             # Once a core-mall recipe owns a cell, that cell is reserved for
@@ -7300,8 +7303,8 @@ def _borrow_free_mall_cell(
         # can be built on AM1 before AM2 production exists).  Borrowing must
         # discover the real line across every live assembler tier or it will
         # report an empty pool even though a complete cell is available.
-        line = None
-        for machine_tier in live_base.ASSEMBLER_TIERS:
+        line = census.get(original_recipe) if census is not None else None
+        for machine_tier in (() if census is not None else live_base.ASSEMBLER_TIERS):
             line = live_base.find_line(
                 client, surface, force, original_recipe, str(machine_tier),
                 # Anchor protection counts real producers only: an unbuilt
@@ -8663,6 +8666,10 @@ def _unfunded_ladder_ingredient(
 def _missing_chemical_ladder_predecessor(
     client: RconClient, surface: str, force: str, item: str,
 ) -> str | None:
+    if cooperative():
+        # Both direct builds and borrowed steps share this scheduling query.
+        # Their actual recipe/material checks own legality in queued execution.
+        return None
     return next((
         predecessor
         for predecessor in _chemical_ladder_predecessors(item)
@@ -8822,11 +8829,6 @@ def _ensure_chemical_ladder_predecessor(
     item: str, reference_point: Point, emit: Callable[[str], None],
 ) -> None:
     """Advance at most one missing rung before constructing `item`."""
-    if cooperative():
-        # Queued work discovers actual input/construction shortages itself.
-        # The serial capability order is a scheduling preference: an idle
-        # stocked furnace must not gate a funded refinery/equipment batch.
-        return
     if item == "steel-plate":
         _defer_steel_blocked_loan(client, bridge, surface, force, reference_point, emit)
         return

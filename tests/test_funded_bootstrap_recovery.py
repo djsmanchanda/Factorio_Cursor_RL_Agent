@@ -22,6 +22,7 @@ def recovery(tmp_path, monkeypatch):
     monkeypatch.setattr(b.live_base, "machine_input_contents", lambda *_: {})
     monkeypatch.setattr(b, "active_bootstrap_loans", lambda *_: [])
     line = live_base.LineState("electronic-circuit", 1, 0, (42.5, 39.5), ((45.5, 38.5),))
+    monkeypatch.setattr(b.live_base, "assembler_line_census", lambda *_: {"electronic-circuit": line})
     monkeypatch.setattr(b.live_base, "find_line", lambda _c, _s, _f, recipe, *_a, **_k:
                         line if recipe == "electronic-circuit" else None)
     monkeypatch.setattr(b.live_base, "entity_at", lambda _c, _s, point:

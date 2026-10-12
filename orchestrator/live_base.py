@@ -139,6 +139,30 @@ def find_line(
     )
 
 
+def assembler_line_census(client: RconClient, surface: str, force: str) -> dict[str, LineState]:
+    """Read real native assembler recipes once, independent of catalog size.
+
+    Borrowing needs physical producer counts to protect anchors. Ghosts and
+    unconfigured machines cannot pay that count; all actual tiers share it.
+    """
+    lua = ("local s=game.surfaces[" + json.dumps(surface) + "];local out={};"
+           "for _,name in ipairs(helpers.json_to_table(" + json.dumps(json.dumps(ASSEMBLER_TIERS)) + ")) do "
+           "for _,e in pairs(s.find_entities_filtered{name=name,force=" + json.dumps(force) + "}) do "
+           "local r=e.get_recipe();if r then out[#out+1]={recipe=r.name,x=e.position.x,y=e.position.y,"
+           "working=e.status==defines.entity_status.working,made=e.products_finished} end end end;"
+           "rcon.print(helpers.table_to_json(out))")
+    records = json.loads(_sc(client, lua))
+    grouped = {}
+    for record in records:
+        grouped.setdefault(record['recipe'], []).append(record)
+    return {recipe: LineState(recipe=recipe, machine_count=len(actors),
+                working_count=sum(bool(a['working']) for a in actors),
+                machine_positions=tuple((float(a['x']), float(a['y'])) for a in actors),
+                output_position=(float(actors[-1]['x']), float(actors[-1]['y'])),
+                produced_count=sum(int(a['made']) for a in actors))
+            for recipe, actors in grouped.items()}
+
+
 def find_idle_machine_row(
     client: RconClient, surface: str, force: str, recipe: str, machine: str,
     near: Point, *, radius: float = 24.0,

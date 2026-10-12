@@ -527,10 +527,11 @@ def test_unbuilt_preview_cannot_block_a_funded_batch_behind_chest_supply(monkeyp
 def test_queue_can_make_refinery_equipment_from_stock_without_restarting_idle_steel(monkeypatch):
     from orchestrator import autonomous_builder as ab
     install_live_recipe_fixture(monkeypatch)
-    monkeypatch.setattr(ab,'_missing_chemical_ladder_predecessor',lambda *a:'steel-plate')
+    monkeypatch.setattr(ab,'_chemical_capability_started',lambda c,s,f,item:item!='steel-plate')
     established=[]
     monkeypatch.setattr(ab,'ensure_produced',lambda *a,**k:established.append(a[4]))
     with execution_slice():
+        assert ab._missing_chemical_ladder_predecessor(object(),'private','player','oil-refinery') is None
         ab._ensure_chemical_ladder_predecessor(object(),object(),'private','player','oil-refinery',(0,0),lambda _:None)
     assert established==[]
     with pytest.raises(ab.ProductionPrerequisiteDeferred):

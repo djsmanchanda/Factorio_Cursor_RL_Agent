@@ -675,3 +675,20 @@ running; new private freeze required, no Lua deployment. Chemical/science
 output remains unverified.
 
 Final fast verification:1,271 passed,three skipped,only inherited four-import firewall failure;3,039 deselected.
+
+### 2026-10-12 20:18 IST — borrower census and shared chemical scheduling seam
+
+Live run persistent-laya-s50616-1791816201 revealed the same serial chemical
+check inside loan servicing. The cooperative opt-out now lives in the shared
+_missing_chemical_ladder_predecessor query, covering both direct and borrowed
+steps. Hard recipe inputs and funded construction remain enforced.
+
+Personally timed the same read-only oil-refinery borrower selection on the
+preserved private world: old18.638s/461RCONcalls; new1.137s/43calls; exact same
+gear borrower at(54.5,38.5),AM1. A single shared real-assembler census replaces
+three-tier queries for every force recipe; ghost/last-anchor/tier protections
+remain. This16.4x measurement concerns borrower selection, not whole-factory
+throughput.277focused queue/construction/chemical tests pass. New frozen private
+runner required after fast gate; no mod deployment.
+
+Final census fast gate:1,272passed,three skipped,only unchanged four-import firewall failure.

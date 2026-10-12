@@ -588,3 +588,8 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
   only physically committed mall allocations block borrowing. Probe verified
   steel1140 and three unbuilt previews. 130 focused/1271 fast passes,3 skips,
   inherited firewall failure. Lifecycle: new frozen private runner; no mod deploy.
+
+- 2026-10-12 20:19 IST: Live borrower selection18.638→1.137s,461→43RCONcalls, same
+  candidate. Shared cooperative predecessor query covers borrowed steps too.
+  277focused/1272fast pass,3skip/inherited firewall. Lifecycle:new private freeze,
+  personal observation/helper disabled; chemical/science still pending.

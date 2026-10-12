@@ -471,3 +471,5 @@ A rolled-back world clock discards them. The rate-proxy list is still reported
 separately; goal completion remains the live target_completed research flag.
 
 Queued chemical construction uses actual recipe inputs and funded geometry, rather than the serial chemical capability ladder. An idle furnace with stocked steel cannot hold up funded refinery equipment. Missing inputs and construction bills still enter the queue and hard chemical legality remains enforced. A saved mall preview only bypasses borrowing after its owned machine or ghost physically exists; an unfunded unbuilt preview can use an existing borrower without consuming another chest.
+
+Borrower selection surveys real native assembler recipes across all tiers in one RCON census. Recipe catalog size does not add per-recipe transport calls, and physical last-anchor counts remain protected.
