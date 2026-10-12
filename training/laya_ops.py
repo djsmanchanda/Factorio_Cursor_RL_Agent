@@ -243,12 +243,13 @@ class DeterministicSession:
             if job.operation == "produce" and free is not None and self._queue_can_produce(job.item):
                 spec = LINE_RECIPES[job.item]
                 if spec.get("machine") in live_base.ASSEMBLER_TIERS and not spec.get("fluid_ingredients"):
+                    batch_free = self._queue_batch_stock(stock, job.item, free)
                     crafts = math.ceil(max(0, job.target-job.delivered-current_stock) /
                                        max(float(spec.get("product_amount", 1)), 1))
                     # Actual finite inputs admit rotation independently of an
                     # unfunded new-cell bill. Preserve other projects' ownership.
                     proof["batch_funded"] = crafts > 0 and all(
-                        free.get(i, 0) >= math.ceil(n*crafts)
+                        batch_free.get(i, 0) >= math.ceil(n*crafts)
                         for i,n in zip(spec["ingredients"], spec["amounts"], strict=True))
             if job.operation == "retire_starter":
                 proof["complete"] = (economics.get("bootstrap_districts", {}).get(job.item, {})
@@ -405,10 +406,22 @@ class DeterministicSession:
                 continue
             crafts = math.ceil(max(0, job.target-job.delivered-int(stock.get(job.item, 0))) /
                                max(float(spec.get("product_amount", 1)), 1))
+            batch_free = self._queue_batch_stock(stock, job.item, free)
             for ingredient, amount in zip(spec["ingredients"], spec["amounts"], strict=True):
                 needed = math.ceil(amount*crafts)
-                if free.get(ingredient, 0) < needed and self._queue_can_produce(ingredient):
-                    self.queue._supply(job, ingredient, needed)
+                if batch_free.get(ingredient, 0) < needed and self._queue_can_produce(ingredient):
+                    # Stock held by another project cannot pay this new bill.
+                    target = int(stock.get(ingredient, 0))+needed-batch_free.get(ingredient, 0)
+                    self.queue._supply(job, ingredient, target)
+
+    @staticmethod
+    def _queue_batch_stock(stock, item, free):
+        """Use the same transaction claimants as the shared loan tool."""
+        ledger = getattr(ab, "_MATERIAL_RESERVATION_LEDGER", None)
+        owners = (ab._material_project_id(item), f"loan_inputs_{item}")
+        if ledger is not None and any(owner in getattr(ledger, "projects", {}) for owner in owners):
+            return ledger.allocatable_stock(stock, claimants=owners)
+        return free
 
     def _queue_assign_idle_malls(self, facts, economics):
         """Fill installed spare capacity from goals/precursors without a policy turn."""

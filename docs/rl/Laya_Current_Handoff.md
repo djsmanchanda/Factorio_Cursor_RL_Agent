@@ -729,3 +729,17 @@ only1remainingpole(alreadyfunded). Next private Python freeze after fast gate;
 no mod deploy. Actual plastic/science remains pending.
 
 Final precursor fast gate:1,274passed,three skipped,only inherited four-import firewall failure.
+
+### 2026-10-12 20:36 IST — queue input ownership matches shared rotation
+
+Run persistent-laya-s50616-1791817362(69f0710) completed the enlarged ironstick
+batch but still did not dispatch poles. Live ledger reserved4sticks for
+paired_mall_medium-electric-pole; queue readiness treated this caller's own
+reservation as unavailable, unlike _bootstrap_loan_stock. Queue batch facts
+and forecasts now use the same paired_mall_/loan_inputs_ claimants. Foreign
+claims stay excluded; shortages raise global supply targets by the actual
+foreign-held deficit.81focused tests pass. Regression: twelve sticks,own4
+fund the three poles; addingforeign4 rejects admission and targets16sticks.
+Next private freeze after fast gate; no mod deploy, chemistry/science pending.
+
+Final owned-batch fast gate:1,275passed,three skipped,only inherited four-import firewall failure.

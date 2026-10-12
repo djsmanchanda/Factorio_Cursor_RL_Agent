@@ -477,3 +477,5 @@ Borrower selection surveys real native assembler recipes across all tiers in one
 Queue readiness distinguishes a funded finite production batch from a funded new cell. A solid assembler batch whose complete remaining input bill is allocatable can run through shared rotation while a saved expansion job waits for chests. This never funds construction or waives lab/chemical legality, and other projects retain their reservations.
 
 Before borrowing, a finite batch forecasts its complete remaining solid input quantities into priority-inheriting precursor jobs. Output-per-craft and owned delivery credits reduce the bill. Active producers/loans keep their own WIP and supply handling; unknown stock cannot authorize a forecast.
+
+Batch readiness and precursor forecasts use the shared loan transaction owners (the item cell and its loan-input project). Its own reservations fund the batch; another project's held inventory raises the global supply target rather than completing an insufficient precursor job.

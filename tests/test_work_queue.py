@@ -913,3 +913,27 @@ def test_batch_precursor_bill_scales_with_remaining_output_and_credits(tmp_path,
     facts['machines']=[];pole.delivered=2
     s._queue_supply_batch_inputs(facts,econ)
     assert len(s.queue.jobs)==1  # Only one remaining pole: six sticks already fund it.
+
+
+def test_batch_readiness_can_use_its_own_reservation_and_forecasts_foreign_hold(tmp_path,monkeypatch):
+    from orchestrator import autonomous_builder as ab
+    from orchestrator.material_reservations import MaterialReservationLedger
+    install_live_recipe_fixture(monkeypatch)
+    s=object.__new__(DeterministicSession);s.queue=queue(tmp_path);s.reached_phases=()
+    s.client=object()
+    ledger=MaterialReservationLedger(tmp_path/'reservations',episode_id='claims',surface='nauvis',force='player')
+    monkeypatch.setattr(ab,'_MATERIAL_RESERVATION_LEDGER',ledger)
+    stock={'medium-electric-pole':9,'iron-stick':12,'steel-plate':100,'copper-cable':100}
+    ledger.declare('paired_mall_medium-electric-pole',{'iron-stick':4},stock,hold_until_producing=True)
+    ledger.mark_constructing('paired_mall_medium-electric-pole',stock)
+    pole=s.queue.enqueue('produce',{'item':'medium-electric-pole','stock_target':12},priority=100,tick=0)
+    facts={'tick':0,'machines':[]};econ={'material_stock':stock}
+    assert s._queue_snapshot(facts,econ)['owned'][pole.job_id]['batch_funded']
+    s._queue_supply_batch_inputs(facts,econ)
+    assert len(s.queue.jobs)==1  # Its own four sticks must not be made again.
+    ledger.declare('foreign-project',{'iron-stick':4},stock,hold_until_producing=True)
+    ledger.mark_constructing('foreign-project',stock)
+    assert not s._queue_snapshot(facts,econ)['owned'][pole.job_id]['batch_funded']
+    s._queue_supply_batch_inputs(facts,econ)
+    sticks=s.queue.jobs[s.queue.identity('produce',{'item':'iron-stick'})]
+    assert sticks.target==16 and ledger.projects['foreign-project'].reserved['iron-stick']==4
