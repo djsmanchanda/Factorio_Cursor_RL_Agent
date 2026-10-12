@@ -227,3 +227,12 @@ def test_vertical_bringup_covers_gated_machine_beyond_covered_requester(monkeypa
     # Live boundary: requester is served by (52,20); its machine is outside25.
     assert max(abs(63.5-52),abs(43.5-20))<25
     assert max(abs(63.5-52),abs(48.5-20))>25
+
+
+@pytest.mark.parametrize('machine,provider', [((63.5,38.5),(63.5,42.5)),((63.5,48.5),(63.5,44.5))])
+def test_vertical_provider_is_recognized_from_declared_cross_offsets(monkeypatch,machine,provider):
+    entities={(63.5,43.5):{'name':'requester-chest'},provider:{'name':'passive-provider-chest'}}
+    monkeypatch.setattr(builder.live_base,'entity_at',lambda c,s,p:entities.get(p))
+    assert builder._paired_mall_provider(object(),'nauvis',[machine])==provider
+    entities.pop((63.5,43.5))
+    assert builder._paired_mall_provider(object(),'nauvis',[machine]) is None

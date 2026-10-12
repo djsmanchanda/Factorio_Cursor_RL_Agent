@@ -431,3 +431,7 @@ An existing configured producer is dispatchable independently of obsolete cell
 kit dependencies, without claiming its finite batch is complete. Shared repair
 checks mall-machine logistic coverage before classifying a disabled gate as a
 healthy demand wait, so a covered requester cannot mask a disconnected machine.
+
+Shared provider lookup recognizes up/down slots through the declared cross
+layout offsets, so their existing-cell maintenance uses the same ownership and
+coverage path as left/right cells.

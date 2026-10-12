@@ -5211,14 +5211,19 @@ def _retire_promoted_mall_slot(
 def _paired_mall_provider(
     client: RconClient, surface: str, machine_positions: Sequence[Point],
 ) -> Point | None:
-    """Find the provider assigned to one machine in a paired mall cell."""
+    """Find the provider of a horizontal or vertical cross-mall machine."""
+    from planners.quad_mall_layout import QUAD_MALL_MACHINE_OFFSETS, QUAD_MALL_PROVIDER_OFFSETS
+    offsets = [(3, 0, -1), (-3, 0, 1), (-3, 0, -1)]
+    offsets.extend((-QUAD_MALL_MACHINE_OFFSETS[side][0], -QUAD_MALL_MACHINE_OFFSETS[side][1],
+                    QUAD_MALL_PROVIDER_OFFSETS[group][1])
+                   for side, group in (("north", "top"), ("south", "bottom")))
     for machine_x, machine_y in machine_positions:
-        for requester_dx, provider_dy in ((3, -1), (-3, 1), (-3, -1)):
-            requester = (machine_x + requester_dx, machine_y)
+        for requester_dx, requester_dy, provider_dy in offsets:
+            requester = (machine_x + requester_dx, machine_y + requester_dy)
             requester_entity = live_base.entity_at(client, surface, requester)
             if not requester_entity or requester_entity["name"] != "requester-chest":
                 continue
-            provider = (requester[0], machine_y + provider_dy)
+            provider = (requester[0], requester[1] + provider_dy)
             provider_entity = live_base.entity_at(client, surface, provider)
             if provider_entity and provider_entity["name"] == "passive-provider-chest":
                 return provider

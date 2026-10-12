@@ -546,3 +546,7 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
   gated inserter assembler. Mall bring-up/repair now cover machine controls;
   observed configured producers can service queued batches despite old kits.
   315focused/1256fast pass,3skip/knownfirewall. Lifecycle: frozen private resume.
+
+- 2026-10-12 17:10 IST: Vertical provider recognition now uses shared cross offsets;
+  actual private lookup resolves63.5,44.5 for blocked inserter.317focused/
+  1256fast pass,3skip/knownfirewall. Lifecycle: frozen private resumption.

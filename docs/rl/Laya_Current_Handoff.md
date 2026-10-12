@@ -499,3 +499,13 @@ obsolete cell-kit dependencies; it never credits completion. Actual saved-state
 replay readies produce.inserter.315focused/1256fast pass,3skip/knownfour-import
 firewall. Lifecycle: new frozen current-world private resume; bots plan/build
 normal coverage without manual gameplay repairs.
+
+### 2026-10-12 17:10 IST — vertical provider identity repaired
+
+e7912f5 run persistent-laya-s50616-1791805090 stopped60wallseconds. Inserter
+production now dispatches but mall_provider wasNone: legacy lookup only
+recognized horizontal ±3 slots, excluding the supplied vertical±5 layout.
+Coverage repair therefore never ran for that cell. Shared lookup now derives
+vertical requester/provider offsets from planners.quad_mall_layout constants.
+Exact private27992 read resolves provider63.5,44.5 for assembler63.5,48.5;
+317focused/1256fast pass,3skip/knownfirewall. New private freeze follows.
