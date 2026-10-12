@@ -143,19 +143,27 @@ end
 -- this project has ever had eventually had to answer by hand over RCON.
 local function input_boxes(entity)
   local boxes = {}
-  local fluidbox = entity.fluidbox
-  if not fluidbox then return boxes end
-  for index = 1, #fluidbox do
-    local proto_ok, proto = pcall(function() return fluidbox.get_prototype(index) end)
-    local direction = proto_ok and proto and proto.production_type or nil
-    if direction == "input" or direction == "input-output" then
-      local contents = fluidbox[index]
-      local conn_ok, connections = pcall(function() return fluidbox.get_connections(index) end)
+  for index = 1, entity.fluids_count do
+    local proto_ok, proto = pcall(function() return entity.get_fluid_box_prototype(index) end)
+    local is_input = false
+    local function accepts_input(box)
+      return box and (box.production_type == "input" or box.production_type == "input-output")
+    end
+    if proto_ok and proto then
+      if type(proto) == "table" and proto[1] then
+        for _, box in ipairs(proto) do is_input = is_input or accepts_input(box) end
+      else
+        is_input = accepts_input(proto)
+      end
+    end
+    if is_input then
+      local contents = entity.get_fluid(index)
+      local conn_ok, connections = pcall(function() return entity.get_fluid_box_neighbours(index) end)
       table.insert(boxes, {
         index = index,
         amount = contents and contents.amount or 0,
         fluid = contents and contents.name or nil,
-        connected = conn_ok and #connections > 0
+        connected = conn_ok and connections ~= nil and #connections > 0
       })
     end
   end
@@ -165,7 +173,7 @@ end
 local function fluid_machines(surface, force)
   local machines = {}
   for _, entity in pairs(surface.find_entities_filtered({ type = FLUID_CARRYING_TYPES, force = force })) do
-    if entity.valid and entity.fluidbox and #entity.fluidbox > 0 then
+    if entity.valid and entity.fluids_count > 0 then
       local boxes = input_boxes(entity)
       if #boxes > 0 then
         table.insert(machines, {

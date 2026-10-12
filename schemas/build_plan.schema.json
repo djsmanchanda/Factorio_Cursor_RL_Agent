@@ -237,10 +237,10 @@
             }
            }
           }
-          }
+         }
         },
         "clear_inventory_limit": {
-          "type": "boolean"
+         "type": "boolean"
         },
         "infinity_filter": {
          "type": "string"
@@ -326,6 +326,10 @@
            "type": "integer"
           }
          }
+        },
+        "mirroring": {
+         "type": "boolean",
+         "description": "Physical engine mirroring around the entity facing axis; required when reflecting asymmetric fluid ports."
         }
        },
        "allOf": [
