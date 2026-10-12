@@ -390,3 +390,9 @@ can assign a funded empty lane as parallel `mall_capacity` even if another
 producer or lender currently runs that recipe. The queued ops menu keeps other
 starter goals selectable while an owned foundation waits; execution reservations
 still decide which construction can actually proceed.
+
+Committed plate stock deficits expose the appropriate starter/foundation/extension
+option even when the phase's small measured rate target is already met. The
+option carries the exact stock shortfall and goal urgency; full/backpressured
+output still prevents unnecessary capacity. Raw plates remain in their shared
+mining/smelting operation family, and Laya retains queue-order authority.

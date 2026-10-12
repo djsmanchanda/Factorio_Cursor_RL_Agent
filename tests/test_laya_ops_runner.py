@@ -1323,3 +1323,13 @@ def test_met_phase_product_rejoins_gate_before_phase_peer_is_ready(tmp_path, mon
     run(FakeWorld(), GuidedPolicy(3), journal=tmp_path/"rates.jsonl", decisions=2,
         measure_ticks=600, seed=3, run_id="rates", session=session)
     assert session.at_operation == [{"copper-plate": .5}, {"iron-plate": .5, "copper-plate": .5}]
+
+
+def test_committed_plate_bill_exposes_expansion_even_after_phase_rate_is_met():
+    board={'needs':[{'item':'iron-plate','condition':'satisfied','goal_required_per_s':.5}]}
+    started=[{'ok':True,'operation':'starter','params':{'recipe':p}} for p in ('iron-plate','copper-plate')]
+    menu=compile_options(board,started,queued_targets={'iron-plate':26},material_stock={'iron-plate':2},continuous_queue=True)
+    option=next(o for o in menu['options'] if o['option_id']=='op.foundation.iron-plate')
+    assert option['features']['goal_need'] and option['features']['committed_stock_shortfall']==24
+    full=compile_options(board,started,queued_targets={'iron-plate':26},material_stock={'iron-plate':26},continuous_queue=True)
+    assert 'op.foundation.iron-plate' not in {o['option_id'] for o in full['options']}

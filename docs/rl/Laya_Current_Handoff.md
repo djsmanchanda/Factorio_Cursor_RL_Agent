@@ -399,3 +399,30 @@ starters without breaking a district's own pioneer identity.224 focused pass;
 fast1240 pass/3skip, only unchanged four-import firewall failure. Lifecycle:
 fresh frozen private validation; no mod deployment, save rescue or production
 mutation. Sustained acceleration still requires live evidence.
+
+### 2026-10-12 16:07 IST — cumulative fresh validation running
+
+Started persistent-laya-s50616-1791801441 frozen db012a7, speed2 verified,
+private34992/27992; owner laya-persistent-run-20261012T103720Z-53635ce6.service.
+Archive data/persistent-factorio/history/20261012T103717Z-19f7a678 preserves the
+previous prefix. At105seconds, four configured mall actors manufactured circuits,
+belts/cable/gears and Laya queued the newly exposed stone starter alongside
+pending copper construction. Personal diagnosis/observation continues; no
+sustained acceleration or later checkpoint claim yet.
+
+### 2026-10-12 16:19 IST — measured capacity growth; plate-demand options repaired
+
+db012a7 fresh run persistent-laya-s50616-1791801441 was observed through551wall
+seconds/49decisions and stopped on diagnosed slow growth, without runtime errors.
+Six configured malls include a second gear actor; the stone starter was offered
+and queued alongside copper. Actual manufactured output includes circuits,
+long-handed inserters, assemblers, splitters and a drill. Copper rate rose from
+~0.625 to measured2.662/s after replacement production; iron remained~1.25/s.
+AcceptedC0 only; no claim of research completion or sustained general speedup.
+
+Several queued bills reported unsupported_supply:iron-plate, but phase rate
+satisfaction suppressed iron foundation options. Committed stock deficits now
+expose their legal plate construction operation and measured shortfall, with
+backpressure guards preserved.225 focused pass; fast1241 pass/3skip, only known
+four-import firewall failure. Lifecycle: new frozen runner resumes this private
+world; no mod deployment, manual game repair, merge or adoption.

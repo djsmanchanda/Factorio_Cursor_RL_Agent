@@ -622,7 +622,8 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
         district_state = ((bootstrap_districts or {}).get(plate) or {}).get("lifecycle_state")
         # New capacity follows demand; finishing owned work survives rate/phase changes.
         legal = ()
-        if (plate in unmet or PLATES[plate] in unmet) and plate not in backpressured:
+        stock_need = short.get(plate, 0) > 0
+        if (plate in unmet or PLATES[plate] in unmet or stock_need) and plate not in backpressured:
             legal = {"none": ("starter",), "starter": ("foundation",) if starters_done else (),
                      "foundation": ("extend",)}[stages.get(plate, "none")]
         # A district whose replacement is already reserved/validating/retiring has claimed this
@@ -645,7 +646,8 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                 "need_id": f"{'lifecycle' if lifecycle_pending else 'item'}:{plate}",
                 "summary": f"{operation} {plate}", "params": {"recipe": plate},
                 "features": {"plate_stage": stages.get(plate, "none"), "last_code": codes.get((operation, plate), "new"),
-                             "goal_need": plate in goal or lifecycle_pending,
+                             "goal_need": plate in goal or lifecycle_pending or stock_need,
+                             "committed_stock_shortfall": int(short.get(plate, 0)),
                              "lifecycle_pending": lifecycle_pending,
                              "lifecycle_state": district_state,
                              # The tooling said it waits on bots or coverage: retry after a wait, not at once.

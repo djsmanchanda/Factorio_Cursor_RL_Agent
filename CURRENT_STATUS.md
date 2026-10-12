@@ -516,3 +516,8 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
   bills, zero-stock delivery wakeups, precursor quantities, parallel idle recipe
   capacity and queue-mode starter visibility.224 focused/1240fast pass; unchanged
   firewall failure only. Lifecycle: fresh frozen private validation.
+
+- 2026-10-12 16:19 IST: Observed six configured malls, added gear capacity and
+  copper output~0.625→2.662/s; iron stayed~1.25/s. Committed plate shortages now
+  expose growth despite met phase rates.225 focused/1241fast pass; known firewall
+  failure only. Lifecycle: frozen private resumption; sustained speed unproven.
