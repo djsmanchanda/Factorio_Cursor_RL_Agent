@@ -752,3 +752,27 @@ def test_resume_recovers_completed_pending_entities_from_own_receipt(tmp_path, m
     assert proof['owned'][cell.job_id]['funded'] is False
     s.queue.reconcile(proof)
     assert cell.checkpoint['resume_construction'] is True
+
+
+def test_configured_producer_dispatches_despite_obsolete_cell_kit_dependencies(tmp_path):
+    q=queue(tmp_path)
+    job=q.enqueue('produce',{'item':'inserter','stock_target':20},priority=100,tick=0)
+    q.record(job,{'ok':False,'code':'material_shortage','details':{'required':{'long-handed-inserter':8}}},
+             snapshot(),can_produce=lambda _:True)
+    supply=q.jobs[job.dependencies[0]]
+    observed=snapshot(120,owned={job.job_id:{'producer_present':True}})
+    q.reconcile(observed)
+    assert supply.state!='complete' and job in q.ready(observed)
+    job.reason='dependency_cycle:old_cell_kit'
+    assert job in q.ready(observed)
+    # Unknown or an unconfigured machine cannot remove the kit dependency.
+    assert job not in q.ready(snapshot(120))
+
+
+def test_only_configured_physical_assemblers_prove_producer_presence(tmp_path):
+    s=object.__new__(DeterministicSession);s.queue=queue(tmp_path)
+    job=s.queue.enqueue('produce',{'item':'inserter','stock_target':20},priority=100,tick=0)
+    for machine in ({'name':'assembling-machine-1'}, {'name':'entity-ghost','recipe':'inserter'},
+                    {'name':'assembling-machine-1','recipe':'splitter'}):
+        assert s._queue_snapshot({'tick':0,'machines':[machine]}, {})['owned'][job.job_id]['producer_present'] is False
+    assert s._queue_snapshot({'tick':0,'machines':[{'name':'assembling-machine-1','recipe':'inserter'}]}, {})['owned'][job.job_id]['producer_present'] is True

@@ -136,6 +136,8 @@ class WorkQueue:
         # Irrelevant surplus crafting cannot wake an unchanged shortage.
         values = {i: [stock.get(i, 0), claims.get(i), snapshot.get('dependency_budget', {}).get(i, 0)]
                   for i in job.required}
+        if job.operation == 'produce':
+            values['producer_present'] = snapshot.get('owned', {}).get(job.job_id, {}).get('producer_present') is True
         if job.reason.startswith('geometry:'):
             values['layout'] = snapshot.get('layout')
         return json.dumps(values, sort_keys=True)
@@ -188,11 +190,13 @@ class WorkQueue:
                       if j.state != 'complete' and j.retry_tick <= self.tick
                       and j.blocked_signature is None
                       and not j.checkpoint.get('pending_entities')
-                      and not j.reason.startswith('dependency_cycle:')
+                      and (not j.reason.startswith('dependency_cycle:')
+                           or snapshot.get('owned', {}).get(j.job_id, {}).get('producer_present') is True)
                       and (j.kind != 'spare' or not any(
                           higher.state != 'complete' and higher.priority > j.priority
                           for higher in self.jobs.values()))
                       and (j.checkpoint.get('resume_construction') is True
+                           or snapshot.get('owned', {}).get(j.job_id, {}).get('producer_present') is True
                            or snapshot.get('owned', {}).get(j.job_id, {}).get('funded') is True
                            or all(self.jobs[d].state == 'complete' for d in j.dependencies))]
         return sorted(candidates, key=lambda j: (

@@ -201,6 +201,8 @@ class DeterministicSession:
     def _queue_snapshot(self, facts, economics):
         stock = economics.get("material_stock")
         owned = {}
+        producers = {m.get("recipe") for m in facts.get("machines", [])
+                     if m.get("name") in live_base.ASSEMBLER_TIERS and m.get("recipe")}
         loans = economics.get("loans") or []
         def pending_entities(job):
             receipt = job.checkpoint.get("receipt", {})
@@ -213,6 +215,8 @@ class DeterministicSession:
                          if pending_positions else {})
         for job in self.queue.jobs.values():
             proof = {"reserved": {}}
+            if job.operation == "produce":
+                proof["producer_present"] = job.item in producers
             pending = pending_entities(job) if job.state != "complete" else []
             if pending:
                 proof["pending_ready"] = all(pending_names.get(tuple(e["position"])) == e["entity"] for e in pending)

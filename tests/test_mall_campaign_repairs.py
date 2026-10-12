@@ -339,3 +339,15 @@ def test_maintenance_services_other_completed_loans_while_one_craft_finishes(mon
     monkeypatch.setattr(b,'_submit_bootstrap_loan',unexpected)
     with pytest.raises(StuckError,match='unexpected adapter'):
         b._release_completed_construction_loans(object(),object(),'private','player',(0,0),lambda _:None)
+
+
+def test_disconnected_logistic_gate_is_repaired_before_disabled_classification(monkeypatch):
+    existing=SimpleNamespace(machine_count=1,working_count=0,machine_positions=((63.5,48.5),),output_position=(63.5,44.5))
+    plan=SimpleNamespace(existing=existing)
+    client=SimpleNamespace(command=lambda _:None)
+    monkeypatch.setattr(b.live_base,'entity_statuses',lambda *a:{(63.5,48.5):'disabled_by_control_behavior'})
+    covered=[]
+    monkeypatch.setattr(b,'extend_roboport_coverage',lambda *a,**kw:(covered.append((a[4],kw['purpose'])) or False))
+    assert b._repair_stalled_line(client,object(),'nauvis','player','inserter',(3,-1),lambda _:None,
+                                 plan,mall_provider=(63.5,44.5),upgrade_bootstrap=False)==(63.5,44.5)
+    assert covered==[((63.5,48.5),'logistic')]

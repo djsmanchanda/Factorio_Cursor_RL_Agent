@@ -214,3 +214,16 @@ def test_vertical_submission_uses_the_preflight_owner(monkeypatch):
                                   lambda *a,**kw:None,lambda _:None,SEED_A,'north')
     assert names[0]=='paired_mall_inserter'
     assert not any(name.startswith('seed_vertical_mall_') for name in names)
+
+
+def test_vertical_bringup_covers_gated_machine_beyond_covered_requester(monkeypatch):
+    covered=[]
+    monkeypatch.setattr(mall,'assert_mall_cell_footprint_free',lambda *a:None)
+    monkeypatch.setattr(mall,'_submit',lambda *a,**kw:None)
+    def bring(*args,**kwargs):covered.extend(kwargs['logistic_chest_positions'])
+    mall._build_seed_vertical_slot(object(),object(),'nauvis','player','inserter',{},REFERENCE,
+                                  bring,lambda _:None,(59,42),'south',stock_gate_target=28)
+    assert (63.5,43.5) in covered and (63.5,48.5) in covered
+    # Live boundary: requester is served by (52,20); its machine is outside25.
+    assert max(abs(63.5-52),abs(43.5-20))<25
+    assert max(abs(63.5-52),abs(48.5-20))>25

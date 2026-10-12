@@ -425,3 +425,9 @@ Once observation verifies a job's pending bot-built entities, its continuation
 can finish without refilling the consumed kit's shared supply target. The
 checkpoint survives resumption; new shortages and geometry blockers still wait.
 Pending proof may be recovered from the same world's exact construction receipt.
+
+Mall bring-up covers both logistic chests and gated assembler positions.
+An existing configured producer is dispatchable independently of obsolete cell
+kit dependencies, without claiming its finite batch is complete. Shared repair
+checks mall-machine logistic coverage before classifying a disabled gate as a
+healthy demand wait, so a covered requester cannot mask a disconnected machine.

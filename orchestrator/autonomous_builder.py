@@ -5656,6 +5656,12 @@ def _repair_stalled_line(
     pre_statuses = live_base.entity_statuses(
         client, surface, existing.machine_positions,
     )
+    if mall_provider is not None and callable(getattr(client, "command", None)):
+        # Disabled by a logistic condition is healthy only inside its network.
+        # A vertical mall's chest can be covered while its gated machine is not.
+        for position in existing.machine_positions:
+            extend_roboport_coverage(client, bridge, surface, force, position, emit,
+                                    purpose="logistic", reserved_tiles=mall_grid_reserved_tiles(reference_point))
     if pre_statuses and all(
         status in {"working", "full_output", "disabled_by_control_behavior"}
         for status in pre_statuses.values()

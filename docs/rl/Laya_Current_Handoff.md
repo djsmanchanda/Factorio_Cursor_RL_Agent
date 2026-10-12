@@ -484,3 +484,18 @@ and backlog expansion; material and geometry validators remain authoritative.
 actual preserved queue readies the installed inserter cell despite unfinished
 global supply targets. Next lifecycle: frozen private resumption to observe
 crafting, manufacturing mix and parallel capacity.
+
+### 2026-10-12 17:08 IST — disconnected mall stock gate diagnosed and repaired
+
+67d7723 run persistent-laya-s50616-1791804743 configured inserter cell but
+actual crafts_finished stayed0. Exact private27992 read: roboport52,20 radius25
+serves requester63.5,43.5; assembler63.5,48.5 and vertical arms have no network.
+Its logistic condition disables despite network inserter stock0. Stop confirmed.
+Shared mall bring-up now covers assembler positions as well as chests (paired,
+vertical and quad); existing mall repair checks that coverage before accepting
+disabled_by_control_behavior as a healthy wait. Exact configured physical
+producer fact permits finite jobs to service output/repair independently of
+obsolete cell-kit dependencies; it never credits completion. Actual saved-state
+replay readies produce.inserter.315focused/1256fast pass,3skip/knownfour-import
+firewall. Lifecycle: new frozen current-world private resume; bots plan/build
+normal coverage without manual gameplay repairs.

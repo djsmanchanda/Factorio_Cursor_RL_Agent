@@ -541,3 +541,8 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
   consumed kits; approved automatic growth replaces the queue opening cap.
   Actual saved-world replay readies its installed inserter cell.311focused/
   1253fast pass,3skip; knownfirewall. Lifecycle: new frozen private resumption.
+
+- 2026-10-12 17:08 IST: Exact private probe found covered requester but disconnected
+  gated inserter assembler. Mall bring-up/repair now cover machine controls;
+  observed configured producers can service queued batches despite old kits.
+  315focused/1256fast pass,3skip/knownfirewall. Lifecycle: frozen private resume.

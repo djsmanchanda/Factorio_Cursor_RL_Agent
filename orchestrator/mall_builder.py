@@ -1461,7 +1461,7 @@ def build_compact_mall_stage(
     bring_stage_up(
         client, bridge, surface, force, f"compact mall for {recipe}",
         origin, stage_area, substation, [machine], emit,
-        logistic_chest_positions=[*ingredient_sources.values(), *chests],
+        logistic_chest_positions=[*ingredient_sources.values(), *chests, machine],
         reserved_tiles=reserved_tiles,
     )
     _submit(client, bridge, surface, requests, f"mall_inputs_{recipe}", emit)
@@ -1505,7 +1505,8 @@ def _build_seed_vertical_slot(
         client, bridge, surface, force, f"compact mall for {recipe}",
         origin, ((center[0] - 7, center[1] - 7), (center[0] + 7, center[1] + 7)),
         reserved_substation_position(reference_point, origin), [machine], emit,
-        logistic_chest_positions=[*ingredient_sources.values(), center, provider],
+        # The gated assembler also needs a logistic network at its own tile.
+        logistic_chest_positions=[*ingredient_sources.values(), center, provider, machine],
         reserved_tiles=planned_footprint_tiles(plan) | mall_grid_reserved_tiles(reference_point),
     )
     _submit(client, bridge, surface, requests, f"mall_inputs_{recipe}", emit)
@@ -1687,7 +1688,7 @@ def build_quad_mall_stage(
     bring_stage_up(
         client, bridge, surface, force, f"quad bootstrap mall for {recipe}",
         center, stage_area, substation, machines, emit,
-        logistic_chest_positions=[*ingredient_sources.values(), *chests],
+        logistic_chest_positions=[*ingredient_sources.values(), *chests, *machines],
         reserved_tiles=reserved_tiles,
     )
     if requests["phases"][0]["actions"]:
