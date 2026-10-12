@@ -461,3 +461,12 @@ and funded ghosts claim the chosen half before power can yield.162 focused
 passes; fast gate1227 passes/3 skips, unchanged four-import firewall failure.
 Lifecycle: new frozen Python run; no Lua deployment. First smoke stopped and
 preserved at286s; no mall output improvement claimed for that smoke.
+
+### 2026-10-12 14:16 IST — engine-compatible craft-boundary pause
+
+Factorio2.1.21 exposes `active` as read-only. Boundary holds now use the writable
+`disabled_by_script` flag and restore its previous value. Read-only-active Lua
+fixture and128 focused tests pass; fast1227 passes/3 skips retains only known
+firewall failure. The actual private engine accepted a hold and restore; a
+following survey verified the assembler active again. Lifecycle: new frozen
+Python runner; no Lua deployment. The second smoke stopped on this adapter error.

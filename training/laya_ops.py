@@ -271,7 +271,7 @@ class DeterministicSession:
                "local e=s.find_entities_filtered{position={" + str(position[0])+","+str(position[1]) +
                "},radius=0.1,type='assembling-machine',force="+json.dumps(FORCE)+",limit=1}[1];"
                "if e and e.get_recipe() and e.get_recipe().name=="+json.dumps(loan.step_recipe or loan.current_recipe)+
-               " and e.crafting_progress==0 then e.active=false;rcon.print('held') else rcon.print('boundary_wait') end")
+               " and e.crafting_progress==0 then e.disabled_by_script=true;rcon.print('held') else rcon.print('boundary_wait') end")
         lower.checkpoint["hold_position"] = list(position)
         self.queue.save()
         if self.client.command("/sc " + lua).strip() != "held":
@@ -297,7 +297,7 @@ class DeterministicSession:
             return
         lua = ("local e=game.surfaces["+json.dumps(SURFACE)+"].find_entities_filtered{position={"+
                str(position[0])+","+str(position[1])+"},radius=0.1,type='assembling-machine',force="+
-               json.dumps(FORCE)+",limit=1}[1];if e then e.active=true end")
+               json.dumps(FORCE)+",limit=1}[1];if e then e.disabled_by_script=false end")
         self.client.command("/sc " + lua)
         job.checkpoint.pop("hold_position", None)
         self.queue.save()

@@ -293,3 +293,11 @@ high-priority peers delayed gear service. Exact pending-entity waits, ready-firs
 fair polling and persisted mall allocation/funded ghost submission fix that
 mechanism.162 focused passes; fast1227 passes/3 skips with only known firewall
 failure. The next frozen private smoke starts through the same OC endpoints.
+
+### 2026-10-12 14:16 IST — pause adapter verified against Factorio2.1.21
+
+Run `persistent-laya-s50616-1791794354` (df82b86) stopped at26seconds on its first
+mall recipe configuration: the engine makes `LuaEntity.active` read-only.
+Boundary guards now use writable `disabled_by_script`; actual private-engine
+hold/restore and subsequent active=true survey passed.128 focused/1227 fast
+checks pass; only unchanged firewall baseline fails. A fresh frozen run follows.

@@ -180,27 +180,29 @@ def test_wait_choices_keep_executor_advancing_and_record_each_lane(tmp_path):
     assert 'work_queue' in summary
 
 
-def test_recipe_handoff_waits_for_boundary_then_restores_active_flag():
+def test_recipe_handoff_uses_writable_disable_flag_and_restores_it():
     import subprocess
     import pytest
     from orchestrator.stage_services import _hold_recipe_changes, StuckError
     class LuaClient:
-        progress, active = 0.5, True
+        progress, disabled = 0.5, False
         def command(self, text):
             lua = (
-                f"e={{active={str(self.active).lower()},crafting_progress={self.progress}}};"
+                f"e={{disabled_by_script={str(self.disabled).lower()},crafting_progress={self.progress}}};"
+                "setmetatable(e,{__index=function(t,k) if k=='active' then return not t.disabled_by_script end end,"
+                "__newindex=function(t,k,v) if k=='active' then error('LuaEntity::active is read only') else rawset(t,k,v) end end});"
                 "function e.get_recipe() return {name='inserter'} end;"
                 "game={surfaces={private={find_entities_filtered=function() return {e} end}}};"
                 "rcon={print=function(v) print(v) end};helpers={};"
                 "helpers.json_to_table=function(v) if string.find(v,'recipe') then "
-                "return {{x=1,y=1,recipe='electric-mining-drill'}} else return {{x=1,y=1,active=true}} end end;"
+                "return {{x=1,y=1,recipe='electric-mining-drill'}} else return {{x=1,y=1,disabled=false}} end end;"
                 "helpers.table_to_json=function(t) if #t==0 then return '[]' else "
-                "return '[{\"x\":1,\"y\":1,\"active\":true}]' end end;"
-                + "(function() " + text[4:] + " end)();print('ACTIVE='..tostring(e.active))"
+                "return '[{\"x\":1,\"y\":1,\"disabled\":false}]' end end;"
+                + "(function() " + text[4:] + " end)();print('DISABLED='..tostring(e.disabled_by_script))"
             )
             result = subprocess.run(['lua','-'], input=lua, text=True, capture_output=True, check=True)
             lines = result.stdout.splitlines()
-            self.active = lines[-1] == 'ACTIVE=true'
+            self.disabled = lines[-1] == 'DISABLED=true'
             return lines[0] if len(lines)>1 else ''
     client = LuaClient()
     plan = {'phases': [{'actions': [{'action_type': 'configure_entity', 'entity': 'assembling-machine-1',
@@ -209,11 +211,11 @@ def test_recipe_handoff_waits_for_boundary_then_restores_active_flag():
         with pytest.raises(StuckError, match='completed craft'):
             with _hold_recipe_changes(client, 'private', 'player', plan):
                 raise AssertionError('entered before boundary')
-        assert client.active is True
+        assert client.disabled is False
         client.progress = 0
         with _hold_recipe_changes(client, 'private', 'player', plan):
-            assert client.active is False
-        assert client.active is True
+            assert client.disabled is True
+        assert client.disabled is False
 
 
 def install_live_recipe_fixture(monkeypatch):

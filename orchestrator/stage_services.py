@@ -552,8 +552,8 @@ def _hold_recipe_changes(client, surface, force, plan):
                ")) do local e=s.find_entities_filtered{position={a.x,a.y},radius=0.1,type='assembling-machine',force="+
                json.dumps(force)+",limit=1}[1];if e then local r=e.get_recipe();"
                "if not r or r.name~=a.recipe then if e.crafting_progress~=0 then rcon.print('BOUNDARY_WAIT');return end;"
-               "todo[#todo+1]={e=e,x=a.x,y=a.y,active=e.active} end end end;local held={};"
-               "for _,v in ipairs(todo) do v.e.active=false;held[#held+1]={x=v.x,y=v.y,active=v.active} end;"
+               "todo[#todo+1]={e=e,x=a.x,y=a.y,disabled=e.disabled_by_script} end end end;local held={};"
+               "for _,v in ipairs(todo) do v.e.disabled_by_script=true;held[#held+1]={x=v.x,y=v.y,disabled=v.disabled} end;"
                "rcon.print(helpers.table_to_json(held))")
         reply = client.command("/sc " + lua).strip()
         if reply == "BOUNDARY_WAIT":
@@ -567,7 +567,7 @@ def _hold_recipe_changes(client, surface, force, plan):
             lua = ("local s=game.surfaces["+json.dumps(surface)+"];for _,a in ipairs(helpers.json_to_table("+
                    json.dumps(json.dumps(held))+")) do local e=s.find_entities_filtered{position={a.x,a.y},"
                    "radius=0.1,type='assembling-machine',force="+json.dumps(force)+
-                   ",limit=1}[1];if e then e.active=a.active end end")
+                   ",limit=1}[1];if e then e.disabled_by_script=a.disabled end end")
             client.command("/sc " + lua)
 
 
