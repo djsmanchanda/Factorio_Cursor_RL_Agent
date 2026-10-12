@@ -583,3 +583,8 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
   same-recipe maintenance. 77 focused passes; scoped fast gate only inherited
   firewall failure. Lifecycle: new frozen private runner, helper disabled for
   personal observation; chemical/science live outcome pending.
+
+- 2026-10-12 20:13 IST: Funded cooperative jobs bypass serial chemical capability order;
+  only physically committed mall allocations block borrowing. Probe verified
+  steel1140 and three unbuilt previews. 130 focused/1271 fast passes,3 skips,
+  inherited firewall failure. Lifecycle: new frozen private runner; no mod deploy.

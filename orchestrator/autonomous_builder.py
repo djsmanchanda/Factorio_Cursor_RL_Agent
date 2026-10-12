@@ -8822,6 +8822,11 @@ def _ensure_chemical_ladder_predecessor(
     item: str, reference_point: Point, emit: Callable[[str], None],
 ) -> None:
     """Advance at most one missing rung before constructing `item`."""
+    if cooperative():
+        # Queued work discovers actual input/construction shortages itself.
+        # The serial capability order is a scheduling preference: an idle
+        # stocked furnace must not gate a funded refinery/equipment batch.
+        return
     if item == "steel-plate":
         _defer_steel_blocked_loan(client, bridge, surface, force, reference_point, emit)
         return
@@ -9618,7 +9623,8 @@ def _rationed_mall_batch(
         )
     active = active_bootstrap_loans(client, surface, force)
     own_loan = next((loan for loan in active if loan.target_item == item), None)
-    if own_loan is None and saved_mall_allocation(surface, force, item) is not None:
+    continuation = saved_mall_allocation(surface, force, item)
+    if own_loan is None and mall_allocation_is_committed(client, surface, force, continuation):
         # This job already admitted a standing cell. Continue its exact kit;
         # repricing a fresh slot or borrowing an anchor abandons installed work.
         return False

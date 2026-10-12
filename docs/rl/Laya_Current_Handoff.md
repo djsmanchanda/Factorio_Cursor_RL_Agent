@@ -653,3 +653,25 @@ with the private world preserved. New frozen Python runner required; no mod
 deployment. Frozen runs can disable their automatic helper explicitly; personal
 observation uses that opt-out because requested T3 codex/Luna delegation tools
 are unavailable. Actual chemical/science output remains unverified.
+
+### 2026-10-12 20:12 IST — funded queue work bypasses serial capability scheduling
+
+Run persistent-laya-s50616-1791815791 (1811253, helper disabled) stopped
+after 230 seconds/9 decisions to fix the next observed blocker. Preserved
+world probe: steel1140, iron4800, but legacy refinery predecessor=steel-plate.
+The idle steel furnace has no active recipe, so the serial ladder repeatedly
+re-submitted its seed despite sufficient batch inputs. Cooperative execution
+now lets actual input/bot construction bills determine predecessors. The
+serial deterministic scheduler keeps its original ladder; hard shared planners,
+funding, chemical legality and lab admission remain enforced.
+
+Saved previews for medium poles(35,47)left, underground pipes(41,52)left and
+iron sticks(32,57)left had no physical machine or ghost. The earlier continuation
+fix mistook any preview for admitted construction, preventing rotation while
+provider chests were reserved for chemistry. Now only physical commitment
+keeps a batch on its saved build; an unbuilt preview can borrow funded existing
+capacity. 130 focused queue/chemical/campaign tests pass. Broader fast gate
+running; new private freeze required, no Lua deployment. Chemical/science
+output remains unverified.
+
+Final fast verification:1,271 passed,three skipped,only inherited four-import firewall failure;3,039 deselected.

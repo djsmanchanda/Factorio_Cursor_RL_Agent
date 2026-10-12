@@ -500,6 +500,44 @@ def test_committed_cell_continues_at_cap_without_borrowing(monkeypatch):
                                   plan,None,upgrade_bootstrap=False)
 
 
+def test_unbuilt_preview_cannot_block_a_funded_batch_behind_chest_supply(monkeypatch):
+    from orchestrator import autonomous_builder as ab
+    install_live_recipe_fixture(monkeypatch)
+    state={'mall_allocation:private:player:transport-belt': [[32,32],'right']}
+    monkeypatch.setattr(ab,'_independent_mall_ready',lambda *a:False)
+    monkeypatch.setattr(ab,'_recipe_depends_on_fast_transport_belt',lambda *a:False)
+    monkeypatch.setattr(ab,'_transferable_or_available_stock',lambda *a:{'iron-plate':100})
+    monkeypatch.setattr(ab,'_rationed_mall_completion_target',lambda *a:10)
+    monkeypatch.setattr(ab,'_unfunded_ladder_ingredient',lambda *a:None)
+    monkeypatch.setattr(ab,'active_bootstrap_loans',lambda *a:[])
+    monkeypatch.setattr(ab.live_base,'entity_at',lambda *a:None)
+    monkeypatch.setattr(ab,'_bootstrap_loan_stock',lambda *a:({},{}))
+    monkeypatch.setattr(ab,'bootstrap_external_shortages',lambda *a:[])
+    monkeypatch.setattr(ab.live_base,'find_line',lambda *a,**k:None)
+    monkeypatch.setattr(ab,'_bootstrap_demand_cell_affordable',lambda *a:(False,{'passive-provider-chest':1}))
+    monkeypatch.setattr(ab,'_rationed_mall_spare_target',lambda *a:10)
+    calls=[]
+    monkeypatch.setattr(ab,'_start_bootstrap_loan',lambda *a,**k:calls.append((a[4],a[5])) or 'batch started')
+    with execution_slice(checkpoint=state):
+        assert ab._rationed_mall_batch(object(),object(),'private','player','transport-belt',10,(0,0),lambda _:None)
+    assert calls==[('transport-belt',10)]
+    assert state['mall_allocation:private:player:transport-belt']==[[32,32],'right']
+
+
+def test_queue_can_make_refinery_equipment_from_stock_without_restarting_idle_steel(monkeypatch):
+    from orchestrator import autonomous_builder as ab
+    install_live_recipe_fixture(monkeypatch)
+    monkeypatch.setattr(ab,'_missing_chemical_ladder_predecessor',lambda *a:'steel-plate')
+    established=[]
+    monkeypatch.setattr(ab,'ensure_produced',lambda *a,**k:established.append(a[4]))
+    with execution_slice():
+        ab._ensure_chemical_ladder_predecessor(object(),object(),'private','player','oil-refinery',(0,0),lambda _:None)
+    assert established==[]
+    with pytest.raises(ab.ProductionPrerequisiteDeferred):
+        ab._ensure_chemical_ladder_predecessor(object(),object(),'private','player','oil-refinery',(0,0),lambda _:None)
+    assert established==['steel-plate']
+
+
 def test_idle_lanes_automatically_take_ready_items_and_missing_precursors(tmp_path, monkeypatch):
     from orchestrator import autonomous_builder as ab, mall_builder as mall
     from planners.recipe_data import MACHINE_CAPABILITIES
