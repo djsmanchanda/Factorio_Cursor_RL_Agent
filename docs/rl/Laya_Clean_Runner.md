@@ -357,3 +357,11 @@ polling, and deferred peers poll by oldest last attempt before priority.
 that job until a batched survey confirms them built. Cooperative mall creation
 persists the selected cell half and submits its funded ghosts before power
 work can yield; restart/retry uses that same allocation.
+
+A stock gate can freeze a partial craft. Boundary preparation now parks the
+exact feeding inserters, returns unused real machine/held inputs to the cell's
+requester, and temporarily disconnects that assembler's stock gate. The in-flight
+craft completes with no next input; only then may configuration hold/change it.
+Feeder flags and the previous gate connection live in the world-scoped runtime
+checkpoint and restore after the transaction. This does not change standing
+numeric limits or manufacture an item/progress credit.

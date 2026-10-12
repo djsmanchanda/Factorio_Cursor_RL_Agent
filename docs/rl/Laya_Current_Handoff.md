@@ -301,3 +301,14 @@ mall recipe configuration: the engine makes `LuaEntity.active` read-only.
 Boundary guards now use writable `disabled_by_script`; actual private-engine
 hold/restore and subsequent active=true survey passed.128 focused/1227 fast
 checks pass; only unchanged firewall baseline fails. A fresh frozen run follows.
+
+### 2026-10-12 14:36 IST — observed mid-craft stock-gate deadlock repaired
+
+Run `persistent-laya-s50616-1791794801` (40f8e11) produced gear/cable but remained
+at three assemblers with one unconfigured. The user's missing belts/inserters/
+drills observation matched the live survey. Cable loan progress0.7667 was frozen
+by its stock gate; zero-boundary sampling could not hand it to circuits. Stopped
+through OC; preserved before the next fresh archive. Shared craft-drain mechanics
+now finish the current craft without a next input and restore exact feeder/gate
+flags. Native-Lua conservation/restart test and private engine crafts8→9/progress0
+verification pass.140 focused/1229 fast pass; only unchanged firewall baseline.

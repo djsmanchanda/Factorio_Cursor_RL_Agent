@@ -952,7 +952,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         if callable(prepare):
             if queue_enabled:
                 from orchestrator.execution_slice import execution_slice
-                with execution_slice():
+                with execution_slice(runtime=session.queue.runtime, persist=session.queue.save):
                     prepare()
             else:
                 prepare()

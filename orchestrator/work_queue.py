@@ -52,11 +52,13 @@ class WorkQueue:
     def __init__(self, path: Path, *, world_id: str, tick: int):
         self.path, self.world_id = path, world_id
         self.jobs: dict[str, WorkJob] = {}
+        self.runtime = {}
         if path.exists():
             payload = json.loads(path.read_text())
             if payload.get('version') != self.VERSION or payload.get('world_id') != world_id:
                 raise ValueError('Work queue world/version mismatch')
             self.jobs = {j['job_id']: WorkJob(**j) for j in payload['jobs']}
+            self.runtime = payload.get('runtime', {})
             if tick < payload['tick']:
                 # A copied/reset world's clock cannot postpone all its work.
                 for job in self.jobs.values():
@@ -240,5 +242,5 @@ class WorkQueue:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temp = self.path.with_suffix('.tmp')
         temp.write_text(json.dumps({'version': self.VERSION, 'world_id': self.world_id,
-                                   'tick': self.tick, 'jobs': self.describe()}, indent=2)+'\n')
+                                   'tick': self.tick, 'jobs': self.describe(), 'runtime': self.runtime}, indent=2)+'\n')
         temp.replace(self.path)

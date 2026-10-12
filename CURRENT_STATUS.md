@@ -470,3 +470,14 @@ fixture and128 focused tests pass; fast1227 passes/3 skips retains only known
 firewall failure. The actual private engine accepted a hold and restore; a
 following survey verified the assembler active again. Lifecycle: new frozen
 Python runner; no Lua deployment. The second smoke stopped on this adapter error.
+
+### 2026-10-12 14:36 IST — gated in-flight crafts can reach a safe handoff
+
+Live feedback confirmed three assemblers, one empty, no belts/inserters/drills:
+a cable loan's stock gate froze progress0.7667 before its recipe handoff. Shared
+boundary preparation now parks feeders, returns unused real inputs, finishes
+that craft and restores feeder/gate state after configuration. Durable runtime
+checkpoints retain pending drains. Native-Lua conservation/restart regression,
+140 focused passes; fast1229 passes/3 skips, only known firewall failure. Private
+engine verified crafts8→9, progress→0, hold and restore. Lifecycle: fresh frozen
+Python runner; no mod deployment. Natural throughput improvement still to observe.

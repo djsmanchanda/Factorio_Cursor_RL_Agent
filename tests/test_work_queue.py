@@ -347,3 +347,72 @@ def test_mall_allocation_survives_power_yield_and_claims_ghosts_first(monkeypatc
                                               lambda *a:None,lambda _:None)
     assert events==['mall_ghosts','power','mall_ghosts','power']
     assert plans[0]==plans[1] and choose==[True] and saved==[True]
+
+
+def test_drain_finishes_gated_craft_without_another_input_and_survives_restart(tmp_path):
+    import json, re, subprocess
+    import pytest
+    from orchestrator.stage_services import _hold_recipe_changes, StuckError
+    class NativeLua:
+        state={'progress':0.75,'finished':8,'input':7,'held':1,'chest':13,'feeding_disabled':False,
+               'machine_disabled':False,'connected':True}
+        def command(self,text):
+            def literal(v):
+                if isinstance(v,dict): return '{'+','.join('['+json.dumps(k)+']='+literal(x) for k,x in v.items())+'}'
+                if isinstance(v,list): return '{'+','.join(literal(x) for x in v)+'}'
+                return json.dumps(v)
+            body=re.sub(r'helpers\.json_to_table\(("(?:\\.|[^"\\])*")\)',
+                        lambda m:literal(json.loads(json.loads(m[1]))),text[4:])
+            preamble='''
+local state=STATE
+local st={name='copper-plate',quality='normal',count=state.input}
+local hs={name='copper-plate',quality='normal',count=state.held}
+st.valid_for_read=st.count>0;hs.valid_for_read=hs.count>0
+local cb={connect_to_logistic_network=state.connected}
+local e={position={x=1,y=1},force='player',crafting_progress=state.progress,
+ disabled_by_script=state.machine_disabled,products_finished=state.finished,
+ bounding_box={left_top={x=-0.5,y=-0.5},right_bottom={x=2.5,y=2.5}}}
+function e.get_recipe() return {name='copper-cable'} end
+function e.get_control_behavior() return cb end
+function e.get_inventory(index) assert(index==1);return {st} end
+setmetatable(e,{__index=function(t,k) if k=='active' then return not t.disabled_by_script end end,
+ __newindex=function(t,k,v) if k=='active' then error('active is read only') else rawset(t,k,v) end end})
+local feeder={position={x=3,y=1},drop_position={x=1,y=1},pickup_position={x=4,y=1},
+ disabled_by_script=state.feeding_disabled,held_stack=hs}
+local dst={can_insert=function(_) return true end,insert=function(item) state.chest=state.chest+item.count;return item.count end}
+local surface={find_entities_filtered=function(opts)
+ if opts.type=='assembling-machine' then return {e} elseif opts.type=='inserter' then return {feeder} else return {dst} end end}
+game={surfaces={private=surface}};defines={inventory={crafter_input=1}}
+local function encode(v)
+ if type(v)=='table' then local a={};if #v>0 then for _,x in ipairs(v) do a[#a+1]=encode(x) end;return '['..table.concat(a,',')..']' end
+ for k,x in pairs(v) do a[#a+1]=string.format('%q',k)..':'..encode(x) end;return '{'..table.concat(a,',')..'}'
+ elseif type(v)=='string' then return string.format('%q',v) else return tostring(v) end end
+helpers={table_to_json=encode};rcon={print=function(v) print(v) end}
+(function() BODY end)()
+state.input=st.count;state.held=hs.count;state.feeding_disabled=feeder.disabled_by_script
+state.machine_disabled=e.disabled_by_script;state.connected=cb.connect_to_logistic_network
+print('STATE='..encode(state))
+'''
+            lua=preamble.replace('STATE',literal(self.state),1).replace('BODY',body,1)
+            out=subprocess.run(['lua','-'],input=lua,text=True,capture_output=True,check=True).stdout.splitlines()
+            self.state=json.loads(out[-1][6:])
+            return out[0] if len(out)>1 else ''
+    client=NativeLua()
+    q=queue(tmp_path)
+    plan={'phases':[{'actions':[{'action_type':'configure_entity','entity':'assembling-machine-1',
+                                 'position':{'x':1,'y':1},'recipe':'electronic-circuit'}]}]}
+    with execution_slice(runtime=q.runtime,persist=q.save):
+        with pytest.raises(StuckError,match='completed craft'):
+            with _hold_recipe_changes(client,'private','player',plan): pass
+    assert client.state['input']==0 and client.state['held']==0 and client.state['chest']==21
+    assert client.state['feeding_disabled'] and not client.state['connected']
+    assert client.state['progress']==0.75 and client.state['finished']==8  # No manufactured progress.
+    q=queue(tmp_path)
+    assert q.runtime['craft_drains']['1.00:1.00']['feeders'][0]['disabled'] is False
+    # Engine completes the already-funded in-flight craft with no next input.
+    client.state.update(progress=0,finished=9)
+    with execution_slice(runtime=q.runtime,persist=q.save):
+        with _hold_recipe_changes(client,'private','player',plan):
+            assert client.state['machine_disabled'] is True
+    assert not client.state['machine_disabled'] and not client.state['feeding_disabled']
+    assert client.state['connected'] is True and q.runtime['craft_drains']=={}

@@ -277,6 +277,9 @@ class DeterministicSession:
         if self.client.command("/sc " + lua).strip() != "held":
             lower.checkpoint.pop("hold_position", None)
             lower.checkpoint["preemption_wait"] = {"for": urgent.job_id, "reason": "craft in progress"}
+            from orchestrator.craft_boundary import request_drain
+            request_drain(self.client, SURFACE, FORCE, [{"entity": loan.machine_name,
+                          "position": {"x": position[0], "y": position[1]}, "recipe": urgent.item}])
             self.queue.save()
             return False
         lower.checkpoint.pop("preemption_wait", None)
@@ -335,14 +338,14 @@ class DeterministicSession:
                                                  "minimum_machines": 1+(existing.machine_count if existing else 0)},
                                priority=demanded.priority+1, tick=facts["tick"], kind="capacity")
         def execute(job, params):
-            with execution_slice(checkpoint=job.checkpoint, persist=self.queue.save):
+            with execution_slice(checkpoint=job.checkpoint, persist=self.queue.save, runtime=self.queue.runtime):
                 result = self.run(job.operation, **params)
             if result.get("loan_batch") is not None:
                 self._queue_snapshot(facts, {"material_stock": stock, "loans": [result["loan_batch"]]})
             self.emit(f"QUEUE {job.job_id} priority={job.priority}: {result.get('code')}"
                       + (f" -- {result.get('message', '')[:180]}" if not result.get("ok") else ""))
             return result
-        with execution_slice():
+        with execution_slice(runtime=self.queue.runtime, persist=self.queue.save):
             receipts = self.queue.pulse(snapshot, execute, can_produce=self._queue_can_produce,
                                         preempt=self._queue_preempt)
         return receipts
