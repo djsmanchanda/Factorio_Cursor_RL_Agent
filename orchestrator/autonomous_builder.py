@@ -9551,13 +9551,17 @@ def _bootstrap_reserve_machine_target(
 
 def _missing_rotating_input(
     client: RconClient, surface: str, force: str, item: str,
-    target: int,
+    target: int, *, loan: MallBootstrapLoan | None = None,
 ) -> tuple[str, int] | None:
     """Find a missing direct ingredient that another rotating batch can make."""
     spec = LINE_RECIPES.get(item)
     if spec is None:
         return None
     actual, usable = _bootstrap_loan_stock(client, surface, force, item)
+    if loan is not None and callable(getattr(client, "command", None)):
+        # Bot-delivered inputs are no longer transferable stock, but this
+        # batch still owns them. Do not restore a productive funded actor.
+        usable = dict(Counter(usable) + Counter(_loan_owned_inputs(client, surface, loan)))
     missing = max(0, target - int(actual.get(item, 0)))
     if missing <= 0:
         return None
@@ -9632,7 +9636,7 @@ def _rationed_mall_batch(
         return False
     if own_loan is not None:
         missing_input = _missing_rotating_input(
-            client, surface, force, item, target,
+            client, surface, force, item, target, loan=own_loan,
         )
         if missing_input is not None:
             prerequisite, required = missing_input

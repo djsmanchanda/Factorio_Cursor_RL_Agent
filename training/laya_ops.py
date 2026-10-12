@@ -243,6 +243,9 @@ class DeterministicSession:
             if job.operation == "produce" and free is not None and self._queue_can_produce(job.item):
                 spec = LINE_RECIPES[job.item]
                 if spec.get("machine") in live_base.ASSEMBLER_TIERS and not spec.get("fluid_ingredients"):
+                    proof["batch_inputs"] = list(spec["ingredients"])
+                    proof["batch_started"] = any(l.get("target_item") == job.item and l.get("step_recipe") == job.item
+                                                 for l in loans)
                     batch_free = self._queue_batch_stock(stock, job.item, free)
                     crafts = math.ceil(max(0, job.target-job.delivered-current_stock) /
                                        max(float(spec.get("product_amount", 1)), 1))

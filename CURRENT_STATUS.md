@@ -608,3 +608,8 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
   sticks fund poles; foreign4 raises supply target12→16.81focused/1275fast
   passes,3skip/inherited firewall. Lifecycle:new private freeze/no Lua deploy;
   plastic/science not yet verified.
+
+- 2026-10-12 20:50 IST: Existing batches detach obsolete cell dependencies; rejected
+  cycle checks preserve credits. Rotating handoffs count owned requester/WIP.
+  325focused/1278fast passes,3skip/inherited firewall. Lifecycle:new private
+  freeze/no Lua deploy; chemistry construction observed,output pending.

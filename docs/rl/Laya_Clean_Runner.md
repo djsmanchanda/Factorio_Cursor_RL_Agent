@@ -479,3 +479,5 @@ Queue readiness distinguishes a funded finite production batch from a funded new
 Before borrowing, a finite batch forecasts its complete remaining solid input quantities into priority-inheriting precursor jobs. Output-per-craft and owned delivery credits reduce the bill. Active producers/loans keep their own WIP and supply handling; unknown stock cannot authorize a forecast.
 
 Batch readiness and precursor forecasts use the shared loan transaction owners (the item cell and its loan-input project). Its own reservations fund the batch; another project's held inventory raises the global supply target rather than completing an insufficient precursor job.
+
+A funded or active existing-lane batch supersedes non-recipe dependencies from its earlier unbuilt cell bill. The capacity job remains independent. Rejected cycle edges cannot resize a completed batch or erase its delivery credits. Rotating-input checks include only that loan's own requester/machine WIP alongside its allocatable network inputs.

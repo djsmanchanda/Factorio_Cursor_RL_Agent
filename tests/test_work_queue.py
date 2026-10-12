@@ -937,3 +937,30 @@ def test_batch_readiness_can_use_its_own_reservation_and_forecasts_foreign_hold(
     s._queue_supply_batch_inputs(facts,econ)
     sticks=s.queue.jobs[s.queue.identity('produce',{'item':'iron-stick'})]
     assert sticks.target==16 and ledger.projects['foreign-project'].reserved['iron-stick']==4
+
+
+def test_existing_batch_detaches_superseded_chest_bill_but_keeps_recipe_supply(tmp_path):
+    q=queue(tmp_path)
+    sticks=q.enqueue('produce',{'item':'iron-stick','stock_target':12},priority=100,tick=0)
+    chest=q.enqueue('produce',{'item':'passive-provider-chest','stock_target':1},priority=101,tick=0,parent=sticks.job_id)
+    iron=q.enqueue('produce',{'item':'iron-plate','stock_target':6},priority=101,tick=0,parent=sticks.job_id)
+    sticks.required={'passive-provider-chest':1,'iron-plate':6}
+    snap=snapshot(120,owned={sticks.job_id:{'batch_inputs':['iron-plate'],'batch_started':True}})
+    q.reconcile(snap)
+    assert sticks.dependencies==[iron.job_id] and sticks.required=={'iron-plate':6}
+    assert sticks.job_id not in chest.parents and sticks.job_id in iron.parents
+    restored=queue(tmp_path,tick=120)
+    assert restored.jobs[sticks.job_id].dependencies==[iron.job_id]
+
+
+def test_rejected_cycle_cannot_erase_completed_delivery_or_resize_its_bill(tmp_path):
+    q=queue(tmp_path)
+    parent=q.enqueue('produce',{'item':'medium-electric-pole','stock_target':12},priority=100,tick=0)
+    child=q.enqueue('produce',{'item':'iron-stick','stock_target':4},priority=101,tick=0)
+    # Old construction ownership created a path through the provider goal.
+    child.dependencies=[parent.job_id]
+    child.state='complete';child.delivered=4
+    child.checkpoint['lane_credits']={'owned-lane':4}
+    assert q.enqueue('produce',{'item':'iron-stick','stock_target':12},priority=102,tick=120,parent=parent.job_id) is None
+    assert child.state=='complete' and child.delivered==4 and child.target==4
+    assert child.checkpoint['lane_credits']=={'owned-lane':4}

@@ -79,6 +79,11 @@ class WorkQueue:
     def enqueue(self, operation, params, *, priority, tick, kind=None, parent=None):
         job_id = self.identity(operation, params)
         job = self.jobs.get(job_id)
+        if job is not None and parent and parent not in job.parents and self._path(job_id, parent):
+            # Reject the edge before touching an older batch's credits or bill.
+            self.jobs[parent].reason = f'dependency_cycle:{job_id}'
+            self.jobs[parent].state = 'blocked'
+            return None
         if job is None:
             job = WorkJob(job_id, operation, dict(params), priority, tick, len(self.jobs),
                           kind or ('production' if operation == 'produce' else 'construction'))
@@ -148,6 +153,20 @@ class WorkQueue:
         self.tick = int(snapshot['tick'])
         stock = snapshot.get('stock')
         owned = snapshot.get('owned', {})
+        for job in self.jobs.values():
+            evidence = owned.get(job.job_id, {})
+            if (job.operation == 'produce' and 'batch_inputs' in evidence
+                    and (evidence.get('batch_funded') or evidence.get('batch_started'))
+                    and not job.checkpoint.get('pending_entities')):
+                # Existing-lane production supersedes its unbuilt cell bill.
+                # Retain recipe input dependencies; expansion is a separate job.
+                inputs = set(evidence['batch_inputs'])
+                detached = [d for d in job.dependencies if self.jobs[d].item not in inputs]
+                for dep in detached:
+                    child = self.jobs[dep]
+                    child.parents = [parent for parent in child.parents if parent != job.job_id]
+                job.dependencies = [d for d in job.dependencies if d not in detached]
+                job.required = {item:n for item,n in job.required.items() if item in inputs}
         for job in self.jobs.values():
             dependencies = [[d, self.jobs[d].state, self.jobs[d].delivered, self.jobs[d].target]
                             for d in job.dependencies]

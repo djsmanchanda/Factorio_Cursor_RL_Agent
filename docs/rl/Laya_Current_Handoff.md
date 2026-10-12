@@ -743,3 +743,22 @@ fund the three poles; addingforeign4 rejects admission and targets16sticks.
 Next private freeze after fast gate; no mod deploy, chemistry/science pending.
 
 Final owned-batch fast gate:1,275passed,three skipped,only inherited four-import firewall failure.
+
+### 2026-10-12 20:49 IST — retire superseded cell dependencies and retain owned WIP
+
+Private run persistent-laya-s50616-1791817626(dd98cf9) submitted coal-belt/power packets and
+bot-built a charged port at(-315,-29); construction coverage continued. But
+the pole replenishment repeatedly restored/reborrowed2crafts at a time.
+_missing_rotating_input read only transferable stock, ignoring its own
+requester/machine inputs. It now counts that real owned WIP, consistently with
+loan production.
+
+The old unbuilt cell dependencies also remained after rotation started:
+sticks→provider→plastic→poles made attaching poles→sticks look cyclic. Queue
+reconciliation now detaches superseded non-recipe cell supplies for a funded
+or physically active solid batch; real construction/capacity jobs remain.
+Rejected cyclic attachments are checked before resizing an older batch or
+resetting delivery credits.325focused tests pass. Fast gate pending; next
+private Python freeze required,no mod deploy. Plastic/science output still0.
+
+Final stale-cell/WIP fast gate:1,278passed,three skipped,only inherited four-import firewall failure.

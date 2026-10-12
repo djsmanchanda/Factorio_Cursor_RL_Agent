@@ -378,3 +378,15 @@ def test_borrower_census_is_one_read_and_keeps_the_last_feedstock_anchor(monkeyp
     assert census['iron-gear-wheel'].machine_count==2
     assert census['iron-gear-wheel'].working_count==1
     assert census['iron-gear-wheel'].produced_count==50
+
+
+def test_rotating_batch_keeps_bot_delivered_inputs_instead_of_restoring_its_cell(monkeypatch):
+    monkeypatch.setitem(b.LINE_RECIPES,'medium-electric-pole',{'ingredients':['iron-stick','steel-plate','copper-cable'],
+                        'amounts':[4,2,2],'product_amount':1,'machine':'assembling-machine-1'})
+    monkeypatch.setattr(b,'_bootstrap_loan_stock',lambda *a:({'medium-electric-pole':6},{'iron-stick':0,'steel-plate':100,'copper-cable':100}))
+    monkeypatch.setattr(b,'_production_started',lambda *a:False)
+    monkeypatch.setattr(b,'_loan_owned_inputs',lambda c,s,l:{'iron-stick':24})
+    current=SimpleNamespace(target_item='medium-electric-pole')
+    client=SimpleNamespace(command=lambda _:None)
+    assert b._missing_rotating_input(client,'private','player','medium-electric-pole',12)==('iron-stick',24)
+    assert b._missing_rotating_input(client,'private','player','medium-electric-pole',12,loan=current) is None
