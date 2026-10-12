@@ -429,3 +429,13 @@ reserve a full bill. Two regressions fail before/pass after;255 focused
 passes; fast gate1204 passes/3 skips with only the unchanged four-import
 firewall failure. Lifecycle: new frozen Python runner required; no mod
 deployment. Sustained throughput remains unproven.
+
+### 2026-10-12 12:29 IST — full queue and binding ancestors reach standing gates
+
+Shared gate maintenance now receives the full mall construction queue in both
+Laya and the deterministic loop. Recipe/cell-bill ancestors of binding
+consumers receive the same required-stock treatment as directly named inputs.
+Two regressions fail before/pass after;274 focused passes; saved live-recipe
+replay raises circuit gate5→18; fast gate1206 passes/3 skips, only the
+unchanged four-import firewall failure. Lifecycle: new frozen Python runner
+required; no mod deployment. Sustained scale improvement remains unproven.

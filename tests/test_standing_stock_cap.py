@@ -286,3 +286,18 @@ def test_queued_binding_precursor_bypasses_optional_cap_without_admitted_bill(mo
     assert builder._effective_mall_stock_gate(
         object(), "nauvis", "player", "electronic-circuit",
         upgrade_bootstrap=False, requested=13) == 5
+
+
+def test_binding_consumer_opens_its_queued_precursor_gate(monkeypatch):
+    # The live catalog learns these recipes; a dry import has no such facts.
+    monkeypatch.setitem(builder.LINE_RECIPES, "fast-inserter",
+                        {"ingredients": ["electronic-circuit", "iron-plate", "inserter"]})
+    monkeypatch.setitem(builder.LINE_RECIPES, "splitter",
+                        {"ingredients": ["electronic-circuit", "iron-plate", "transport-belt"]})
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", None)
+    monkeypatch.setattr(builder, "_startup_mall_item_cap", lambda *_: 5)
+    monkeypatch.setattr(builder, "_rationed_mall_wip_gap", lambda *_: 0)
+    monkeypatch.setattr(builder, "_BLOCKING_MALL_ITEMS", {"fast-inserter", "splitter"})
+    assert builder._effective_mall_stock_gate(
+        object(), "nauvis", "player", "electronic-circuit",
+        upgrade_bootstrap=False, requested=18) == 18

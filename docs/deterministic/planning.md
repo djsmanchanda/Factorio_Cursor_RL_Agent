@@ -732,3 +732,8 @@ upstream sources. The hold releases when measured production starts.
 Named binding construction shortages include queued precursor demand even
 before a finite batch can reserve its full input bill. Such demand can exceed
 optional starter caps; the numeric standing growth policy still applies.
+
+Standing gate maintenance receives the full current construction queue, not
+only admitted reservations and active loans. Recipe and declared cell-bill
+ancestors of binding consumers receive required-stock treatment, so a circuit
+reserve cannot stay at five while drills/inserters/splitters need eighteen.

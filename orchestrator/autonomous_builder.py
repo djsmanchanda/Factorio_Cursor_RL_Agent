@@ -6001,7 +6001,11 @@ def _effective_mall_stock_gate(
     if upgrade_bootstrap:
         return requested
     startup_cap = _startup_mall_item_cap(client, surface, force, item)
-    binding_target = int(requested or 0) if item in _BLOCKING_MALL_ITEMS else 0
+    binding = item in _BLOCKING_MALL_ITEMS or any(
+        item in _queued_mall_prerequisites(consumer)
+        for consumer in _BLOCKING_MALL_ITEMS
+    )
+    binding_target = int(requested or 0) if binding else 0
     wip_gap = _rationed_mall_wip_gap(client, surface, force, item)
     if requested is not None:
         requested = standing_gate_target(
@@ -13795,7 +13799,7 @@ def run(
             _refresh_logistic_chest_budget(
                 client, surface, force, _MATERIAL_RESERVATION_LEDGER, emit,
             )
-            _refresh_owned_standing_gates(client, bridge, surface, force, emit)
+            _refresh_owned_standing_gates(client, bridge, surface, force, emit, requested=mall_targets)
             _advance_bootstrap_starter_retirements(client, bridge, surface, force, emit)
             tick, task = _survey_pass(
                 client, surface, force, mall_targets, priorities, prepped,

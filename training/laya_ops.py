@@ -156,7 +156,8 @@ class DeterministicSession:
         # Wait turns still reconcile open bills, and restored cells rejoin
         # their standing role before the next measured observation.
         ab._refresh_owned_standing_gates(self.client, self.bridge, SURFACE, FORCE, self.emit,
-                                        rate_targets=getattr(self, "rate_targets", ()))
+                                        rate_targets=getattr(self, "rate_targets", ()),
+                                        requested=getattr(self, "mall_targets", {}))
 
     def _loan_batch_facts(
         self, loan, *, available: Mapping[str, int] | None | object = _UNSET,
@@ -316,7 +317,8 @@ class DeterministicSession:
         try:
             ab._refresh_logistic_chest_budget(self.client, SURFACE, FORCE, ab._MATERIAL_RESERVATION_LEDGER, self.emit)
             ab._refresh_owned_standing_gates(self.client, self.bridge, SURFACE, FORCE, self.emit,
-                                            rate_targets=getattr(self, "rate_targets", ()))
+                                            rate_targets=getattr(self, "rate_targets", ()),
+                                            requested=getattr(self, "mall_targets", {}))
             # Starter teardown follows delivered replacement output on every pass, not only when chosen.
             ab._advance_bootstrap_starter_retirements(self.client, self.bridge, SURFACE, FORCE, self.emit)
             result = self._operations()[operation](**params)

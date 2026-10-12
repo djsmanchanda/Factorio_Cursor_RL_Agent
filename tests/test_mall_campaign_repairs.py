@@ -294,3 +294,24 @@ def test_delivery_claim_retires_only_when_its_construction_demand_is_gone(monkey
                    PriorityList(tmp_path / "priorities.json", 0))
     assert ledger.project_is_active("deliver_electric-mining-drill") is bool(ghost_count)
     assert ledger.project_is_active("paired_mall_lab")
+
+
+def test_session_gate_maintenance_receives_full_construction_queue(monkeypatch):
+    calls = []
+    monkeypatch.setattr(b, "_survey_pass", lambda *_: None)
+    monkeypatch.setattr(b, "_release_completed_construction_loans", lambda *_: None)
+    monkeypatch.setattr(b, "_advance_bootstrap_starter_retirements", lambda *_: None)
+    monkeypatch.setattr(b, "_refresh_logistic_chest_budget", lambda *_: None)
+    monkeypatch.setattr(b, "_refresh_owned_standing_gates", lambda *_a, **kw: calls.append(kw))
+    monkeypatch.setattr(b, "_MATERIAL_RESERVATION_LEDGER", None)
+    session = DeterministicSession.__new__(DeterministicSession)
+    session.client, session.bridge, session.emit = object(), object(), lambda _: None
+    session.reference_point, session.priorities = (0, 0), object()
+    session.mall_targets = {"electronic-circuit": 18}
+    session.rate_targets = {"copper-cable"}
+    monkeypatch.setattr(session, "_operations", lambda: {"reserve_steel_seed": lambda: True})
+    session.prepare_decision()
+    session.run("reserve_steel_seed")
+    assert len(calls) == 2
+    assert all(c["requested"] == {"electronic-circuit": 18} for c in calls)
+    assert all(c["rate_targets"] == {"copper-cable"} for c in calls)
