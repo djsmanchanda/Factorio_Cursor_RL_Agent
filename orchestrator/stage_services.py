@@ -607,7 +607,8 @@ def _submit(
     # Keep caller-owned/persisted plan identities stable. A failed coverage or
     # material attempt may retry the same object later and must be converted
     # again so its synchronous infrastructure contract is not silently lost.
-    plan = copy.deepcopy(plan)
+    from planners.fluid_machine_settings import complete_fluid_mirroring_settings
+    plan = complete_fluid_mirroring_settings(plan)
     forbidden = {"infinity-chest", "infinity-pipe", "electric-energy-interface"}
     for phase in plan.get("phases", []):
         for action in phase.get("actions", []):
@@ -631,7 +632,7 @@ def _submit(
         "logistic_request", "logistic_requests", "logistic_sections",
         "clear_logistic_groups", "inventory_limit", "clear_inventory_limit",
         "logistic_condition",
-        "clear_logistic_condition", "input_priority", "output_priority", "recipe",
+        "clear_logistic_condition", "input_priority", "output_priority", "recipe", "mirroring",
     }
     for action in direct_actions:
         if action["action_type"] == "place_entity" and setting_fields.intersection(action):

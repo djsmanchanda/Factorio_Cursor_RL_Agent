@@ -16,7 +16,8 @@ _DIRECTION_VECTORS = {
 }
 
 # The pipe stands immediately outside the 3x3 pumpjack footprint. The
-# graphical connector is on the machine edge, but placing a pipe on that edge
+# Source pumpjacks are mirrored; these offsets describe that explicit setting.
+# The graphical connector is on the machine edge, but placing a pipe on that edge
 # tile collides with the pumpjack (live run 2026-08-26 04:43).
 _PUMPJACK_OUTPUT_OFFSETS = {
     "north": (-1, -2), "east": (2, -1),
@@ -682,7 +683,12 @@ def _fluid_resource_plan(
 
 
 def generate_pumpjack_source(sites: list[dict], pipe_tiles: list[tuple[float, float]]) -> dict:
-    return _fluid_resource_plan("crude_oil", "pumpjack", sites, pipe_tiles)
+    plan = _fluid_resource_plan("crude_oil", "pumpjack", sites, pipe_tiles)
+    for phase in plan['phases']:
+        for action in phase['actions']:
+            if action.get('entity') == 'pumpjack':
+                action['mirroring'] = True
+    return plan
 
 
 def generate_offshore_pump_source(sites: list[dict], pipe_tiles: list[tuple[float, float]]) -> dict:

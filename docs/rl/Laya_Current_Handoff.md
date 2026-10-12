@@ -801,3 +801,24 @@ refinery pipe geometry was emitted without entity mirroring. Geometry/API
 fixes remain to be implemented; do not personally sample subsequent active runs.
 
 Final end-only helper fast gate:1,280passed,three skipped,only inherited four-import firewall failure. Helper completed; audit requested for cross-run coverage citations.
+
+### 2026-10-12 22:41 IST — physical oil settings and existing coal service
+
+Completed-run helper correction for persistent-laya-s50616-1791818809
+withdrew older-run coverage citations. Offline reserved-intent replay and
+Factorio 2.1.21 port evidence establish missing physical mirroring: all three
+pumpjacks and four refineries require mirroring=True; the two plastic plants
+require False. Plans now emit this engine setting, and shared submission
+unambiguously completes old settings on a copy without changing coordinates
+or persisted transactions. Ghost/existing configuration applies and verifies it.
+Fluid diagnostics use the current fluids_count/get_fluid/prototype/neighbours
+API instead of removed entity.fluidbox. Existing coal reuse and oil retry now
+service both drill rows through shared power tooling, preserving the saved
+belt source and refusing mismatched ownership. No manual gameplay repair.
+
+Verification:143 focused passes;1,296 fast passes,3 skips,only inherited
+four-import training/laya_lines.py firewall failure. The inherited controller
+test remains excluded. Lifecycle:deploy changed Lua to both private Laya mod
+copies,reload only private server,preserve world,then freeze next runner.
+Use built-in DeepSeek after RUN END; no active-run inspection. Real plastic,
+advanced circuits,science delivery and completed research remain unverified.

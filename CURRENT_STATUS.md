@@ -623,3 +623,8 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
   DeepSeek. Helper launches after RUN END/index,never during gameplay.38focused/
   1280fast passes,3skip/inherited firewall. Current completed-run helper returned;
   older-run coverage citation needs correction. Lifecycle: next frozen runner.
+
+- 2026-10-12 22:41 IST: Physical mirroring restored for oil machines; current fluid API
+  and owned coal power service on transaction retry.143 focused/1296 fast
+  pass,3 skip/inherited firewall. Lifecycle:private Lua deployment/server
+  reload,new freeze,end-only helper; plastic/science still unverified.

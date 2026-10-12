@@ -313,6 +313,11 @@ local function configuration_error(entity, action, direction)
   if direction ~= nil and entity.direction ~= direction then
     return "direction_mismatch"
   end
+  if action.mirroring ~= nil then
+    local ok, actual = pcall(function() return entity.mirroring end)
+    if not ok then return "mirroring_read_failed" end
+    if actual ~= action.mirroring then return "mirroring_mismatch" end
+  end
   if action.underground_type then
     local ok, actual = pcall(function() return entity.belt_to_ground_type end)
     if not ok then return "underground_type_read_failed" end
@@ -523,6 +528,10 @@ local function return_removed_items(entity, removed)
 end
 
 local function configure_created_entity(entity, action)
+  if action.mirroring ~= nil then
+    local ok = pcall(function() entity.mirroring = action.mirroring end)
+    if not ok then return "mirroring_set_failed" end
+  end
   if action.recipe then
     local actual, read_error = recipe_name(entity)
     if read_error then return read_error end

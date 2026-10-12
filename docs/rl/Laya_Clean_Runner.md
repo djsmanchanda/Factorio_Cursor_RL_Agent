@@ -481,3 +481,12 @@ Before borrowing, a finite batch forecasts its complete remaining solid input qu
 Batch readiness and precursor forecasts use the shared loan transaction owners (the item cell and its loan-input project). Its own reservations fund the batch; another project's held inventory raises the global supply target rather than completing an insufficient precursor job.
 
 A funded or active existing-lane batch supersedes non-recipe dependencies from its earlier unbuilt cell bill. The capacity job remains independent. Rejected cycle edges cannot resize a completed batch or erase its delivery credits. Rotating-input checks include only that loan's own requester/machine WIP alongside its allocatable network inputs.
+
+## Physical oil configuration on continuation
+
+Fluid plans carry the engine's boolean `mirroring` setting, including source
+pumpjacks. Shared submission can complete missing settings in old reserved
+plans only when owned pipe geometry uniquely identifies the native port frame;
+it does not rewrite the persisted intent or move reserved geometry. Existing
+coal mines are serviced before reuse and during oil transaction retry, with
+the saved belt source retained. A retry cannot substitute a different mine.

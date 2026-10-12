@@ -511,6 +511,39 @@ def _coal_belt_source(
     return mine.output
 
 
+def _service_coal_mine(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    mine: extraction_state.ResourceMine, service_stage: ServiceStage,
+    emit: Callable[[str], None],
+) -> None:
+    origin, area, substation, drills = existing_mine_service_geometry(
+        mine.output, mine.drill_count, mine.expansion_step,
+        shared_belt_y=mine.shared_belt_y, first_column_x=mine.first_column_x,
+    )
+    service_stage(
+        client, bridge, surface, force, "mining stage for coal", origin,
+        area, substation, drills, emit, logistic_chest_positions=[],
+    )
+
+
+def _service_reserved_coal_mine(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    source: Point, service_stage: ServiceStage, emit: Callable[[str], None],
+) -> None:
+    """Resume the owned supply without replacing a transaction's belt source."""
+    mine = extraction_state.find_resource_mine(client, surface, force, "coal", source)
+    if mine is None or _coal_belt_source(client, surface, mine) != source:
+        raise StuckError(f"reserved coal source {source} has no matching owned mine")
+    if mine.pending:
+        from orchestrator.autonomous_builder import ProductionPrerequisiteDeferred
+
+        raise ProductionPrerequisiteDeferred(
+            f"reserved coal mine at {source} is still constructing",
+            code="pending_system_construction",
+        )
+    _service_coal_mine(client, bridge, surface, force, mine, service_stage, emit)
+
+
 def ensure_coal_mine(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     reference: Point, service_stage: ServiceStage, emit: Callable[[str], None],
@@ -616,6 +649,9 @@ def ensure_coal_mine(
                     f"  COAL DISTRICT: reusing owned belt mine at {source}; "
                     "the nearest viable coal belongs to its existing patch"
                 )
+            _service_coal_mine(
+                client, bridge, surface, force, existing, service_stage, emit,
+            )
             return source
         emit(
             f"  COAL DISTRICT: local patch at {found.nearest} is "
@@ -1710,6 +1746,9 @@ def _execute_opening_oil_cell(
             _substation(plan), machines, emit,
             logistic_chest_positions=_logistic_chest_positions(plan),
         )
+    _service_reserved_coal_mine(
+        client, bridge, surface, force, coal, service_stage, emit,
+    )
     coal_belt_tiles = sum(
         1 for action in coal_actions
         if "transport-belt" in action.get("entity", "")
