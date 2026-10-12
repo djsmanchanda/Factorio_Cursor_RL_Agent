@@ -822,3 +822,17 @@ test remains excluded. Lifecycle:deploy changed Lua to both private Laya mod
 copies,reload only private server,preserve world,then freeze next runner.
 Use built-in DeepSeek after RUN END; no active-run inspection. Real plastic,
 advanced circuits,science delivery and completed research remain unverified.
+
+### 2026-10-12 22:43 IST — corrected oil continuation launched
+
+Private Laya unit `laya-persistent-run-20261012T171318Z-63500095.service` executes frozen revision
+`73b0af65b51baac56b92114c1544bfd1efffab73` at speed2 on34992/27992. Freeze:
+`/home/djsm/Github_Desktop/Factorio_Cursor_RL_Agent/data/t3-laya-loop/worktree/data/persistent-factorio/runs/20261012T171318Z-63500095/freeze.json`. Deployment record:
+`data/persistent-factorio/mod-deployments/20261012T171242Z/deployment.json`.
+Both shared deterministic and namespaced Laya Lua copies are0.2.46201;
+training mod remains0.1.10104. Saved before graceful server reload;
+world/transaction/queue preserved. Private runtime probe confirms Laya active,
+deterministic inactive. Matching side-by-side GUI artifacts installed; GUI
+client restart remains required before joining. Production and separate
+deterministic server untouched. Helper enabled with end-only default; no
+active-run gameplay inspection. Outcome pending.
