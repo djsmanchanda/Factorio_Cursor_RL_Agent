@@ -760,3 +760,9 @@ queued precursor, not permission to build a wrongly fed vertical machine. The
 executor can assign built empty vertical positions too. Capacity counts all
 four sides, including ghosted and built no-recipe vertical machines, using a
 batched census rather than a per-module RCON loop.
+
+Requester input sections are configured only after the slot's bot-built machine,
+transfer arms, chests, power and coverage are ready. Activating a new section
+earlier can move construction items into recipe WIP (for example regular
+inserters needed both by a long-handed recipe and by its own feeder arms),
+leaving a funded cell unable to finish. Other slots' sections remain intact.

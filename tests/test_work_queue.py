@@ -513,3 +513,33 @@ def test_idle_lanes_automatically_take_ready_items_and_missing_precursors(tmp_pa
     stranger=s.queue.enqueue('produce',{'item':'inserter','stock_target':5},priority=100,tick=100)
     s._queue_assign_idle_malls({'tick':120},{'material_stock':{'iron-plate':100,'iron-gear-wheel':50,'electronic-circuit':20}})
     assert not any(k.startswith('mall_allocation:') for k in stranger.checkpoint)
+
+
+def test_mall_inputs_cannot_hoard_inserters_before_its_transfer_arms_are_built(monkeypatch):
+    from copy import deepcopy
+    from orchestrator import mall_builder as mall
+    from orchestrator.stage_services import StuckError
+    install_live_recipe_fixture(monkeypatch)
+    monkeypatch.setattr(mall,'_choose_slot',lambda *a,**k:((32,32),'right'))
+    monkeypatch.setattr(mall,'assert_mall_cell_footprint_free',lambda *a:None)
+    monkeypatch.setattr(mall,'_clear_stale_side_requests',lambda *a:None)
+    plans=[]
+    monkeypatch.setattr(mall,'_submit',lambda c,b,s,p,*a:plans.append(deepcopy(p)))
+    constructed=False
+    def bring_up(*a,**k):
+        if not constructed:
+            raise StuckError('two regular arms await bots',code='infrastructure_construction_wait',state='constructing')
+    state={}
+    with execution_slice(checkpoint=state):
+        with pytest.raises(StuckError,match='regular arms'):
+            mall.build_compact_mall_stage(object(),object(),'private','player','long-handed-inserter',{},(0,0),
+                                         bring_up,lambda _:None)
+    assert not any(a.get('logistic_sections') for p in plans for phase in p['phases'] for a in phase['actions'])
+    constructed=True
+    with execution_slice(checkpoint=state):
+        mall.build_compact_mall_stage(object(),object(),'private','player','long-handed-inserter',{},(0,0),
+                                     bring_up,lambda _:None)
+    configured=[a for p in plans for phase in p['phases'] for a in phase['actions'] if a.get('logistic_sections')]
+    assert len(configured)==1
+    assert configured[0]['action_type']=='configure_entity'
+    assert any(r['name']=='inserter' for r in configured[0]['logistic_sections'][0]['requests'])

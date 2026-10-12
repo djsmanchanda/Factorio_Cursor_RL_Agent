@@ -347,3 +347,25 @@ and collision validation across30 repeated modules. Fast gate1234 pass/3 skip;
 only the unchanged four-import firewall failure. Private engine read-only census
 confirms the user's recreated pattern is discoverable. Committed next before
 fresh private freeze; no adoption, production action or mod deployment.
+
+### 2026-10-12 15:36 IST — new private validation running
+
+Started persistent-laya-s50616-1791799593 frozen668176e through the9140 OC;
+requested/observed speed2 on34992/27992. Prior world (including user pattern
+example) archived at data/persistent-factorio/history/20261012T100629Z-ec639177.
+Owner unit laya-persistent-run-20261012T100632Z-e66daada.service, freeze under
+data/persistent-factorio/runs/20261012T100632Z-e66daada/. Personal observations
+append to this run's diagnostics/personal-observation.jsonl. Code remains frozen;
+actual manufacturing/utilization improvement awaits observation.
+
+### 2026-10-12 15:47 IST — personally observed construction-input deadlock repaired
+
+Stopped668176e run persistent-laya-s50616-1791799593 after about225wall seconds;
+acceptedC0 only. Two measured intervals produced300belts/167gears/162cable but
+zero circuits/inserters/drills/long-handed inserters. An unconfigured long-handed
+cell's requester consumed regular inserters before its own transfer-arm ghosts
+finished; the queue then cycled around missing support. Shared paired/vertical/
+quad construction now defers new input sections until physical bring-up passes.
+219 focused tests pass, including construction-yield/no-input-hoarding replay;
+fast1235 pass/3skip, only unchanged four-import firewall failure. Next lifecycle:
+new frozen private validation; no Lua deployment or manual save repair.

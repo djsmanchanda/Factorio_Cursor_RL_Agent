@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import math
 from collections import Counter
 from collections.abc import Callable, Mapping
@@ -191,6 +192,24 @@ def _reconcile_built_mall_plan(client, surface, force, plan):
     for action, point in zip(actions, points, strict=True):
         if (point, action["entity"]) in built:
             action["action_type"] = "configure_entity"
+
+
+def _defer_mall_requests(plan):
+    """Construction owns scarce items before recipe input buffers may claim them."""
+    configurations = []
+    fields = {"logistic_sections", "logistic_request", "logistic_requests", "clear_logistic_groups"}
+    for phase in plan["phases"]:
+        for action in phase["actions"]:
+            if action.get("entity") != "requester-chest" or not fields.intersection(action):
+                continue
+            configuration = {"action_type":"configure_entity", "entity":"requester-chest",
+                             "position":copy.deepcopy(action["position"])}
+            for field in fields:
+                if field in action:
+                    configuration[field] = action.pop(field)
+            configurations.append(configuration)
+    return {"surface":plan["surface"], "force":plan["force"],
+            "phases":[{"name":"mall_input_requests", "actions":configurations}]}
 
 
 def saved_mall_allocation(surface, force, recipe):
@@ -1370,6 +1389,7 @@ def build_compact_mall_stage(
         client, surface, requester_action, recipe, side,
     )
     emit(f"compact parts mall for {recipe}: assigning {side} half of cell {origin}")
+    requests = _defer_mall_requests(plan)
     assert_mall_cell_footprint_free(
         client, surface, plan, recipe, origin, side,
     )
@@ -1425,6 +1445,7 @@ def build_compact_mall_stage(
         logistic_chest_positions=[*ingredient_sources.values(), *chests],
         reserved_tiles=reserved_tiles,
     )
+    _submit(client, bridge, surface, requests, f"mall_inputs_{recipe}", emit)
     _configure_built_mall_recipes(
         client, bridge, surface, force, recipe,
         machine_name or spec["machine"], [machine], stock_gate_target, emit,
@@ -1456,6 +1477,7 @@ def _build_seed_vertical_slot(
          "reusing its requester and provider")
     if callable(getattr(client, "command", None)):
         _reconcile_built_mall_plan(client, surface, force, plan)
+    requests = _defer_mall_requests(plan)
     assert_mall_cell_footprint_free(client, surface, plan, recipe, origin, side)
     _submit(client, bridge, surface, plan, f"seed_vertical_mall_{recipe}_{side}", emit)
     machine = _vertical_slot_position(origin, side)
@@ -1467,6 +1489,7 @@ def _build_seed_vertical_slot(
         logistic_chest_positions=[*ingredient_sources.values(), center, provider],
         reserved_tiles=planned_footprint_tiles(plan) | mall_grid_reserved_tiles(reference_point),
     )
+    _submit(client, bridge, surface, requests, f"mall_inputs_{recipe}", emit)
     _configure_built_mall_recipes(
         client, bridge, surface, force, recipe,
         machine_name or spec["machine"], [machine], stock_gate_target, emit,
@@ -1563,6 +1586,7 @@ def build_quad_mall_stage(
             )
     plan["surface"], plan["force"] = surface, force
     emit(f"quad bootstrap mall for {recipe}: assigning {group} half at {center}")
+    requests = _defer_mall_requests(plan)
     seed_module = center == quad_mall_center(reference_point) and group == "top"
     assert_mall_cell_footprint_free(
         client, surface, plan, recipe,
@@ -1647,6 +1671,8 @@ def build_quad_mall_stage(
         logistic_chest_positions=[*ingredient_sources.values(), *chests],
         reserved_tiles=reserved_tiles,
     )
+    if requests["phases"][0]["actions"]:
+        _submit(client, bridge, surface, requests, f"mall_inputs_{recipe}", emit)
     _configure_built_mall_recipes(
         client, bridge, surface, force, recipe,
         machine_name or spec["machine"], machines, stock_gate_target, emit,

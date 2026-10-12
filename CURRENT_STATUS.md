@@ -501,3 +501,8 @@ firewall failure. Lifecycle: fresh frozen Python run; no Lua deployment.
   blueprint, keeps empty vertical positions assignable and batches capacity
   census.232 focused pass (exact blueprint and30-module collision replay),1234
   fast pass/3 skip; unchanged firewall baseline. Lifecycle: fresh private freeze.
+
+- 2026-10-12 15:47 IST: Observed private mall input requests consuming its own
+  missing feeder items. Shared cell input sections now wait for bot construction
+  and service readiness.219 focused/1235fast pass; unchanged firewall baseline.
+  Lifecycle: new frozen private runner; live speed improvement still unproven.
