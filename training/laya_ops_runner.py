@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from orchestrator.laya_knowledge import load_guideline_context
+from orchestrator.work_state import WorkStateSignal
 from training.laya_clean_runner import (ROOT, Settings, _append, _goal_gap, _status_line, _training_record,
                                         _write_status, rolling_measurement)
 from training.laya_factory_status import BACKPRESSURE_CONDITIONS, compact_status, compile_status
@@ -980,12 +981,38 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             )
         prepare = getattr(session, "prepare_decision", None)
         if callable(prepare):
-            if queue_enabled:
-                from orchestrator.execution_slice import execution_slice
-                with execution_slice(runtime=session.queue.runtime, persist=session.queue.save):
+            preparation = None
+            try:
+                if queue_enabled:
+                    from orchestrator.execution_slice import execution_slice
+                    with execution_slice(runtime=session.queue.runtime, persist=session.queue.save):
+                        prepare()
+                else:
                     prepare()
-            else:
-                prepare()
+            except WorkStateSignal as signal:
+                # Maintenance waits must remain evidence while Laya chooses other
+                # legal work. A declared failed/bug state still stops safely.
+                preparation = {"ok": False, "operation": "prepare_decision", "params": {},
+                               "code": signal.code, "classification": signal.classification,
+                               "state": signal.state, "details": signal.details,
+                               "message": str(signal)[:500]}
+            except Exception as error:
+                error_path = journal.parent / f"prepare-error-{index:04d}-{uuid.uuid4().hex[:8]}.log"
+                error_path.write_text(traceback.format_exc())
+                preparation = {"ok": False, "operation": "prepare_decision", "params": {},
+                               "code": "tool_error", "classification": "bug", "state": "failed",
+                               "message": f"{type(error).__name__}: {error}"[:400],
+                               "traceback_file": str(error_path)}
+                summary["failures"] += 1
+            if preparation is not None:
+                results.append(preparation)
+                _append(journal, {"run_id": run_id, "event": "reconcile", "index": index,
+                                  "tick": _live_tick(adapter, 0), **preparation})
+                emit(f"RECONCILE: {preparation['code']} -- {preparation['message']}")
+                if preparation["state"] == "failed" or preparation["classification"] == "bug":
+                    summary["stop"] = "hard_failure"
+                    summary["hard_failure"] = preparation
+                    break
         facts = adapter.query()
         samples.append((facts["tick"], dict(facts["production"]), dict(facts["consumption"])))
         measurement = rolling_measurement(samples, settings.rate_window_ticks) or measurement

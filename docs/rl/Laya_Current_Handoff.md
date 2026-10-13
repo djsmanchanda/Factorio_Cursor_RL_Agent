@@ -846,3 +846,25 @@ and Haiku implementation occur after natural RUN END. One regression fails
 against previous HEAD and passes with the fix;46 focused tests pass,1297fast
 pass/3skip with only the unchanged four-import firewall baseline. Lifecycle:
 freeze the verified supervisor before launching a new isolated campaign.
+
+
+### 2026-10-14 04:48:05 IST — preparation containment and authorized ten-hour successor
+
+The previous six-hour campaign ended at its original deadline after final
+validation on d976c43. Its offshore-pump stock-gate WorkStateSignal escaped
+pre-decision preparation and discarded partial accounting. The verified fix
+records expected preparation waits before normal observation/policy choice;
+failed states and unexpected errors stop safely with retained decision counts,
+terminal acceptance and unexpected-error traceback. No geometry, inventory,
+policy weights or Lua changes. Three regressions fail against the parent;114
+focused tests pass. Campaign fast gate:1302pass/3skip,only the independently
+reproduced unchanged four-import firewall failure; no exemption expansion.
+
+User authorized a new TEN-HOUR DeepSeek/Haiku5.5 loop. New launch record:
+2026-10-14 04:48:05 IST; new-work deadline:2026-10-14 14:48:05 IST. Unit:laya-deepseek-haiku-10h-20261014T0445IST.service.
+Evidence:/home/djsm/Github_Desktop/Factorio_Cursor_RL_Agent/data/t3-laya-loop/worktree/data/laya-experiments/deepseek-haiku-20261014T0445IST. Saved DeepSeek:ses_ec874ae0dfferxDZCYSVTGB4fa; fresh Haiku per fix.
+Launch is being finalized; progress.json and the owned unit establish whether
+it started. No scheduled live model reviews. Fresh isolated worlds, speed2,
+Factorio2.1.21, mining-productivity-4 target; old worlds preserved. An active
+natural episode may finish after the new-work deadline for terminal evidence.
+No production/GUI deployment,push,merge,adoption or promotion.

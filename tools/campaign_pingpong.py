@@ -67,7 +67,7 @@ def validate_campaign(config, state) -> None:
     if not state.primary_session_id:
         raise RuntimeError("real saved Hi-bootstrap session required")
     if not state.deadline_utc:
-        raise RuntimeError("persist launch+six-hour deadline before starting controller")
+        raise RuntimeError("persist the original campaign deadline before starting controller")
     original = read(config.state_root / "campaign.json")
     if state.deadline_utc != original.get("deadline_utc"):
         raise RuntimeError("original absolute deadline changed")
@@ -470,7 +470,7 @@ def final_report(config, state, *, failure: str | None = None) -> Path:
     codex = getattr(config, "agent_topology", "legacy") == "deepseek-codex"
     implementer = "owning GPT-6.1-Sol/high T3 thread" if codex else "fresh Haiku"
     body = ("<!-- Path: campaign/final-report.md | Purpose: Audit every attempted run and improvement handoff. -->\n\n"
-            f"# DeepSeek / {implementer} six-hour Laya campaign\n\n"
+            f"# DeepSeek / {implementer} {config.max_runtime_seconds / 3600:g}-hour Laya campaign\n\n"
             f"Status: {state.phase}. Final report generated {datetime.now(timezone.utc).isoformat()}. "
             f"Original deadline {state.deadline_utc}. Branch `{config.campaign_branch}`. "
             "No merge, push, adoption or production promotion.\n\n"

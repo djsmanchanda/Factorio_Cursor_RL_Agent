@@ -204,3 +204,20 @@ replacing a previous valid export (pipe exports can truncate at64KiB).
 A recorded operational recovery retains all failure records; `recovery.json`
 sets the prior-failure count so the repaired controller gets at most three
 new recovery attempts, without changing deadline/session/episode identity.
+
+## Authorized ten-hour successor (October 14, 2026)
+
+The latest user instruction requests the same DeepSeek/Haiku loop for ten
+hours after fixing the preparation failure. Use a fresh campaign state root
+and returned DeepSeek bootstrap session, `--max-runtime-hours 10`, and an
+immutable launch-plus-ten-hour deadline in both campaign.json and controller
+state. The historical branch name still ends in `-6h`; it does not determine
+this successor's duration. Never extend the completed campaign's deadline.
+The final report names the configured duration.
+
+The remaining profile contracts stay in force: fresh disposable worlds,
+end-only model reviews, one focused verified fix per cycle, scoped commits,
+private mod stamping, final thirty-minute validation, and no new work after
+the original deadline. A natural episode already active can finish for
+terminal evidence. Python-only preparation containment requires new frozen
+runners; it grants no production or GUI lifecycle authority.

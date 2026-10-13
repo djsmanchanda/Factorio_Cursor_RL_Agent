@@ -106,6 +106,64 @@ def test_caught_tool_errors_preserve_the_exact_stack_for_audit(tmp_path):
         assert "ValueError: inventory index expected, got nil" in text
 
 
+def test_predecision_supply_wait_is_recorded_and_policy_keeps_choosing(tmp_path):
+    import json
+    from orchestrator.autonomous_builder import ProductionPrerequisiteDeferred
+
+    class WaitingSession(FakeSession):
+        def prepare_decision(self):
+            raise ProductionPrerequisiteDeferred(
+                "offshore-pump stock gate waits for its existing assembler",
+                code="mall_stock_gate_target_pending", state="supply_wait",
+                details={"item": "offshore-pump"},
+            )
+
+    session = WaitingSession()
+    summary = run(FakeWorld(), GuidedPolicy(3), journal=tmp_path / "journal.jsonl", decisions=3,
+                  measure_ticks=600, seed=3, run_id="preparation-wait", session=session)
+    rows = [json.loads(line) for line in (tmp_path / "journal.jsonl").read_text().splitlines()]
+    waits = [row for row in rows if row["event"] == "reconcile"]
+    assert len(waits) == 3 and summary["decisions"] == 3 and session.calls
+    assert summary["failures"] == 0
+    assert summary["codes"]["mall_stock_gate_target_pending"] == 3
+    assert all(row["operation"] == "prepare_decision" and row["state"] == "supply_wait"
+               and row["details"] == {"item": "offshore-pump"} for row in waits)
+
+
+@pytest.mark.parametrize("typed_bug", [False, True])
+def test_predecision_fault_preserves_completed_decisions_and_terminal_acceptance(tmp_path, typed_bug):
+    import json
+    from orchestrator.work_state import WorkStateSignal
+
+    class BrokenPreparation(FakeSession):
+        prepares = 0
+
+        def prepare_decision(self):
+            self.prepares += 1
+            if self.prepares == 3:
+                if typed_bug:
+                    raise WorkStateSignal("invalid owned gate", code="invalid_owned_gate",
+                                          classification="bug", state="failed")
+                raise ValueError("invalid owned gate")
+
+        def acceptance(self):
+            return {"C0": "passed", "C1": "failed"}
+
+    summary = run(FakeWorld(), GuidedPolicy(3), journal=tmp_path / "journal.jsonl", decisions=6,
+                  measure_ticks=600, seed=3, run_id="preparation-fault", session=BrokenPreparation())
+    assert summary["stop"] == "hard_failure" and summary["decisions"] == 2
+    assert summary["failures"] == (0 if typed_bug else 1)
+    assert summary["accepted"] == ["C0"] and summary["acceptance"]["C1"] == "failed"
+    assert summary["hard_failure"]["operation"] == "prepare_decision"
+    assert summary["hard_failure"]["code"] == ("invalid_owned_gate" if typed_bug else "tool_error")
+    rows = [json.loads(line) for line in (tmp_path / "journal.jsonl").read_text().splitlines()]
+    assert rows[-1]["event"] == "acceptance" and rows[-1]["at"] == "end"
+    if not typed_bug:
+        from pathlib import Path
+        trace = Path(summary["hard_failure"]["traceback_file"]).read_text()
+        assert "ValueError: invalid owned gate" in trace
+
+
 def test_accepted_window_does_not_stop_at_a_rate_proxy(tmp_path, monkeypatch):
     from training import laya_ops_runner as ops
     checks = iter([True, True, True, False])
