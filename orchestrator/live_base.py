@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -1976,13 +1977,28 @@ def occupied_tile_owners(
     return owners
 
 
-def pending_construction_items(client: RconClient, surface: str, force: str) -> dict[str, int]:
-    """Remaining entity-ghost bill, independent of completed producer batches."""
+def pending_construction_items(
+    client: RconClient, surface: str, force: str, *,
+    exclude: Sequence[tuple[str, Point]] = (),
+) -> dict[str, int]:
+    """Remaining entity-ghost bill, optionally excluding an exact retried plan."""
+    exclusions = ""
+    if exclude:
+        payload = json.dumps([[name, *position] for name, position in exclude])
+        exclusions = (
+            "local excluded={};local function key(name,p) return name..':'.."
+            "string.format('%.6f:%.6f',p.x,p.y) end;"
+            "for _,p in pairs(helpers.json_to_table(" + json.dumps(payload) + ")) do "
+            "excluded[key(p[1],{x=p[2],y=p[3]})]=true end;"
+        )
     lua = (
         "local s=game.surfaces['" + surface + "'];local counts={};"
+        + exclusions +
         "for _,g in pairs(s.find_entities_filtered{type='entity-ghost',force='" + force + "'}) do "
+        + ("if not excluded[key(g.ghost_name,g.position)] then " if exclude else "") +
         "local items=g.ghost_prototype.items_to_place_this;local item=items and items[1];"
-        "if item then counts[item.name]=(counts[item.name] or 0)+(item.count or 1) end end;"
+        "if item then counts[item.name]=(counts[item.name] or 0)+(item.count or 1) end "
+        + ("end " if exclude else "") + "end;"
         "local out={};for name,count in pairs(counts) do out[#out+1]=name..'='..count end;"
         "rcon.print(table.concat(out,','))"
     )

@@ -306,6 +306,10 @@ class MaterialReservationLedger:
         keep_constructing = bool(
             existing is not None
             and existing.state == "constructing"
+            # Transient submission names (for example power_bridge) are
+            # reused for later builds. Their old consumed bill cannot fund
+            # another build; only an explicitly held producer stays active.
+            and self._active(existing)
             and existing.required == bill
         )
         project = MaterialProject(

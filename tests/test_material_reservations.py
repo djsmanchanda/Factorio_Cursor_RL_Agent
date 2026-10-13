@@ -250,6 +250,211 @@ def test_reused_submission_name_gets_a_fresh_transient_reservation(
     assert ledger.projects["power_bridge"].revision == 3
 
 
+@pytest.mark.parametrize("second_stock", [4, 6])
+def test_repeated_funded_bridge_cannot_consume_the_steel_seed(
+    tmp_path: Path, monkeypatch, second_stock: int,
+) -> None:
+    """A later four-pole bridge is a new bill, even under the same stage name."""
+    ledger = _ledger(tmp_path)
+    stock = {"medium-electric-pole": 6}
+    ledger.declare(
+        "conversion_steel-plate", {"medium-electric-pole": 2}, stock,
+        priority=100,
+    )
+    monkeypatch.setattr(stage_services, "active_material_ledger", lambda: ledger)
+    monkeypatch.setattr(stage_services.live_base, "transferable_items", lambda *_a: stock)
+    monkeypatch.setattr(stage_services.live_base, "available_items", lambda *_a: stock)
+    monkeypatch.setattr(stage_services, "clear_plan_clutter", lambda *_a: None)
+    monkeypatch.setattr(stage_services, "_reservation_supply_estimates", lambda *_a: ({}, {}))
+    monkeypatch.setattr(stage_services, "load_json", lambda report: report)
+    submitted = []
+
+    def build_layout(_authorization, plan):
+        bill = len(plan["phases"][0]["actions"])
+        submitted.append(plan)
+        stock["medium-electric-pole"] -= bill
+        return {
+            "ok": True, "attempted_placements": bill,
+            "succeeded_placements": bill, "placed_ghosts": bill,
+            "placed_entities": 0,
+        }
+
+    bridge = SimpleNamespace(build_layout=build_layout)
+
+    def pole_plan(count, offset):
+        return {"force": "player", "phases": [{"actions": [
+            {"action_type": "place_ghost", "entity": "medium-electric-pole",
+             "position": {"x": offset + index + 0.5, "y": 0.5}}
+            for index in range(count)
+        ]}]}
+
+    stage_services._submit(
+        object(), bridge, "nauvis", pole_plan(4, 0), "power_bridge",
+        lambda _m: None, require_funded=True,
+    )
+    assert stock["medium-electric-pole"] == 2
+    # Resume after the first bridge, then try a different route with the same
+    # name and pole count. Only two of four remaining poles are spendable.
+    ledger = _ledger(tmp_path)
+    stock["medium-electric-pole"] = second_stock
+    if second_stock == 4:
+        with pytest.raises(MaterialShortage) as error:
+            stage_services._submit(
+                object(), bridge, "nauvis", pole_plan(4, 10), "power_bridge",
+                lambda _m: None, require_funded=True,
+            )
+        assert error.value.required == {"medium-electric-pole": 6}
+        assert len(submitted) == 1
+    else:
+        stage_services._submit(
+            object(), bridge, "nauvis", pole_plan(4, 10), "power_bridge",
+            lambda _m: None, require_funded=True,
+        )
+        assert len(submitted) == 2
+        assert stock["medium-electric-pole"] == 2
+    assert ledger.projects["conversion_steel-plate"].reserved == {
+        "medium-electric-pole": 2,
+    }
+    stage_services._submit(
+        object(), bridge, "nauvis", pole_plan(2, 20), "conversion_steel-plate",
+        lambda _m: None, require_funded=True, reservation_priority=100,
+    )
+    assert stock["medium-electric-pole"] == (2 if second_stock == 4 else 0)
+
+
+def test_redeclaration_preserves_a_producer_held_until_output(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path)
+    stock = {"passive-provider-chest": 2}
+    ledger.declare(
+        "chest-producer", stock, stock, hold_until_producing=True,
+    )
+    ledger.mark_constructing("chest-producer", stock)
+    project = ledger.declare("chest-producer", stock, stock)
+
+    assert project.state == "constructing"
+    assert project.hold_until_producing
+    assert project.reserved == stock
+
+
+def test_additive_ghosts_cannot_bypass_another_projects_reserve(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ledger = _ledger(tmp_path)
+    stock = {"medium-electric-pole": 2}
+    ledger.declare("steel-seed", stock, stock, priority=100)
+    monkeypatch.setattr(stage_services, "active_material_ledger", lambda: ledger)
+    monkeypatch.setattr(stage_services.live_base, "transferable_items", lambda *_a: stock)
+    monkeypatch.setattr(stage_services, "_reservation_supply_estimates", lambda *_a: ({}, {}))
+    monkeypatch.setattr(stage_services, "clear_plan_clutter", lambda *_a: None)
+    bridge = SimpleNamespace(build_layout=lambda *_a: pytest.fail("reserved poles were exposed to bots"))
+    plan = {"phases": [{"actions": [{
+        "action_type": "place_ghost", "entity": "medium-electric-pole",
+        "position": {"x": 10.5, "y": 0.5},
+    }]}]}
+
+    with pytest.raises(MaterialShortage):
+        stage_services._submit(
+            object(), bridge, "nauvis", plan, "foundation", lambda _m: None,
+            allow_unfunded_ghosts=True,
+        )
+
+
+def test_funded_bridge_accounts_for_another_packets_unbuilt_poles(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """The live refinery and bridge were submitted one second apart."""
+    ledger = _ledger(tmp_path)
+    stock = {"medium-electric-pole": 8}
+    ledger.declare(
+        "conversion_steel-plate", {"medium-electric-pole": 2}, stock,
+        priority=100,
+    )
+    monkeypatch.setattr(stage_services, "active_material_ledger", lambda: ledger)
+    monkeypatch.setattr(stage_services.live_base, "transferable_items", lambda *_a: stock)
+    monkeypatch.setattr(stage_services, "_reservation_supply_estimates", lambda *_a: ({}, {}))
+    client = SimpleNamespace(command=lambda *_a: "")
+    pending = {("medium-electric-pole", (0.5, 0.5)),
+               ("medium-electric-pole", (1.5, 0.5)),
+               ("medium-electric-pole", (2.5, 0.5)),
+               ("medium-electric-pole", (3.5, 0.5))}
+    monkeypatch.setattr(
+        stage_services.live_base, "pending_construction_items",
+        lambda *_a, exclude=(): {"medium-electric-pole": len(pending - set(exclude))},
+    )
+
+    def plan(offset):
+        return {"phases": [{"actions": [
+            {"action_type": "place_ghost", "entity": "medium-electric-pole",
+             "position": {"x": offset + index + 0.5, "y": 0.5}}
+            for index in range(4)
+        ]}]}
+
+    ledger.declare("iron_refinery", {"medium-electric-pole": 4}, stock)
+    ledger.mark_constructing("iron_refinery", stock)
+    # Bots have not collected the refinery's four poles yet. An exact retry
+    # owns those ghosts; a new bridge must count them as committed stock.
+    stage_services.assert_affordable(
+        client, "nauvis", "player", plan(0), "iron_refinery", lambda _m: None, True,
+    )
+    ledger.mark_constructing("iron_refinery", stock)
+    with pytest.raises(MaterialShortage) as error:
+        stage_services.assert_affordable(
+            client, "nauvis", "player", plan(10), "power_bridge", lambda _m: None, True,
+        )
+    assert error.value.required == {"medium-electric-pole": 10}
+    assert error.value.available == stock
+    assert ledger.projects["conversion_steel-plate"].reserved == {
+        "medium-electric-pole": 2,
+    }
+    pending.clear()
+    stock["medium-electric-pole"] = 6
+    stage_services.assert_affordable(
+        client, "nauvis", "player", plan(10), "power_bridge", lambda _m: None, True,
+    )
+
+
+@pytest.mark.lua
+def test_pending_construction_query_excludes_only_exact_owned_ghosts() -> None:
+    from orchestrator import live_base
+
+    import shutil
+    import subprocess
+
+    binary = shutil.which("lua")
+    if binary is None:
+        pytest.skip("Lua interpreter is unavailable")
+    payload = json.dumps([["medium-electric-pole", 0.5, -0.5]])
+    stub = "helpers={json_to_table=function(payload) assert(payload==" + json.dumps(payload) + ") return {{'medium-electric-pole',0.5,-0.5}} end}\n"
+    stub += """
+        local function ghost(name,x,y)
+            return {ghost_name=name,position={x=x,y=y},
+                    ghost_prototype={items_to_place_this={{name=name,count=1}}}}
+        end
+        game={surfaces={nauvis={find_entities_filtered=function(filter)
+            assert(filter.force=='player' and filter.type=='entity-ghost')
+            return {ghost('medium-electric-pole',0.5,-0.5),
+                    ghost('medium-electric-pole',1.5,-0.5),
+                    ghost('transport-belt',0.5,-0.5)}
+        end}}}
+        rcon={print=print}
+    """
+
+    def command(text):
+        assert text.startswith("/sc ")
+        return subprocess.run(
+            [binary, "-"], input=stub + text[4:], text=True,
+            capture_output=True, check=True,
+        ).stdout.strip()
+
+    client = SimpleNamespace(command=command)
+    assert live_base.pending_construction_items(client, "nauvis", "player") == {
+        "medium-electric-pole": 2, "transport-belt": 1,
+    }
+    assert live_base.pending_construction_items(
+        client, "nauvis", "player", exclude=(("medium-electric-pole", (0.5, -0.5)),),
+    ) == {"medium-electric-pole": 1, "transport-belt": 1}
+
+
 def test_compact_bill_includes_cell_entities_and_first_recipe_craft(
     monkeypatch,
 ) -> None:

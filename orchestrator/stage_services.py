@@ -424,6 +424,24 @@ def assert_affordable(
     # cannot revive construction ghosts or be moved into a stage provider, so
     # accepting them here creates a false-ready plan that no bot can finish.
     stock = live_base.transferable_items(client, surface, force)
+    # Submission releases a transient ledger reservation before bots collect
+    # its items. Those still-visible ghosts remain a physical commitment.
+    # Exact ghosts in this plan belong to its retry, not a second bill.
+    pending = {}
+    if hasattr(client, "command"):
+        owned = tuple(
+            (str(action["entity"]), (action["position"]["x"], action["position"]["y"]))
+            for phase in plan.get("phases", [])
+            for action in phase.get("actions", [])
+            if action.get("action_type") == "place_ghost"
+        )
+        pending = live_base.pending_construction_items(
+            client, surface, force, exclude=owned,
+        )
+    uncommitted = {
+        item: max(0, count - pending.get(item, 0))
+        for item, count in stock.items()
+    }
     ledger = active_material_ledger()
     if ledger is not None:
         project = ledger.projects.get(name)
@@ -436,37 +454,40 @@ def assert_affordable(
                 client, surface, force, required, stock,
             )
             project = ledger.declare(
-                name, required, stock, source_producers=sources,
+                name, required, uncommitted, source_producers=sources,
                 expected_rates=rates, priority=reservation_priority,
             )
         claimant_names = set(reservation_claimants)
         if project is not None:
             claimant_names.add(name)
-        available = ledger.allocatable_stock(stock, claimants=claimant_names)
+        available = ledger.allocatable_stock(uncommitted, claimants=claimant_names)
         if project is not None:
-            short_targets = ledger.shortage_targets(name, stock)
+            short_targets = ledger.shortage_targets(name, uncommitted)
         else:
             short_targets = {
-                item: stock.get(item, 0) + count - available.get(item, 0)
+                item: uncommitted.get(item, 0) + count - available.get(item, 0)
                 for item, count in required.items()
                 if available.get(item, 0) < count
             }
         if short_targets:
-            raise MaterialShortage(name, short_targets, stock)
+            raise MaterialShortage(
+                name, {item: count + pending.get(item, 0)
+                       for item, count in short_targets.items()}, stock,
+            )
         emit(
             f"  {name}: material reservation ok "
             f"({sum(required.values())} ghost items allocated)"
         )
         return
     short = {
-        item: count - stock.get(item, 0)
+        item: count - uncommitted.get(item, 0)
         for item, count in required.items()
-        if stock.get(item, 0) < count
+        if uncommitted.get(item, 0) < count
     }
     if short:
         raise MaterialShortage(
             name,
-            {item: required[item] for item in short},
+            {item: required[item] + pending.get(item, 0) for item in short},
             stock,
         )
     emit(f"  {name}: material check ok ({sum(required.values())} ghost items in stock)")
@@ -627,6 +648,16 @@ def _submit(
         ledger = active_material_ledger()
         project = ledger.projects.get(name) if ledger is not None else None
         if project is not None and project.hold_until_producing:
+            raise
+        # Bots cannot distinguish this blueprint's items from another
+        # project's reserved stock. Additive submission may wait for new
+        # supply, but must not expose a foreign reservation to construction.
+        if ledger is not None and any(
+            other.project_id != name
+            and ledger.project_is_active(other.project_id)
+            and any(other.reserved.get(item, 0) > 0 for item in shortage.required)
+            for other in ledger.projects.values()
+        ):
             raise
         if not allow_unfunded_ghosts:
             producer_backed = _shortage_has_complete_supply_chains(
