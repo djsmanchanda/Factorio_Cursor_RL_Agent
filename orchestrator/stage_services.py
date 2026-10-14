@@ -18,6 +18,7 @@ from orchestrator.game_bridge import GameBridge, load_json
 from orchestrator.material_reservations import active_material_ledger
 from orchestrator.parts_mall import MaterialShortage
 from orchestrator.placement_clutter import clear_plan_clutter
+from orchestrator.pole_obstruction import PoleObstruction, relocate_obstructing_poles
 from orchestrator.power_district import append_plan_reservation
 from orchestrator.roboport_placement import clear_chain_positions
 from orchestrator.work_state import WorkStateSignal
@@ -628,6 +629,14 @@ def _submit(
     converted_infrastructure = _ghostify_direct_infrastructure(plan)
     consume_plan_submission(name)
     clear_plan_clutter(client, surface, plan, emit)
+    try:
+        relocate_obstructing_poles(
+            client, bridge, surface, plan.get("force", "player"), plan, name, emit, _submit,
+        )
+    except PoleObstruction as obstruction:
+        raise StuckError(
+            str(obstruction), code="power_pole_obstruction", details=obstruction.details,
+        ) from obstruction
     try:
         assert_affordable(
             client, surface, plan.get("force", "player"), plan, name, emit,
