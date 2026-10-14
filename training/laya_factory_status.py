@@ -30,6 +30,9 @@ FURNACE_SPEEDS = {"stone-furnace": 1.0, "steel-furnace": 2.0, "electric-furnace"
 ASSEMBLER_TIERS = ("assembling-machine-1", "assembling-machine-2", "assembling-machine-3")
 # Satisfied means measured supply covers this share of the required rate.
 SATISFIED_SHARE = 0.95
+# Output-blocked machines whose accessible stock covers this many seconds of demand
+# are idle because nothing draws from them, not because supply is missing.
+STOCKED_SECONDS = 600
 
 # Factorio entity_status names grouped into the conditions Laya must separate.
 STATUS_BUCKETS = {
@@ -137,10 +140,12 @@ def _upgrade_fact(machines: Sequence[Mapping], item: str, recipe: Mapping | None
 
 
 def _diagnose(item: str, recipe: Mapping | None, buckets: Mapping[str, int], machine_count: int,
-              required: float, capacity: float | None, measured: float | None) -> str:
+              required: float, capacity: float | None, measured: float | None, stock: int = 0) -> str:
     """Describe the measured condition of one need; never prescribe a remedy."""
     if measured is not None and measured >= required * SATISFIED_SHARE:
         return "satisfied"
+    if buckets.get("blocked", 0) * 2 > machine_count and stock >= required * STOCKED_SECONDS:
+        return "satisfied"  # A full mall measures 0/s while its stock meets demand.
     if item in RAW_ITEMS:
         return "short" if measured is not None else "unmeasured"
     if recipe is None:
@@ -198,7 +203,8 @@ def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Ma
             per_machine = machine_rate(tier, item, recipe)
             if per_machine:
                 machines_needed[tier] = math.ceil(required / per_machine - 1e-9)
-        condition = _diagnose(item, recipe, buckets, len(machines), required, capacity, measured)
+        condition = _diagnose(item, recipe, buckets, len(machines), required, capacity, measured,
+                              int(stock.get(item, 0)))
         if condition == "unbuilt" and built.get(item, 0) > 0:
             condition = "built_idle"  # Built by the runner but never ran (usually starved of input).
         needs.append({

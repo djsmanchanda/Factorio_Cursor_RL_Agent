@@ -4,7 +4,7 @@ import pytest
 
 from orchestrator.laya_state import validate_state
 from training.laya_factory_status import (
-    FactoryStatusError, apply_to_state, bottleneck_chain, compile_status, goal_demand,
+    FactoryStatusError, apply_to_state, bottleneck_chain, compile_status, goal_demand, goal_met,
 )
 from training.laya_saved_world import decision_state
 
@@ -140,3 +140,13 @@ def test_compact_rows_mark_stock_chain_items_with_a_zero_goal():
     board = compile_status({**world([]), "recipes": recipes}, {"iron-plate": 0.5}, stock={"medium-electric-pole": 0.5})
     rows = {r["item"]: r for r in compact_status(board, limit=20)["needs"]}
     assert rows["steel-plate"]["goal"] == 0.0 and rows["iron-plate"]["goal"] == 0.5
+
+
+def test_full_mall_with_stock_is_satisfied_but_empty_blocked_mall_is_not():
+    blocked = [machine("electric-furnace", "copper-plate", "full_output")]
+    full = compile_status(world(blocked, items={"copper-plate": 4800}), {"copper-plate": 0.25}, flows(copper_plate=0.0))
+    empty = compile_status(world(blocked, items={"copper-plate": 10}), {"copper-plate": 0.25}, flows(copper_plate=0.0))
+    assert full["needs"][0]["condition"] == "satisfied"
+    assert empty["needs"][0]["condition"] == "output_blocked"
+    assert bottleneck_chain(full) == []
+    assert not goal_met(full["needs"][0])  # Phase goals still judge the measured rate.
