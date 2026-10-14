@@ -5830,6 +5830,9 @@ def _restore_bootstrap_loan(
             (surface, force, loan.original_recipe),
         ),
         provider_fill_chest=shared_provider,
+        stock_gate_target=_MALL_STOCK_GATE_FLOORS.get(
+            (surface, force, loan.original_recipe),
+        ),
     )
     plan["surface"], plan["force"] = surface, force
     _submit(

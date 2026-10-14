@@ -468,9 +468,14 @@ def bootstrap_loan_plan(
 
 def restore_bootstrap_loan_plan(
     loan: MallBootstrapLoan, *, provider_stock_target: int | None = None,
-    provider_fill_chest: bool = False,
+    provider_fill_chest: bool = False, stock_gate_target: int | None = None,
 ) -> dict:
     """Restore the original recipe and request group after the seed is stocked.
+
+    ``stock_gate_target`` is the original item's recorded assembler stock gate.
+    Mall providers are unbounded, so that gate is the cell's only cap: clearing
+    it let a restored drill cell craft 209 drills against a need of 8 (live
+    2026-10-15). ``None`` (a cell that never had a gate) clears the loan's gate.
 
     ``provider_stock_target`` is the item's canonical provider count: every
     live cell making the same item carries the same limit (user standard
@@ -512,7 +517,10 @@ def restore_bootstrap_loan_plan(
                     "x": loan.machine_position[0], "y": loan.machine_position[1],
                 },
                 "recipe": loan.original_recipe,
-                "clear_logistic_condition": True,
+                **(
+                    {"clear_logistic_condition": True} if stock_gate_target is None
+                    else {"logistic_condition": stock_gate(loan.original_recipe, stock_gate_target)}
+                ),
             },
             _as_configuration(provider),
         ],

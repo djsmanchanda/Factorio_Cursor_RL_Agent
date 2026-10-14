@@ -20,6 +20,7 @@ from orchestrator.mall_bootstrap import (
     restore_bootstrap_loan_plan,
 )
 from planners.recipe_data import LINE_RECIPES
+from planners.stock_gating import stock_gate
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -419,6 +420,16 @@ def test_seventh_assembler_is_a_mall_batch_on_seed_stock(monkeypatch) -> None:
     assert step is not None
     assert step.recipe == "assembling-machine-1"
     assert external == ()
+
+
+def test_restore_reinstates_the_original_stock_gate(monkeypatch) -> None:
+    _install_seed_recipes(monkeypatch)
+    plan = restore_bootstrap_loan_plan(_loan("requester-chest"), stock_gate_target=12)
+    machine = next(a for a in plan["phases"][0]["actions"] if a["entity"] == "assembling-machine-1")
+    # Mall providers are unbounded; without its gate a restored cell crafts forever.
+    assert "clear_logistic_condition" not in machine
+    assert machine["logistic_condition"] == stock_gate("copper-cable", 12)
+    assert not list(SCHEMA.iter_errors(plan))
 
 
 def _restore_plan(provider_fill_chest: bool) -> dict:
