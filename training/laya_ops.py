@@ -18,6 +18,7 @@ become observations instead of crashing the run.  The world must be live
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -52,7 +53,18 @@ def receipt(operation: str, params: dict, result: object) -> dict:
     else:
         code = "done"
     return {"ok": code != "prerequisite_advanced", "operation": operation, "params": params, "code": code,
-            "result": None if result is None else str(result)[:200]}
+            "result": _receipt_result(result)}
+
+
+def _receipt_result(result: object) -> object:
+    """Small JSON dicts stay readable (the runner reads ``lifecycle``); anything else is a short string."""
+    if isinstance(result, dict):
+        try:
+            if len(json.dumps(result)) <= 200:
+                return result
+        except (TypeError, ValueError):
+            pass
+    return None if result is None else str(result)[:200]
 
 
 class DeterministicSession:

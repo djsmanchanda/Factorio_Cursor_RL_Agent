@@ -126,8 +126,9 @@ def test_retire_starter_is_offered_after_the_foundation_until_released():
     base.append({"ok": True, "operation": "foundation", "params": {"recipe": "iron-plate"}})
     ids = {o["option_id"] for o in compile_options(BOARD, base)["options"]}
     assert {"op.extend.iron-plate", "op.retire_starter.iron-plate"} <= ids
-    released = base + [{"ok": True, "operation": "retire_starter", "params": {"recipe": "iron-plate"},
-                        "result": {"lifecycle": "released"}}]
+    from training.laya_ops import receipt
+    # Through the real receipt: a stringified result once crashed the next menu (live 2026-10-15).
+    released = base + [receipt("retire_starter", {"recipe": "iron-plate"}, {"lifecycle": "released", "submitted": True})]
     assert "op.retire_starter.iron-plate" not in {o["option_id"] for o in compile_options(BOARD, released)["options"]}
 
 
