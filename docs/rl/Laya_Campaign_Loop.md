@@ -221,3 +221,18 @@ private mod stamping, final thirty-minute validation, and no new work after
 the original deadline. A natural episode already active can finish for
 terminal evidence. Python-only preparation containment requires new frozen
 runners; it grants no production or GUI lifecycle authority.
+
+
+## Authorized eight-hour follow-up (October 14 evening, 2026)
+
+The latest user request starts another eight hours after the small evidence and
+retry fixes. Use a fresh state root/session, `--max-runtime-hours 8`, and
+immutable launch-plus-eight-hour campaign/controller deadlines. Retain the
+end-only review, private-world, verification, final-validation and natural
+active-episode contracts above. Prior deadlines are not extended. The branch
+name remains historical; the new record defines this campaign's duration.
+
+Terminal index lookup keeps the latest32whole JSONL rows rather than a byte
+tail; a large work queue must not make a completed result appear missing.
+Queue promotion changes priority, while its existing retry interval remains;
+reconciliation still wakes work as soon as relevant evidence changes.

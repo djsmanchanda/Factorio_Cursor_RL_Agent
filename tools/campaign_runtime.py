@@ -25,6 +25,7 @@ import tarfile
 import tempfile
 import os
 from dataclasses import replace
+from collections import deque
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -485,16 +486,7 @@ class LayaRuntime:
         index = Path(config.code_root) / "data/laya-saved-world/laya-runs.jsonl"
         ready_deadline = time.time() + max(1, config.helper_wait_seconds)
         while True:
-            indexed = False
-            if index.exists():
-                with index.open("rb") as handle:
-                    handle.seek(max(0, index.stat().st_size - 8192))
-                    rows = handle.read().decode("utf-8", errors="replace").splitlines()
-                for row in rows:
-                    try:
-                        indexed |= json.loads(row).get("run_id") == episode
-                    except (ValueError, AttributeError):
-                        continue
+            indexed = any(row.get("run_id") == episode for row in _run_index_records(index))
             if indexed:
                 break
             if time.time() >= ready_deadline:
@@ -707,22 +699,31 @@ class LayaRuntime:
 
 
 
+def _run_index_records(index: Path) -> list[dict]:
+    """Keep recent whole rows: a work queue can make one run exceed a byte tail."""
+    if not index.exists():
+        return []
+    with index.open(encoding="utf-8", errors="replace") as handle:
+        lines = deque(handle, maxlen=32)
+    records = []
+    for line in lines:
+        try:
+            record = json.loads(line)
+        except ValueError:  # A concurrent append may not have completed its row.
+            continue
+        if isinstance(record, dict):
+            records.append(record)
+    return records
+
+
 def comparator_records(root: Path) -> list[dict]:
     """Translate explicit prior world roots to helper API records, bounded reads."""
     root = Path(root).resolve()
     index = root.parent / "laya-runs.jsonl"
     records = []
-    if index.exists():
-        with index.open("rb") as handle:
-            handle.seek(max(0, index.stat().st_size - 65536))
-            lines = handle.read().decode("utf-8", errors="replace").splitlines()
-        for line in lines:
-            try:
-                record = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(record, dict) and record.get("root") and Path(record["root"]).resolve() == root:
-                records.append({**record, "kind": "laya"})
+    for record in _run_index_records(index):
+        if record.get("root") and Path(record["root"]).resolve() == root:
+            records.append({**record, "kind": "laya"})
     if not records:
         log = root / "logs/laya-runner.log"
         if not log.exists():

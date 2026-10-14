@@ -120,6 +120,28 @@ def test_reorder_inherits_priority_and_cycle_is_visible(tmp_path):
     assert precursor.priority == goal.priority > 50
 
 
+def test_priority_promotion_preserves_wait_horizon_until_supply_changes(tmp_path):
+    q = queue(tmp_path)
+    goal = q.enqueue('produce', {'item': 'plastic-bar', 'stock_target': 30}, priority=50, tick=0)
+    precursor = q.enqueue('produce', {'item': 'pipe', 'stock_target': 20},
+                          priority=50, tick=0, parent=goal.job_id)
+    q.record(precursor, {'ok': False, 'code': 'production_prerequisite_deferred'},
+             snapshot(), can_produce=lambda _: False)
+    q.reconcile(snapshot(10))
+    q.promote(goal.job_id, tick=10)
+    assert precursor.priority == goal.priority > 50
+    assert precursor.retry_tick == 120 and precursor not in q.ready(snapshot(10))
+    q.reconcile(snapshot(120))
+    assert precursor in q.ready(snapshot(120))
+
+    q.record(precursor, {'ok': False, 'code': 'material_shortage',
+                         'details': {'required': {'iron-plate': 1}}},
+             snapshot(120), can_produce=lambda _: False)
+    q.promote(goal.job_id, tick=130)
+    q.reconcile(snapshot(130, {'iron-plate': 1}))
+    assert precursor in q.ready(snapshot(130, {'iron-plate': 1}))
+
+
 def test_spares_wait_until_urgent_work_is_clear(tmp_path):
     q = queue(tmp_path)
     q.enqueue('produce', {'item': 'inserter', 'stock_target': 2}, priority=5, tick=0, kind='spare')

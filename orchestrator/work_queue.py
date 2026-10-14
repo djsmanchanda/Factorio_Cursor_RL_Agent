@@ -133,7 +133,8 @@ class WorkQueue:
                 seen.add(here)
                 job = self.jobs[here]
                 job.priority = priority
-                job.retry_tick = min(job.retry_tick, tick)
+                # Reordering work does not change a pending tool's retry horizon.
+                # Reconcile still wakes it immediately when its supply changes.
                 todo.extend(job.dependencies)
         self.save()
 

@@ -517,14 +517,15 @@ def test_two_real_adapter_cycles_use_distinct_frozen_sources_and_terminal_observ
     assert not any('checkpoint' in prompt.lower() and 'assessment' in prompt.lower() for prompt in harness.prompts)
 
 
-def test_observer_completion_is_durable_and_configured_once(tmp_path, monkeypatch):
+@pytest.mark.parametrize('padding', [0, 90000])
+def test_observer_completion_is_durable_and_configured_once(tmp_path, monkeypatch, padding):
     config = laya_config(tmp_path, code_root=tmp_path / 'episode/code', observer_model=runtime.LAYA_OBSERVER_MODEL,
-                         observer_variant='xhigh', comparator_roots=(tmp_path / 'previous',))
+                         observer_variant='xhigh', comparator_roots=(tmp_path / 'previous',), helper_wait_seconds=0)
     (config.code_root / 'docs/rl').mkdir(parents=True)
     (config.code_root / 'docs/rl/laya_helper.json').write_text('{"deterministic_reference":{}}')
     index = config.code_root / 'data/laya-saved-world/laya-runs.jsonl'
     index.parent.mkdir(parents=True)
-    index.write_text('{"run_id":"actual-run"}\n')
+    index.write_text(json.dumps({'run_id': 'actual-run', 'summary': {'work_queue': 'x' * padding}}) + '\n')
     called = []
     def run(command, **kwargs):
         called.append(command)
@@ -658,6 +659,20 @@ def test_prior_world_roots_become_explicit_helper_comparison_records(tmp_path):
     assert records == [{**row, 'kind':'laya'}]
     # Full exploratory experiment records are retained rather than filtered out.
     assert records[0]['experiment'] == 'old-live-pair'
+
+
+def test_comparator_preserves_large_complete_row_before_incomplete_tail(tmp_path):
+    world = tmp_path / 'worlds/large-run'
+    world.mkdir(parents=True)
+    row = {'run_id': 'large-run', 'root': str(world),
+           'summary': {'stop': 'stalled', 'accepted': ['C0', 'C2'],
+                       'work_queue': [{'reason': '\u03bb' * 50000}]}}
+    other = {'run_id': 'other-run', 'root': str(tmp_path / 'other'), 'summary': {'stop': 'stalled'}}
+    (world.parent / 'laya-runs.jsonl').write_text(
+        json.dumps(other) + '\n' + json.dumps(row, ensure_ascii=False) + '\n' + '{"run_id":"unfinished',
+        encoding='utf-8',
+    )
+    assert runtime.comparator_records(world) == [{**row, 'kind': 'laya'}]
 
 
 def test_verified_goal_stops_campaign_without_speculative_fixer(tmp_path, monkeypatch):

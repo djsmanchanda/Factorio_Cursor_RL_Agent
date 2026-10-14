@@ -868,3 +868,28 @@ it started. No scheduled live model reviews. Fresh isolated worlds, speed2,
 Factorio2.1.21, mining-productivity-4 target; old worlds preserved. An active
 natural episode may finish after the new-work deadline for terminal evidence.
 No production/GUI deployment,push,merge,adoption or promotion.
+
+
+### 2026-10-14 21:37:42 IST — complete terminal records and eight-hour successor
+
+The previous campaign's second run did write its durable index:89952bytes,
+1817decisions,real C0/C2 accepted,C1 failed,research incomplete. Terminal
+review cut the row mid-JSON at64KiB and falsely treated it as missing. Both
+index readers now keep complete recent rows; malformed pending appends are
+skipped. Read-only replay recovered that exact terminal result. A separate
+small executor correction preserves retry horizons during priority promotion;
+priority inheritance and immediate wake on changed supply remain. No policy
+weight,layout,mod or legality changes. Three regression cases fail before,
+192focused pass; fast1306pass/3skip with only independently confirmed unchanged
+four-import firewall baseline. No new exemption.
+
+User authorized a fresh8hour DeepSeek/Haiku loop, same end-only reviews.
+Launch record:2026-10-14 21:37:42 IST; immutable new-work deadline:2026-10-15 05:37:42 IST.
+Unit:laya-deepseek-haiku-8h-20261014T2135IST.service; private34995/27995. Evidence:/home/djsm/Github_Desktop/Factorio_Cursor_RL_Agent/data/t3-laya-loop/worktree/data/laya-experiments/deepseek-haiku-20261014T2135IST.
+Saved DeepSeek:ses_ec4d8c45bffemjpk4FFkbHWTOh; fresh Haiku5.5/xhigh per fix. Launch is being
+finalized; progress.json,launch-verification.json and the owned unit establish
+actual start. Previous34994/27994world retained. Speed2,2.1.21,fresh pinned
+source copies,mining-productivity-4 target. Guided episodes plus verified
+code improvement; no new neural checkpoint training claim. No new work after
+deadline; an active natural run may finish for terminal evidence. Python-only
+new frozen runners; no production/GUI deployment,merge,push or adoption.
