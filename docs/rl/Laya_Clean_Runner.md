@@ -25,7 +25,9 @@ are migration debt, catalogued in [decision authority](laya_decision_authority_i
 They are not proof that policy authority has already moved to Laya.
 
 Both paths currently use `GuidedPolicy`: shown rule preferences multiply and a
-15% uniform exploration floor preserves legal alternatives. `--policy exploration`
+15% uniform exploration floor preserves legal alternatives by default. Variants
+may set `policy.epsilon` from 0 to 1 for matched comparisons; zero still samples
+from rule weights. `--policy exploration`
 is the uniform comparator. The guided sampler does not read prose. No learned
 checkpoint is fitted to ops `decision-states.jsonl` by the current campaign;
 L1–L3 lab models and supplied-input mall learning are separate runtimes/profiles.

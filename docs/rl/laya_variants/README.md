@@ -14,7 +14,10 @@ What a variant may change:
   still verified against their source documents.
 - **Context sent to Laya:** `settings.guideline_limit`, `per_need_checked`,
   `per_need_shown`, `stock_rate`, `rate_window_ticks`.
-- **Policy:** `policy.epsilon` (exploration floor).
+- **Policy:** `policy.epsilon` (uniform exploration floor, from 0 to 1;
+  default 0.15). Zero removes the uniform component but retains seeded
+  sampling in proportion to rule weights; it does not select only the
+  highest-weight option. An argmax comparator is a separate policy factor.
 - **Runtime:** `runtime.speed`; geometry uses `settings.stall_decisions`.
   Ops has a separate 18,000-tick stall constant; that setting does not tune it.
 
