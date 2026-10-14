@@ -382,6 +382,22 @@ def test_plate_expansion_preflight_rejects_real_infrastructure(monkeypatch) -> N
         builder._plate_expansion_foundation(client, "nauvis", "player", "iron-plate", plan)
 
 
+def test_plate_expansion_refusal_names_the_occupying_entity(monkeypatch) -> None:
+    """2026-10-13 iron refusal listed tiles only; the occupant identifies the owner."""
+    plan = {"phases": [{"actions": [{
+        "action_type": "place_ghost", "entity": "electric-furnace",
+        "position": {"x": 1.5, "y": 1.5},
+    }]}]}
+    client = SimpleNamespace(command=lambda _command: "")
+    monkeypatch.setattr(builder.live_base, "occupied_tile_owners", lambda *_a, **_k: {
+        (0, 0): ("substation", 40.0, 36.0),
+    })
+    monkeypatch.setattr(builder.live_base, "water_tiles", lambda *_a: set())
+
+    with pytest.raises(StuckError, match=r"substation@\(40\.0, 36\.0\)"):
+        builder._plate_expansion_foundation(client, "nauvis", "player", "iron-plate", plan)
+
+
 def test_plate_expansion_marks_an_obstructing_roboport_for_relocation(monkeypatch) -> None:
     plan = {"phases": [{"actions": [{
         "action_type": "place_ghost", "entity": "electric-furnace",
