@@ -566,6 +566,27 @@ def planned_cell_reserved_tiles(
     return reserved
 
 
+def compact_cell_reserved_tiles(
+    plan: dict, reference_point: Point, origin: tuple[int, int],
+) -> set[tuple[int, int]]:
+    """Land kept clear while routing power for one compact-mall half.
+
+    Covers the whole current cell, not only the half being placed: reserving
+    just the submitted half let a bridge pole land on the other half's chest
+    column (live 2026-10-15: big pole at (58, 35) blocked the provider ghost
+    at (58.5, 34.5)). Also covers the next cell sites and, for seed cells, the
+    dense expansion bank.
+    """
+    reserved = (
+        planned_footprint_tiles(plan)
+        | _cell_footprint_tiles(origin)
+        | planned_cell_reserved_tiles(reference_point, origin)
+    )
+    if seed_cell_uses_shared_substation(reference_point, origin):
+        reserved |= seed_expansion_reserved_tiles(reference_point)
+    return reserved
+
+
 def _slot_position(origin: tuple[int, int], side: str) -> Point:
     return (origin[0] + (1.5 if side == "left" else 7.5), origin[1] + 1.5)
 
@@ -897,9 +918,7 @@ def build_compact_mall_stage(
         client, surface, requester_action, recipe, side,
     )
     emit(f"compact parts mall for {recipe}: assigning {side} half of cell {origin}")
-    reserved_tiles = planned_footprint_tiles(plan) | planned_cell_reserved_tiles(reference_point, origin)
-    if seed_cell_uses_shared_substation(reference_point, origin):
-        reserved_tiles |= seed_expansion_reserved_tiles(reference_point)
+    reserved_tiles = compact_cell_reserved_tiles(plan, reference_point, origin)
     if callable(getattr(client, "command", None)):
         existing_network = live_base.pole_network_id(
             client, surface, substation,
