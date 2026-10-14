@@ -1,6 +1,7 @@
 # Path: tests/test_mall_cell_reservation.py | Purpose: Protect the reservation of future mall cell sites from power and coverage routing.
 
 import itertools
+import math
 
 from orchestrator.mall_builder import (
     LINE_RECIPES, _cell_footprint_tiles, _cell_origins, compact_cell_reserved_tiles, planned_cell_reserved_tiles,
@@ -36,3 +37,23 @@ def test_routing_one_half_keeps_the_other_half_of_its_cell_clear():
                       for y in range(substation[1] - 5, substation[1] + 5)
                       if not {(x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1)} & reserved]
     assert big_pole_spots  # the cell's power can still land in the gap row
+
+
+def test_shared_substations_power_several_cells_from_the_gaps():
+    from orchestrator.mall_builder import (
+        _cell_powered_boxes, _substation_reaches, cell_substation, seed_cell_uses_shared_substation,
+        shared_substation_sites,
+    )
+    from planners.infrastructure_geometry import footprint_tile_indices
+
+    reference = (0.0, 0.0)
+    cells = [o for o in _cell_origins(reference) if not seed_cell_uses_shared_substation(reference, o)]
+    sites = shared_substation_sites(reference)
+    assert len(sites) * 3 <= len(cells)  # one substation per cell wasted its 18x18 supply area
+    bodies = set().union(*(_cell_footprint_tiles(o) for o in _cell_origins(reference)))
+    for origin in cells:
+        site = cell_substation(reference, origin)
+        assert _substation_reaches(site, _cell_powered_boxes(origin))
+        assert not footprint_tile_indices(site, 2) & bodies
+    centres = [site for site, _cells in sites]
+    assert all(any(math.dist(a, b) <= 18 for b in centres if b != a) for a in centres)  # one wired spine

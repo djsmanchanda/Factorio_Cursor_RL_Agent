@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import functools
 import math
 from collections import Counter
 from collections.abc import Callable, Mapping
@@ -18,6 +19,9 @@ from planners.quad_mall_layout import (
     QUAD_MALL_GROUP_MACHINES, QUAD_MALL_MACHINE_OFFSETS,
     generate_quad_mall_layout,
 )
+from planners.infrastructure import POLE_SPECS
+from planners.infrastructure_geometry import footprint_tile_indices
+from planners.plan_validation import ENTITY_FOOTPRINTS
 from planners.recipe_data import LINE_RECIPES
 from planners.stock_gating import stock_gate
 from tools.rcon_client import RconClient
@@ -531,21 +535,100 @@ def seed_expansion_reserved_tiles(reference_point: Point) -> set[tuple[int, int]
 PLANNED_CELL_SITES = 8  # future paired-cell sites kept clear of power and coverage routing
 
 
-def _cell_footprint_tiles(origin: tuple[int, int]) -> set[tuple[int, int]]:
-    """A paired cell's real footprint: both halves (machines, inserters, chests) and its own substation.
-
-    Generated like the cell itself, so the gaps between cells stay free for the poles that power them.
-    """
+def _cell_body_plans(origin: tuple[int, int]) -> list[dict]:
     spec = LINE_RECIPES["iron-gear-wheel"]
+    return [generate_paired_mall_layout(
+        "iron-gear-wheel", spec["machine"], spec["ingredients"], spec["amounts"], origin, side,
+        craft_time=spec["craft_time"], set_recipe=False, include_substation=False, shared_provider=False,
+    ) for side in ("left", "right")]
+
+
+def _cell_footprint_tiles(origin: tuple[int, int]) -> set[tuple[int, int]]:
+    """A paired cell's real footprint: both halves (machines, inserters, chests).
+
+    Generated like the cell itself, so the gaps between cells stay free for the
+    poles that power them. Its power comes from a shared substation site.
+    """
     tiles: set[tuple[int, int]] = set()
-    for side in ("left", "right"):
-        plan = generate_paired_mall_layout(
-            "iron-gear-wheel", spec["machine"], spec["ingredients"], spec["amounts"], origin, side,
-            craft_time=spec["craft_time"], set_recipe=False, include_substation=side == "left",
-            substation_position=(origin[0] + 4.0, origin[1] + 5.0), shared_provider=False,
-        )
+    for plan in _cell_body_plans(origin):
         tiles |= planned_footprint_tiles(plan)
     return tiles
+
+
+def _cell_powered_boxes(origin: tuple[int, int]) -> list[tuple[float, float, float, float]]:
+    """Assemblers and inserters of both halves: what a cell's substation must reach."""
+    boxes = []
+    for plan in _cell_body_plans(origin):
+        for action in plan["phases"][0]["actions"]:
+            entity = action["entity"]
+            if entity.startswith("assembling-machine") or entity.endswith("inserter"):
+                half = ENTITY_FOOTPRINTS.get(entity, 1) / 2
+                x, y = action["position"]["x"], action["position"]["y"]
+                boxes.append((x - half, y - half, x + half, y + half))
+    return boxes
+
+
+def _substation_reaches(site: Point, boxes: list[tuple[float, float, float, float]]) -> bool:
+    reach = POLE_SPECS["substation"]["supply"]
+    return all(left < site[0] + reach and right > site[0] - reach
+               and top < site[1] + reach and bottom > site[1] - reach
+               for left, top, right, bottom in boxes)
+
+
+@functools.lru_cache(maxsize=8)
+def shared_substation_sites(reference_point: Point) -> tuple[tuple[Point, tuple[tuple[int, int], ...]], ...]:
+    """Mall power spine: substation sites that each power several cells.
+
+    One substation per cell (user 2026-10-15) wasted its 18x18 supply area. In
+    build order, each still-unpowered cell gets the site that also covers the
+    most later cells, off every cell body, the seed bank and earlier sites, so
+    a site placed now already powers the cells that come after it.
+    """
+    origins = [o for o in _cell_origins(reference_point)
+               if not seed_cell_uses_shared_substation(reference_point, o)]
+    blocked = set(seed_expansion_reserved_tiles(reference_point))
+    for origin in _cell_origins(reference_point):
+        blocked |= _cell_footprint_tiles(origin)
+    boxes = {origin: _cell_powered_boxes(origin) for origin in origins}
+    covered: set[tuple[int, int]] = set()
+    sites = []
+    for origin in origins:
+        if origin in covered:
+            continue
+        centre = (origin[0] + 4.5, origin[1] + 1.5)
+        best = None
+        for dx in range(-10, 20):
+            for dy in range(-10, 14):
+                site = (float(origin[0] + dx), float(origin[1] + dy))
+                if footprint_tile_indices(site, 2) & blocked or not _substation_reaches(site, boxes[origin]):
+                    continue
+                gain = tuple(o for o in origins if o not in covered and _substation_reaches(site, boxes[o]))
+                key = (-len(gain), math.dist(site, centre), site)
+                if best is None or key < best[0]:
+                    best = (key, site, gain)
+        if best is None:
+            continue  # No clear site: the cell keeps its own anchor (cell_substation fallback).
+        _key, site, gain = best
+        sites.append((site, gain))
+        covered.update(gain)
+        blocked |= footprint_tile_indices(site, 2)
+    return tuple(sites)
+
+
+def cell_substation(reference_point: Point, origin: tuple[int, int]) -> Point:
+    """Where the substation powering this cell stands."""
+    if seed_cell_uses_shared_substation(reference_point, origin):
+        return seed_shared_substation(reference_point)
+    for site, cells in shared_substation_sites(reference_point):
+        if origin in cells:
+            return site
+    return (origin[0] + 4.0, origin[1] + 5.0)
+
+
+def _cell_substation_tiles(reference_point: Point, origin: tuple[int, int]) -> set[tuple[int, int]]:
+    if seed_cell_uses_shared_substation(reference_point, origin):
+        return set()  # The seed anchor belongs to the seed bank's reservation.
+    return footprint_tile_indices(cell_substation(reference_point, origin), 2)
 
 
 def planned_cell_reserved_tiles(
@@ -562,7 +645,7 @@ def planned_cell_reserved_tiles(
     start = origins.index(current) + 1 if current in origins else 0
     reserved: set[tuple[int, int]] = set()
     for origin in origins[start:start + count]:
-        reserved |= _cell_footprint_tiles(origin)
+        reserved |= _cell_footprint_tiles(origin) | _cell_substation_tiles(reference_point, origin)
     return reserved
 
 
@@ -580,6 +663,7 @@ def compact_cell_reserved_tiles(
     reserved = (
         planned_footprint_tiles(plan)
         | _cell_footprint_tiles(origin)
+        | _cell_substation_tiles(reference_point, origin)
         | planned_cell_reserved_tiles(reference_point, origin)
     )
     if seed_cell_uses_shared_substation(reference_point, origin):
@@ -785,10 +869,11 @@ def rebuild_incomplete_mall_cell(
         # Blueprints carry the machine footprint only.  The recipe is applied
         # by the post-construction stock-gate configuration pass.
         craft_time=spec["craft_time"], set_recipe=False,
-        include_substation=seed_cell_includes_substation(
-            reference_point, origin, side,
+        include_substation=(
+            seed_cell_includes_substation(reference_point, origin, side)
+            or not seed_cell_uses_shared_substation(reference_point, origin)
         ),
-        substation_position=seed_shared_substation(reference_point),
+        substation_position=cell_substation(reference_point, origin),
     )
     plan["surface"], plan["force"] = surface, force
     emit(
@@ -890,10 +975,11 @@ def build_compact_mall_stage(
         # Blueprints carry the machine footprint only.  The recipe is applied
         # by the post-construction stock-gate configuration pass.
         craft_time=spec["craft_time"], set_recipe=False,
-        include_substation=seed_cell_includes_substation(
-            reference_point, origin, side,
+        include_substation=(
+            seed_cell_includes_substation(reference_point, origin, side)
+            or not seed_cell_uses_shared_substation(reference_point, origin)
         ),
-        substation_position=seed_shared_substation(reference_point),
+        substation_position=cell_substation(reference_point, origin),
         stock_gate_target=stock_gate_target,
         fill_chest=fill_chest or recipe in {"iron-gear-wheel", "copper-cable"},
         request_multiplier_override=request_multiplier_override,
@@ -905,11 +991,7 @@ def build_compact_mall_stage(
         origin[0] + 4.5,
         origin[1] + (0.5 if side == "left" else 2.5),
     )
-    substation = (
-        seed_shared_substation(reference_point)
-        if seed_cell_uses_shared_substation(reference_point, origin)
-        else (origin[0] + 4.0, origin[1] + 5.0)
-    )
+    substation = cell_substation(reference_point, origin)
     requester_action = next(
         action for phase in plan["phases"] for action in phase["actions"]
         if action.get("entity") == "requester-chest"
