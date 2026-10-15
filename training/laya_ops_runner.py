@@ -389,9 +389,12 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     producible = {i: m for i, m in short.items() if plates_in(i, recipes or {}) <= started
                   and obtainable(recipes, i, stock or {})} if recipes else short
     for item, missing in (sorted(producible.items(), key=lambda kv: -kv[1])[:MAX_PRODUCE] if slots else ()):
+        # The tooling's stock_target is a network level (the mall's stock gate), not a delta: asking for the
+        # bare shortage gated a drill cell at 4 while the network held 6 and the starter needed 8.
+        target = int((stock or {}).get(item, 0)) + missing
         options.append({
             "option_id": f"op.produce.{item}", "family": "produce", "product": item, "need_id": f"stock:{item}",
-            "summary": f"produce {item} (short {missing})", "params": {"item": item, "stock_target": missing},
+            "summary": f"produce {item} (short {missing})", "params": {"item": item, "stock_target": target},
             # Items a goal plate's operation is blocked on serve that goal.
             "features": {"last_code": codes.get(("produce", item), "new"), "shortage": missing,
                          "waiting": in_progress(codes.get(("produce", item))),

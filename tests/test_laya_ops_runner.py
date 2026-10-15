@@ -111,6 +111,16 @@ def test_no_produce_for_items_whose_plate_has_no_starter_yet():
     assert "op.produce.transport-belt" in ids and "op.produce.splitter" not in ids  # splitter needs copper
 
 
+def test_produce_asks_for_a_network_level_not_the_bare_shortage():
+    # Live 2026-10-15: the stone starter needed 8 drills, the network held 6; asking for 2 gated the cell shut.
+    starter = {"ok": False, "operation": "starter", "params": {"recipe": "stone-brick"}, "code": "material_shortage",
+               "details": {"required": {"electric-mining-drill": 8}, "available": {"electric-mining-drill": 6}}}
+    results = [{"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}}, starter]
+    options = compile_options(BOARD, results, stock={"electric-mining-drill": 6})["options"]
+    drill = next(o for o in options if o["option_id"] == "op.produce.electric-mining-drill")
+    assert drill["params"]["stock_target"] == 8 and drill["features"]["shortage"] == 2
+
+
 def test_mall_side_shortages_are_kept_per_item_and_loans_count_as_progress():
     from training.laya_ops_runner import in_progress
     results = [{"ok": False, "operation": "mall_slot", "params": {"item": "electronic-circuit"}, "code": "material_shortage",
