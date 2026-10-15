@@ -1207,17 +1207,6 @@ def _defer_power_hookup(
     )
 
 
-def _corridor_preference(placements: list[tuple[str, Point]]) -> tuple:
-    """Fewest poles, then least land; names only break exact ties.
-
-    Comparing placements alone ranked "big-electric-pole" before
-    "medium-electric-pole" alphabetically, so equal-length routes ended in a
-    2x2 pole where a 1x1 one served (live 2026-10-15, (58, 35)).
-    """
-    land = sum(int(POLE_SPECS[name]["size"]) ** 2 for name, _point in placements)
-    return len(placements), land, placements
-
-
 def extend_power(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     near_position: Point, emit: Callable[[str], None], *,
@@ -1462,7 +1451,7 @@ def extend_power(
             if placements and all(stock.get(name, 0) >= count for name, count in bill.items()):
                 alternatives.append(placements)
         if alternatives:
-            selected = min(alternatives, key=_corridor_preference)
+            selected = min(alternatives, key=lambda placements: (len(placements), placements))
             baseline_funded = all(stock.get(name, 0) >= action_names.count(name) for name in action_names)
             if len(selected) < len(hops) or not baseline_funded:
                 action_names = [name for name, _point in selected]
