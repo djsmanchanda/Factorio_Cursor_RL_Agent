@@ -2787,3 +2787,21 @@ def test_binding_loan_at_bill_yields_to_preempt(monkeypatch) -> None:
 
     assert any("PREEMPT" in message for message in messages)
     assert "RESTORED" in messages
+
+
+def test_a_project_short_of_an_item_releases_its_reserve_to_that_items_producer(tmp_path, monkeypatch) -> None:
+    """Live 2026-10-15/16: the iron refinery held the only assembling machine while waiting on 26 inserters,
+    so the inserter cell could never be funded. The waiting project's reserve may fund its own supplier."""
+    ledger = _ledger(tmp_path)
+    stock = {"assembling-machine-1": 1, "inserter": 2}
+    ledger.declare("modular_iron-plate_refinery", {"assembling-machine-1": 1, "inserter": 28}, stock)
+    assert ledger.projects_waiting_on("inserter") == ("modular_iron-plate_refinery",)
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", ledger)
+    monkeypatch.setattr(builder, "mall_slot_count", lambda *_a: 5)
+    monkeypatch.setattr(builder, "preview_mall_allocation", lambda *_a, **_k: ((0.0, 0.0), "left"))
+    monkeypatch.setattr(builder, "compact_mall_project_bill", lambda *_a, **_k: {"assembling-machine-1": 1})
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: dict(stock))
+    affordable = lambda item: builder._bootstrap_demand_cell_affordable(object(), "nauvis", "player", item, 1, (0.0, 0.0))
+    assert affordable("inserter") == (True, {})  # the refinery waits on inserters: its machine may build their cell
+    assert affordable("transport-belt") == (False, {"assembling-machine-1": 1})  # nobody waits on belts here
