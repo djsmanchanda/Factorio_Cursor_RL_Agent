@@ -8677,11 +8677,18 @@ def _bootstrap_demand_cell_affordable(
         )
     )
     stock = _transferable_or_available_stock(client, surface, force)
+    ledger = _MATERIAL_RESERVATION_LEDGER
+    # A project short of this item cannot progress until its producer exists, so
+    # its reserved inputs may fund that producer's cell. Holding them deadlocked
+    # live runs (2026-10-15/16: the iron refinery held the assembling machine the
+    # inserter cell needed while waiting 26 inserters; 1,292 capacity waits over
+    # last night's matrix).
+    waiting = ledger.projects_waiting_on(item) if hasattr(ledger, "projects_waiting_on") else ()
     available = (
-        _MATERIAL_RESERVATION_LEDGER.allocatable_stock(
-            stock, claimant=_material_project_id(item),
+        ledger.allocatable_stock(
+            stock, claimant=_material_project_id(item), claimants=waiting,
         )
-        if _MATERIAL_RESERVATION_LEDGER is not None else stock
+        if ledger is not None else stock
     )
     shortage = {
         ingredient: required

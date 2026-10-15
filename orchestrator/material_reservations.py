@@ -393,6 +393,14 @@ class MaterialReservationLedger:
             for item, count in stock.items()
         }
 
+    def projects_waiting_on(self, item: str) -> tuple[str, ...]:
+        """Active projects still short of ``item``: they cannot progress until it is made."""
+        return tuple(
+            project.project_id for project in self.projects.values()
+            if self._active(project)
+            and int(project.required.get(item, 0)) > int(project.reserved.get(item, 0))
+        )
+
     def required_stock(self, item: str) -> int:
         return self.stock_targets().get(item, 0)
 
