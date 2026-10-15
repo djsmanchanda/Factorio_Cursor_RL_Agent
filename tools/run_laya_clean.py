@@ -81,6 +81,9 @@ def main(argv=None) -> int:
     p.add_argument("--mods-source", type=Path)
     p.add_argument("--resume-bundle", type=Path, help="Hash-verified earned C1 checkpoint")
     p.add_argument("--export-checkpoint", type=Path, help="Save an earned C1 checkpoint after a successful run")
+    p.add_argument("--jumpstart", action="store_true",
+                   help="Restart a fresh controller on this already-running world after a stall or failure "
+                        "(experiment): carry only earlier segments' lifecycle receipts")
     args = p.parse_args(argv)
     root = owned_root(args.root)
     resume=load_bundle(args.resume_bundle) if args.resume_bundle else None
@@ -131,10 +134,13 @@ def main(argv=None) -> int:
             policy = (GuidedPolicy(args.seed, preferences=load_preferences(ROOT / settings.catalog), **policy_options)
                       if args.policy == "guided" else ExplorationPolicy(args.seed))
             if args.actions == "deterministic":
-                from training.laya_ops_runner import run as run_ops
+                from training.laya_ops_runner import lifecycle_receipts, run as run_ops
+                carried = (lifecycle_receipts(paths["journal"].parent / "decision-states.jsonl")
+                           if args.jumpstart else [])
                 summary = run_ops(adapter, policy, journal=paths["journal"], decisions=args.decisions or None,
                                   measure_ticks=args.measure_ticks, seed=args.seed, run_id=run_id, emit=log,
-                                  should_stop=stop.is_set, status_path=paths["status"], settings=settings)
+                                  should_stop=stop.is_set, status_path=paths["status"], settings=settings,
+                                  carried=carried)
             else:
                 summary = run(adapter, policy, journal=paths["journal"],
                               decisions=args.decisions or None, measure_ticks=args.measure_ticks, seed=args.seed,

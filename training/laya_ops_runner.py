@@ -448,15 +448,46 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
             "options": options, "shortfalls": short}
 
 
+# What a restarted controller must know about the world it inherits: which plates have starters, foundations or
+# retired starters, which mall slots and growth it already stood. Demand, failures and waits are not carried.
+LIFECYCLE_OPERATIONS = ("starter", "foundation", "extend", "retire_starter", "steel", "reserve_steel_seed",
+                        "mall_slot", "grow")
+
+
+def lifecycle_receipts(records: Path) -> list[dict]:
+    """Successful lifecycle receipts of earlier controller segments on this world (jumpstart experiment)."""
+    import json
+    carried = []
+    if not records.exists():
+        return carried
+    for line in records.read_text(encoding="utf-8").splitlines():
+        record = json.loads(line)
+        chosen = next((o for o in record.get("options") or () if o.get("option_id") == record["choice"]["option_id"]),
+                      None)
+        outcome = record.get("outcome") or {}
+        if chosen and chosen.get("family") in LIFECYCLE_OPERATIONS and outcome.get("ok"):
+            carried.append({"ok": True, "operation": chosen["family"], "params": chosen.get("params") or {},
+                            "code": outcome.get("code"), "result": outcome.get("result"), "tick": record.get("tick")})
+    return carried
+
+
 def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, measure_ticks: int, seed: int,
         run_id: str, emit: Callable[[str], None] = lambda _: None, should_stop: Callable[[], bool] = lambda: False,
-        status_path: Path | None = None, settings: Settings = Settings(), session: Any = None) -> dict:
-    """Observe -> board -> operations -> choose -> run one -> record, until the mission ends or stalls."""
+        status_path: Path | None = None, settings: Settings = Settings(), session: Any = None,
+        carried: list[dict] = ()) -> dict:
+    """Observe -> board -> operations -> choose -> run one -> record, until the mission ends or stalls.
+
+    ``carried`` seeds the history with an earlier segment's lifecycle receipts when a fresh controller is
+    restarted on the same world; everything else starts fresh.
+    """
     from training.laya_ops import DeterministicSession
     session = session or DeterministicSession(adapter.root, emit=lambda line: emit(f"  TOOL {line}"))
     records = journal.parent / "decision-states.jsonl"
     reached: list[str] = []
-    results: list[dict] = []
+    results: list[dict] = list(carried)
+    if carried:
+        emit(f"JUMPSTART: restarting on the same world with {len(carried)} lifecycle receipt(s) from earlier "
+             f"segments: {', '.join(sorted({r['operation'] for r in carried}))}")
     samples: list = []
     measurement = None
     summary: dict = {"decisions": 0, "failures": 0, "phases_reached": reached, "stop": "decision_budget"}

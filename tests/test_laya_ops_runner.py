@@ -321,3 +321,17 @@ def test_a_flat_out_gear_producer_with_starved_consumers_offers_growth():
              "code": "prerequisite_advanced"}
     assert not grow([asked])  # already asked to grow from 1; wait for that cell
 
+
+def test_a_restarted_controller_inherits_only_lifecycle_receipts(tmp_path):
+    from training.laya_ops_runner import lifecycle_receipts, plate_stages
+    def record(family, params, ok, code):
+        return json.dumps({"choice": {"option_id": "x"}, "options": [{"option_id": "x", "family": family, "params": params}],
+                           "outcome": {"ok": ok, "code": code, "result": None}, "tick": 1})
+    states = tmp_path / "decision-states.jsonl"
+    states.write_text("\n".join([record("starter", {"recipe": "iron-plate"}, True, "submitted"),
+                                 record("foundation", {"recipe": "iron-plate"}, True, "submitted"),
+                                 record("produce", {"item": "inserter", "stock_target": 9}, True, "producing"),
+                                 record("foundation", {"recipe": "copper-plate"}, False, "material_shortage")]))
+    carried = lifecycle_receipts(states)
+    assert [r["operation"] for r in carried] == ["starter", "foundation"]
+    assert plate_stages(carried) == {"iron-plate": "foundation"}
