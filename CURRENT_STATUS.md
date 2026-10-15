@@ -321,3 +321,9 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - What: AGENTS.md routes delegation through the active harness; T3 Code inherits model/provider defaults without model or effort overrides, and falls back to direct evidence reading when delegation is unsupported.
 - Evidence: reviewed instruction diff and git diff --check pass. Required fast gate stopped with 285 collection errors, including duplicate saved-run test modules under data/; no subagent launch was exercised. Log: /tmp/factorio-t3-agents-fast-20261015.log.
 - Lifecycle: instructions only; no runner, mod or Factorio restart/deployment required. New sessions load the updated charter.
+
+
+## [2026-10-15 14:19 IST] Explicit T3 delegation tool contract
+- What: AGENTS.md names T3 MCP delegate_task/task_status, requires discovering both before delegation, prohibits native collaboration tools in T3 and falls back to direct reading when tools are missing.
+- Evidence: reviewed documentation diff and whitespace checks pass. Isolated managed Codex 0.162.0 requests confirmed the upstream two flags retain native tools while adding agents.enabled=false removes them; normal inference completed in both arms. Required fast gate again stopped with 285 collection errors, including saved-run import collisions under data/; log: /tmp/factorio-t3-explicit-tools-fast-20261015.log. T3-owned delegation remains untested because its tools are unavailable here.
+- Lifecycle: instructions only; new sessions load the charter. No T3 runtime patch, runner restart, mod deployment or Factorio restart performed or required for this documentation change.

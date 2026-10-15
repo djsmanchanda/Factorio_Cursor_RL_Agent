@@ -64,7 +64,9 @@ Do not declare a run stuck merely because a timer expired while progress continu
 
 Delegate reading test data, experiment reports and logs through the active environment's supported subagent harness. Subagents return a compact summary citing paths, counts and run IDs. Read small files directly.
 
-In T3 Code, use the subagent tools exposed by the active harness and inherit its model/provider defaults; omit explicit model and reasoning-effort overrides. Do not force GPT-6-Luna or switch providers to satisfy delegation. If no supported subagent tool is available, or delegation returns an unsupported-feature error (including “Codex used a feature that ChatGPT sharing does not support”), read the evidence directly and report the fallback instead of retrying the unsupported call. Outside T3 Code, choose a subagent model only when the active harness and provider support it.
+In T3 Code, launch delegated work only with the `t3-code` MCP tool `delegate_task` and monitor it with `task_status` (full tool names may have an MCP prefix). Discover both tools before delegating. If either is unavailable, read the evidence directly and report the fallback. Never substitute native `collaboration.*` tools, including `collaboration.spawn_agent`, or launch a native subagent to test availability: on ChatGPT-sharing connections, native agent messages can fail both child and parent before a fallback can run. See [T3 Code issue #17679](https://github.com/pingdotgg/t3code/issues/17679).
+
+Inherit T3's model/provider defaults; omit explicit model and reasoning-effort overrides. Do not force GPT-6-Luna or switch providers to satisfy delegation. If T3-owned delegation returns an unsupported-feature error, read the evidence directly instead of retrying. Outside T3 Code, choose a subagent model only when the active harness and provider support it.
 
 ## Coding preferences
 
