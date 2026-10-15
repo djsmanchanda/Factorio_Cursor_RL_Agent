@@ -29,7 +29,7 @@ from typing import Any
 from orchestrator.laya_knowledge import load_guideline_context
 from training.laya_clean_runner import (ROOT, Settings, _append, _goal_gap, _status_line, _training_record,
                                         _write_status, rolling_measurement)
-from training.laya_factory_status import compact_status, compile_status
+from training.laya_factory_status import STATUS_BUCKETS, compact_status, compile_status
 from training.laya_mall_slots import obtainable
 from training.laya_mission import current_phase, phase_reached
 
@@ -54,6 +54,7 @@ WAIT_TICKS = (300, 1800)
 # (the full catalog's geometry rules -- power variants, line sites, quad slots -- do not apply here).
 OPS_CATALOG = "docs/rl/laya_ops_guidelines.json"
 MAX_PRODUCE = 4  # produce options per decision (largest shortages first)
+SATURATED_STOCK = 10  # a flat-out producer with fewer than this in the network is the limit, not a full mall
 
 
 def plate_stages(results: list[dict]) -> dict[str, str]:
@@ -317,8 +318,29 @@ def plates_in(item: str, recipes: Mapping, seen: frozenset = frozenset()) -> set
     return set().union(*(plates_in(i["name"], recipes, seen | {item}) for i in recipe.get("ingredients", [])))
 
 
+def saturated_feedstock(machines: list[Mapping], recipes: Mapping, stock: Mapping[str, int],
+                        growable: tuple[str, ...]) -> dict[str, dict]:
+    """Growable items whose machines all run flat out while another mall machine starves for them.
+
+    Facts only: the item's machine count, how many consumers are starved, and its network stock (almost none).
+    """
+    found = {}
+    for item in growable:
+        own = [m for m in machines if m.get("recipe") == item]
+        if not own or any(m.get("status") not in STATUS_BUCKETS["working"] for m in own):
+            continue
+        if int(stock.get(item, 0)) >= SATURATED_STOCK:
+            continue
+        starved = [m for m in machines if m.get("status") in STATUS_BUCKETS["starved"]
+                   and any(i.get("name") == item for i in (recipes.get(m.get("recipe")) or {}).get("ingredients", ()))]
+        if starved:
+            found[item] = {"machines": len(own), "starved_consumers": len(starved)}
+    return found
+
+
 def compile_options(board: Mapping, results: list[dict], tick: int | None = None, recipes: Mapping | None = None,
-                    stock: Mapping[str, int] | None = None) -> dict:
+                    stock: Mapping[str, int] | None = None, machines: list[Mapping] | None = None,
+                    growable: tuple[str, ...] = ()) -> dict:
     """Operations worth offering now, each tagged with the need it serves and the facts rules weigh."""
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
     goal = {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
@@ -400,6 +422,18 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                          "waiting": in_progress(codes.get(("produce", item))),
                          "unchanged_failure": ("produce", item) in stuck, "batch_active": batch_active,
                          "goal_need": bool(sources.get(item, set()) & goal)}})
+    # A feedstock producer at its limit (live 2026-10-15: one gear AM1 behind every belt, inserter and drill).
+    for item, fact in saturated_feedstock(machines or [], recipes or {}, stock or {}, growable).items():
+        if any(r["operation"] == "grow" and (r.get("params") or {}) == {"item": item, "machines": fact["machines"]}
+               for r in results):
+            continue  # Growth from this count was already asked for; its cell is still being built.
+        options.append({
+            "option_id": f"op.grow.{item}", "family": "grow", "product": item, "need_id": f"stock:{item}",
+            "summary": f"grow {item} ({fact['machines']} machine(s) flat out, {fact['starved_consumers']} starved)",
+            "params": {"item": item, "machines": fact["machines"]},
+            "features": {"last_code": codes.get(("grow", item), "new"), "saturated": True,
+                         "starved_consumers": fact["starved_consumers"], "batch_active": batch_active,
+                         "goal_need": bool(sources.get(item, set()) & goal)}})
     for option in options:  # Laya's own recent decisions, per option
         params = option["params"]
         option["features"].update(history_features(results, (option["family"], params.get("recipe") or params.get("item")),
@@ -477,7 +511,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             for name, count in (network.get("items") or {}).items():
                 stock[name] = stock.get(name, 0) + int(count)
         economics = session.economics() if hasattr(session, "economics") else None
-        menu = with_economics(compile_options(board, results, facts["tick"], facts.get("recipes"), stock),
+        menu = with_economics(compile_options(board, results, facts["tick"], facts.get("recipes"), stock,
+                                              facts.get("machines"), getattr(session, "growable", ())),
                               results, economics)
         reserved: Counter = Counter()
         for project in ((economics or {}).get("projects") or {}).values():

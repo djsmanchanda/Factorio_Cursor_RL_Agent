@@ -5583,6 +5583,78 @@ def refresh_feedstock_chest_caps(
         _submit_mall_refresh_once(("chest_gate", surface, force, item, machines, cap), apply)
 
 
+def produce_to_demand(
+    client: RconClient, bridge: GameBridge, surface: str, force: str, item: str,
+    reference_point: Point, emit: Callable[[str], None], *, stock_target: int,
+) -> Point | None:
+    """Make ``item`` up to an absolute network level and cap its cell there.
+
+    A demand-driven caller names the level it needs; that level is the cell's
+    stock gate, so a permanent cell stops when the need is met. Without it a
+    persistent intermediate crafted until its chest was full (live 2026-10-15:
+    an ungated inserter cell made 711 while drills starved for gears and
+    circuits). Gear and cable keep their own-chest cap instead.
+    """
+    target = max(1, int(stock_target))
+    return ensure_produced(
+        client, bridge, surface, force, item, reference_point, emit,
+        upgrade_bootstrap=False, stock_target=target,
+        stock_gate_target=None if item in _MALL_RECIPE_ANCHORS else target,
+    )
+
+
+#: Feedstock every other mall cell draws on; a second cell keeps the own-chest
+#: cap, so growth never leaves an uncapped producer behind.
+GROWABLE_PRODUCERS = tuple(_MALL_RECIPE_ANCHORS)
+
+
+def grow_producer(
+    client: RconClient, bridge: GameBridge, surface: str, force: str, item: str,
+    reference_point: Point, emit: Callable[[str], None], *, machines: int,
+) -> Point | None:
+    """Add one more gear/cable cell when every existing one runs flat out.
+
+    The same minimum-machine build the deterministic runtime uses to restore
+    an anchor pair (live 2026-10-15: one gear AM1 at ~0.97/s fed belts,
+    inserters, fast inserters, drills and assemblers, and the network held 0).
+    """
+    if item not in GROWABLE_PRODUCERS:
+        raise ValueError(f"{item} is not a growable feedstock producer")
+    emit(f"  PRODUCER GROWTH: {item} has {machines} machine(s) all working; adding one")
+    return ensure_produced(
+        client, bridge, surface, force, item, reference_point, emit,
+        upgrade_bootstrap=False, stock_target=1,
+        minimum_machines=max(1, int(machines)) + 1, allow_promotion=False,
+    )
+
+
+def release_finished_bootstrap_loans(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    reference_point: Point, emit: Callable[[str], None],
+) -> None:
+    """Hand back every borrowed cell whose loan target is already stocked.
+
+    A finished loan used to be serviced only when its item was asked for
+    again, so it kept the slot and its requester kept pulling the loan's
+    ingredients (live 2026-10-15: an inserter cell borrowed for drills idled
+    at "drills < 35" while requesting drill inputs). User 2026-10-15: when no
+    more of an item is required, remove its request and vacate the slot.
+    """
+    if not hasattr(client, "command"):
+        return
+    loans = active_bootstrap_loans(client, surface, force)
+    if not loans:
+        return
+    stock = live_base.transferable_items(client, surface, force)
+    for loan in loans:
+        if int(stock.get(loan.target_item, 0)) < loan.target_count:
+            continue
+        _submit_bootstrap_loan(
+            client, bridge, surface, force, loan, emit,
+            reference_point=reference_point, release_when_met=True,
+        )
+
+
 _PIPE_PERMANENT_DONORS = frozenset(
     RATIONED_MALL_BATCH_ITEMS.difference(CORE_MALL_PRODUCERS, {"pipe"})
 )
@@ -6046,7 +6118,13 @@ def _submit_bootstrap_loan(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     loan: MallBootstrapLoan, emit: Callable[[str], None], *,
     preempt_for: str | None = None, reference_point: Point | None = None,
+    release_when_met: bool = False,
 ) -> str:
+    """Advance, finish, promote or restore one loan.
+
+    ``release_when_met`` hands the cell back as soon as the loan's required
+    count is stocked, skipping spare production: nothing else asks for more.
+    """
     global _BOOTSTRAP_LOAN_PROGRESS_REVISION, _BOOTSTRAP_LOAN_CONFIGURATION_REVISION
     # A managed persistent source points at a provider chest, not at an
     # immutable machine. Once that cell is borrowed for another recipe the
@@ -6155,7 +6233,7 @@ def _submit_bootstrap_loan(
         loan.target_item in _BLOCKING_MALL_ITEMS
         and int(actual.get(loan.target_item, 0)) >= loan.target_count
     )
-    preempted = binding_bill_met or bool(
+    preempted = binding_bill_met or (release_when_met and minimum_fulfilled) or bool(
         preempt_for is not None
         and preempt_for != loan.target_item
         and minimum_fulfilled
@@ -6167,7 +6245,7 @@ def _submit_bootstrap_loan(
         emit(
             f"  MALL BOOTSTRAP LOAN PREEMPT: {loan.target_item} fulfilled its "
             f"required {loan.target_count}; releasing spare production through "
-            f"{loan.production_target} for {preempt_for or 'construction handoff'}"
+            f"{loan.production_target} for {preempt_for or ('no further demand' if release_when_met else 'construction handoff')}"
         )
         step = None
     starting_spare_phase = bool(

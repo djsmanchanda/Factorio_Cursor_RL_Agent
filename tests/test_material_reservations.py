@@ -2742,6 +2742,36 @@ def test_binding_loan_short_of_bill_shields_against_stockpile_preempt(
     assert "SUBMIT" not in messages
 
 
+@pytest.mark.parametrize("release_when_met", [False, True])
+def test_a_stocked_loan_hands_its_cell_back_when_nothing_asks_for_more(monkeypatch, release_when_met) -> None:
+    """Live 2026-10-15: a finished drill loan idled on an inserter cell, still requesting drill inputs,
+    because nothing serviced it again. Released, it restores instead of making spares."""
+    messages = _mock_binding_serve(monkeypatch, transferable=6)
+    monkeypatch.setattr(builder, "_BLOCKING_MALL_ITEMS", set())  # no binding bill forces the handoff
+    monkeypatch.setattr(builder, "_restore_bootstrap_loan", lambda *_a, **_k: messages.append("RESTORED"))
+    builder._submit_bootstrap_loan(
+        SimpleNamespace(command=lambda *_a: ""), object(), "nauvis", "player", _binding_drill_loan(),
+        messages.append, release_when_met=release_when_met,
+    )
+    assert ("RESTORED" in messages) is release_when_met
+    assert any("no further demand" in m for m in messages) is release_when_met
+
+
+def test_the_loan_sweep_releases_only_stocked_loans(monkeypatch) -> None:
+    stocked, short = _binding_drill_loan(), builder.MallBootstrapLoan(
+        original_recipe="copper-cable", target_item="inserter", target_count=20, side="right",
+        requester_position=(42.5, 38.5), current_recipe="inserter")
+    released = []
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: [stocked, short])
+    monkeypatch.setattr(builder.live_base, "transferable_items",
+                        lambda *_a: {"electric-mining-drill": 6, "inserter": 3})
+    monkeypatch.setattr(builder, "_submit_bootstrap_loan",
+                        lambda *a, **k: released.append((a[4].target_item, k["release_when_met"])))
+    builder.release_finished_bootstrap_loans(
+        SimpleNamespace(command=lambda *_a: ""), object(), "nauvis", "player", (0.0, 0.0), lambda _m: None)
+    assert released == [("electric-mining-drill", True)]
+
+
 def test_binding_loan_at_bill_yields_to_preempt(monkeypatch) -> None:
     """Once the blocking bill is spendable, spares yield normally."""
     messages = _mock_binding_serve(monkeypatch, transferable=6)

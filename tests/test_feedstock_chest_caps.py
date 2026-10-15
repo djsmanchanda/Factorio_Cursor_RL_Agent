@@ -39,3 +39,22 @@ def test_cable_stops_at_1k_not_ten_200_stacks(monkeypatch):
     monkeypatch.setitem(ab.ITEM_STACK_SIZES, "copper-cable", 200)
     assert ab._feedstock_chest_cap("copper-cable") == 1000  # user: no more than 1k in a shared chest
     assert ab._feedstock_chest_cap("electronic-circuit") is None
+
+
+def test_demand_production_caps_the_cell_at_the_asked_level_except_feedstock(monkeypatch):
+    # Live 2026-10-15: an ungated inserter cell made 711 while drills starved for gears and circuits.
+    calls = []
+    monkeypatch.setattr(ab, "ensure_produced", lambda *a, **k: calls.append((a[4], k["stock_target"], k["stock_gate_target"])))
+    ab.produce_to_demand(Client(), None, "nauvis", "player", "inserter", (0, 0), print, stock_target=497)
+    ab.produce_to_demand(Client(), None, "nauvis", "player", "iron-gear-wheel", (0, 0), print, stock_target=40)
+    assert calls == [("inserter", 497, 497), ("iron-gear-wheel", 40, None)]  # gear keeps its own-chest cap
+
+
+def test_growth_adds_one_feedstock_machine_and_refuses_other_items(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ab, "ensure_produced", lambda *a, **k: calls.append((a[4], k["minimum_machines"])))
+    ab.grow_producer(Client(), None, "nauvis", "player", "iron-gear-wheel", (0, 0), lambda m: None, machines=1)
+    assert calls == [("iron-gear-wheel", 2)]
+    import pytest
+    with pytest.raises(ValueError):
+        ab.grow_producer(Client(), None, "nauvis", "player", "inserter", (0, 0), lambda m: None, machines=1)

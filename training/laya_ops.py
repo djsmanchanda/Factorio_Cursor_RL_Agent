@@ -38,7 +38,7 @@ PROFILE = "reduced-v1"  # no seed stock: every construction item is produced in 
 # What each operation promises when it returns normally (training/laya_ops_runner reads ``code``):
 # produce/mall_slot/steel promise a producing output; ensure_produced returns None after building only ONE
 # missing stage, which is progress but not the requested postcondition.
-PRODUCING_OPERATIONS = {"produce", "mall_slot", "steel"}
+PRODUCING_OPERATIONS = {"produce", "mall_slot", "steel", "grow"}
 SUBMITTING_OPERATIONS = {"starter", "foundation", "extend"}  # their layout is submitted (bots build it)
 
 
@@ -69,6 +69,8 @@ def _receipt_result(result: object) -> object:
 
 class DeterministicSession:
     """One Laya world with the deterministic runtime's per-run state."""
+
+    growable = ab.GROWABLE_PRODUCERS  # producers the "grow" operation may add a cell to
 
     def __init__(self, root: Path, *, goal_item: str = "automation-science-pack",
                  reference_point: tuple[float, float] = (0.0, 0.0), emit: Callable[[str], None] = print) -> None:
@@ -115,9 +117,11 @@ class DeterministicSession:
                                                            earmark_unfunded=True),
             # Build one missing stage toward stocking ``item`` (deepest unmet ingredient first). Before the
             # independent mall, pre-core items are rotational mall batches (upgrade_bootstrap=False), not lines.
-            "produce": lambda item, stock_target=1: ab.ensure_produced(c, b, SURFACE, FORCE, item, ref, emit,
-                                                                       stock_target=max(1, int(stock_target)),
-                                                                       upgrade_bootstrap=False),
+            # stock_target is the network level wanted; the cell is capped there, so it stops when the need is met.
+            "produce": lambda item, stock_target=1: ab.produce_to_demand(c, b, SURFACE, FORCE, item, ref, emit,
+                                                                         stock_target=stock_target),
+            # One more gear/cable cell when every existing one runs flat out and other cells starve for it.
+            "grow": lambda item, machines: ab.grow_producer(c, b, SURFACE, FORCE, item, ref, emit, machines=machines),
             # A standing slot in the bootstrap mall pool (the deterministic runner's "production prep").
             "mall_slot": lambda item: ab.ensure_produced(c, b, SURFACE, FORCE, item, ref, emit, upgrade_bootstrap=False,
                                                          stock_target=1, minimum_machines=1, allow_promotion=False),
@@ -153,15 +157,20 @@ class DeterministicSession:
                        "message": str(signal)[:500]}
         else:
             outcome = receipt(operation, params, result)
-        self._cap_feedstock_chests()
+        self._maintain_mall()
         return outcome
 
-    def _cap_feedstock_chests(self) -> None:
-        """Gear/cable cells built by any operation get their own-chest cap once they stand (cached when unchanged)."""
-        try:
-            ab.refresh_feedstock_chest_caps(self.client, self.bridge, SURFACE, FORCE, self.emit)
-        except WorkStateSignal as signal:  # Not this operation's outcome; retried after the next one.
-            self.emit(f"  MALL CHEST CAP FAILED: {signal}")
+    def _maintain_mall(self) -> None:
+        """After every operation: cap standing gear/cable cells, hand back cells whose loan is already stocked."""
+        for name, upkeep in (
+                ("MALL CHEST CAP", lambda: ab.refresh_feedstock_chest_caps(self.client, self.bridge, SURFACE, FORCE,
+                                                                           self.emit)),
+                ("LOAN RELEASE", lambda: ab.release_finished_bootstrap_loans(self.client, self.bridge, SURFACE, FORCE,
+                                                                            self.reference_point, self.emit))):
+            try:
+                upkeep()
+            except WorkStateSignal as signal:  # Not this operation's outcome; retried after the next one.
+                self.emit(f"  {name} FAILED: {signal}")
 
     def economics(self) -> dict:
         """What the tooling has committed: active material projects (reserved and still missing per item) and

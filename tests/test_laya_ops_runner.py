@@ -1,5 +1,7 @@
 # Path: tests/test_laya_ops_runner.py | Purpose: Protect Laya's loop over deterministic operations: options from the board and results, doc-rule choices, recorded outcomes.
 
+import json
+
 from training.laya_guided_policy import GuidedPolicy
 from training.laya_ops_runner import compile_options, plate_stages, run, shortages
 
@@ -295,3 +297,27 @@ def test_options_carry_known_bills_and_lent_cells():
     text = brief(results, None, None, {}, 0, economics=economics)
     assert "MALL: transport-belt cell lent to make electric-mining-drill (to 2)" in text
     assert "RESERVED: paired_mall_inserter supply_wait missing electronic-circuit 1, inserter 6" in text
+
+
+def _gear_world(gear_status="working", stock=0):
+    recipes = {"iron-gear-wheel": {"ingredients": [{"name": "iron-plate", "amount": 2}]},
+               "inserter": {"ingredients": [{"name": "iron-gear-wheel", "amount": 1}]}}
+    machines = [{"name": "assembling-machine-1", "recipe": "iron-gear-wheel", "status": gear_status},
+                {"name": "assembling-machine-1", "recipe": "inserter", "status": "item_ingredient_shortage"}]
+    return recipes, machines, {"iron-gear-wheel": stock}
+
+
+def test_a_flat_out_gear_producer_with_starved_consumers_offers_growth():
+    # Live 2026-10-15: one gear AM1 at ~0.97/s behind every belt, inserter and drill; network gears 0.
+    recipes, machines, stock = _gear_world()
+    grow = lambda results=(), **world: [o for o in compile_options(
+        BOARD, list(results), recipes=recipes, stock=world.get("stock", stock), machines=world.get("machines", machines),
+        growable=("iron-gear-wheel",))["options"] if o["family"] == "grow"]
+    (option,) = grow()
+    assert option["params"] == {"item": "iron-gear-wheel", "machines": 1}
+    assert not grow(stock={"iron-gear-wheel": 400})  # stocked: the producer is not the limit
+    assert not grow(machines=_gear_world("disabled_by_control_behavior")[1])  # capped, not saturated
+    asked = {"ok": False, "operation": "grow", "params": {"item": "iron-gear-wheel", "machines": 1},
+             "code": "prerequisite_advanced"}
+    assert not grow([asked])  # already asked to grow from 1; wait for that cell
+
