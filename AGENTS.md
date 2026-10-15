@@ -62,7 +62,9 @@ Identify the subsystem, read its documents, and ignore unrelated documents and t
 
 Do not declare a run stuck merely because a timer expired while progress continues; diagnose time, supply, throughput, alternate action or retry.
 
-Delegate reading test data, experiment reports and logs to a subagent: Claude Code uses Haiku 5.5 (high effort); Codex uses GPT-6-Luna (high). They return a compact summary citing paths, counts and run IDs. Read small files directly.
+Delegate reading test data, experiment reports and logs through the active environment's supported subagent harness. Subagents return a compact summary citing paths, counts and run IDs. Read small files directly.
+
+In T3 Code, use the subagent tools exposed by the active harness and inherit its model/provider defaults; omit explicit model and reasoning-effort overrides. Do not force GPT-6-Luna or switch providers to satisfy delegation. If no supported subagent tool is available, or delegation returns an unsupported-feature error (including “Codex used a feature that ChatGPT sharing does not support”), read the evidence directly and report the fallback instead of retrying the unsupported call. Outside T3 Code, choose a subagent model only when the active harness and provider support it.
 
 ## Coding preferences
 
