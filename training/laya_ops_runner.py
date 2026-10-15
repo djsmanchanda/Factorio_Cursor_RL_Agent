@@ -20,7 +20,9 @@ logs, ledger and helper are shared.  Sequencing lives in the docs, not here.
 
 from __future__ import annotations
 
+import json
 import math
+import time
 from collections import Counter
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -437,7 +439,15 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         summary["acceptance"] = statuses
         passed = [c for c, status in statuses.items() if status == "passed"]
         summary["accepted"] = sorted(set(summary.get("accepted", [])) | set(passed))
-        _append(journal, {"run_id": run_id, "event": "acceptance", "at": event, "statuses": statuses})
+        details = getattr(session, "acceptance_details", None)
+        packet = None
+        if details and "error" not in statuses:
+            folder = journal.parent / "acceptance" / run_id
+            folder.mkdir(parents=True, exist_ok=True)
+            packet = folder / f"{time.time_ns()}.json"
+            packet.write_text(json.dumps(details, sort_keys=True) + "\n")
+        _append(journal, {"run_id": run_id, "event": "acceptance", "at": event, "statuses": statuses,
+                          "wall_epoch": time.time(), "details_path": str(packet) if packet else None})
     check_acceptance("start")
     index = -1
     while decisions is None or index + 1 < decisions:
@@ -445,6 +455,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         if should_stop():
             summary["stop"] = "stopped"
             break
+        decision_started = time.perf_counter()
         facts = adapter.query()
         samples.append((facts["tick"], dict(facts["production"]), dict(facts["consumption"])))
         measurement = rolling_measurement(samples, settings.rate_window_ticks) or measurement
@@ -497,6 +508,10 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                  "guidelines": rules}
         choice = policy.choose(state, menu)
         chosen = next(o for o in menu["options"] if o["option_id"] == choice["option_id"])
+        _append(journal.parent / "controller-performance.jsonl",
+                {"run_id": run_id, "index": index, "wall_epoch": time.time(),
+                 "phase": phase["phase_id"], "controller_seconds": time.perf_counter() - decision_started,
+                 "scope": "observe_compile_choose_excludes_execution"})
         emit(f"DECISION {index} phase={phase['phase_id']} tick={facts['tick']} need={chosen['need_id']} "
              f"p={choice['probability']:.3f} rules={','.join(sorted(set(choice['rules'])))}: {chosen['summary']}")
         status = _status_line(compact)

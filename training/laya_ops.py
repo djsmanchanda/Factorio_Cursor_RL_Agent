@@ -189,9 +189,20 @@ class DeterministicSession:
             return {"error": str(error)[:200]}
         self._baseline = self._baseline or snapshot
         self._history = (self._history + [snapshot])[-20:]
-        return {m.checkpoint_id: self._evaluator.evaluate(m.checkpoint_id, snapshot, baseline=self._baseline,
-                                                          history=self._history).status.value
-                for m in self._evaluator.milestones}
+        from orchestrator.checkpoint_milestones import evaluate_milestone
+        results = {m.checkpoint_id: self._evaluator.evaluate(m.checkpoint_id, snapshot, baseline=self._baseline,
+                                                            history=self._history)
+                   for m in self._evaluator.milestones}
+        # Preserve predicate evidence before the evaluator replaces later passes
+        # with a monotonic latch. Current status is observation only.
+        self.acceptance_details = {
+            "tick": snapshot.tick,
+            "results": {key: value.as_mapping() for key, value in results.items()},
+            "current": {m.checkpoint_id: evaluate_milestone(
+                m.checkpoint_id, snapshot, baseline=self._baseline, history=self._history,
+                milestones=self._evaluator.milestones).as_mapping() for m in self._evaluator.milestones},
+        }
+        return {key: value.status.value for key, value in results.items()}
 
     def close(self) -> None:
         set_active_material_ledger(None)

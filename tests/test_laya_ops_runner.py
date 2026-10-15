@@ -79,6 +79,38 @@ def test_loop_runs_operations_and_records_each_outcome(tmp_path):
     assert summary["decisions"] == 6 and session.calls
     rows = [json.loads(l) for l in (tmp_path / "decision-states.jsonl").read_text().splitlines()]
     assert len(rows) == 6 and all("outcome" in r and "distribution" in r for r in rows)
+    timing = [json.loads(line) for line in (tmp_path / "controller-performance.jsonl").read_text().splitlines()]
+    assert len(timing) == 6 and all(r["controller_seconds"] >= 0 for r in timing)
+    assert {r["scope"] for r in timing} == {"observe_compile_choose_excludes_execution"}
+
+
+def test_controller_time_excludes_blocking_execution_and_retains_predicate_packet(tmp_path, monkeypatch):
+    import json
+    import training.laya_ops_runner as module
+    clock = [0]
+    world, session = FakeWorld(), FakeSession()
+    query, execute = world.query, session.run
+
+    def timed_query():
+        clock[0] += 1
+        return query()
+
+    def slow_execute(*args, **kwargs):
+        clock[0] += 100
+        return execute(*args, **kwargs)
+
+    world.query = timed_query
+    session.run = slow_execute
+    session.acceptance = lambda: {"C0": "passed"}
+    session.acceptance_details = {"tick": 1000, "results": {
+        "C0": {"status": "passed", "evidence": {"checks": {"base_valid": True}}}}, "current": {}}
+    monkeypatch.setattr(module.time, "perf_counter", lambda: clock[0])
+    run(world, GuidedPolicy(3), journal=tmp_path / "journal.jsonl", decisions=1, measure_ticks=600,
+        seed=3, run_id="timing", session=session)
+    record = json.loads((tmp_path / "controller-performance.jsonl").read_text())
+    assert record["controller_seconds"] == 1
+    packets = list((tmp_path / "acceptance/timing").glob("*.json"))
+    assert packets and json.loads(packets[0].read_text())["results"]["C0"]["evidence"]["checks"]["base_valid"]
 
 
 def test_mall_slots_wait_for_their_plates_and_borrowing_for_slots():

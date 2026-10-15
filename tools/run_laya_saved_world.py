@@ -69,6 +69,9 @@ def prepare(args):
     manifest["mod_hashes"] = {str(p.relative_to(mods)): file_hash(p) for p in mods.rglob("*")
                              if p.is_file() and p.name != "mod-list.json"}
     manifest["repository_revision"] = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    identity = ROOT / "evaluation-arm.json"
+    if identity.exists():
+        manifest["repository_revision"] = json.loads(identity.read_text())["revision"]
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     print(manager(root, "start"))
     if runtime == "disposable_mall":

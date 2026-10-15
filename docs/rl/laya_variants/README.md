@@ -14,7 +14,8 @@ What a variant may change:
   still verified against their source documents.
 - **Context sent to Laya:** `settings.guideline_limit`, `per_need_checked`,
   `per_need_shown`, `stock_rate`, `rate_window_ticks`.
-- **Policy:** `policy.epsilon` (exploration floor).
+- **Policy:** `policy.epsilon` (uniform exploration floor from 0 to 1;
+  default 0.15). Zero retains seeded rule-weighted sampling; it is not argmax.
 - **Runtime:** `runtime.speed`; geometry uses `settings.stall_decisions`.
   Ops has a separate 18,000-tick stall constant; that setting does not tune it.
 
@@ -45,3 +46,18 @@ weights; it grants no additional variant adoption or production promotion.
 Record experiment, report, decision and predicate version in `CURRENT_STATUS.md`,
 then archive the variant. Generated catalogs (`generated/`) are disposable and
 must be regenerated from synchronized sources for new runs.
+
+`tools/laya_matrix_campaign.py --manifest <frozen-manifest.json>` runs matched
+code/epsilon cohorts on dedicated copied worlds. Its manifest pins code and
+input hashes, jobs, ports and phase deadlines; run it under a user systemd unit
+with a hard deadline and `--finalize-only` as its stop hook. It preserves
+unstarted and crashed jobs, verifies acceptance packets, and keeps calibration
+and selected confirmation cohorts separate from the factorial results.
+
+Admission starts at four worlds. Each measured world must sustain at least
+98% of UPS samples at 100+ and 95% at 110+, over five-minute windows with
+100 samples. Controller p95 must be at most five seconds and twice its
+per-code low-load baseline, measured without blocking action execution.
+Thirty calibration decisions per code and two healthy windows precede growth;
+missing telemetry holds admission. External worlds count toward the 30-world
+host cap. These gates measure capacity, not policy fitness or adoption.

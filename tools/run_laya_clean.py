@@ -111,6 +111,9 @@ def main(argv=None) -> int:
     run_id = f"{root.name}-s{args.seed}-{int(time.time())}"
     mode = "stepped" if args.stepped else "live"
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+    identity = ROOT / "evaluation-arm.json"
+    if identity.exists():
+        commit = json.loads(identity.read_text())["revision"]
     started = local_stamp()
     log = RunLog(paths["log"], paths["heartbeat"])
     summary = {"decisions": 0, "failures": 0, "phases_reached": [], "stop": "runner_error"}
