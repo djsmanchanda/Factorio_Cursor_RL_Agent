@@ -129,6 +129,28 @@ def shortages(results: list[dict], sources: dict | None = None) -> dict[str, int
     return dict(short)
 
 
+def shortage_levels(results: list[dict]) -> dict[str, int]:
+    """Network level each short item needed when its operation failed: the stock then plus the shortfall.
+
+    Fixed at failure time. A level read off today's stock drifts upward forever when the blocked operation is
+    not retried (live 2026-10-15: "splitter short 1" made one splitter per loan up to 158).
+    """
+    latest: dict[tuple, dict] = {}
+    for r in results:
+        latest[_key(r)] = r
+    levels: dict[str, int] = {}
+    for r in latest.values():
+        if r.get("ok") or r.get("code") != "material_shortage" or "stock_at" not in r:
+            continue
+        details = r.get("details") or {}
+        available = details.get("available") or {}
+        for item, count in (details.get("required") or {}).items():
+            missing = int(count) - int(available.get(item, 0))
+            if missing > 0:
+                levels[item] = max(levels.get(item, 0), int(r["stock_at"].get(item, 0)) + missing)
+    return levels
+
+
 RECENT = 8  # decisions kept verbatim in the history; older ones survive only in the per-operation summary
 STUCK_DECISIONS = 6  # decisions without a built operation after which Laya counts itself stuck
 
@@ -356,12 +378,14 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     # the starters before any mine-to-refinery foundation).
     starters_done = {"iron-plate", "copper-plate"} <= {p for p, s in stages.items() if s != "none"}
     for plate in PLATES:
-        if plate not in unmet and PLATES[plate] not in unmet:
-            continue
         # Hard lifecycle order of the tooling (its ledgers break otherwise): starter -> foundation -> extend,
         # and retiring the starter once the foundation stands.
         legal = {"none": ("starter",), "starter": ("foundation",) if starters_done else (),
                  "foundation": ("extend",) + (() if retired(results, plate) else ("retire_starter",))}[stages.get(plate, "none")]
+        if plate not in unmet and PLATES[plate] not in unmet:
+            # Retiring a starter is lifecycle cleanup, not production, so it outlives the plate's goal (live
+            # 2026-10-15: once C4's board held only plastic, the iron starter was never retired).
+            legal = tuple(operation for operation in legal if operation == "retire_starter")
         for operation in legal:
             options.append({
                 "option_id": f"op.{operation}.{plate}", "family": operation, "product": plate,
@@ -410,10 +434,14 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     # so plastic): its loan never finishes and blocks every other batch (chemical_capability_handoff).
     producible = {i: m for i, m in short.items() if plates_in(i, recipes or {}) <= started
                   and obtainable(recipes, i, stock or {})} if recipes else short
+    levels = shortage_levels(results)
     for item, missing in (sorted(producible.items(), key=lambda kv: -kv[1])[:MAX_PRODUCE] if slots else ()):
         # The tooling's stock_target is a network level (the mall's stock gate), not a delta: asking for the
         # bare shortage gated a drill cell at 4 while the network held 6 and the starter needed 8.
-        target = int((stock or {}).get(item, 0)) + missing
+        have = int((stock or {}).get(item, 0))
+        target = levels.get(item, have + missing)
+        if have >= target and item in levels:
+            continue  # Made since the failure: retrying the blocked operation is the next step, not more stock.
         options.append({
             "option_id": f"op.produce.{item}", "family": "produce", "product": item, "need_id": f"stock:{item}",
             "summary": f"produce {item} (short {missing})", "params": {"item": item, "stock_target": target},

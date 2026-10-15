@@ -335,3 +335,24 @@ def test_a_restarted_controller_inherits_only_lifecycle_receipts(tmp_path):
     carried = lifecycle_receipts(states)
     assert [r["operation"] for r in carried] == ["starter", "foundation"]
     assert plate_stages(carried) == {"iron-plate": "foundation"}
+
+
+def test_a_produce_level_is_fixed_at_failure_time_and_dropped_once_covered():
+    # Live 2026-10-15: a stale "splitter short 1" read off today's stock made one splitter per loan up to 158.
+    blocked = {"ok": False, "operation": "retire_starter", "params": {"recipe": "iron-plate"},
+               "code": "material_shortage", "stock_at": {"splitter": 0},
+               "details": {"required": {"splitter": 1}, "available": {}}}
+    results = [{"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}}, blocked]
+    produce = lambda have: [o for o in compile_options(BOARD, results, stock={"splitter": have})["options"]
+                            if o["option_id"] == "op.produce.splitter"]
+    (option,) = produce(0)
+    assert option["params"]["stock_target"] == 1
+    assert not produce(157)  # made since the failure: retry the blocked operation instead
+
+
+def test_starter_retirement_stays_on_the_menu_after_the_plate_goal_is_met():
+    # Live 2026-10-15: in C4 the board held only plastic and the iron starter was never retired.
+    built = [{"ok": True, "operation": op, "params": {"recipe": "iron-plate"}} for op in ("starter", "foundation")]
+    met = {"needs": [{"item": "plastic-bar", "condition": "recipe_unavailable", "goal_required_per_s": 0.5}]}
+    ids = {o["option_id"] for o in compile_options(met, built)["options"]}
+    assert "op.retire_starter.iron-plate" in ids and "op.extend.iron-plate" not in ids
