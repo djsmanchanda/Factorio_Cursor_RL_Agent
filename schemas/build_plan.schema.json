@@ -253,6 +253,49 @@
         "clear_logistic_condition": {
          "type": "boolean"
         },
+        "clear_chest_gate": {
+         "type": "boolean"
+        },
+        "chest_gate": {
+         "type": "object",
+         "additionalProperties": false,
+         "required": [
+          "chest",
+          "signal",
+          "comparator",
+          "constant"
+         ],
+         "properties": {
+          "chest": {
+           "type": "object",
+           "required": [
+            "x",
+            "y"
+           ],
+           "properties": {
+            "x": {
+             "type": "number"
+            },
+            "y": {
+             "type": "number"
+            }
+           }
+          },
+          "signal": {
+           "type": "string",
+           "minLength": 1
+          },
+          "comparator": {
+           "enum": [
+            "<"
+           ]
+          },
+          "constant": {
+           "type": "integer",
+           "minimum": 1
+          }
+         }
+        },
         "logistic_condition": {
          "type": "object",
          "additionalProperties": false,

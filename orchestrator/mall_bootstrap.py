@@ -14,7 +14,7 @@ from planners.mall_layout import (
     request_multiplier,
 )
 from planners.recipe_data import LINE_RECIPES
-from planners.stock_gating import stock_gate
+from planners.stock_gating import chest_gate, stock_gate
 from tools.rcon_client import RconClient
 
 Point = tuple[float, float]
@@ -422,6 +422,9 @@ def bootstrap_loan_plan(
         "position": {"x": loan.machine_position[0], "y": loan.machine_position[1]},
         "recipe": step.recipe,
         "logistic_condition": stock_gate(step.recipe, step.target_count),
+        # A borrowed feedstock cell's chest cap watches the ORIGINAL item; left on, a full
+        # gear chest would hold the loan's machine off.
+        "clear_chest_gate": True,
     }
     requester = {
         "action_type": "configure_entity",
@@ -469,9 +472,11 @@ def bootstrap_loan_plan(
 def restore_bootstrap_loan_plan(
     loan: MallBootstrapLoan, *, provider_stock_target: int | None = None,
     provider_fill_chest: bool = False, stock_gate_target: int | None = None,
+    chest_gate_target: int | None = None,
 ) -> dict:
     """Restore the original recipe and request group after the seed is stocked.
 
+    ``chest_gate_target`` re-caps a feedstock cell's own provider (the loan cleared it).
     ``stock_gate_target`` is the original item's recorded assembler stock gate.
     Mall providers are unbounded, so that gate is the cell's only cap: clearing
     it let a restored drill cell craft 209 drills against a need of 8 (live
@@ -520,6 +525,10 @@ def restore_bootstrap_loan_plan(
                 **(
                     {"clear_logistic_condition": True} if stock_gate_target is None
                     else {"logistic_condition": stock_gate(loan.original_recipe, stock_gate_target)}
+                ),
+                **(
+                    {} if chest_gate_target is None
+                    else {"chest_gate": chest_gate(loan.original_recipe, loan.provider_position, chest_gate_target)}
                 ),
             },
             _as_configuration(provider),

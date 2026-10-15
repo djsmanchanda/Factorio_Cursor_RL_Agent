@@ -150,3 +150,11 @@ def test_full_mall_with_stock_is_satisfied_but_empty_blocked_mall_is_not():
     assert empty["needs"][0]["condition"] == "output_blocked"
     assert bottleneck_chain(full) == []
     assert not goal_met(full["needs"][0])  # Phase goals still judge the measured rate.
+
+
+def test_a_cell_held_off_by_its_own_gate_reads_as_stocked_not_idle():
+    # A capped gear chest switches its assembler off; that is a full mall, not a broken one.
+    gated = [machine("assembling-machine-1", "iron-gear-wheel", "disabled_by_control_behavior")]
+    board = compile_status(world(gated, items={"iron-gear-wheel": 400}), {"iron-gear-wheel": 0.25},
+                           flows(iron_gear_wheel=0.0))
+    assert board["needs"][0]["condition"] == "satisfied"

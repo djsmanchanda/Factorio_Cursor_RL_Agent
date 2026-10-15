@@ -147,11 +147,21 @@ class DeterministicSession:
         try:
             result = self._operations()[operation](**params)
         except WorkStateSignal as signal:
-            return {"ok": False, "operation": operation, "params": params, "code": getattr(signal, "code", None),
-                    "classification": getattr(signal, "classification", None),
-                    "state": getattr(signal, "state", None), "details": getattr(signal, "details", None),
-                    "message": str(signal)[:500]}
-        return receipt(operation, params, result)
+            outcome = {"ok": False, "operation": operation, "params": params, "code": getattr(signal, "code", None),
+                       "classification": getattr(signal, "classification", None),
+                       "state": getattr(signal, "state", None), "details": getattr(signal, "details", None),
+                       "message": str(signal)[:500]}
+        else:
+            outcome = receipt(operation, params, result)
+        self._cap_feedstock_chests()
+        return outcome
+
+    def _cap_feedstock_chests(self) -> None:
+        """Gear/cable cells built by any operation get their own-chest cap once they stand (cached when unchanged)."""
+        try:
+            ab.refresh_feedstock_chest_caps(self.client, self.bridge, SURFACE, FORCE, self.emit)
+        except WorkStateSignal as signal:  # Not this operation's outcome; retried after the next one.
+            self.emit(f"  MALL CHEST CAP FAILED: {signal}")
 
     def economics(self) -> dict:
         """What the tooling has committed: active material projects (reserved and still missing per item) and

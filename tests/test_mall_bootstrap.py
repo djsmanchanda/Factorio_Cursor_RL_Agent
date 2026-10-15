@@ -20,7 +20,7 @@ from orchestrator.mall_bootstrap import (
     restore_bootstrap_loan_plan,
 )
 from planners.recipe_data import LINE_RECIPES
-from planners.stock_gating import stock_gate
+from planners.stock_gating import chest_gate, stock_gate
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -430,6 +430,18 @@ def test_restore_reinstates_the_original_stock_gate(monkeypatch) -> None:
     assert "clear_logistic_condition" not in machine
     assert machine["logistic_condition"] == stock_gate("copper-cable", 12)
     assert not list(SCHEMA.iter_errors(plan))
+
+
+def test_a_borrowed_feedstock_cell_drops_its_chest_cap_and_gets_it_back(monkeypatch) -> None:
+    _install_seed_recipes(monkeypatch)
+    loan = _loan()
+    borrowed = bootstrap_loan_plan(loan, MallBootstrapStep("advanced-circuit", 2, 2))
+    restored = restore_bootstrap_loan_plan(_loan("requester-chest"), chest_gate_target=800)
+    machine = lambda plan: next(a for a in plan["phases"][0]["actions"] if a["entity"] == "assembling-machine-1")
+    # Left on, a full cable chest would hold the loan's machine off.
+    assert machine(borrowed)["clear_chest_gate"] is True
+    assert machine(restored)["chest_gate"] == chest_gate("copper-cable", loan.provider_position, 800)
+    assert not list(SCHEMA.iter_errors(borrowed)) and not list(SCHEMA.iter_errors(restored))
 
 
 def _restore_plan(provider_fill_chest: bool) -> dict:

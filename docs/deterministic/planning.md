@@ -449,6 +449,10 @@ These names describe intended responsibilities, not permission to build speculat
   first makes any missing gears, then switches to belts, while the two baseline
   gear assemblers and one cable assembler remain assigned. The loan restores
   the cable recipe when its reserve is full or another batch needs the slot.
+  Each built gear/cable assembler reads its own provider over a green wire and
+  stops at min(10 stacks, 1000 items) there (user 2026-10-15: the chest is
+  shared, so it must not hold more than 1k gear or cable). A loan clears that
+  circuit gate on the borrowed machine and its restore reapplies it.
 - A collision-checked additive blueprint does not wait for every construction
   item to have a producer. Stage its reachable construction coverage, submit
   the ghosts, and promote the persisted exact shortfall as binding mall work;

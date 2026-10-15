@@ -181,7 +181,8 @@ from planners.infrastructure_geometry import footprint_tile_indices
 from planners.local_layout_planner import LocalLayoutPlanner
 from planners.mall_layout import (
     generate_compact_mall_request_update, generate_mall_provider_limit_update,
-    generate_mall_stock_gate_update, generate_promoted_mall_retirement_plan,
+    generate_mall_chest_gate_update, generate_mall_stock_gate_update,
+    generate_promoted_mall_retirement_plan,
     recipe_group_name, recipe_group_requests,
     request_multiplier as standard_mall_request_multiplier,
 )
@@ -5119,6 +5120,8 @@ def _refresh_mall_cell(
                     f"mall_stock_gate_{item}", emit,
                 ),
             )
+            if item in _MALL_RECIPE_ANCHORS:
+                refresh_feedstock_chest_caps(client, bridge, surface, force, emit, (item,))
     return mall_provider
 
 
@@ -5527,6 +5530,59 @@ _MALL_RECIPE_ANCHORS = {
     "iron-gear-wheel": 1,
     "copper-cable": 1,
 }
+#: Gear and cable cells stop at 10 stacks and at most 1k items in their OWN
+#: provider, read over a green wire (user 2026-10-15: "it shouldn't stock more
+#: than 1k gear or copper wire in the chest, as the chest is shared"). The
+#: logistic gate can only cap the whole network; uncapped, a gear cell filled
+#: 3276 gears in 14 game minutes.
+_FEEDSTOCK_CHEST_STACKS = 10
+_FEEDSTOCK_CHEST_ITEMS = 1000
+
+
+def _feedstock_chest_cap(item: str) -> int | None:
+    if item not in _MALL_RECIPE_ANCHORS:
+        return None
+    stacks = _FEEDSTOCK_CHEST_STACKS * ITEM_STACK_SIZES.get(item, FALLBACK_STACK_SIZE)
+    return min(stacks, _FEEDSTOCK_CHEST_ITEMS)
+
+
+def refresh_feedstock_chest_caps(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    emit: Callable[[str], None], items: Sequence[str] = tuple(_MALL_RECIPE_ANCHORS),
+) -> None:
+    """Wire every built gear/cable assembler to its own provider and cap that chest.
+
+    Only built machines are wired, so this runs after construction rather than at
+    placement; unchanged cells cost one survey and no plan.
+    """
+    if not hasattr(client, "command"):
+        return
+    for item in items:
+        cap = _feedstock_chest_cap(item)
+        line = live_base.find_line(
+            client, surface, force, item, str(LINE_RECIPES[item]["machine"]), include_ghosts=False,
+        )
+        if cap is None or line is None:
+            continue
+        names = live_base.entity_names_at(client, surface, line.machine_positions)
+        machines = tuple(
+            (str(names[position]), position, chest)
+            for position in line.machine_positions
+            if names.get(position) in live_base.ASSEMBLER_TIERS
+            and (chest := _paired_mall_provider(client, surface, [position])) is not None
+        )
+        if not machines:
+            continue
+        plan = generate_mall_chest_gate_update(item, list(machines), cap)
+        plan["surface"], plan["force"] = surface, force
+
+        def apply(item: str = item, plan: dict = plan, cap: int = cap, count: int = len(machines)) -> None:
+            emit(f"  MALL CHEST CAP: {count} {item} cell(s) stop at {cap} in their own provider (green wire)")
+            _submit(client, bridge, surface, plan, f"mall_chest_gate_{item}", emit)
+
+        _submit_mall_refresh_once(("chest_gate", surface, force, item, machines, cap), apply)
+
+
 _PIPE_PERMANENT_DONORS = frozenset(
     RATIONED_MALL_BATCH_ITEMS.difference(CORE_MALL_PRODUCERS, {"pipe"})
 )
@@ -5833,6 +5889,7 @@ def _restore_bootstrap_loan(
         stock_gate_target=_MALL_STOCK_GATE_FLOORS.get(
             (surface, force, loan.original_recipe),
         ),
+        chest_gate_target=_feedstock_chest_cap(loan.original_recipe),
     )
     plan["surface"], plan["force"] = surface, force
     _submit(

@@ -85,7 +85,7 @@ end
 -- a configurable action field means adding it here.
 M.SETTING_FIELDS = {
   "logistic_request", "logistic_requests", "logistic_sections", "clear_logistic_groups", "inventory_limit", "clear_inventory_limit",
-  "infinity_filter", "logistic_condition", "clear_logistic_condition",
+  "infinity_filter", "logistic_condition", "clear_logistic_condition", "chest_gate", "clear_chest_gate",
   "input_priority", "output_priority",
 }
 

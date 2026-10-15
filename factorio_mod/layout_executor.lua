@@ -384,6 +384,12 @@ local function configuration_error(entity, action, direction)
       return "logistic_condition_not_cleared"
     end
   end
+  if action.clear_chest_gate then
+    local behavior = entity.get_control_behavior()
+    if behavior and behavior.circuit_enable_disable == true then
+      return "chest_gate_not_cleared"
+    end
+  end
   local requests = action.logistic_requests
   if not requests and action.logistic_request then
     requests = { action.logistic_request }
@@ -629,6 +635,42 @@ local function configure_created_entity(entity, action)
     if not ok then return "logistic_condition_set_failed" end
     if behavior.connect_to_logistic_network ~= true then
       return "logistic_condition_not_applied"
+    end
+  end
+  if action.clear_chest_gate then
+    local behavior = entity.get_or_create_control_behavior()
+    if not behavior then return "chest_gate_unsupported" end
+    local ok = pcall(function() behavior.circuit_enable_disable = false end)
+    if not ok then return "chest_gate_clear_failed" end
+  end
+  if action.chest_gate then
+    -- Unlike the logistic gate, this caps ONE chest: the machine reads its own
+    -- provider over a green wire. Both ends must be built; a wire on a ghost
+    -- would report success for a cap that never lands.
+    local gate = action.chest_gate
+    local chest = entity.surface.find_entities_filtered{
+      position = { gate.chest.x, gate.chest.y }, radius = 0.01, force = entity.force,
+      type = { "container", "logistic-container" },
+    }[1]
+    if not chest then return "chest_gate_chest_missing" end
+    local behavior = entity.get_or_create_control_behavior()
+    if not behavior then return "chest_gate_unsupported" end
+    local ok = pcall(function()
+      local own = entity.get_wire_connector(defines.wire_connector_id.circuit_green, true)
+      local other = chest.get_wire_connector(defines.wire_connector_id.circuit_green, true)
+      if not own.is_connected_to(other) then own.connect_to(other, false) end
+      behavior.circuit_enable_disable = true
+      behavior.circuit_condition = {
+        first_signal = { type = "item", name = gate.signal },
+        comparator = gate.comparator,
+        constant = gate.constant,
+      }
+    end)
+    if not ok then return "chest_gate_set_failed" end
+    local own = entity.get_wire_connector(defines.wire_connector_id.circuit_green, false)
+    if not (own and own.is_connected_to(chest.get_wire_connector(defines.wire_connector_id.circuit_green, false)))
+      or behavior.circuit_enable_disable ~= true then
+      return "chest_gate_not_applied"
     end
   end
   if action.clear_logistic_groups then

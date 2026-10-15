@@ -39,7 +39,8 @@ STATUS_BUCKETS = {
     "working": {"working", "normal"},
     "power": {"no_power", "low_power"},
     "starved": {"item_ingredient_shortage", "fluid_ingredient_shortage", "no_ingredients", "no_input_fluid"},
-    "blocked": {"full_output", "waiting_for_space_in_destination"},
+    # A stock or chest gate holding a machine off is output held by design, like a full chest.
+    "blocked": {"full_output", "waiting_for_space_in_destination", "disabled_by_control_behavior"},
 }
 
 
