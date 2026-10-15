@@ -462,6 +462,20 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
             "features": {"last_code": codes.get(("grow", item), "new"), "saturated": True,
                          "starved_consumers": fact["starved_consumers"], "batch_active": batch_active,
                          "goal_need": bool(sources.get(item, set()) & goal)}})
+    # A phase goal that nothing makes yet and no shortage names (live 2026-10-16: C4's plastic-bar read
+    # "recipe_unavailable" with no producer, and the menu held only waits until the run stalled). The tooling's
+    # produce builds its producer chain (the oil cell for plastic) one stage per call.
+    offered = {o["product"] for o in options if o["family"] == "produce"}
+    for need in board["needs"]:
+        item = need["item"]
+        if ((need.get("goal_required_per_s") or 0) > 0 and need["condition"] in ("unbuilt", "recipe_unavailable")
+                and item not in offered and item not in PLATES):
+            options.append({
+                "option_id": f"op.produce.{item}", "family": "produce", "product": item, "need_id": f"item:{item}",
+                "summary": f"produce {item} (phase goal with no producer)", "params": {"item": item, "stock_target": 1},
+                "features": {"last_code": codes.get(("produce", item), "new"), "shortage": 0, "goal_need": True,
+                             "waiting": in_progress(codes.get(("produce", item))),
+                             "unchanged_failure": ("produce", item) in stuck, "batch_active": batch_active}})
     for option in options:  # Laya's own recent decisions, per option
         params = option["params"]
         option["features"].update(history_features(results, (option["family"], params.get("recipe") or params.get("item")),

@@ -356,3 +356,13 @@ def test_starter_retirement_stays_on_the_menu_after_the_plate_goal_is_met():
     met = {"needs": [{"item": "plastic-bar", "condition": "recipe_unavailable", "goal_required_per_s": 0.5}]}
     ids = {o["option_id"] for o in compile_options(met, built)["options"]}
     assert "op.retire_starter.iron-plate" in ids and "op.extend.iron-plate" not in ids
+
+
+def test_a_phase_goal_with_no_producer_is_offered_to_produce():
+    # Live 2026-10-16: C4's plastic-bar read "recipe_unavailable" and the menu held only waits until the stall.
+    c4 = {"needs": [{"item": "plastic-bar", "condition": "recipe_unavailable", "goal_required_per_s": 0.5},
+                    {"item": "stone-brick", "condition": "unbuilt", "goal_required_per_s": 0.5}]}
+    options = compile_options(c4, [])["options"]
+    (plastic,) = [o for o in options if o["option_id"] == "op.produce.plastic-bar"]
+    assert plastic["features"]["goal_need"] and plastic["params"] == {"item": "plastic-bar", "stock_target": 1}
+    assert "op.produce.stone-brick" not in {o["option_id"] for o in options}  # plates keep their lifecycle operations

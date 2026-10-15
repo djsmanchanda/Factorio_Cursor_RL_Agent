@@ -86,7 +86,9 @@ PRIMARY_ENTITY = {"expand": "roboport", "mine": "electric-mining-drill", "smelt"
                   "assemble": "assembling-machine-1"}
 # Recipes the clean runner needs exported in addition to the shared helper's list.
 RECIPE_LIST_END = '"chemical-plant","oil-refinery","pumpjack"}'
-EXTRA_RECIPES = ("big-electric-pole", "iron-stick", "fast-inserter")  # fast-inserter: line output taps
+EXTRA_RECIPES = ("big-electric-pole", "iron-stick", "fast-inserter",  # fast-inserter: line output taps
+                 # Later phase goals: unexported, C4/C6 production was never measured (live 2026-10-16).
+                 "plastic-bar", "advanced-circuit")
 # Idle furnaces return no current recipe; report the previous one so built-but-starved
 # furnaces stay attributed to their product.
 RECIPE_LINE = 'if e.type~="mining-drill" then local recipe=e.get_recipe(); m.recipe=recipe and recipe.name end'
