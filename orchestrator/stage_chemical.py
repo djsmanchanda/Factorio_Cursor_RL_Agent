@@ -523,7 +523,13 @@ def ensure_coal_mine(
     found = None
     if existing is not None:
         if existing.pending:
-            raise StuckError("existing coal mine is incomplete; refusing to duplicate it")
+            # Its ghosts are still being built: a construction wait, not a bug. As an untyped stop
+            # Laya re-chose the same plastic step 68 times in one trial (batch 2026-10-16 night).
+            raise StuckError(
+                "existing coal mine is incomplete; refusing to duplicate it",
+                code="coal_mine_construction_wait", classification="intended_difficulty",
+                state="constructing", details={"mine": list(existing.output) if existing.output else None},
+            )
         source = _coal_belt_source(client, surface, existing)
         if prefer_nearest_patch:
             found = resource_patches.nearest_viable_patch(
