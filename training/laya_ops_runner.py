@@ -36,7 +36,10 @@ from training.laya_mission import current_phase, phase_reached
 PLATES = {"iron-plate": "iron-ore", "copper-plate": "copper-ore", "stone-brick": "stone"}
 # The tooling is already making it (a mall batch or loan in progress, a borrow queued): wait, and it is progress.
 IN_PROGRESS = {"temporary_mall_batch", "production_prerequisite_deferred", "rationed_mall_borrow_deferred",
-               "rotating_mall_prerequisite_handoff", "prerequisite_advanced"}
+               "rotating_mall_prerequisite_handoff", "prerequisite_advanced",
+               # The chemical ladder is building the item's prerequisite: retrying at once changes nothing
+               # (night batch 2026-10-16: one chest re-chosen 10x on "establishing plastic-bar", then a stall).
+               "chemical_capability_handoff"}
 # Receipts that put something into the world (training/laya_ops.receipt); a reservation or a wait does not.
 BUILT = {"producing", "submitted", "prerequisite_advanced"}
 STALL_TICKS = 18000  # five game minutes without measurable progress (loan batches are slow by design)

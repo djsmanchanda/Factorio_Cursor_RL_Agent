@@ -381,3 +381,12 @@ def test_an_oil_cell_part_shortage_is_offered_once_its_recipe_is_a_fact():
                {"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}}, short]
     ids = {o["option_id"] for o in compile_options(BOARD, results, recipes=recipes, stock={"iron-plate": 50})["options"]}
     assert "op.produce.pipe-to-ground" in ids
+
+
+def test_a_chemical_handoff_parks_its_option_until_the_wait_expires():
+    # Night batch 2026-10-16: produce passive-provider-chest re-chosen 10x on "chemical ladder is establishing plastic-bar".
+    from training.laya_ops_runner import WAIT_EXPIRY, in_progress, last_codes
+    handoff = {"ok": False, "operation": "produce", "params": {"item": "passive-provider-chest"},
+               "code": "chemical_capability_handoff", "tick": 1000}
+    assert in_progress("chemical_capability_handoff")
+    assert last_codes([handoff], tick=1000 + WAIT_EXPIRY)[("produce", "passive-provider-chest")] == "wait_expired"
