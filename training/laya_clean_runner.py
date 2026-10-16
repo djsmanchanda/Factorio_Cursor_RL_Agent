@@ -88,7 +88,10 @@ PRIMARY_ENTITY = {"expand": "roboport", "mine": "electric-mining-drill", "smelt"
 RECIPE_LIST_END = '"chemical-plant","oil-refinery","pumpjack"}'
 EXTRA_RECIPES = ("big-electric-pole", "iron-stick", "fast-inserter",  # fast-inserter: line output taps
                  # Later phase goals: unexported, C4/C6 production was never measured (live 2026-10-16).
-                 "plastic-bar", "advanced-circuit")
+                 "plastic-bar", "advanced-circuit",
+                 # Oil-cell parts: a shortage only becomes a produce option when its recipe is a fact; without
+                 # pipe-to-ground, 13 C4 trials retried "produce plastic-bar" 763 times (batch 2026-10-16).
+                 "pipe-to-ground", "offshore-pump", "substation", "small-electric-pole")
 # Idle furnaces return no current recipe; report the previous one so built-but-starved
 # furnaces stay attributed to their product.
 RECIPE_LINE = 'if e.type~="mining-drill" then local recipe=e.get_recipe(); m.recipe=recipe and recipe.name end'

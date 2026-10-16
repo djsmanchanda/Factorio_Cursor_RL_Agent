@@ -366,3 +366,18 @@ def test_a_phase_goal_with_no_producer_is_offered_to_produce():
     (plastic,) = [o for o in options if o["option_id"] == "op.produce.plastic-bar"]
     assert plastic["features"]["goal_need"] and plastic["params"] == {"item": "plastic-bar", "stock_target": 1}
     assert "op.produce.stone-brick" not in {o["option_id"] for o in options}  # plates keep their lifecycle operations
+
+
+def test_an_oil_cell_part_shortage_is_offered_once_its_recipe_is_a_fact():
+    # Batch 2026-10-16: "chemical_oil_cell_packets ... pipe-to-ground: need 20, short 20" 415 times, never producible.
+    from training.laya_clean_runner import EXTRA_RECIPES
+    assert {"pipe-to-ground", "offshore-pump", "substation", "small-electric-pole"} <= set(EXTRA_RECIPES)
+    recipes = {"pipe-to-ground": {"ingredients": [{"name": "pipe", "amount": 10}, {"name": "iron-plate", "amount": 5}]},
+               "pipe": {"ingredients": [{"name": "iron-plate", "amount": 1}]},
+               "iron-plate": {"ingredients": [{"name": "iron-ore", "amount": 1}]}}
+    short = {"ok": False, "operation": "produce", "params": {"item": "plastic-bar"}, "code": "material_shortage",
+             "stock_at": {"pipe-to-ground": 0}, "details": {"required": {"pipe-to-ground": 20}, "available": {}}}
+    results = [{"ok": True, "operation": "starter", "params": {"recipe": "iron-plate"}},
+               {"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}}, short]
+    ids = {o["option_id"] for o in compile_options(BOARD, results, recipes=recipes, stock={"iron-plate": 50})["options"]}
+    assert "op.produce.pipe-to-ground" in ids
