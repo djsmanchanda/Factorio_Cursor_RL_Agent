@@ -840,6 +840,18 @@ def _emit_stage_delivery_telemetry(
             pass
 
 
+def _on_generating_network(
+    client: RconClient, surface: str, force: str, position: Point,
+) -> bool:
+    """Whether the pole network at ``position`` already carries generation."""
+    if not hasattr(client, "command"):
+        return False
+    if live_base.pole_network_id(client, surface, position) is None:
+        return False
+    generation = live_base.network_generation_kw(client, surface, force, position)
+    return bool(generation and generation > 0)
+
+
 def _apply_remedy(
     client: RconClient, bridge: GameBridge, surface: str, force: str, name: str,
     remedy: str, description: str, origin: Point, substation_position: Point,
@@ -932,7 +944,14 @@ def _apply_remedy(
         # recorded position or no second network to bridge to; the previous
         # code discarded that, so the loop re-ran an identical no-op for
         # every remaining round and reported only a bare timeout.
-        acted = extend_power_for_stage(substation_position)
+        # A substation already on a generating network reports "nothing to
+        # bridge" as success, which skipped the stranded machines below: the
+        # crude-oil pumpjacks at (-330.5, 10.5) stayed unpowered for all 10
+        # rounds while the bridge was asked about (-298, -78) (2026-10-17).
+        acted = (
+            False if _on_generating_network(client, surface, force, substation_position)
+            else extend_power_for_stage(substation_position)
+        )
         if not acted:
             # A scaffold can already be on the source network while one or
             # more machines sit outside its supply area (for example, the

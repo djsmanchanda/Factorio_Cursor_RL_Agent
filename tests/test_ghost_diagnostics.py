@@ -1387,3 +1387,19 @@ def test_covered_charging_ghost_with_stock_keeps_coverage_wait(
     )
 
     assert issue is not None and issue[1] == "coverage_charge_wait"
+
+
+def test_stage_power_hooks_stranded_machines_when_the_substation_already_generates(monkeypatch) -> None:
+    """2026-10-17: the crude-oil substation reported "nothing to bridge" (success) for 10 rounds while its
+    pumpjacks stayed unpowered; the stranded-machine hookup only ran when the substation call failed."""
+    calls = []
+    monkeypatch.setattr(builder, "extend_power", lambda _c, _b, _s, _f, position, _e: calls.append(position) or True)
+    monkeypatch.setattr(live_base, "entity_statuses", lambda *_a: {(-330.5, 10.5): "no_power", (-326.5, 10.5): "working"})
+    monkeypatch.setattr(live_base, "pole_network_id", lambda *_a: 1)
+    monkeypatch.setattr(live_base, "network_generation_kw", lambda *_a: 900.0)
+    client = type("Client", (), {"command": lambda self, text: ""})()
+    acted = builder._apply_remedy(
+        client, None, "nauvis", "player", "crude-oil source", "stage_power", "2 machine(s) unpowered",
+        (-298.0, -78.0), (-298.0, -78.0), [(-330.5, 10.5), (-326.5, 10.5)], [], None, lambda _m: None,
+    )
+    assert acted and calls == [(-330.5, 10.5)]  # the stranded pumpjack, not the already-powered substation
