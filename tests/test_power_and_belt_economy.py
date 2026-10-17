@@ -487,7 +487,7 @@ def test_submit_does_not_adopt_an_unowned_same_force_belt(monkeypatch) -> None:
         if (pos[0], pos[1]) == (51.5, -104.5) else None,
     )
 
-    with pytest.raises(ss.StuckError, match="blocked by real infrastructure"):
+    with pytest.raises(ss.StuckError, match="blocked by real infrastructure") as blocked:
         ss._submit(
             object(), FakeBridge(), "nauvis", plan, "landfill bridge",
             lambda _m: None,
@@ -495,6 +495,9 @@ def test_submit_does_not_adopt_an_unowned_same_force_belt(monkeypatch) -> None:
 
     assert len(built) == 1
     assert plan["phases"][0]["actions"]
+    assert blocked.value.code == "infrastructure_collision"
+    assert blocked.value.details["blocking_count"] == 1
+    assert blocked.value.details["blockers"][0]["occupant"]["name"] == "transport-belt"
 
 
 def test_lone_undiagnosed_ghost_gets_one_rebuild_cycle(monkeypatch) -> None:

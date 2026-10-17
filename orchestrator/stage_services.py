@@ -764,7 +764,11 @@ def _submit(
         if blocking:
             raise StuckError(
                 f"{name}: blocked by real infrastructure, not map clutter -- needs a "
-                f"different placement (go around, not through): {blocking[:3]}"
+                f"different placement (go around, not through): {blocking[:3]}",
+                code="infrastructure_collision",
+                details={"plan": name, "surface": surface,
+                         "force": plan.get("force", "player"),
+                         "blocking_count": len(blocking), "blockers": blocking[:3]},
             )
         if not cleared_any:
             raise StuckError(f"{name}: {report['failed_placements']} placement(s) failed: "
@@ -1421,7 +1425,15 @@ def extend_power(
             orthogonal=avoid_resources,
         )
     except ValueError as error:
-        raise StuckError(f"power gap cannot be routed safely: {error}") from error
+        raise StuckError(
+            f"power gap cannot be routed safely: {error}",
+            code="power_route_unavailable",
+            details={"surface": surface, "force": force,
+                     "consumer_position": list(near_position),
+                     "source_position": list(target_position),
+                     "endpoint": list(endpoint), "bridge_pole": bridge_pole,
+                     "blocked_tiles": len(blocked), "reason": str(error)},
+        ) from error
     action_names = [bridge_pole] * len(hops)
     if own_network is None:
         hops = [*hops, endpoint]

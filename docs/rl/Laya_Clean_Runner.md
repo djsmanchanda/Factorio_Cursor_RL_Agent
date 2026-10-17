@@ -43,6 +43,11 @@ Receipts must retain transaction identity, selected parameters, typed cause,
 ownership, resource use and observed postconditions. A successful return is not
 by itself proof of delivered output or a standing producer.
 
+Shared service failures now distinguish `infrastructure_collision` (plan and
+observed occupant evidence) from `power_route_unavailable` (endpoints, pole,
+blocked tile count and route reason). Both remain failed bug outcomes; typing
+them does not establish a viable route or resolve the underlying placement.
+
 Current geometry transactions preserve submitted plans and pre/post facts.
 Current ops wraps ordinary returns, including `None`, as `ok=True` and records
 only part of the result. Its history/lifecycle features and error containment do
