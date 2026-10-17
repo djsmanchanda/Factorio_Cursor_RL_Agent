@@ -8110,9 +8110,37 @@ def _chemical_capability_started(
         held = (
             live_base.transferable_items(client, surface, force).get(item, 0)
             + live_base.placed_entity_count(client, surface, force, item)
+            + _ladder_loan_draw(client, surface, force, item)
         )
         return held >= _CHEMICAL_BATCH_TARGETS[item]
     return _production_started(client, surface, force, item)
+
+
+def _ladder_loan_draw(
+    client: RconClient, surface: str, force: str, item: str,
+) -> int:
+    """`item` that active ladder-rung loans have requested for their own crafts.
+
+    A later rung's loan draws its predecessor's stock into its requester and
+    machine before crafting. That stock is still the ladder's. Without this
+    credit, the drawn rung reopened and its handoff restored the later loan;
+    recovery then returned the draw, which satisfied the rung again. The cycle
+    repeated with no progress (reset cohort network-s76601: oil-refinery drew
+    pipe 101 -> 81, six restores, stalled).
+    """
+    drawn = 0
+    for loan in active_bootstrap_loans(client, surface, force):
+        recipe = loan.step_recipe
+        if recipe not in CHEMICAL_BOOTSTRAP_LADDER or not loan.step_required_crafts:
+            continue
+        spec = LINE_RECIPES.get(recipe) or {}
+        per_craft = dict(zip(
+            spec.get("ingredients", ()), spec.get("amounts", ()),
+        )).get(item, 0)
+        drawn += per_craft * max(1, math.ceil(
+            loan.step_required_crafts * (1 + _LOAN_REQUEST_HEADROOM_FRACTION),
+        ))
+    return drawn
 
 
 def _chemical_ladder_predecessors(item: str) -> tuple[str, ...]:

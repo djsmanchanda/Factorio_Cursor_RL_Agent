@@ -27,3 +27,39 @@ def test_a_rung_the_world_does_not_hold_is_missing_and_nothing_is_latched(monkey
     assert ab._chemical_capability_started(Client(), "nauvis", "player", "pipe")
     stock["pipe"] = 10  # consumed somewhere that did not place it: the world no longer holds the rung
     assert not ab._chemical_capability_started(Client(), "nauvis", "player", "pipe")
+
+
+def _loan(step_recipe, crafts=1):
+    return ab.MallBootstrapLoan(
+        original_recipe="copper-cable", target_item=step_recipe, target_count=1,
+        side="left", requester_position=(42.5, 38.5), current_recipe=step_recipe,
+        step_recipe=step_recipe, step_required_crafts=crafts,
+    )
+
+
+def _drawing(monkeypatch, *loans):
+    monkeypatch.setitem(ab.LINE_RECIPES, "oil-refinery", {
+        "ingredients": ["steel-plate", "iron-gear-wheel", "stone-brick", "electronic-circuit", "pipe"],
+        "amounts": [15, 10, 10, 10, 10],
+    })
+    monkeypatch.setitem(ab.LINE_RECIPES, "pipe-to-ground", {
+        "ingredients": ["pipe", "iron-plate"], "amounts": [10, 5],
+    })
+    monkeypatch.setattr(ab, "active_bootstrap_loans", lambda *a: loans)
+
+
+def test_pipe_a_later_rung_loan_has_drawn_is_still_the_ladders(monkeypatch):
+    # reset cohort network-s76601: the oil-refinery loan drew pipe 101 -> 81, the reopened
+    # pipe rung restored the loan, recovery returned the pipe, and the pair cycled six times.
+    _world(monkeypatch, stock={"pipe": 81}, placed={})
+    _drawing(monkeypatch, _loan("oil-refinery"))  # one craft plus headroom requests 20 pipe
+    assert ab._chemical_capability_started(Client(), "nauvis", "player", "pipe")
+
+
+def test_pipe_consumed_outside_the_ladder_still_reopens_the_rung(monkeypatch):
+    _world(monkeypatch, stock={"pipe": 81}, placed={})
+    _drawing(monkeypatch, _loan("pipe-to-ground"))
+    assert not ab._chemical_capability_started(Client(), "nauvis", "player", "pipe")
+    _world(monkeypatch, stock={"pipe": 10}, placed={})
+    _drawing(monkeypatch, _loan("oil-refinery"))  # a real shortage is not hidden by the draw
+    assert not ab._chemical_capability_started(Client(), "nauvis", "player", "pipe")
