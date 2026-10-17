@@ -88,10 +88,11 @@ def unchanged_failures(results: list[dict], stock: Mapping[str, int]) -> set[tup
         latest[(r["operation"], params.get("recipe") or params.get("item"))] = r
     stuck = set()
     for key, r in latest.items():
-        if not r.get("ok") and r.get("code") == "material_shortage":
-            seen = r.get("stock_at") or {}
-            required = (r.get("details") or {}).get("required") or {}
-            if required and all(int(stock.get(item, 0)) <= int(seen.get(item, 0)) for item in required):
+        for bill in _demand_bills(r):
+            seen = bill.get("stock_at", r.get("stock_at"))
+            required = bill.get("required") or {}
+            if seen is not None and required and all(
+                    int(stock.get(item, 0)) <= int(seen.get(item, 0)) for item in required):
                 stuck.add(key)
     return stuck
 
@@ -108,6 +109,18 @@ def last_codes(results: list[dict], tick: int | None = None) -> dict[tuple, str]
     return codes
 
 
+def _demand_bills(result: Mapping):
+    """Material bills reported by a failed operation, including a rejected mall claim."""
+    if result.get("ok"):
+        return
+    details = result.get("details") or {}
+    if result.get("code") == "material_shortage":
+        yield details
+    claim = details.get("slot_claim")
+    if isinstance(claim, Mapping) and isinstance(claim.get("required"), Mapping):
+        yield claim
+
+
 def shortages(results: list[dict], sources: dict | None = None) -> dict[str, int]:
     """Items the latest material shortage of each operation still asks for (``sources``: item -> plates blocked)."""
     latest: dict[tuple, dict] = {}
@@ -116,8 +129,7 @@ def shortages(results: list[dict], sources: dict | None = None) -> dict[str, int
         latest[(r["operation"], params.get("recipe") or params.get("item"))] = r
     short: Counter = Counter()
     for r in latest.values():
-        if not r.get("ok") and r.get("code") == "material_shortage":
-            details = r.get("details") or {}
+        for details in _demand_bills(r):
             available = details.get("available") or {}
             for item, count in (details.get("required") or {}).items():
                 missing = int(count) - int(available.get(item, 0))
@@ -140,14 +152,15 @@ def shortage_levels(results: list[dict]) -> dict[str, int]:
         latest[_key(r)] = r
     levels: dict[str, int] = {}
     for r in latest.values():
-        if r.get("ok") or r.get("code") != "material_shortage" or "stock_at" not in r:
-            continue
-        details = r.get("details") or {}
-        available = details.get("available") or {}
-        for item, count in (details.get("required") or {}).items():
-            missing = int(count) - int(available.get(item, 0))
-            if missing > 0:
-                levels[item] = max(levels.get(item, 0), int(r["stock_at"].get(item, 0)) + missing)
+        for details in _demand_bills(r):
+            stock_at = details.get("stock_at", r.get("stock_at"))
+            if stock_at is None:
+                continue
+            available = details.get("available") or {}
+            for item, count in (details.get("required") or {}).items():
+                missing = int(count) - int(available.get(item, 0))
+                if missing > 0:
+                    levels[item] = max(levels.get(item, 0), int(stock_at.get(item, 0)) + missing)
     return levels
 
 
@@ -267,9 +280,10 @@ def with_economics(menu: dict, results: list[dict], economics: Mapping | None) -
     """
     bills = {}
     for r in results:
-        required = (r.get("details") or {}).get("required")
-        if r.get("code") == "material_shortage" and isinstance(required, Mapping):
-            bills[_key(r)] = {i: int(n) for i, n in required.items()}
+        for demand in _demand_bills(r):
+            required = demand.get("required")
+            if isinstance(required, Mapping):
+                bills[_key(r)] = {i: int(n) for i, n in required.items()}
     loans = (economics or {}).get("loans")
     lent = {loan["lender"] for loan in loans or ()}
     for option in menu["options"]:
@@ -533,6 +547,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         summary["acceptance"] = statuses
         passed = [c for c, status in statuses.items() if status == "passed"]
         summary["accepted"] = sorted(set(summary.get("accepted", [])) | set(passed))
+        summary["accepted_ever"] = list(summary["accepted"])
+        summary["accepted_final"] = None if "error" in statuses else sorted(passed)
         _append(journal, {"run_id": run_id, "event": "acceptance", "at": event, "statuses": statuses})
     check_acceptance("start")
     index = -1
@@ -663,5 +679,6 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     # Typed outcomes, not only caught exceptions: an untyped_stuck is a tool fault even when nothing raised.
     summary["codes"] = dict(Counter(r.get("code") or "error" for r in results if not r.get("ok")))
     emit(f"SUMMARY: stop={summary['stop']} decisions={summary['decisions']} failures={summary['failures']} "
-         f"phases={','.join(reached) or 'none'} accepted={','.join(summary.get('accepted', [])) or 'none'}")
+         f"phases={','.join(reached) or 'none'} accepted={','.join(summary.get('accepted', [])) or 'none'} "
+         f"accepted_final={'unknown' if summary.get('accepted_final') is None else ','.join(summary['accepted_final']) or 'none'}")
     return summary

@@ -33,6 +33,7 @@ from pathlib import Path
 
 PHASE = re.compile(r"^\+(\d+)s PHASE REACHED: (C\d) .* at tick (\d+)")
 SUMMARY = re.compile(r"SUMMARY: stop=(\S+) decisions=(\d+) failures=(\d+) phases=(\S*) accepted=(\S*)")
+FINAL_ACCEPTANCE = re.compile(r"\baccepted_final=(\S+)")
 
 
 def _atomic(path: Path, data: object) -> None:
@@ -42,7 +43,7 @@ def _atomic(path: Path, data: object) -> None:
 
 
 def summarize(world: Path) -> dict:
-    """Outcome facts from the runner log: stop, phases with their seconds/ticks, strict acceptance."""
+    """Outcome facts, separating ever-passed predicates from the final observation."""
     log = world / "logs/laya-runner.log"
     if not log.exists():
         return {"runner_stop": None}
@@ -54,6 +55,10 @@ def summarize(world: Path) -> dict:
             out.update(runner_stop=match.group(1), decisions=int(match.group(2)), failures=int(match.group(3)),
                        phases=[p for p in match.group(4).split(",") if p and p != "none"],
                        accepted=[p for p in match.group(5).split(",") if p and p != "none"])
+            out["accepted_ever"] = list(out["accepted"])
+            final = FINAL_ACCEPTANCE.search(line)
+            out["accepted_final"] = (None if final is None or final.group(1) == "unknown" else
+                                     [p for p in final.group(1).split(",") if p and p != "none"])
         elif start_tick is None and " tick=" in line and "DECISION 0 " in line:
             start_tick = int(line.split(" tick=")[1].split()[0])
     for phase in phases.values():
@@ -163,8 +168,8 @@ class Batch:
         for job in self.jobs:
             rows[job["arm"]].append(job)
         lines = [f"# {self.cfg['name']}", "", f"Planned jobs: {len(self.jobs)}; statuses: {dict(Counter(j['status'] for j in self.jobs))}", "",
-                 "| Arm | Run | Stops | Proxy C1/C2/C3/C4 | Median game-min to C2 | Strict accepted (any) | untyped_stuck |",
-                 "|---|---:|---|---|---:|---|---:|"]
+                 "| Arm | Run | Stops | Proxy C1/C2/C3/C4 | Median game-min to C2 | Predicates ever passed | Predicates passed at end (observed runs) | untyped_stuck |",
+                 "|---|---:|---|---|---:|---|---|---:|"]
         for arm, jobs in rows.items():
             ran = [j for j in jobs if j.get("runner_stop") or j["status"] in ("completed", "wall_cap", "runner_error")]
             stops = dict(Counter(j.get("runner_stop") or j["status"] for j in ran))
@@ -172,9 +177,15 @@ class Batch:
             c2 = [j["phase_times"]["C2"]["game_seconds"] / 60 for j in ran
                   if "C2" in (j.get("phase_times") or {}) and j["phase_times"]["C2"].get("game_seconds") is not None]
             accepted = dict(Counter(p for j in ran for p in (j.get("accepted") or [])))
+            final_observed = [j for j in ran if j.get("accepted_final") is not None]
+            final = dict(Counter(p for j in final_observed for p in j["accepted_final"]))
             median_c2 = f"{statistics.median(c2):.1f} (n={len(c2)})" if c2 else "-"
             lines.append(f"| {arm} | {len(ran)}/{len(jobs)} | {stops} | {'/'.join(map(str, reached))} | {median_c2} | "
-                         f"{accepted} | {sum(j.get('untyped_stuck', 0) for j in ran)} |")
+                         f"{accepted} | {final} (n={len(final_observed)}/{len(ran)}) | "
+                         f"{sum(j.get('untyped_stuck', 0) for j in ran)} |")
+        lines += ["", "Proxy phases and deterministic checkpoint predicates are separate measurements. "
+                  "Ever-passed predicates may later regress; final observations do not prove sustained service. "
+                  "Legacy logs without accepted_final have unknown final acceptance."]
         lines += ["", "Arms:"] + [f"- {a['id']} @ {a.get('revision', '?')[:9]}: {a.get('change', '')}" for a in self.cfg["arms"]]
         (self.root / "report.md").write_text("\n".join(lines) + "\n")
 

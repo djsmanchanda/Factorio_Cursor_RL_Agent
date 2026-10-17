@@ -65,6 +65,14 @@ Unknown evidence stays unknown. The ops path currently lacks bills, requester
 draws and lender consequences in its menu/state; several scarcity features
 therefore default to false. Add those facts before training on their values.
 
+As of October 18, a failed mall-slot claim retained by a borrow deferral carries
+its material bill, owner, allocatable stock, network stock and reservation
+owners in `details.slot_claim`. These bills feed existing produce demand with
+a network target fixed at the failed claim. A claim whose material stock has
+not increased also sets the existing `unchanged_failure` option fact; a bare
+handoff without a material snapshot does not establish that fact. This covers that failure path;
+other requester bills and lender consequences remain incomplete.
+
 Use the [strategy document](Laya_Strategy_Guidelines.md) for preferences.
 Geometry uses `laya_mission_guidelines.json` and ranks applicable rules for its
 count limit. Ops normally uses `laya_ops_guidelines.json`, then keeps rules in
@@ -87,6 +95,13 @@ It also includes C5 and advanced-circuit consumption. Reports must name the
 predicate version, starting state and sustain window, and separate production,
 delivery and consumption. Do not compare proxy flags with deterministic
 checkpoint flags as though they were identical.
+
+Ops summaries retain `accepted` as the historical union of predicates that
+passed, also named `accepted_ever`. `accepted_final` lists predicates passing
+at the final observation; it is null (logged as `unknown`) when observation
+fails or is unavailable. Full final statuses remain in `acceptance` and the
+journal. Batch reports disclose the final-observation denominator; old logs
+have unknown final acceptance. A final pass alone does not establish sustain.
 
 Replacement requires the same starting save/kit/research, mods, objective and
 budgets as the incumbent, shared milestone predicates, sustained service,

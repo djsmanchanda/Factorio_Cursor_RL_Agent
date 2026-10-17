@@ -34,3 +34,22 @@ The former September 21 stopped-state handoff is preserved in the
 [archive](../archive/rl/Laya_Current_Handoff_2026-09-21.md). Dated handoffs and
 reports remain evidence; do not treat old start/stop instructions as current
 service ownership or reset authority.
+
+## Resumed: cohort complete; offline fixes (2026-10-18, 01:41 IST)
+
+The October 17 reset-chest campaign and sidecars ended: 282 planned jobs,
+117 completed and 165 not started by deadline. The separate normal rung run
+(seed 76900) makes 118 analyzed runs. On 36 shared completed seeds, proxy C2
+was control 19, rung 23, chest 7; this does not establish rung adoption or final
+deterministic acceptance. No laya units were loaded on miniship at resumption.
+
+Offline changes expose rejected mall-slot material bills as produce demand,
+mark observed unchanged claim stock for existing retry preferences, and report
+ever-passed and final acceptance separately. 49 focused tests pass; the fast
+gate has 967 passes, one skip and one preexisting import-firewall failure (same
+four violations reproduced from committed 690983f). No live result is claimed.
+The two-machine Git helper and workflow are in tools/task_workspace.py and
+[the workflow](../two_machine_workflow.md). Existing unrelated edits remain.
+Future runs need fresh frozen code; no server, mod or save action was performed.
+Next: user-requested Luna log review, then choose substantial independent
+workstreams with explicit file ownership and a shared commit SHA.

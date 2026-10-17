@@ -337,3 +337,8 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - What: added local-only task_workspace.py status/create commands and documented one explicit base SHA, branch and worktree per task. Parent work and machine-local runtime state stay separate; all synchronization/integration is explicit.
 - Evidence: nine disposable-Git integration tests pass, including dirty/staged parent preservation, collisions, literal shell characters in paths, upstream counts and hook suppression. Current host is miniship; other laptop checkout has not been inspected or configured.
 - Lifecycle: none; no remote push, machine provisioning or runtime action performed.
+
+## [2026-10-18 01:41 IST] Expose blocked mall demand and terminal acceptance
+- What: rejected slot claims retain owned material bills, network/allocatable snapshots and reservation owners; existing produce menus request fixed network targets for those blockers. Unchanged claim stock sets the existing retry fact. Runner/batch reporting separates ever-passed from final predicates, preserves unknown observations and discloses observed denominators.
+- Evidence: 49 focused tests pass (ops, claim-demand, batch, acceptance and disposable Git workspace checks). Required fast gate: 967 passed, 1 skipped, 1 preexisting import-firewall failure; committed 690983f reproduces the same four forbidden imports. Evidence remains offline tests; no replay, live run, matched improvement or adoption. Logs: /tmp/laya-resume-all-focused-20261018.log and /tmp/laya-resume-final-fast-20261018.log.
+- Lifecycle: all laya units were absent at resumption; no runtime action performed. Future runners need a fresh frozen copy of these Python changes; no Lua deployment required.

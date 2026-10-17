@@ -8988,6 +8988,7 @@ def _rationed_mall_batch(
                     },
                 )
             return True
+    slot_claim = None
     own_loan = any(loan.target_item == item for loan in active)
     if not active or (
         not own_loan
@@ -9012,6 +9013,26 @@ def _rationed_mall_batch(
             )
             return False
         if shortage:
+            # Preserve the rejected claim as a bill, even when borrowing also
+            # fails. Its allocatable stock can be zero while network stock is
+            # reserved for other projects; callers need both to request output.
+            claim_stock = _transferable_or_available_stock(client, surface, force)
+            owner = _material_project_id(item)
+            ledger = _MATERIAL_RESERVATION_LEDGER
+            available = ledger.allocatable_stock(claim_stock, claimant=owner) if ledger else claim_stock
+            slot_claim = {
+                "owner": owner,
+                "required": dict(shortage),
+                "available": {name: int(available.get(name, 0)) for name in shortage},
+                "stock_at": {name: int(claim_stock.get(name, 0)) for name in shortage},
+                "reserved_by": {
+                    project.project_id: {name: project.reserved[name] for name in shortage
+                                         if project.reserved.get(name, 0) > 0}
+                    for project in (ledger.projects.values() if ledger else ())
+                    if ledger._active(project) and project.project_id != owner
+                    and any(project.reserved.get(name, 0) > 0 for name in shortage)
+                },
+            }
             emit(
                 f"  BOOTSTRAP MALL CAPACITY WAIT: {item} cannot claim another "
                 "slot without consuming reserved "
@@ -9045,6 +9066,7 @@ def _rationed_mall_batch(
                 "item": item,
                 "target": target,
                 "available_stock": stock.get(item, 0),
+                **({"slot_claim": slot_claim} if slot_claim else {}),
                 "active_loans": [
                     {
                         "original_recipe": loan.original_recipe,
