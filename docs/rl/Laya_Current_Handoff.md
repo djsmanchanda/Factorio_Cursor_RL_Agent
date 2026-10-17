@@ -115,3 +115,13 @@ and /tmp/laya-combined-fast-20261018.log. No campaign adoption or live validatio
 Next source work: resolve the remaining strategic-wrapper import boundary.
 Runtime use needs fresh frozen code; guarded gates also require deliberate mod
 deployment and Factorio reload. No lifecycle action was performed.
+
+## Startup policy boundary committed (2026-10-18, 03:05 IST)
+
+Laya sessions initialize mechanics only; the steel seed fence is a selected
+operation whose receipt distinguishes reserved, material_shortage,
+seed_committed and seed_producing. Final Opus review P2 (a committed belt-side
+seed lost its bill to the re-declared fence) is fixed with a real-bill
+regression. Fast gate 1,121 passed, 3 skipped, known firewall failure. A
+ten-hour Claude Opus orchestration window (to 12:50 IST) now tests these
+fixes on disposable worlds; see CURRENT_STATUS.md for results.

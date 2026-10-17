@@ -19,6 +19,7 @@ _FIXTURE = Path(__file__).parent / "fixtures" / "electronics_world_spec.json"
 # are orthogonal, so `-m "deterministic and not slow"` and `-m lua` remain
 # meaningful without duplicating test files into artificial directories.
 _TRAINING_FILES = {
+    "test_laya_ops_initialization.py",
     "test_training_batch_cli.py", "test_training_candidates.py",
     "test_training_compute.py", "test_training_episode.py",
     "test_training_evaluation.py", "test_training_factorio_bridge.py",
@@ -49,6 +50,7 @@ _DETERMINISTIC_HINTS = (
 # highest-value safety/contracts across all domains; breadth remains in the
 # scheduled/manual full suite instead of masquerading as fast validation.
 _FAST_FILES = {
+    "test_laya_ops_initialization.py",
     "test_action_catalog.py", "test_bootstrap_district.py",
     "test_capacity_model.py", "test_construction_stock.py",
     "test_factory_invariants.py", "test_fluid_routing.py",

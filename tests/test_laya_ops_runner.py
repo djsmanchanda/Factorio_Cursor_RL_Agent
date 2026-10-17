@@ -248,7 +248,7 @@ def test_receipts_say_whether_the_operation_finished():
     assert (step["ok"], step["code"]) == (False, "prerequisite_advanced")
     assert receipt("mall_slot", {"item": "electronic-circuit"}, (45.5, 38.5))["code"] == "producing"
     assert receipt("foundation", {"recipe": "iron-plate"}, (1, 2))["code"] == "submitted"
-    fence = receipt("reserve_steel_seed", {}, None)
+    fence = receipt("reserve_steel_seed", {}, {"ok": True, "code": "reserved"})
     assert fence["ok"] and fence["code"] == "reserved"
     # A stage built toward the slot keeps the slot on the menu, retried after a wait.
     starters = [receipt("starter", {"recipe": p}, (0, 0)) for p in ("iron-plate", "copper-plate")]

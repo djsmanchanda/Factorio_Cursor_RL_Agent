@@ -384,3 +384,15 @@ Combined fast gate: 1,107 passed, three skipped, one existing firewall failure
 Unrelated tracked changes remain intact. Bootstrap/geometry need fresh frozen
 Python in the next runner; guarded gates additionally need deliberate mod
 deployment and Factorio reload. No runtime, installed mod, service or save changed.
+
+## Laya startup no longer runs the deterministic opener (2026-10-18, 03:05 IST)
+
+Ops sessions now call `initialize_operation_runtime` (ledgers, recipe catalog,
+caches) instead of `_open_the_run`; Laya chooses `reserve_steel_seed` itself.
+The selected fence verifies funding against current stock and stays retryable
+when underfunded. A planned/submitted/producing seed reports `seed_committed` or
+`seed_producing` without re-running the two-pole fence, so the belt-side seed's
+one-pole plan bill is never dropped (Opus review P2, reproduced and fixed).
+Evidence: 46 focused tests; exact staged-source export fast gate 1,121 passed,
+3 skipped, 1 known firewall failure (same two laya_ops imports). Unit level
+only. Lifecycle: fresh frozen Python for the next runner; nothing deployed.

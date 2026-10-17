@@ -37,6 +37,18 @@ collision validators, bot construction/configuration, and measured counters.
 Reuse choosing wrappers only behind an explicitly documented migration boundary;
 extract their alternatives rather than adding another hidden priority branch.
 
+Ops session startup clears run-local caches, loads live recipe/prototype facts,
+validates the goal and restores persisted work. It does not run the deterministic
+mission opener, create its priority scheduler or allocate new mission reserves.
+The selected `reserve_steel_seed` action explicitly requests steel intent and
+reserves the planner-derived pole bill in the material ledger. Reopening a
+session preserves existing reservations; this is not general ops history recovery.
+The action refreshes allocations against current stock before reporting
+`reserved`; an underfunded bill returns `material_shortage` and remains retryable.
+A seed already planned, committed to construction or producing reports
+`seed_committed` or `seed_producing` instead of re-running the two-pole fence:
+the seed's own plan bill (one pole for the belt-side seed) stays in force.
+
 The required result contract distinguishes submitted, constructing,
 prerequisite advanced, batch active, output delivered, producer ready and failed.
 Receipts must retain transaction identity, selected parameters, typed cause,

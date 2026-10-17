@@ -12704,17 +12704,16 @@ def _reserve_steel_starter_power_seed(
     )
 
 
-def _open_the_run(
-    client: RconClient, bridge: GameBridge, surface: str, force: str,
-    goal_item: str, mission_items: tuple[str, ...], script_output: Path | str,
-    emit: Callable[[str], None], *, bootstrap_profile_name: str,
-    reference_point: Point,
-) -> tuple[dict[str, int], dict[str, int], PriorityList]:
-    """Learn the force's real recipes, then announce what this run is aiming at.
+def initialize_operation_runtime(
+    bridge: GameBridge, surface: str, force: str, goal_item: str,
+    emit: Callable[[str], None],
+) -> None:
+    """Clear run-local caches and learn live prototypes without choosing work.
 
-    The catalog load has to happen before the target is validated a second
-    time: the first check only knows the hardcoded recipes, and the point of
-    loading is that the live force may know more.
+    Both callers need the same mechanics state. Mission reserves, seed supply
+    and priority scheduling belong to the deterministic run opener, not to
+    initializing a session whose next operation is selected externally.
+    Validate the target after loading recipes the live force may know.
     """
     global _STARTUP_METAL_STARTERS_OBSERVED, _STARTUP_MALL_LIMITS_RELEASED
     global _STARTUP_MALL_LIMITS_FALLBACK_PROBED
@@ -12752,6 +12751,16 @@ def _open_the_run(
         "(redeploy the mod to enable tier selection)"
     )
     validate_builder_target(goal_item, surface, LINE_RECIPES)
+
+
+def _open_the_run(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    goal_item: str, mission_items: tuple[str, ...], script_output: Path | str,
+    emit: Callable[[str], None], *, bootstrap_profile_name: str,
+    reference_point: Point,
+) -> tuple[dict[str, int], dict[str, int], PriorityList]:
+    """Initialize mechanics, then apply the deterministic mission's policy."""
+    initialize_operation_runtime(bridge, surface, force, goal_item, emit)
     profile = bootstrap_profile(bootstrap_profile_name)
     ledger = _MATERIAL_RESERVATION_LEDGER
     if profile.seed_stock:

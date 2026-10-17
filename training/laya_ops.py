@@ -8,9 +8,9 @@ validation and bot-built submission -- is reused unchanged.  Its *decisions*
 (gates, deferrals, rationing, the fixed stage order in ``run()``) are not:
 Laya chooses which operation to run and when (docs/rl/Laya_Clean_Runner.md).
 
-A session prepares the same per-run state ``orchestrator.autonomous_builder.run``
-prepares (ledgers, recipe catalog, cleared caches) on a Laya world, then runs
-one operation per call.  Failures the tooling signals (``WorkStateSignal``:
+A session initializes ledgers, the recipe catalog and cleared caches on a Laya
+world without the deterministic opener's reserves or priority scheduling, then
+runs one operation per call. Failures the tooling signals (``WorkStateSignal``:
 material shortage, deferral, stuck) come back as typed results, so they can
 become observations instead of crashing the run.  The world must be live
 (unpaused): operations wait on bots and power in wall-clock time.
@@ -30,6 +30,7 @@ from orchestrator.game_bridge import GameBridge, load_json
 from planners.sandbox_infrastructure import build_layout_authorization
 from planners.plan_validation import validate_build_plan
 from orchestrator.material_reservations import MaterialReservationLedger, set_active_material_ledger
+from orchestrator.parts_mall import MaterialShortage
 from orchestrator.work_state import WorkStateSignal
 from tools.rcon_client import RconClient
 
@@ -46,14 +47,12 @@ SUBMITTING_OPERATIONS = {"starter", "foundation", "extend"}  # their layout is s
 
 def receipt(operation: str, params: dict, result: object) -> dict:
     """A normal return as a typed receipt: ``ok`` only when the operation's own postcondition holds."""
-    if operation == "raise_stock_gate":
+    if operation in {"raise_stock_gate", "reserve_steel_seed"}:
         return {"operation": operation, "params": params, **result}
     if operation in PRODUCING_OPERATIONS:
         code = "producing" if result is not None else "prerequisite_advanced"
     elif operation in SUBMITTING_OPERATIONS:
         code = "submitted"
-    elif operation == "reserve_steel_seed":
-        code = "reserved"
     else:
         code = "done"
     return {"ok": code != "prerequisite_advanced", "operation": operation, "params": params, "code": code,
@@ -99,10 +98,7 @@ class DeterministicSession:
         stage_services.reset_coverage_progress()
         ab._TRANSFERABLE_WAITS.clear()
         ab._STAGE_DELIVERY_ATTEMPTS.clear()
-        # Construction targets of the run (what the mission will build): the steel fence reads them.
-        self.mall_targets, _, _ = ab._open_the_run(self.client, self.bridge, SURFACE, FORCE, goal_item, (),
-                                                   self.script_output, emit, bootstrap_profile_name=PROFILE,
-                                                   reference_point=reference_point)
+        ab.initialize_operation_runtime(self.bridge, SURFACE, FORCE, goal_item, emit)
         ab._restore_bootstrap_reservations()
         ab._reconcile_bootstrap_work(self.client, SURFACE, FORCE)
 
@@ -132,7 +128,7 @@ class DeterministicSession:
                                                          stock_target=1, minimum_machines=1, allow_promotion=False),
             # Fence the steel starter's poles in the material ledger before other work spends them
             # (poles need steel: without the fence the foundation/steel cycle cannot start).
-            "reserve_steel_seed": lambda: ab._reserve_steel_starter_power_seed(c, SURFACE, FORCE, self.mall_targets, emit),
+            "reserve_steel_seed": self._reserve_steel_seed,
             # The compact steel seed beside the iron line (gated by the tooling on the iron foundation).
             "steel": lambda stock_target=10: ab.ensure_produced(c, b, SURFACE, FORCE, "steel-plate", ref, emit,
                                                                 stock_target=max(1, int(stock_target))),
@@ -146,6 +142,36 @@ class DeterministicSession:
             "coverage": lambda x, y, purpose="construction": stage_services.extend_roboport_coverage(
                 c, b, SURFACE, FORCE, (x, y), emit, purpose=purpose),
         }
+
+    def _reserve_steel_seed(self) -> dict:
+        """Verify this selected seed fence against current, allocated stock."""
+        if ab._production_started(self.client, SURFACE, FORCE, "steel-plate"):
+            # Not a build receipt: nothing was placed by this call.
+            return {"ok": True, "code": "seed_producing", "state": "producing"}
+        ledger = ab._MATERIAL_RESERVATION_LEDGER
+        project_id = "conversion_steel-plate"
+        # A planned or submitted seed already owns its plan bill (the belt-side seed bills one pole);
+        # re-running the two-pole fence would re-declare and drop that bill.
+        project = None if ledger is None else ledger.projects.get(project_id)
+        if ledger is not None and (ledger.path.with_suffix(".steel-seed.json").exists()
+                                   or (project is not None and project.state == "constructing")):
+            return {"ok": True, "code": "seed_committed", "state": getattr(project, "state", None),
+                    "project_id": project_id}
+        ab._reserve_steel_starter_power_seed(
+            self.client, SURFACE, FORCE, {"steel-plate": 1}, self.emit)
+        project = None if ledger is None else ledger.projects.get(project_id)
+        if project is None:
+            raise WorkStateSignal("Steel seed reservation was not recorded", code="reservation_unverified",
+                                  classification="bug", state="failed", details={"project_id": project_id})
+        stock = ab._transferable_or_available_stock(self.client, SURFACE, FORCE)
+        # Refresh allocations without shrinking an expanded construction bill.
+        ledger.shortage_targets(project_id, stock)
+        project = ledger.projects[project_id]
+        bill = ab._steel_starter_power_seed_bill()
+        if any(project.reserved.get(item, 0) < count for item, count in bill.items()):
+            raise MaterialShortage(project_id, bill, project.reserved)
+        return {"ok": True, "code": "reserved", "state": project.state, "project_id": project_id,
+                "required": bill, "reserved": dict(project.reserved)}
 
     def _retire_starter(self, recipe: str) -> dict:
         """The tooling retires the starter only after the refinery's measured output and chest evidence."""
