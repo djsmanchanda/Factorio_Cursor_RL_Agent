@@ -342,3 +342,8 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - What: Standing finite cells share persisted loan identity and vacate after completion. Borrowed cells keep their identity through verified restoration. Exact machine refunds, held hands and requester excess recover without spills or overwriting companion requests; full providers retain pending ownership across restart. Gear/cable anchors and capability requests are preserved.
 - Evidence: 298 focused checks; fast gate 973 pass / 1 skip / unchanged inherited import-firewall failure. Luna medium identified and reviewed the restart/spill fixes. Engine API smoke remains required.
 - Lifecycle: stage changed Lua/schema from a frozen commit and start fresh disposable instances. Completed day campaign 64/64, unit inactive. No existing runtime or installed mods changed.
+
+## [2026-10-17 10:07 IST] Reset: reachable, conserved material delivery
+- What: Validate provider/consumer network identity before cell/stage delivery; zero moved is not progress. Transfer only accepted destination stock with rollback on source refusal, and scope destination to player force.
+- Evidence: 378 focused checks, including Lua conservation and disconnected-network cases; fast gate 973 pass / 1 skip / same inherited import-firewall failure.
+- Lifecycle: fresh frozen lifecycle smoke `a93ee97` is running on ports 35440/28440 under a bounded user unit. Network change requires new frozen Python consumers. No active day campaign remains; no deployed installed mod/GUI copy was changed.

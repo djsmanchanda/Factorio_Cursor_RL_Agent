@@ -1046,6 +1046,11 @@ def _apply_remedy(
             ensure_logistic_coverage(
                 client, bridge, surface, force, [delivery], emit,
             )
+            if hasattr(client, "command"):
+                networks = live_base.logistic_networks_covering(client, surface, force, [origin, delivery])
+                if networks[0] is None or networks[0] != networks[1]:
+                    emit(f"  MATERIAL DELIVERY WAIT: stage/provider networks {networks}; stock cannot feed this stage")
+                    return False
             moved = live_base.transfer_stock(
                 client, surface, item,
                 max(required * 8, 16), delivery,
@@ -1054,7 +1059,7 @@ def _apply_remedy(
                 f"  MATERIAL DELIVERY: moved {moved} {item} from base stock "
                 f"into the existing stage provider at {delivery}"
             )
-            return True
+            return moved > 0
         # ``available_items`` sees the whole force, while the ghost probe sees
         # only the target logistic network. A zero network count with stock in
         # the base is often temporary: other construction ghosts have reserved
@@ -10098,6 +10103,12 @@ def _deliver_cell_ingredients(
                 plan["surface"], plan["force"] = surface, force
                 _submit(client, bridge, surface, plan,
                         f"deliver_{ingredient}", emit)
+            if hasattr(client, "command"):
+                ensure_logistic_coverage(client, bridge, surface, force, [chest, destination], emit)
+                networks = live_base.logistic_networks_covering(client, surface, force, [chest, destination])
+                if networks[0] is None or networks[0] != networks[1]:
+                    emit(f"  CELL DELIVERY WAIT: requester/provider networks {networks}; no reachable delivery")
+                    continue
             moved = live_base.transfer_stock(
                 client, surface, ingredient,
                 max(amount * 4, 20), destination,

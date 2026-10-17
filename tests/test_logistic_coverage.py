@@ -107,6 +107,61 @@ def test_transfer_stock_uses_mall_providers_and_storage_as_sources() -> None:
     assert "mode=='storage'" in lua
 
 
+@pytest.mark.parametrize("capacity,refuse", [(0, False), (3, False), (100, False), (3, True)])
+@pytest.mark.lua
+def test_transfer_reports_only_accepted_items_and_preserves_total_stock(capacity, refuse):
+    import shutil
+    import subprocess
+    binary = shutil.which("lua")
+    if binary is None:
+        pytest.skip("Lua interpreter unavailable")
+    fixture = '''
+local source_count,destination_count=10,0
+local force={name='player'}
+local inventory={get_item_count=function() return source_count end,
+ remove=function(stack)
+  if refuse then error('source unavailable') end
+  local got=math.min(source_count,stack.count);source_count=source_count-got;return got end}
+local source={unit_number=1,prototype={logistic_mode='passive-provider'},get_inventory=function() return inventory end}
+local destination={unit_number=2,insert=function(stack)
+ local n=math.min(stack.count,capacity-destination_count);destination_count=destination_count+n;return n end,
+ get_inventory=function() return {remove=function(stack)
+  local n=math.min(stack.count,destination_count);destination_count=destination_count-n;return n end} end}
+local surface={find_entities_filtered=function(o)
+ assert(o.force==force)
+ if o.position then return {destination} end
+ return {source,destination} end}
+game={surfaces={nauvis=surface},forces={player=force}};defines={inventory={chest=1}};rcon={print=print}
+'''
+    class Client:
+        def command(self, command):
+            script = f"local capacity={capacity};local refuse={str(refuse).lower()}\n" + fixture + command[4:]
+            script += "\nassert(source_count+destination_count==10)\n"
+            result = subprocess.run([binary, "-"], input=script, capture_output=True, text=True)
+            assert result.returncode == 0, result.stderr
+            return result.stdout
+    assert live_base.transfer_stock(Client(), "nauvis", "iron-plate", 6, (4, 5)) == (0 if refuse else min(capacity, 6))
+
+
+@pytest.mark.parametrize("reply,expected", [('["11","11"]', ("11", "11")), ('["11","12"]', ("11", "12")),
+                                            ('[false,"12"]', (None, "12"))])
+def test_network_identity_read_preserves_disconnected_and_missing_coverage(reply, expected):
+    assert live_base.logistic_networks_covering(_FakeRcon(reply), "nauvis", "player", [(0, 0), (3, 0)]) == expected
+
+
+@pytest.mark.parametrize("networks,expected_moves", [(("11", "11"), 2), (("11", "12"), 0), ((None, "11"), 0)])
+def test_cell_delivery_requires_provider_in_the_requesters_actual_network(monkeypatch, networks, expected_moves):
+    monkeypatch.setattr(builder.live_base, "network_item_count", lambda *_a: 0)
+    monkeypatch.setattr(builder.live_base, "nearest_container", lambda *_a, **_k: (3, 0))
+    monkeypatch.setattr(builder.live_base, "logistic_networks_covering", lambda *_a: networks)
+    monkeypatch.setattr(builder, "ensure_logistic_coverage", lambda *_a: None)
+    calls=[]
+    monkeypatch.setattr(builder.live_base, "transfer_stock", lambda *a: calls.append(a) or 1)
+    assert _deliver_cell_ingredients(_FakeRcon(), object(), "nauvis", "player", "electronic-circuit", (0, 0),
+                                     lambda _m: None, requester_position=(0, 0)) is bool(expected_moves)
+    assert len(calls) == expected_moves
+
+
 def test_cell_delivery_reuses_a_nearby_provider_without_a_new_plan(monkeypatch) -> None:
     submitted: list[str] = []
     transfers: list[tuple[str, int, tuple[float, float]]] = []
