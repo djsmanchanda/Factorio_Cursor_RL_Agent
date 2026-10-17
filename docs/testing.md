@@ -7,6 +7,11 @@ markers. Marker assignment is centralized in `tests/conftest.py`; adding a new
 test module requires placing it in the right domain or accepting the pure
 contract fallback deliberately.
 
+Default discovery is limited to `tests/`. Frozen campaign copies under `data/`
+retain their historical tests as evidence; collecting them together imports
+incompatible revisions and duplicates module names. To verify a frozen arm,
+run pytest from that arm's code directory.
+
 Primary domains:
 
 - `contracts`: schemas, catalogs, pure planners, validators, and invariants;
