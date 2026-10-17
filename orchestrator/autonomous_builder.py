@@ -7965,7 +7965,6 @@ _CHEMICAL_RUNG_PARK_CODES = frozenset({
     "steel_power_cycle_break",
 })
 
-_CHEMICAL_RUNGS_STOCKED: set[tuple[str, str, str]] = set()
 _CHEMICAL_BATCH_TARGETS = {
     "pipe": ITEM_STACK_SIZES.get("pipe", 100),
     "chemical-plant": 2,
@@ -7998,17 +7997,8 @@ def _chemical_capability_started(
     if item in _CHEMICAL_BATCH_TARGETS and _chemical_uses_rotating_batch(
         client, surface, force, item,
     ):
-        key = (surface, force, item)
-        if key in _CHEMICAL_RUNGS_STOCKED:
-            return True
         stock = live_base.available_items(client, surface, force)
-        if stock.get(item, 0) >= _CHEMICAL_BATCH_TARGETS[item]:
-            # Latched: the oil cell this rung exists for consumes or reserves
-            # its stock, and reopening the rung re-borrowed a cell for pipe
-            # ~780 times across one batch without an oil cell ever standing.
-            _CHEMICAL_RUNGS_STOCKED.add(key)
-            return True
-        return False
+        return stock.get(item, 0) >= _CHEMICAL_BATCH_TARGETS[item]
     return _production_started(client, surface, force, item)
 
 
@@ -12725,7 +12715,6 @@ def _open_the_run(
     _MALL_REFRESH_SIGNATURES.clear()
     _MALL_PROVIDER_CAPACITY_FLOORS.clear()
     _MALL_STOCK_GATE_FLOORS.clear()
-    _CHEMICAL_RUNGS_STOCKED.clear()
     _MALL_ITEM_PROVIDER_LIMITS.clear()
     _REFINERY_SITE_RESERVATIONS.clear()
     _STARTUP_METAL_STARTERS_OBSERVED = False
