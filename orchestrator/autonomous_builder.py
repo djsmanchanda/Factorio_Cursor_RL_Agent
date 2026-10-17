@@ -79,9 +79,11 @@ from orchestrator.mall_bootstrap import (
     _LOAN_REQUEST_HEADROOM_FRACTION,
     active_bootstrap_loans,
     bootstrap_external_shortages,
+    bootstrap_loan_facts,
     bootstrap_loan_plan,
     next_bootstrap_step,
     promote_bootstrap_loan_plan,
+    release_bootstrap_loan_plan,
     restore_bootstrap_loan_plan,
 )
 from orchestrator.material_reservations import (
@@ -927,27 +929,23 @@ def _apply_remedy(
             )
         acted = nearest is not None
     elif remedy == "stage_power":
-        # A remedy that changes nothing must not be retried. extend_power
-        # returns False without emitting when there is no pole at the
-        # recorded position or no second network to bridge to; the previous
-        # code discarded that, so the loop re-ran an identical no-op for
-        # every remaining round and reported only a bare timeout.
+        # A generated anchor is usable even when machines lie beyond its
+        # supply area. Verify each consumer after connecting that anchor.
         acted = extend_power_for_stage(substation_position)
-        if not acted:
-            # A scaffold can already be on the source network while one or
-            # more machines sit outside its supply area (for example, the
-            # second row of a two-row mine). In that shape the substation has
-            # no *other* powered network to bridge from, but the stranded
-            # machines still need individual hookup poles.
-            statuses = live_base.entity_statuses(
-                client, surface, machine_positions,
-            )
-            stranded = [
-                position for position in machine_positions
-                if statuses.get(tuple(position)) == "no_power"
-            ]
-            for position in stranded:
-                acted |= extend_power_for_stage(position)
+        # A scaffold can already be on the source network while one or
+        # more machines sit outside its supply area (for example, the
+        # second row of a two-row mine). In that shape the substation has
+        # no *other* powered network to bridge from, but the stranded
+        # machines still need individual hookup poles.
+        statuses = live_base.entity_statuses(
+            client, surface, machine_positions,
+        )
+        stranded = [
+            position for position in machine_positions
+            if statuses.get(tuple(position)) == "no_power"
+        ]
+        for position in stranded:
+            acted |= extend_power_for_stage(position)
         if not acted:
             raise StuckError(
                 f"{name}: {description}, but no power bridge can be built from "
@@ -1048,6 +1046,11 @@ def _apply_remedy(
             ensure_logistic_coverage(
                 client, bridge, surface, force, [delivery], emit,
             )
+            if hasattr(client, "command"):
+                networks = live_base.logistic_networks_covering(client, surface, force, [origin, delivery])
+                if networks[0] is None or networks[0] != networks[1]:
+                    emit(f"  MATERIAL DELIVERY WAIT: stage/provider networks {networks}; stock cannot feed this stage")
+                    return False
             moved = live_base.transfer_stock(
                 client, surface, item,
                 max(required * 8, 16), delivery,
@@ -1056,7 +1059,7 @@ def _apply_remedy(
                 f"  MATERIAL DELIVERY: moved {moved} {item} from base stock "
                 f"into the existing stage provider at {delivery}"
             )
-            return True
+            return moved > 0
         # ``available_items`` sees the whole force, while the ghost probe sees
         # only the target logistic network. A zero network count with stock in
         # the base is often temporary: other construction ghosts have reserved
@@ -2966,13 +2969,19 @@ def build_mining_stage(
                 and reserved_recipe != recipe
             ),
         )
-    except stage_extraction.PendingSystemDeferred as error:
+    except (
+        stage_extraction.PendingSystemDeferred,
+        stage_extraction.DistrictExpansionUnbuildable,
+    ) as error:
         # The system serving this demand is still being built -- bots need
         # minutes, not another system. Ending the run here is how the landfill
         # mission died: the second survey under-counted a half-built mine,
         # opened a duplicate system, and its preflight collided with the
-        # first system's own ore bridge.
-        emit(f"PLATE SYSTEM PENDING: {error}")
+        # first system's own ore bridge. An unbuildable district is terminal
+        # for this checkpoint and keeps its own code, so it is not waited on.
+        label = ("PLATE SYSTEM PENDING" if error.state == "constructing"
+                 else "DISTRICT UNBUILDABLE")
+        emit(f"{label}: {error}")
         raise ProductionPrerequisiteDeferred(
             str(error), code=error.code, classification=error.classification,
             state=error.state, details=error.details,
@@ -5590,7 +5599,7 @@ def refresh_feedstock_chest_caps(
 
 def produce_to_demand(
     client: RconClient, bridge: GameBridge, surface: str, force: str, item: str,
-    reference_point: Point, emit: Callable[[str], None], *, stock_target: int,
+    reference_point: Point, emit: Callable[[str], None], *, stock_target: int, finite: bool = True,
 ) -> Point | None:
     """Make ``item`` up to an absolute network level and cap its cell there.
 
@@ -5601,11 +5610,53 @@ def produce_to_demand(
     circuits). Gear and cable keep their own-chest cap instead.
     """
     target = max(1, int(stock_target))
-    return ensure_produced(
+    if finite and item not in _MALL_RECIPE_ANCHORS:
+        _MALL_STOCK_GATE_FLOORS[(surface, force, item)] = target
+    output = ensure_produced(
         client, bridge, surface, force, item, reference_point, emit,
         upgrade_bootstrap=False, stock_target=target,
         stock_gate_target=None if item in _MALL_RECIPE_ANCHORS else target,
     )
+    if output is not None and finite and item not in _MALL_RECIPE_ANCHORS and hasattr(client, "command"):
+        _tag_finite_mall_cells(client, bridge, surface, force, item, target, reference_point, emit)
+    return output
+
+
+def _tag_finite_mall_cells(client, bridge, surface, force, item, target, reference_point, emit) -> None:
+    """A standing finite cell is a loan to its own recipe: reuse the same durable completion/recovery path."""
+    spec = LINE_RECIPES.get(item)
+    if not spec or spec["machine"] not in live_base.ASSEMBLER_TIERS:
+        return
+    line = live_base.find_line(client, surface, force, item, spec["machine"], include_ghosts=False)
+    if line is None:
+        return
+    active = {loan.machine_position: loan for loan in active_bootstrap_loans(client, surface, force)}
+    stock = live_base.transferable_items(client, surface, force)
+    crafts = max(1, math.ceil(max(0, target - stock.get(item, 0)) / spec.get("product_amount", 1)))
+    for position in line.machine_positions:
+        previous = active.get(tuple(position))
+        if previous and (previous.original_recipe != item or previous.target_item != item
+                         or previous.target_count == target or previous.releasing):
+            continue
+        located = locate_mall_cell(position, reference_point)
+        if located is None:
+            continue  # Geometry outside the owned mall is not a releaseable slot.
+        origin, side = located
+        requester = (origin[0] + 4.5, origin[1] + 1.5)
+        if not previous and recipe_group_name(item, side) not in live_base.requester_logistic_groups(client, surface, requester):
+            continue  # Do not seize an unlabelled or another consumer's cell.
+        machine = live_base.entity_at(client, surface, position)
+        if not machine or machine["name"] not in live_base.ASSEMBLER_TIERS:
+            continue
+        loan = MallBootstrapLoan(item, item, target, side, requester, item, machine_name=machine["name"])
+        finished = _bootstrap_loan_products_finished(client, surface, loan)
+        if finished is None:
+            continue
+        plan = bootstrap_loan_plan(loan, MallBootstrapStep(item, target, crafts), baseline_finished=finished,
+                                   previous_group=previous.group if previous else None)
+        plan["surface"], plan["force"] = surface, force
+        _submit(client, bridge, surface, plan, f"finite_mall_cell_{item}", emit)
+        _MALL_REFRESH_SIGNATURES.clear()
 
 
 #: Feedstock every other mall cell draws on; a second cell keeps the own-chest
@@ -5633,6 +5684,32 @@ def grow_producer(
     )
 
 
+def active_batch_crafts(
+    client: RconClient, surface: str, force: str,
+) -> dict[tuple, int]:
+    """Craft counters of active finite batches whose bill is not yet met.
+
+    A rising counter is measured progress. Without it a pipe batch crafting
+    240 -> 278 of 300 read as no progress and the run stopped as stalled
+    (batch-20261017-day pipe-300-s76401). A met or unreadable batch is left out,
+    so surplus output and busy codes alone keep nothing alive.
+    """
+    if not hasattr(client, "command"):
+        return {}
+    loans = active_bootstrap_loans(client, surface, force)
+    available = live_base.transferable_items(client, surface, force) if loans else {}
+    crafts = {}
+    for loan in loans:
+        finished = _bootstrap_loan_products_finished(client, surface, loan)
+        facts = bootstrap_loan_facts(loan, products_finished=finished, available=available)
+        if finished is None or facts.get("bill_met"):
+            continue
+        key = (loan.original_recipe, loan.target_item, facts["step_recipe"],
+               round(loan.machine_position[0], 2), round(loan.machine_position[1], 2))
+        crafts[key] = int(finished)
+    return crafts
+
+
 def release_finished_bootstrap_loans(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     reference_point: Point, emit: Callable[[str], None],
@@ -5652,7 +5729,7 @@ def release_finished_bootstrap_loans(
         return
     stock = live_base.transferable_items(client, surface, force)
     for loan in loans:
-        if int(stock.get(loan.target_item, 0)) < loan.target_count:
+        if not loan.releasing and int(stock.get(loan.target_item, 0)) < loan.target_count:
             continue
         _submit_bootstrap_loan(
             client, bridge, surface, force, loan, emit,
@@ -5953,6 +6030,29 @@ def _restore_bootstrap_loan(
 ) -> None:
     """Restore the borrowed cell before another dependency may claim it."""
     global _BOOTSTRAP_LOAN_CONFIGURATION_REVISION
+    if hasattr(client, "command") and not (loan.releasing and loan.current_recipe == loan.original_recipe
+                                           and loan.original_recipe != loan.target_item):
+        release = release_bootstrap_loan_plan(loan)
+        release["surface"], release["force"] = surface, force
+        try:
+            _submit(client, bridge, surface, release, f"release_bootstrap_loan_{loan.target_item}", emit)
+        except StuckError as error:
+            if "release_destination_full" not in str(error):
+                raise
+            raise ProductionPrerequisiteDeferred(
+                f"{loan.target_item} cell recovery waits for provider space",
+                code="mall_cell_release_wait", state="supply_wait",
+                details={"item": loan.target_item, "requester": list(loan.requester_position),
+                         "provider": list(loan.provider_position)},
+            ) from error
+    if loan.original_recipe == loan.target_item:
+        acknowledgement = release_bootstrap_loan_plan(loan, acknowledge=True)
+        acknowledgement["surface"], acknowledgement["force"] = surface, force
+        _submit(client, bridge, surface, acknowledgement, f"vacate_finite_cell_{loan.target_item}", emit)
+        MANAGED_INTERMEDIATE_SOURCES.pop(loan.target_item, None)
+        _MALL_REFRESH_SIGNATURES.clear()
+        emit(f"  FINITE CELL RELEASED: {loan.target_item} at {loan.machine_position}; requests and owned WIP cleared")
+        return
     try:
         shared_provider = mall_slot_uses_shared_provider(
             client, surface, loan.machine_position,
@@ -5972,12 +6072,17 @@ def _restore_bootstrap_loan(
             (surface, force, loan.original_recipe),
         ),
         chest_gate_target=_feedstock_chest_cap(loan.original_recipe),
+        retain_loan_tag=hasattr(client, "command"),
     )
     plan["surface"], plan["force"] = surface, force
     _submit(
         client, bridge, surface, plan,
         f"restore_bootstrap_loan_{loan.target_item}", emit,
     )
+    if hasattr(client, "command"):
+        acknowledgement = release_bootstrap_loan_plan(loan, acknowledge=True, restore_recipe=loan.original_recipe)
+        acknowledgement["surface"], acknowledgement["force"] = surface, force
+        _submit(client, bridge, surface, acknowledgement, f"acknowledge_loan_restore_{loan.target_item}", emit)
     _BOOTSTRAP_LOAN_CONFIGURATION_REVISION += 1
     _MALL_REFRESH_SIGNATURES.clear()
     emit(
@@ -6136,6 +6241,10 @@ def _submit_bootstrap_loan(
     count is stocked, skipping spare production: nothing else asks for more.
     """
     global _BOOTSTRAP_LOAN_PROGRESS_REVISION, _BOOTSTRAP_LOAN_CONFIGURATION_REVISION
+    if loan.releasing:
+        _restore_bootstrap_loan(client, bridge, surface, force, loan, emit,
+                                reason="finish pending WIP recovery", reference_point=reference_point)
+        return f"released {loan.target_item} cell after WIP recovery"
     # A managed persistent source points at a provider chest, not at an
     # immutable machine. Once that cell is borrowed for another recipe the
     # pointer is stale; leaving it cached makes later pole/assembler loans
@@ -6172,6 +6281,11 @@ def _submit_bootstrap_loan(
         int(spendable.get(loan.target_item, 0))
         if spendable is not None else None
     )
+    if (release_when_met and loan.original_recipe == loan.target_item
+            and target_spendable is not None and target_spendable >= loan.target_count):
+        _restore_bootstrap_loan(client, bridge, surface, force, loan, emit,
+                                reason="finite bill stocked", reference_point=reference_point)
+        return f"released finite {loan.target_item} cell"
     products_finished = (
         _bootstrap_loan_products_finished(client, surface, loan)
         if loan.step_recipe is not None else None
@@ -7838,7 +7952,16 @@ def _build_assembled_stage(
                     client, bridge, surface, force, extraction,
                     reference_point, emit, expand=True,
                 )
-            except stage_extraction.PendingSystemDeferred as error:
+            except (
+                stage_extraction.PendingSystemDeferred,
+                stage_extraction.DistrictExpansionUnbuildable,
+            ) as error:
+                if isinstance(error, stage_extraction.DistrictExpansionUnbuildable):
+                    raise ProductionPrerequisiteDeferred(
+                        str(error), code=error.code,
+                        classification=error.classification,
+                        state=error.state, details=error.details,
+                    ) from error
                 raise ProductionPrerequisiteDeferred(str(error)) from error
             return
         # Site the line beside the input it eats most of, not beside the
@@ -7988,9 +8111,46 @@ def _chemical_capability_started(
     if item in _CHEMICAL_BATCH_TARGETS and _chemical_uses_rotating_batch(
         client, surface, force, item,
     ):
-        stock = live_base.available_items(client, surface, force)
-        return stock.get(item, 0) >= _CHEMICAL_BATCH_TARGETS[item]
+        # The rung exists to supply the oil cell, which reserves its stock and
+        # then places it. Count what the world holds -- physical stock with
+        # reservations included, plus placed entities. Unreserved stock alone
+        # reopened the rung as soon as the cell claimed it (~780 pipe loans in
+        # one batch); an "ever stocked" latch would prove nothing about the
+        # cell's remaining bill (audit 2026-10-17).
+        held = (
+            live_base.transferable_items(client, surface, force).get(item, 0)
+            + live_base.placed_entity_count(client, surface, force, item)
+            + _ladder_loan_draw(client, surface, force, item)
+        )
+        return held >= _CHEMICAL_BATCH_TARGETS[item]
     return _production_started(client, surface, force, item)
+
+
+def _ladder_loan_draw(
+    client: RconClient, surface: str, force: str, item: str,
+) -> int:
+    """`item` that active ladder-rung loans have requested for their own crafts.
+
+    A later rung's loan draws its predecessor's stock into its requester and
+    machine before crafting. That stock is still the ladder's. Without this
+    credit, the drawn rung reopened and its handoff restored the later loan;
+    recovery then returned the draw, which satisfied the rung again. The cycle
+    repeated with no progress (reset cohort network-s76601: oil-refinery drew
+    pipe 101 -> 81, six restores, stalled).
+    """
+    drawn = 0
+    for loan in active_bootstrap_loans(client, surface, force):
+        recipe = loan.step_recipe
+        if recipe not in CHEMICAL_BOOTSTRAP_LADDER or not loan.step_required_crafts:
+            continue
+        spec = LINE_RECIPES.get(recipe) or {}
+        per_craft = dict(zip(
+            spec.get("ingredients", ()), spec.get("amounts", ()),
+        )).get(item, 0)
+        drawn += per_craft * max(1, math.ceil(
+            loan.step_required_crafts * (1 + _LOAN_REQUEST_HEADROOM_FRACTION),
+        ))
+    return drawn
 
 
 def _chemical_ladder_predecessors(item: str) -> tuple[str, ...]:
@@ -10003,6 +10163,12 @@ def _deliver_cell_ingredients(
                 plan["surface"], plan["force"] = surface, force
                 _submit(client, bridge, surface, plan,
                         f"deliver_{ingredient}", emit)
+            if hasattr(client, "command"):
+                ensure_logistic_coverage(client, bridge, surface, force, [chest, destination], emit)
+                networks = live_base.logistic_networks_covering(client, surface, force, [chest, destination])
+                if networks[0] is None or networks[0] != networks[1]:
+                    emit(f"  CELL DELIVERY WAIT: requester/provider networks {networks}; no reachable delivery")
+                    continue
             moved = live_base.transfer_stock(
                 client, surface, ingredient,
                 max(amount * 4, 20), destination,

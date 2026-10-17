@@ -418,8 +418,14 @@ def assert_affordable(
     ``reservation_priority`` lets an upstream construction capability retain
     finite stock ahead of downstream or concurrent projects.
     """
-    required = _ghost_materials(plan)
+    # Replaying an owned plan owes only placements that do not yet exist. Charging its original
+    # full bill again after bots consumed it can manufacture a second copy of every installed part.
+    required = (live_base.plan_construction_status(client, surface, force, plan)["remaining"]
+                if hasattr(client, "command") else _ghost_materials(plan))
     if not required:
+        ledger = active_material_ledger()
+        if ledger is not None:
+            ledger.complete(name)
         return
     # Requester/buffer contents are already committed work-in-progress. They
     # cannot revive construction ghosts or be moved into a stage provider, so
@@ -593,7 +599,8 @@ def _submit(
     # Keep caller-owned/persisted plan identities stable. A failed coverage or
     # material attempt may retry the same object later and must be converted
     # again so its synchronous infrastructure contract is not silently lost.
-    plan = copy.deepcopy(plan)
+    from planners.fluid_machine_settings import complete_fluid_mirroring_settings
+    plan = complete_fluid_mirroring_settings(plan)
     forbidden = {"infinity-chest", "infinity-pipe", "electric-energy-interface"}
     for phase in plan.get("phases", []):
         for action in phase.get("actions", []):
@@ -617,7 +624,7 @@ def _submit(
         "logistic_request", "logistic_requests", "logistic_sections",
         "clear_logistic_groups", "inventory_limit", "clear_inventory_limit",
         "logistic_condition",
-        "clear_logistic_condition", "input_priority", "output_priority", "recipe",
+        "clear_logistic_condition", "input_priority", "output_priority", "recipe", "mirroring", "release_cell",
     }
     for action in direct_actions:
         if action["action_type"] == "place_entity" and setting_fields.intersection(action):

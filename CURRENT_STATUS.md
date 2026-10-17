@@ -328,6 +328,31 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - Evidence: reviewed documentation diff and whitespace checks pass. Isolated managed Codex 0.162.0 requests confirmed the upstream two flags retain native tools while adding agents.enabled=false removes them; normal inference completed in both arms. Required fast gate again stopped with 285 collection errors, including saved-run import collisions under data/; log: /tmp/factorio-t3-explicit-tools-fast-20261015.log. T3-owned delegation remains untested because its tools are unavailable here.
 - Lifecycle: instructions only; new sessions load the charter. No T3 runtime patch, runner restart, mod deployment or Factorio restart performed or required for this documentation change.
 
+## [2026-10-17 09:37 IST] Reset: prerequisite choices and demand-driven observations
+- What: Named prerequisite handoffs become selectable outside the proxy phase and shortage menu cap; current parent outcomes retire old handoffs. Enabled goal production and recipe/item counters follow live demand and its ingredient closure. No rule weights changed.
+- Evidence: 66 focused tests pass, including Lua observation behavior; fast gate 963 pass / 1 skip / 1 inherited import-firewall failure. Offline only.
+- Lifecycle: use the reset branch for new disposable runners; observation Lua travels through the adapter. No deployment, restart or campaign modification performed. Earlier recovered mod changes still require staging from frozen code before live evaluation.
+
+## [2026-10-17 09:45 IST] Reset: selected oil remaining bill drives choices and retries
+- What: Exact installed/pending/unplaced material facts retain immutable transaction identity. Selected missing items become choices before repeated failures; parent options carry current owned bills. Retries charge only uninstalled placements, and paid construction reservations release. Installation high-water marks count delivery progress while bounding rebuild cycles.
+- Evidence: 388 focused checks pass; a regression requests 10 rather than 2 pipes with the prior affordability function. Recorded decision 378 of control-s76403 replays its original four options and gains plastic with the correct goal dependency. Fast gate 964 pass / 1 skip / unchanged inherited import-firewall failure. No live success claimed.
+- Lifecycle: start successor disposable runners from the reset commit after campaign ownership/deadline checks, using committed mod_playground and mods staged from frozen code. No campaign edit, deployment, restart or production action performed. Finite-cell WIP/slot release, network delivery and fresh strict C4/C5 remain open.
+
+## [2026-10-17 10:03 IST] Reset: finite-cell release and durable WIP recovery
+- What: Standing finite cells share persisted loan identity and vacate after completion. Borrowed cells keep their identity through verified restoration. Exact machine refunds, held hands and requester excess recover without spills or overwriting companion requests; full providers retain pending ownership across restart. Gear/cable anchors and capability requests are preserved.
+- Evidence: 298 focused checks; fast gate 973 pass / 1 skip / unchanged inherited import-firewall failure. Luna medium identified and reviewed the restart/spill fixes. Engine API smoke remains required.
+- Lifecycle: stage changed Lua/schema from a frozen commit and start fresh disposable instances. Completed day campaign 64/64, unit inactive. No existing runtime or installed mods changed.
+
+## [2026-10-17 10:07 IST] Reset: reachable, conserved material delivery
+- What: Validate provider/consumer network identity before cell/stage delivery; zero moved is not progress. Transfer only accepted destination stock with rollback on source refusal, and scope destination to player force.
+- Evidence: 378 focused checks, including Lua conservation and disconnected-network cases; fast gate 973 pass / 1 skip / same inherited import-firewall failure.
+- Lifecycle: fresh frozen lifecycle smoke `a93ee97` is running on ports 35440/28440 under a bounded user unit. Network change requires new frozen Python consumers. No active day campaign remains; no deployed installed mod/GUI copy was changed.
+
+## [2026-10-17 10:17 IST] Reset: engine verification and heavy matched testing
+- What: Verified actual finite-cell refunds, full-provider conservation and two save/load acknowledgement boundaries on an isolated API fixture. Fixed atomic Lua test module lookup and catalog state leaking across offline tests.
+- Evidence: 146 affected checks pass; fast gate 973 pass / 1 skip / unchanged firewall failure. Original full suite: 3840 passing cases, 18 failures, 39 skips; nine loader failures corrected, six catalog-order failures reproduced on predecessor and corrected; two other fake-client failures plus firewall reproduce on predecessor. Full confirmation follows this test-only commit. Smoke ended after 772s / 119 decisions at game-tick cap: proxy C0/C1, strict C0, two real cell restorations; no C4/C5 claim.
+- Lifecycle: 32 planned fresh trials (16 matched seed pairs), 8 concurrent, lifecycle `a93ee97` versus network `76d24cb`, under `laya-reset-paired-20261017.service`, October 17 deadline 16:30 IST. Frozen cohort unchanged by test fixes; per-minute offline metrics retain all jobs. Separate fixtures/smoke stopped their servers. Installed GUI/server mods and production untouched.
+
 ## [2026-10-18 01:38 IST] Bound pytest discovery to current source
 - What: default pytest discovery targets tests/; frozen campaign copies remain independently verifiable from their own code roots.
 - Evidence: root discovery previously entered data/ and produced import/collection collisions; bounded fast gate collected the current suite. One preexisting import-firewall test still fails; committed HEAD independently reproduces the same four violations in laya_lines.py/laya_ops.py. No safety rule was relaxed.
@@ -396,3 +421,23 @@ one-pole plan bill is never dropped (Opus review P2, reproduced and fixed).
 Evidence: 46 focused tests; exact staged-source export fast gate 1,121 passed,
 3 skipped, 1 known firewall failure (same two laya_ops imports). Unit level
 only. Lifecycle: fresh frozen Python for the next runner; nothing deployed.
+
+- 2026-10-17: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
+
+- 2026-10-17: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: tests/test_reliability_campaign.py. Prediction: sustained plastic. Reason: fix.
+
+- 2026-10-17: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
+
+- 2026-10-17: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
+
+- 2026-10-17: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
+
+- 2026-10-17: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
+
+- 2026-10-17: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: tests/test_reliability_campaign.py. Prediction: sustained plastic. Reason: fix.
+
+- 2026-10-17: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
+
+- 2026-10-17: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
+
+- 2026-10-17: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.

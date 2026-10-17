@@ -281,6 +281,7 @@ end
 -- that was never asked for any, so the failure mode is silent.
 local logistic_sections = require("logistic_sections")
 local trash_requesters = require("trash_requesters")
+local cell_release = require("cell_release")
 local find_section_by_group = logistic_sections.find_section_by_group
 local claim_section_for_group = logistic_sections.claim_section_for_group
 local verify_section_slots = logistic_sections.verify_section_slots
@@ -310,8 +311,17 @@ local function splitter_priority_error(entity, action)
 end
 
 local function configuration_error(entity, action, direction)
+  if action.release_cell then
+    local reason=cell_release.verify(entity, action.release_cell)
+    if reason then return reason end
+  end
   if direction ~= nil and entity.direction ~= direction then
     return "direction_mismatch"
+  end
+  if action.mirroring ~= nil then
+    local ok, actual = pcall(function() return entity.mirroring end)
+    if not ok then return "mirroring_read_failed" end
+    if actual ~= action.mirroring then return "mirroring_mismatch" end
   end
   if action.underground_type then
     local ok, actual = pcall(function() return entity.belt_to_ground_type end)
@@ -610,6 +620,14 @@ local function configuration_precondition_error(surface, force, action)
 end
 
 local function configure_created_entity(entity, action)
+  if action.release_cell then
+    if action.recipe then return "release_recipe_conflict" end
+    return cell_release.apply(entity, action.release_cell)
+  end
+  if action.mirroring ~= nil then
+    local ok = pcall(function() entity.mirroring = action.mirroring end)
+    if not ok then return "mirroring_set_failed" end
+  end
   if action.recipe then
     local actual, read_error = recipe_name(entity)
     if read_error then return read_error end

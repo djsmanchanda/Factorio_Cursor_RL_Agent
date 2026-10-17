@@ -122,6 +122,7 @@ class LiveWorld(SavedWorldAdapter):
             raise SavedWorldError("saved-world helper changed; recipe list end not found")
         extra = "".join(f',"{name}"' for name in EXTRA_RECIPES)
         self.lua_source = self.lua_source.replace(RECIPE_LIST_END, RECIPE_LIST_END[:-1] + extra + "}")
+        self.extra_recipes: tuple[str, ...] = ()
         if RECIPE_LINE not in self.lua_source:
             raise SavedWorldError("saved-world helper changed; machine recipe line not found")
         self.lua_source = self.lua_source.replace(RECIPE_LINE, RECIPE_LINE_LIVE)

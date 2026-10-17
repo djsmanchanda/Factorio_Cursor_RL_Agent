@@ -51,6 +51,7 @@ class MallBootstrapLoan:
     step_minimum_crafts: int | None = None
     completed_step_targets: tuple[tuple[str, int], ...] = ()
     machine_name: str = "assembling-machine-1"
+    releasing: bool = False
 
     @property
     def production_target(self) -> int:
@@ -347,10 +348,11 @@ def active_bootstrap_loans(
         "local ok,sections=pcall(function() return c.get_logistic_sections() end);"
         "if ok and sections then for _,section in pairs(sections.sections) do "
         "local g=section.group or '';if string.sub(g,1,#prefix)==prefix then "
-        "local slot=section.get_slot(1);if slot and slot.value then "
+        "local slot=section.get_slot(1);"
         "out[#out+1]=g..'|'..c.position.x..'|'..c.position.y..'|'"
         "..machine_at(c.position.x-3,c.position.y)..'|'"
-        "..machine_at(c.position.x+3,c.position.y) end end end end end;"
+        "..machine_at(c.position.x+3,c.position.y)..'|'..(slot and slot.value and 'active' or 'releasing') "
+        "end end end end;"
         "rcon.print(table.concat(out,';'))"
     )
     raw = client.command("/sc " + lua).strip()
@@ -358,7 +360,9 @@ def active_bootstrap_loans(
     for record in raw.split(";"):
         if not record:
             continue
-        group, raw_x, raw_y, left_state, right_state = record.split("|", 4)
+        parts = record.split("|")
+        group, raw_x, raw_y, left_state, right_state = parts[:5]
+        releasing = len(parts) > 5 and parts[5] == "releasing"
         def _parse_side_state(state: str) -> tuple[str, str]:
             if "," in state:
                 machine, recipe = state.split(",", 1)
@@ -381,6 +385,9 @@ def active_bootstrap_loans(
             original, target, count, spare, side, step, step_target, baseline,
             required, minimum, completed,
         ) = parsed
+        current = left_recipe if side == "left" else right_recipe
+        if releasing and current not in {"-", original, step or target}:
+            continue  # An empty historical label alone does not authorize clearing a working recipe.
         loans.append(MallBootstrapLoan(
             original_recipe=original,
             target_item=target,
@@ -388,7 +395,7 @@ def active_bootstrap_loans(
             spare_target_count=spare,
             side=side,
             requester_position=(float(raw_x), float(raw_y)),
-            current_recipe=left_recipe if side == "left" else right_recipe,
+            current_recipe=current,
             step_recipe=step,
             step_target_count=step_target,
             step_baseline_finished=baseline,
@@ -396,8 +403,146 @@ def active_bootstrap_loans(
             step_minimum_crafts=minimum,
             completed_step_targets=completed,
             machine_name=left_machine if side == "left" else right_machine,
+            releasing=releasing,
         ))
     return tuple(loans)
+
+
+def bootstrap_loan_facts(
+    loan: MallBootstrapLoan, *,
+    products_finished: int | None = None,
+    requester_contents: Mapping[str, int] | None = None,
+    available: Mapping[str, int] | None = None,
+    producer_status: str | None = None,
+) -> dict:
+    """Truthful read-only facts about one active loan's step, bill, and progress.
+
+    No item is special-cased: the step recipe, its ingredient bill, and the
+    loan's own target drive every field, so the same shape describes a splitter
+    batch, a drill batch, or a prerequisite ladder rung. ``owner`` is the lender
+    whose mall cell was borrowed; ``step_recipe`` is the step currently
+    configured; ``counter`` is the borrowed assembler's monotonic craft count
+    and ``crafts_done`` its progress past the step baseline. ``remaining_bill``
+    is what the loan's own target still needs and ``missing_inputs`` names step
+    ingredients not covered by the cell requester plus spendable stock -- only
+    where actually deficient, never a negative short. ``postconditions`` states
+    what completes the batch. Unknown telemetry is None, never zero.
+    """
+    step_recipe = loan.step_recipe or loan.current_recipe or loan.target_item
+    spec = LINE_RECIPES.get(step_recipe, {})
+    ingredients = tuple(
+        (str(item), float(amount))
+        for item, amount in zip(
+            spec.get("ingredients", ()), spec.get("amounts", ()), strict=True,
+        )
+    ) if spec else ()
+    crafts_done = (
+        max(0, int(products_finished) - int(loan.step_baseline_finished))
+        if products_finished is not None and loan.step_baseline_finished is not None
+        else None
+    )
+    required_crafts = loan.step_required_crafts
+    remaining_crafts = (
+        max(0, int(required_crafts) - int(crafts_done))
+        if crafts_done is not None and required_crafts is not None
+        else None
+    )
+    # Missing inputs are computed for the crafts still owed; an unknown
+    # remaining count is one craft's worth, and a completed step owes nothing.
+    # Only a real deficit is positive.
+    missing_inputs: dict[str, int] | None = None
+    inputs_covered: bool | None = None
+    if requester_contents is not None and available is not None and ingredients:
+        if remaining_crafts == 0:
+            missing_inputs, inputs_covered = {}, True
+        else:
+            cover = max(1, remaining_crafts) if remaining_crafts is not None else 1
+            missing: dict[str, int] = {}
+            for item, amount in ingredients:
+                needed = math.ceil(float(amount) * cover)
+                held = int(requester_contents.get(item, 0)) + int(available.get(item, 0))
+                if held < needed:
+                    missing[item] = needed - held
+            missing_inputs = missing
+            inputs_covered = not missing
+    remaining_bill: dict[str, int] | None = None
+    bill_met: bool | None = None
+    spare_missing: int | None = None
+    spare_ceiling_met: bool | None = None
+    if available is not None:
+        have = int(available.get(loan.target_item, 0))
+        remaining_bill = {loan.target_item: max(0, loan.target_count - have)}
+        bill_met = have >= loan.target_count
+        spare_missing = max(0, loan.production_target - have)
+        spare_ceiling_met = have >= loan.production_target
+    return {
+        "owner": loan.original_recipe,
+        # Kept for the shared loan-brief/feature readers.
+        "lender": loan.original_recipe,
+        "making": loan.target_item,
+        "target": loan.target_count,
+        "target_item": loan.target_item,
+        "target_count": loan.target_count,
+        "production_target": loan.production_target,
+        "step_recipe": step_recipe,
+        "step_target_count": loan.step_target_count,
+        "step_baseline_finished": loan.step_baseline_finished,
+        "step_required_crafts": required_crafts,
+        "step_minimum_crafts": loan.step_minimum_crafts,
+        "counter": None if products_finished is None else int(products_finished),
+        "crafts_done": crafts_done,
+        "remaining_crafts": remaining_crafts,
+        "remaining_bill": remaining_bill,
+        "spare_missing": spare_missing,
+        "missing_inputs": missing_inputs,
+        "inputs_covered": inputs_covered,
+        "requester": (
+            None if requester_contents is None else
+            {item: int(requester_contents.get(item, 0)) for item, _ in ingredients}
+        ),
+        "producer_status": producer_status,
+        "machine_name": loan.machine_name,
+        "machine_position": [
+            float(loan.machine_position[0]), float(loan.machine_position[1]),
+        ],
+        "postconditions": {
+            "bill": loan.target_count,
+            "production_target": loan.production_target,
+            "bill_met": bill_met,
+            "crafts_met": (
+                None if crafts_done is None or required_crafts is None
+                else crafts_done >= required_crafts
+            ),
+            "spare_ceiling_met": spare_ceiling_met,
+        },
+        "completed_step_targets": [list(pair) for pair in loan.completed_step_targets],
+    }
+
+
+#: Fields whose change means the batch itself did work. Counters and bills are
+#: monotonic-or-step-scoped, so equal signatures are a truthful "unchanged".
+#: ``producer_status`` is exposed as a fact but deliberately excluded: a machine
+#: toggling disabled/working is configuration, not production progress.
+_LOAN_SIGNATURE_FIELDS = (
+    "step_recipe", "step_target_count", "step_required_crafts", "counter",
+    "crafts_done", "remaining_bill", "missing_inputs",
+)
+
+
+def _freeze_signature(value: object) -> object:
+    if isinstance(value, Mapping):
+        return tuple(sorted((str(key), _freeze_signature(item)) for key, item in value.items()))
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_signature(item) for item in value)
+    return value
+
+
+def bootstrap_loan_signature(facts: Mapping) -> tuple:
+    """A hashable digest of the fields that move only when a batch progresses."""
+    return tuple(
+        (field, _freeze_signature(facts.get(field)))
+        for field in _LOAN_SIGNATURE_FIELDS
+    )
 
 
 def _as_configuration(action: dict) -> dict:
@@ -469,10 +614,24 @@ def bootstrap_loan_plan(
     }]}
 
 
+def release_bootstrap_loan_plan(loan: MallBootstrapLoan, *, acknowledge: bool = False,
+                                restore_recipe: str | None = None) -> dict:
+    """Stop one tagged borrowed cell and recover WIP before its original recipe is restored."""
+    return {"phases": [{"name": f"release_bootstrap_loan_{loan.target_item}", "actions": [{
+        "action_type": "configure_entity", "entity": loan.machine_name,
+        "position": {"x": loan.machine_position[0], "y": loan.machine_position[1]},
+        "release_cell": {"group": loan.group, "expected_recipe": loan.current_recipe,
+                         "acknowledge": acknowledge, **({"restore_recipe": restore_recipe} if restore_recipe else {}),
+                         "requester": {"x": loan.requester_position[0], "y": loan.requester_position[1]},
+                         "provider": {"x": loan.provider_position[0], "y": loan.provider_position[1]}},
+    }]}]}
+
+
 def restore_bootstrap_loan_plan(
     loan: MallBootstrapLoan, *, provider_stock_target: int | None = None,
     provider_fill_chest: bool = False, stock_gate_target: int | None = None,
     chest_gate_target: int | None = None,
+    retain_loan_tag: bool = False,
 ) -> dict:
     """Restore the original recipe and request group after the seed is stocked.
 
@@ -512,7 +671,7 @@ def restore_bootstrap_loan_plan(
                 # Original mall groups are shared by every matching cell on
                 # this side. Leave them intact while the unique loan group is
                 # removed, or restoring one borrower would rewrite its peers.
-                "clear_logistic_groups": [loan.group],
+                **({} if retain_loan_tag else {"clear_logistic_groups": [loan.group]}),
                 "logistic_sections": [requester_section],
             },
             {

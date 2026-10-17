@@ -31,12 +31,14 @@ from training.laya_clean_runner import (ROOT, Settings, _append, _goal_gap, _sta
                                         _write_status, rolling_measurement)
 from training.laya_factory_status import STATUS_BUCKETS, compact_status, compile_status
 from training.laya_mall_slots import obtainable
-from training.laya_mission import current_phase, phase_reached
+from training.laya_mission import PHASES, current_phase, phase_reached
 
 PLATES = {"iron-plate": "iron-ore", "copper-plate": "copper-ore", "stone-brick": "stone"}
 # The tooling is already making it (a mall batch or loan in progress, a borrow queued): wait, and it is progress.
 IN_PROGRESS = {"temporary_mall_batch", "production_prerequisite_deferred", "rationed_mall_borrow_deferred",
-               "rotating_mall_prerequisite_handoff", "prerequisite_advanced"}
+               "rotating_mall_prerequisite_handoff", "prerequisite_advanced",
+               # The ore's plate system is still being built by bots (stage_extraction.PendingSystemDeferred).
+               "pending_system_construction"}
 # Receipts that put something into the world (training/laya_ops.receipt); a reservation or a wait does not.
 BUILT = {"producing", "submitted", "prerequisite_advanced"}
 STALL_TICKS = 18000  # five game minutes without measurable progress (loan batches are slow by design)
@@ -121,6 +123,11 @@ def _demand_bills(result: Mapping):
         yield claim
 
 
+def batch_advanced(previous: Mapping[tuple, int], current: Mapping[tuple, int]) -> bool:
+    """Whether any batch seen last check has crafted since (a first sighting is not progress)."""
+    return any(count > previous[key] for key, count in current.items() if key in previous)
+
+
 def shortages(results: list[dict], sources: dict | None = None) -> dict[str, int]:
     """Items the latest material shortage of each operation still asks for (``sources``: item -> plates blocked)."""
     latest: dict[tuple, dict] = {}
@@ -162,6 +169,50 @@ def shortage_levels(results: list[dict]) -> dict[str, int]:
                 if missing > 0:
                     levels[item] = max(levels.get(item, 0), int(stock_at.get(item, 0)) + missing)
     return levels
+
+
+def named_prerequisites(results: list[dict]) -> dict[str, dict]:
+    """Outstanding typed handoffs, retired by the parent's next outcome, independent of proxy phase.
+
+    A rung without a quantity names a capability to establish, not a claim that one item pays its bill.
+    The toolkit retains its recipe/geometry admission and internal batch sizing.
+    """
+    latest = {_key(r): r for r in results}
+    demands: dict[str, dict] = {}
+    for key, r in latest.items():
+        if r.get("ok") or r.get("code") not in {"chemical_capability_handoff", "rotating_mall_prerequisite_handoff"}:
+            continue
+        details = r.get("details") or {}
+        item = details.get("rung") or details.get("prerequisite")
+        if not isinstance(item, str) or not item or item == key[1]:
+            continue
+        quantity = details.get("required")
+        target = int(quantity) if isinstance(quantity, (int, float)) and quantity > 0 else None
+        demand = demands.setdefault(item, {"target": 1, "capability": False, "parents": []})
+        demand["target"] = max(demand["target"], target or 1)
+        demand["capability"] |= target is None
+        demand["parents"].append(f"{key[0]}:{key[1]}")
+    return demands
+
+
+def recipe_demand(results: list[dict], economics: Mapping | None = None) -> tuple[str, ...]:
+    """Prototype queries follow mission data and outstanding work; no phase-specific recipe whitelist."""
+    items = {item for phase in PHASES for item in phase["targets"]}
+    items.update(shortages(results))
+    items.update(named_prerequisites(results))
+    for project in ((economics or {}).get("projects") or {}).values():
+        items.update(project.get("missing") or {})
+    for transaction in ((economics or {}).get("transactions") or {}).values():
+        items.update(transaction.get("remaining") or {})
+    return tuple(sorted(items))
+
+
+def material_results(results: list[dict], transactions: Mapping | None) -> list[dict]:
+    """A current owned remaining bill supersedes its historical shortage, never another consumer's."""
+    stages = {stage for tx in (transactions or {}).values() if not tx.get("error")
+              for stage in tx.get("replaces_shortage_stages", ())}
+    return [r for r in results if r.get("code") != "material_shortage"
+            or (r.get("details") or {}).get("stage") not in stages]
 
 
 RECENT = 8  # decisions kept verbatim in the history; older ones survive only in the per-operation summary
@@ -313,6 +364,9 @@ def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, pha
                                  + (", ".join(f"{i} {n}" for i, n in project["missing"].items()) or "none")
                                  + " reserved " + (", ".join(f"{i} {n}" for i, n in project["reserved"].items()) or "none")
                                  for pid, project in projects.items()] or ["no active owners"])
+        sections["BILLS"] = [f"{tid}: " + (f"unknown ({tx['error']})" if tx.get("error") else
+                             "remaining " + str(tx.get("remaining", {})) + "; missing " + str(tx.get("missing", {})))
+                             for tid, tx in (economics.get("transactions") or {}).items()]
     sections["SINCE LAST BUILD"] = [f"{since_build(results)} decisions"]
 
     def render() -> str:
@@ -349,7 +403,7 @@ def with_economics(menu: dict, results: list[dict], economics: Mapping | None) -
     ``cell_lent``: the item's own mall cell is lent to make something else, so producing it waits on that loan.
     """
     bills = {}
-    for r in results:
+    for r in material_results(results, (economics or {}).get("transactions")):
         for demand in _demand_bills(r):
             required = demand.get("required")
             if isinstance(required, Mapping):
@@ -374,7 +428,12 @@ def with_economics(menu: dict, results: list[dict], economics: Mapping | None) -
             continue
         params = option["params"]
         bill = bills.get((option["family"], params.get("recipe") or params.get("item")))
-        if bill:
+        for tid, transaction in ((economics or {}).get("transactions") or {}).items():
+            if (not transaction.get("error") and "remaining" in transaction
+                    and option["family"] == "produce" and params.get("item") == transaction.get("target_item")):
+                bill = transaction["remaining"]
+                option["bill_owner"] = tid
+        if bill is not None:
             option["bill"] = bill
         option["features"]["bill_known"] = bill is not None
         if option["family"] in ("produce", "mall_slot"):
@@ -459,13 +518,31 @@ def saturated_feedstock(machines: list[Mapping], recipes: Mapping, stock: Mappin
 
 def compile_options(board: Mapping, results: list[dict], tick: int | None = None, recipes: Mapping | None = None,
                     stock: Mapping[str, int] | None = None, machines: list[Mapping] | None = None,
-                    growable: tuple[str, ...] = ()) -> dict:
+                    growable: tuple[str, ...] = (), enabled_recipes: Mapping | None = None,
+                    transactions: Mapping | None = None) -> dict:
     """Operations worth offering now, each tagged with the need it serves and the facts rules weigh."""
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
     goal = {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
-    stuck = unchanged_failures(results, stock or {})
+    current_materials = material_results(results, transactions)
+    stuck = unchanged_failures(current_materials, stock or {})
     sources: dict[str, set] = {}
-    stages, codes, short = plate_stages(results), last_codes(results, tick), shortages(results, sources)
+    stages, codes, short = plate_stages(results), last_codes(results, tick), shortages(current_materials, sources)
+    prerequisites = named_prerequisites(results)
+    for item, demand in prerequisites.items():
+        sources.setdefault(item, set()).update(parent.split(":", 1)[1] for parent in demand["parents"])
+    for tx in (transactions or {}).values():
+        if not tx.get("error") and tx.get("target_item"):
+            for item in tx.get("missing", {}):
+                sources.setdefault(item, set()).add(tx["target_item"])
+    # A bill item or named prerequisite serves the same goals as the consumer it unblocks.
+    # This is dependency evidence for the existing rules, not a new recipe priority or policy weight.
+    changed = True
+    while changed:
+        changed = False
+        for parents in sources.values():
+            before = len(parents)
+            parents.update(*(sources.get(parent, set()) for parent in tuple(parents)))
+            changed |= len(parents) != before
     waiting = any(in_progress(c) for c in codes.values())
     # A mall batch or loan is under way: asking for other items makes the loans preempt each other.
     batch_active = any(in_progress(code) for (operation, _), code in codes.items() if operation in ("produce", "mall_slot"))
@@ -531,22 +608,61 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     # so plastic): its loan never finishes and blocks every other batch (chemical_capability_handoff).
     producible = {i: m for i, m in short.items() if plates_in(i, recipes or {}) <= started
                   and obtainable(recipes, i, stock or {})} if recipes else short
-    levels = shortage_levels(results)
-    for item, missing in (sorted(producible.items(), key=lambda kv: -kv[1])[:MAX_PRODUCE] if slots else ()):
+    levels = shortage_levels(current_materials)
+    demands = {item: {"target": levels.get(item, int((stock or {}).get(item, 0)) + missing),
+                      "missing": missing, "capability": False, "parents": []}
+               for item, missing in (sorted(producible.items(), key=lambda kv: -kv[1])[:MAX_PRODUCE] if slots else ())}
+    # Typed prerequisites must remain selectable even when four larger construction shortages exist.
+    # They can establish upstream capability that obtainable() cannot yet prove (e.g. plastic before oil).
+    for item, demand in prerequisites.items():
+        if item in PLATES or not plates_in(item, recipes or {}) <= started:
+            continue
+        if enabled_recipes is not None and not enabled_recipes.get(item):
+            continue
+        existing = demands.setdefault(item, {**demand, "missing": 0})
+        existing.update(target=max(existing["target"], demand["target"]),
+                        capability=demand["capability"], parents=demand["parents"])
+    # A persisted selected bill supplies current demand before another operation has to fail.
+    # Every missing bill item is a choice; neither proxy phase nor larger unrelated shortages hide it.
+    for tid, transaction in (transactions or {}).items():
+        if transaction.get("error") or transaction.get("complete") or not slots:
+            continue
+        for item, missing in (transaction.get("missing") or {}).items():
+            if (item in PLATES or not plates_in(item, recipes or {}) <= started
+                    or (recipes and not obtainable(recipes, item, stock or {}))
+                    or (enabled_recipes is not None and not enabled_recipes.get(item))):
+                continue
+            target = transaction["stock_levels"][item]
+            demand = demands.setdefault(item, {"target": target, "missing": missing, "capability": False,
+                                                "parents": []})
+            demand["target"] = max(demand["target"], target)
+            demand["missing"] = max(demand["missing"], missing)
+            demand.setdefault("transactions", []).append(tid)
+    for need in board["needs"]:
+        item = need["item"]
+        if (item in goal and item not in PLATES and need["condition"] in {"unbuilt", "recipe_unavailable"}
+                and ((recipes or {}) if enabled_recipes is None else enabled_recipes).get(item)
+                and plates_in(item, recipes or {}) <= started):
+            demand = demands.setdefault(item, {"target": 1, "missing": 0, "parents": []})
+            demand["capability"] = True
+    for item, demand in demands.items():
         # The tooling's stock_target is a network level (the mall's stock gate), not a delta: asking for the
         # bare shortage gated a drill cell at 4 while the network held 6 and the starter needed 8.
         have = int((stock or {}).get(item, 0))
-        target = levels.get(item, have + missing)
-        if have >= target and item in levels:
+        target, missing = demand["target"], demand["missing"]
+        if have >= target and not demand["capability"] and not demand.get("transactions"):
             continue  # Made since the failure: retrying the blocked operation is the next step, not more stock.
         options.append({
             "option_id": f"op.produce.{item}", "family": "produce", "product": item, "need_id": f"stock:{item}",
-            "summary": f"produce {item} (short {missing})", "params": {"item": item, "stock_target": target},
+            "summary": f"produce {item} (short {missing})", "params": {"item": item, "stock_target": target,
+                                                                          **({"finite": False} if demand["capability"] else {})},
             # Items a goal plate's operation is blocked on serve that goal.
             "features": {"last_code": codes.get(("produce", item), "new"), "shortage": missing,
+                         "prerequisite_for": sorted(demand["parents"]),
+                         "transactions": sorted(demand.get("transactions", [])),
                          "waiting": in_progress(codes.get(("produce", item))),
                          "unchanged_failure": ("produce", item) in stuck, "batch_active": batch_active,
-                         "goal_need": bool(sources.get(item, set()) & goal)}})
+                         "goal_need": item in goal or bool(sources.get(item, set()) & goal)}})
     # A feedstock producer at its limit (live 2026-10-15: one gear AM1 behind every belt, inserter and drill).
     for item, fact in saturated_feedstock(machines or [], recipes or {}, stock or {}, growable).items():
         if any(r["operation"] == "grow" and (r.get("params") or {}) == {"item": item, "machines": fact["machines"]}
@@ -617,7 +733,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     samples: list = []
     measurement = None
     summary: dict = {"decisions": 0, "failures": 0, "phases_reached": reached, "stop": "decision_budget"}
-    stall = {"since": 0, "best_gap": math.inf, "tick": None, "machines": 0, "missing": math.inf, "made": {}}
+    stall = {"since": 0, "best_gap": math.inf, "tick": None, "machines": 0, "missing": math.inf, "made": {},
+             "batches": {}, "installed": {}}
     accept = getattr(session, "acceptance", None)
 
     def check_acceptance(event: str) -> None:
@@ -641,6 +758,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         if should_stop():
             summary["stop"] = "stopped"
             break
+        economics = session.economics() if hasattr(session, "economics") else None
+        adapter.extra_recipes = recipe_demand(results, economics)
         facts = adapter.query()
         samples.append((facts["tick"], dict(facts["production"]), dict(facts["consumption"])))
         measurement = rolling_measurement(samples, settings.rate_window_ticks) or measurement
@@ -669,10 +788,11 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         for network in (facts.get("networks") or {}).values():
             for name, count in (network.get("items") or {}).items():
                 stock[name] = stock.get(name, 0) + int(count)
-        economics = economics_observation(session.economics() if hasattr(session, "economics") else None,
-                                          facts.get("networks"))
+        economics = economics_observation(economics, facts.get("networks"))
         menu = with_economics(compile_options(board, results, facts["tick"], facts.get("recipes"), stock,
-                                              facts.get("machines"), getattr(session, "growable", ())),
+                                              facts.get("machines"), getattr(session, "growable", ()),
+                                              enabled_recipes=facts.get("enabled_recipes"),
+                                              transactions=(economics or {}).get("transactions")),
                               results, economics)
         reserved: Counter = Counter()
         for project in ((economics or {}).get("projects") or {}).values():
@@ -691,7 +811,9 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         state = {"brief": told,
                  "observation_digest": {"factory_status": compact, "mission_phase": phase["phase_id"],
                                         "mall_economics": economics,
+                                        "transactions": (economics or {}).get("transactions", {}),
                                         "saved_world": {"provider_stock": {"network": stock},
+                                                        "source_networks": facts.get("networks", {}),
                                                         "reserved_stock": {"network": dict(reserved)}}},
                  "guidelines": rules}
         choice = policy.choose(state, menu)
@@ -719,11 +841,12 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             result["stock_at"] = {item: stock.get(item, 0) for item in ((result.get("details") or {}).get("required") or {})}
         results.append(result)
         after = adapter.query()
+        after_transactions = session.material_transactions() if hasattr(session, "material_transactions") else {}
         emit(f"  OUTCOME: {'ok' if result.get('ok') else result.get('code')}"
              + (f" -- {result.get('message', '')[:200]}" if not result.get("ok") else ""))
         _training_record(records, run_id=run_id, index=index, tick=facts["tick"], phase=phase["phase_id"],
                          state=state, options=[{k: o.get(k) for k in ("option_id", "family", "need_id", "product",
-                                                                      "params", "features")} for o in menu["options"]],
+                                                                      "params", "features", "bill", "bill_owner")} for o in menu["options"]],
                          distribution=choice["distribution"], choice=choice,
                          outcome={**{k: result.get(k) for k in ("ok", "code", "classification", "state", "details",
                                                                  "message", "result")},
@@ -731,7 +854,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                       k: result[k] for k in ('submitted', 'submission_attempted', 'verified',
                                                             'observed', 'error') if k in result}}
                                      if chosen['family'] == 'raise_stock_gate' else {}),
-                                  "ticks": after["tick"] - facts["tick"]})
+                                  "ticks": after["tick"] - facts["tick"], "material_transactions": after_transactions})
         _write_status(status_path, {"run_id": run_id, "index": index, "tick": facts["tick"], "phase": phase,
                                     "reached": reached, "board": compact, "brief": state["brief"], "choice": {**choice, "summary": chosen["summary"]},
                                     "menu": {o["option_id"]: o["summary"] for o in menu["options"]},
@@ -750,7 +873,18 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         made = {item: int((after.get("production") or {}).get(item, 0)) for item in short}
         crafted = any(count > stall["made"].get(item, count) for item, count in made.items())
         stall["made"] = {**stall["made"], **made}
-        progressed = (machines > stall["machines"] or missing < stall["missing"] or crafted
+        # An active finite batch whose craft counter rose is progress the shortage map cannot see (internal
+        # chemical-ladder batches); a first sighting or an unchanged counter is not.
+        batches = session.active_batch_crafts() if hasattr(session, "active_batch_crafts") else {}
+        advancing = batch_advanced(stall["batches"], batches)
+        stall["batches"] = batches
+        installed = {(tid, tx["intent_sha256"]): sum(tx["installed"].values())
+                     for tid, tx in after_transactions.items() if not tx.get("error") and "installed" in tx}
+        delivered = batch_advanced(stall["installed"], installed)
+        # Keep a high-water mark per immutable intent: demolition/rebuild cycles cannot reset the guard.
+        for key, count in installed.items():
+            stall["installed"][key] = max(stall["installed"].get(key, 0), count)
+        progressed = (machines > stall["machines"] or missing < stall["missing"] or crafted or advancing or delivered
                       or gap < stall["best_gap"] * 0.95)
         stall["machines"], stall["missing"] = max(stall["machines"], machines), min(stall["missing"], missing)
         stall["best_gap"] = min(stall["best_gap"], gap)

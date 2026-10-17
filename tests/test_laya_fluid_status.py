@@ -150,7 +150,9 @@ defines={entity_status={no_input_fluid=1}}
 prototypes={entity={
   ["chemical-plant"]={type="assembling-machine",crafting_categories={chemistry=true},get_crafting_speed=function(quality) assert(quality=="normal"); return 1 end,ingredient_count=0},
   ["assembling-machine-1"]={type="assembling-machine",crafting_categories={crafting=true},get_crafting_speed=function() return .5 end,ingredient_count=3},
-  ["electric-furnace"]={type="furnace",crafting_categories={smelting=true},get_crafting_speed=function() return 2 end,ingredient_count=0}}}
+  ["electric-furnace"]={type="furnace",crafting_categories={smelting=true},get_crafting_speed=function() return 2 end,ingredient_count=0}},
+  -- Every queried name in this fixture is an item; fluids never reach the item survey.
+  item=setmetatable({},{__index=function() return {} end})}
 request={bounds={x_min=0,y_min=0,x_max_exclusive=0,y_max_exclusive=0}}
 '''
 

@@ -709,6 +709,45 @@ def test_oil_district_ignores_a_remote_existing_coal_mine(monkeypatch) -> None:
     assert result is None
     assert any("versus" in message for message in messages)
 
+def test_pending_existing_coal_mine_is_a_construction_wait_not_a_stuck_run(
+    monkeypatch,
+) -> None:
+    from orchestrator import stage_chemical
+    from orchestrator.stage_services import StuckError
+    from orchestrator.work_state import WorkStateSignal
+
+    messages = []
+    pending = extraction_state.ResourceMine((24.5, -49.5), 2, pending=True)
+    monkeypatch.setattr(stage_chemical, "retire_depleted_mines", lambda *_a, **_k: 0)
+    monkeypatch.setattr(
+        stage_chemical.extraction_state, "find_resource_mine", lambda *_a: pending,
+    )
+    monkeypatch.setattr(
+        stage_chemical, "_submit",
+        lambda *_a, **_k: pytest.fail("a pending coal mine must not be duplicated"),
+    )
+    monkeypatch.setattr(
+        stage_chemical.live_base, "ghost_blockages",
+        lambda *_a, **_k: [{"reason": "out_of_construction_range"}] * 3
+        + [{"reason": "missing_material:transport-belt:1:0"}],
+    )
+
+    with pytest.raises(WorkStateSignal) as raised:
+        stage_chemical.ensure_coal_mine(
+            object(), object(), "nauvis", "player", (-237.0, -91.0),
+            lambda *_a, **_k: None, messages.append,
+        )
+
+    assert not isinstance(raised.value, StuckError)
+    assert raised.value.state == "constructing"
+    assert raised.value.code == "pending_system_construction"
+    assert raised.value.classification == "intended_difficulty"
+    assert "refusing to duplicate" in str(raised.value)
+    assert any("still constructing" in message for message in messages)
+    # The wait names why the mine's ghosts are not reviving.
+    assert any("out_of_construction_range=3" in message for message in messages)
+
+
 def test_planner_translates_checked_bounds_to_the_exact_line_origin(
     monkeypatch,
 ) -> None:

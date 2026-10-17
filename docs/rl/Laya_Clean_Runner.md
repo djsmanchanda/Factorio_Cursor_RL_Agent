@@ -69,10 +69,12 @@ this operation requires deliberate mod deployment and Factorio reload followed
 by a fresh runner; old executors do not offer it.
 
 Current geometry transactions preserve submitted plans and pre/post facts.
-Current ops wraps ordinary returns, including `None`, as `ok=True` and records
-only part of the result. Its history/lifecycle features and error containment do
-not yet satisfy the complete contract. See the [audit](Laya_System_Audit_2026-10-08.md)
-for reproductions; documentation cleanup does not repair these implementation gaps.
+On the October 17 reset branch, ops receipts distinguish a `None` production
+return (`prerequisite_advanced`) from a standing producer. The selected opening-oil
+transaction also carries its immutable identity and current remaining construction
+bill into decisions and before/after evidence. These changes do not establish the
+complete fulfillment or finite-cell release contract. See the
+[reset integration record](Laya_Reset_Integration_Decision_2026-10-17.md) for tested scope.
 
 ## Decision facts and rules
 
@@ -86,9 +88,13 @@ The target compact projection keeps facts needed to discriminate available choic
 | Option cost, feasibility and production displaced by a loan | Detailed surveys and alternative geometry |
 | Recent relevant outcomes and facts changed since failure | Full attempt history, rationale and rule-to-fact mappings |
 
-Unknown evidence stays unknown. The ops path currently lacks bills, requester
-draws and lender consequences in its menu/state; several scarcity features
-therefore default to false. Add those facts before training on their values.
+Unknown evidence stays unknown. Ops carries reported shortage bills and, on the
+reset branch, the selected opening-oil manifest's remaining bill, exact installation
+credits, foreign claims and missing items. Named prerequisites and selected bill
+items remain choices outside the displayed phase and ordinary shortage limit.
+Recipe/counter queries follow mission and observed demand. Requester draws,
+complete lender consequences and source-network-aware allocation remain incomplete;
+surface-wide transferable stock does not prove logistic reachability.
 
 As of October 18, a failed mall-slot claim retained by a borrow deferral carries
 its material bill, owner, allocatable stock, network stock and reservation

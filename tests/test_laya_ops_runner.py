@@ -356,3 +356,185 @@ def test_starter_retirement_stays_on_the_menu_after_the_plate_goal_is_met():
     met = {"needs": [{"item": "plastic-bar", "condition": "recipe_unavailable", "goal_required_per_s": 0.5}]}
     ids = {o["option_id"] for o in compile_options(met, built)["options"]}
     assert "op.retire_starter.iron-plate" in ids and "op.extend.iron-plate" not in ids
+
+
+def test_an_unbuildable_district_is_not_waiting_and_counts_toward_a_stop():
+    from training.laya_ops_runner import in_progress, repeat_fails
+    # Bots are still building: a wait. An exhausted district has nothing under construction.
+    assert in_progress("pending_system_construction")
+    assert not in_progress("district_expansion_unbuildable")
+    refused = [{"ok": False, "operation": "extend", "params": {"recipe": "copper-plate"}, "tick": tick,
+                "code": "district_expansion_unbuildable"} for tick in (1000, 2000, 3000)]
+    assert repeat_fails(refused, ("extend", "copper-plate")) == 3
+
+
+def test_a_plate_system_still_constructing_is_waiting_until_its_retry_horizon():
+    from training.laya_ops import receipt
+    built = [receipt(op, {"recipe": p}, (0, 0)) for op in ("starter", "foundation") for p in ("iron-plate", "copper-plate")]
+    refused = {"ok": False, "operation": "extend", "params": {"recipe": "copper-plate"}, "tick": 1000,
+               "code": "pending_system_construction"}
+    def menu(tick):
+        return {o["option_id"]: o for o in compile_options(BOARD, built + [refused], tick=tick)["options"]}
+    # Bots are building the copper system: the extend is a wait, and waiting is the constructive choice.
+    assert menu(1600)["op.extend.copper-plate"]["features"]["waiting"]
+    assert menu(1600)["wait.300"]["features"]["constructing"]
+    # After the retry horizon the extend is worth asking again.
+    assert not menu(1000 + 1800)["op.extend.copper-plate"]["features"]["waiting"]
+
+
+class _ClockWorld(FakeWorld):
+    """Game time passes between observations; nothing else in the world changes."""
+
+    def query(self):
+        self.tick += 300
+        return super().query()
+
+
+class _BatchSession(FakeSession):
+    def __init__(self, step):
+        super().__init__()
+        self.count, self.step = 100, step
+
+    def active_batch_crafts(self):
+        self.count += self.step
+        return {("copper-cable", "pipe", "pipe", 33.5, 45.5): self.count}
+
+
+def test_an_advancing_batch_survives_the_stall_detector_and_an_unchanged_one_does_not(tmp_path, monkeypatch):
+    # batch-20261017-day pipe-300-s76401: pipe crafts 240 -> 278 of 300, then STALLED 5 s later.
+    import training.laya_ops_runner as runner
+    from training.laya_ops_runner import batch_advanced
+    monkeypatch.setattr(runner, "STALL_TICKS", 1500)
+    assert not batch_advanced({}, {("a",): 5}) and not batch_advanced({("a",): 5}, {("a",): 5})
+    assert batch_advanced({("a",): 5}, {("a",): 6})
+    stop = lambda step: run(_ClockWorld(), GuidedPolicy(3), journal=tmp_path / f"j{step}.jsonl", decisions=20,
+                            measure_ticks=600, seed=3, run_id=f"t{step}", session=_BatchSession(step))["stop"]
+    assert stop(step=4) == "decision_budget"  # crafting toward its bill: not stalled
+    assert stop(step=0) == "stalled"  # an unchanged batch keeps nothing alive
+
+
+def test_named_prerequisites_are_choices_outside_the_phase_and_shortage_limit():
+    # Day control-s76403 handed one chest off to plastic 125 times in C2 without a plastic choice.
+    handoff = {"ok": False, "operation": "produce", "params": {"item": "passive-provider-chest"},
+               "code": "chemical_capability_handoff", "details": {"rung": "plastic-bar"}}
+    results = [{"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}},
+               dict(SHORT, details={"required": {f"part-{n}": 100 for n in range(5)}}), handoff]
+    options = {o["option_id"]: o for o in compile_options(BOARD, results)["options"]}
+    plastic = options["op.produce.plastic-bar"]
+    assert plastic["params"] == {"item": "plastic-bar", "stock_target": 1, "finite": False}
+    assert plastic["features"]["prerequisite_for"] == ["produce:passive-provider-chest"]
+    assert len([o for o in options.values() if o["family"] == "produce"]) == 5
+    # The parent's new result supersedes its handoff, so old prerequisites cannot accumulate forever.
+    results.append(dict(handoff, ok=True, code="producing", details=None))
+    assert "op.produce.plastic-bar" not in {o["option_id"] for o in compile_options(BOARD, results)["options"]}
+
+
+def test_named_quantity_is_an_absolute_target_and_deduplicates_other_demand():
+    handoff = {"ok": False, "operation": "produce", "params": {"item": "inserter"},
+               "code": "rotating_mall_prerequisite_handoff",
+               "details": {"prerequisite": "electronic-circuit", "required": 6}}
+    slot = {"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}}
+    def produce(stock):
+        return [o for o in compile_options(BOARD, [slot, handoff], stock=stock)["options"]
+                if o["option_id"] == "op.produce.electronic-circuit"]
+    assert produce({"electronic-circuit": 2})[0]["params"]["stock_target"] == 6
+    assert not produce({"electronic-circuit": 6})
+
+
+def test_goal_production_requires_an_enabled_recipe_and_preserves_plate_lifecycle():
+    board = {"needs": [{"item": "plastic-bar", "condition": "recipe_unavailable", "goal_required_per_s": .5}]}
+    def ids(enabled):
+        return {o["option_id"] for o in compile_options(board, [], enabled_recipes=enabled)["options"]}
+    assert "op.produce.plastic-bar" in ids({"plastic-bar": True})
+    assert "op.produce.plastic-bar" not in ids({})
+    assert "op.produce.iron-plate" not in {o["option_id"] for o in compile_options(
+        BOARD, [], enabled_recipes={"iron-plate": True})["options"]}
+
+
+def test_runner_queries_goal_and_new_prerequisite_facts_before_the_next_choice(tmp_path):
+    class DemandWorld(FakeWorld):
+        def query(self):
+            return {**super().query(), "queried": list(self.extra_recipes)}
+
+    class HandoffSession(FakeSession):
+        def run(self, operation, **params):
+            return {"ok": False, "operation": operation, "params": params,
+                    "code": "chemical_capability_handoff", "details": {"rung": "audit-part"}}
+
+    class Policy:
+        authority = "test"
+        def choose(self, state, menu):
+            if world.tick == 1000:
+                world.tick += 1
+            else:
+                assert "audit-part" in world.extra_recipes
+            assert "plastic-bar" in world.extra_recipes  # mission data, even before C4
+            option = next(o for o in menu["options"] if o["family"] != "wait")
+            return {**option, "probability": 1., "rules": [], "distribution": []}
+
+    world = DemandWorld()
+    run(world, Policy(), journal=tmp_path / "journal.jsonl", decisions=2, measure_ticks=600,
+        seed=3, run_id="facts", session=HandoffSession())
+
+
+def test_selected_bill_exposes_missing_work_without_failure_and_retires_its_old_shortage():
+    from training.laya_ops_runner import recipe_demand
+    slot = {"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}}
+    bill = {"complete": False, "remaining": {"pipe-to-ground": 7}, "missing": {"pipe-to-ground": 3},
+            "stock_levels": {"pipe-to-ground": 7}, "replaces_shortage_stages": ["chemical_packet"]}
+    def menu(results, tx):
+        return {o["option_id"]: o for o in compile_options(BOARD, results, transactions={"oil": tx})["options"]}
+    option = menu([slot], bill)["op.produce.pipe-to-ground"]
+    assert option["params"]["stock_target"] == 7 and option["features"]["transactions"] == ["oil"]
+    assert "pipe-to-ground" in recipe_demand([], {"transactions": {"oil": bill}})
+    old = dict(SHORT, details={"stage": "chemical_packet", "required": {"pipe-to-ground": 12}, "available": {}})
+    done = dict(bill, remaining={}, missing={}, stock_levels={})
+    assert "op.produce.pipe-to-ground" not in menu([slot, old], done)
+    # An unreadable transaction cannot erase the last known shortage; another consumer keeps its own bill.
+    assert "op.produce.pipe-to-ground" in menu([slot, old], {"error": "survey failed"})
+    other = dict(old, details={**old["details"], "stage": "other_packet"})
+    assert "op.produce.pipe-to-ground" in menu([slot, other], done)
+
+
+def test_required_construction_delivery_is_progress_but_rebuild_cycles_are_bounded(tmp_path, monkeypatch):
+    import training.laya_ops_runner as runner
+    monkeypatch.setattr(runner, "STALL_TICKS", 1500)
+    class Deliveries(FakeSession):
+        def __init__(self, cycling):
+            super().__init__()
+            self.count, self.cycling = 0, cycling
+        def material_transactions(self):
+            self.count = (1 - self.count) if self.cycling else self.count + 1
+            return {"test": {"intent_sha256": "fixed", "installed": {"pipe": self.count}}}
+    for cycling in (False, True):
+        summary = run(_ClockWorld(), GuidedPolicy(3), journal=tmp_path / f"{cycling}.jsonl", decisions=20,
+                      measure_ticks=600, seed=3, run_id="delivery", session=Deliveries(cycling))
+        assert summary["stop"] == ("stalled" if cycling else "decision_budget")
+
+
+def test_selected_parent_option_carries_its_current_owned_bill():
+    from training.laya_ops_runner import with_economics
+    board = {"needs": [{"item": "plastic-bar", "condition": "unbuilt", "goal_required_per_s": .5}]}
+    tx = {"target_item": "plastic-bar", "remaining": {"pipe": 2}, "missing": {}, "stock_levels": {},
+          "complete": False, "replaces_shortage_stages": ["chemical_packet"]}
+    old = {"ok": False, "operation": "produce", "params": {"item": "plastic-bar"}, "code": "material_shortage",
+           "details": {"stage": "chemical_packet", "required": {"pipe": 10}, "available": {}}}
+    def option():
+        menu = compile_options(board, [old], enabled_recipes={"plastic-bar": True}, transactions={"oil": tx})
+        return next(o for o in with_economics(menu, [old], {"transactions": {"oil": tx}})["options"]
+                    if o["option_id"] == "op.produce.plastic-bar")
+    assert option()["bill"] == {"pipe": 2} and option()["bill_owner"] == "oil"
+    tx["remaining"] = {}
+    assert option()["bill"] == {} and option()["features"]["bill_known"]  # Known paid material bill, service still pending.
+
+
+def test_named_prerequisites_and_their_bill_items_inherit_the_consumers_goal():
+    blocked = dict(SHORT, details={"required": {"passive-provider-chest": 1}, "available": {}})
+    handoff = {"ok": False, "operation": "produce", "params": {"item": "passive-provider-chest"},
+               "code": "chemical_capability_handoff", "details": {"rung": "plastic-bar"}}
+    slot = {"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}}
+    tx = {"target_item": "plastic-bar", "missing": {"pipe": 4}, "stock_levels": {"pipe": 4}}
+    options = {o["option_id"]: o for o in compile_options(BOARD, [slot, blocked, handoff],
+                                                         transactions={"oil": tx})["options"]}
+    assert options["op.produce.plastic-bar"]["features"]["goal_need"]
+    assert options["op.produce.pipe"]["features"]["goal_need"]

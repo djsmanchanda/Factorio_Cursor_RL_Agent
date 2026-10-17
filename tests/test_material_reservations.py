@@ -372,6 +372,8 @@ def test_funded_bridge_accounts_for_another_packets_unbuilt_poles(
     monkeypatch.setattr(stage_services, "active_material_ledger", lambda: ledger)
     monkeypatch.setattr(stage_services.live_base, "transferable_items", lambda *_a: stock)
     monkeypatch.setattr(stage_services, "_reservation_supply_estimates", lambda *_a: ({}, {}))
+    monkeypatch.setattr(stage_services.live_base, "plan_construction_status",
+                        lambda *_a: {"remaining": {"medium-electric-pole": 4}})
     client = SimpleNamespace(command=lambda *_a: "")
     pending = {("medium-electric-pole", (0.5, 0.5)),
                ("medium-electric-pole", (1.5, 0.5)),
@@ -1738,7 +1740,8 @@ def test_spendable_loan_still_restores_on_true_completion(monkeypatch) -> None:
     )
 
     assert result == "restored borrowed iron-gear-wheel producer after seed completion"
-    assert submitted == ["restore_bootstrap_loan_transport-belt"]
+    assert submitted == ["release_bootstrap_loan_transport-belt", "restore_bootstrap_loan_transport-belt",
+                         "acknowledge_loan_restore_transport-belt"]
 
 
 def test_reserved_but_flowing_input_funds_another_mall_cell(monkeypatch) -> None:
@@ -2772,6 +2775,67 @@ def test_the_loan_sweep_releases_only_stocked_loans(monkeypatch) -> None:
     assert released == [("electric-mining-drill", True)]
 
 
+def test_recovery_survives_consumed_output_and_an_interrupted_restore(monkeypatch):
+    from dataclasses import replace
+    loan = _binding_drill_loan()
+    monkeypatch.setattr(builder, "mall_slot_uses_shared_provider", lambda *_a: True)
+    calls = []
+    def submit(*args, **_kw):
+        calls.append((args[4], args[3]))
+        if args[4].startswith("restore_bootstrap_loan"):
+            raise builder.StuckError("interrupted before restore acknowledgement")
+    monkeypatch.setattr(builder, "_submit", submit)
+    client = SimpleNamespace(command=lambda _c: "")
+    with pytest.raises(builder.StuckError):
+        builder._restore_bootstrap_loan(client, object(), "nauvis", "player", loan, lambda _m: None, reason="done")
+    assert len(calls) == 2 and not any(n.startswith("acknowledge") for n, _p in calls)
+    requester = next(a for a in calls[1][1]["phases"][0]["actions"] if a["entity"] == "requester-chest")
+    assert "clear_logistic_groups" not in requester  # durable identity remains even if recipe restoration fails
+    assert not list(Draft7Validator(json.loads((ROOT / "schemas/build_plan.schema.json").read_text())).iter_errors(calls[1][1]))
+    resumed = replace(loan, releasing=True, current_recipe=loan.original_recipe)
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: (resumed,))
+    monkeypatch.setattr(builder.live_base, "transferable_items", lambda *_a: {})
+    calls.clear()
+    monkeypatch.setattr(builder, "_submit", lambda *a, **_k: calls.append((a[4], a[3])))
+    builder.release_finished_bootstrap_loans(client, object(), "nauvis", "player", (0, 0), lambda _m: None)
+    assert [n for n, _p in calls] == [f"restore_bootstrap_loan_{loan.target_item}",
+                                     f"acknowledge_loan_restore_{loan.target_item}"]
+
+
+def test_completed_standing_finite_cell_is_vacated_instead_of_restoring_its_requests(monkeypatch):
+    loan = builder.MallBootstrapLoan("inserter", "inserter", 3, "right", (4.5, 1.5), "inserter")
+    calls = []
+    monkeypatch.setattr(builder, "_submit", lambda *a, **_k: calls.append(a[4]))
+    monkeypatch.setitem(builder.MANAGED_INTERMEDIATE_SOURCES, "inserter", loan.provider_position)
+    builder._restore_bootstrap_loan(SimpleNamespace(command=lambda _c: ""), object(), "nauvis", "player", loan,
+                                    lambda _m: None, reason="finite bill met")
+    assert calls == ["release_bootstrap_loan_inserter", "vacate_finite_cell_inserter"]
+    assert "inserter" not in builder.MANAGED_INTERMEDIATE_SOURCES
+
+
+def test_standing_finite_cell_uses_the_same_durable_loan_and_actual_machine_tier(monkeypatch):
+    monkeypatch.setitem(builder.LINE_RECIPES, "inserter", {
+        "machine": "assembling-machine-1", "ingredients": ["iron-plate"], "amounts": [1],
+        "product_amount": 1, "craft_time": .5})
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a, **_k: SimpleNamespace(machine_positions=[(7.5, 1.5)]))
+    monkeypatch.setattr(builder, "locate_mall_cell", lambda *_a: ((0, 0), "right"))
+    monkeypatch.setattr(builder.live_base, "requester_logistic_groups", lambda *_a: ("mall:inserter:right",))
+    monkeypatch.setattr(builder.live_base, "entity_at", lambda *_a: {"name": "assembling-machine-2"})
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
+    monkeypatch.setattr(builder.live_base, "transferable_items", lambda *_a: {"inserter": 4})
+    monkeypatch.setattr(builder, "_bootstrap_loan_products_finished", lambda *_a: 100)
+    plans = []
+    monkeypatch.setattr(builder, "_submit", lambda *a, **_k: plans.append(a[3]))
+    builder._tag_finite_mall_cells(object(), object(), "nauvis", "player", "inserter", 6, (0, 0), lambda _m: None)
+    requester = next(a for a in plans[0]["phases"][0]["actions"] if a["entity"] == "requester-chest")
+    tag = requester["logistic_sections"][0]["group"]
+    from orchestrator.mall_bootstrap import parse_bootstrap_loan_group
+    parsed = parse_bootstrap_loan_group(tag)
+    assert parsed[:3] == ("inserter", "inserter", 6)
+    assert requester["logistic_sections"][0]["multiplier"] == 3  # two remaining crafts + bounded headroom
+    assert next(a for a in plans[0]["phases"][0]["actions"] if a.get("recipe"))["entity"] == "assembling-machine-2"
+
+
 def test_binding_loan_at_bill_yields_to_preempt(monkeypatch) -> None:
     """Once the blocking bill is spendable, spares yield normally."""
     messages = _mock_binding_serve(monkeypatch, transferable=6)
@@ -2787,3 +2851,29 @@ def test_binding_loan_at_bill_yields_to_preempt(monkeypatch) -> None:
 
     assert any("PREEMPT" in message for message in messages)
     assert "RESTORED" in messages
+
+
+def test_retry_reserves_only_uninstalled_material_and_releases_a_paid_bill(monkeypatch, tmp_path):
+    ledger = _ledger(tmp_path)
+    ledger.declare("packet", {"pipe": 10}, {})
+    monkeypatch.setattr(stage_services, "active_material_ledger", lambda: ledger)
+    remaining, stock = {"pipe": 2}, {"pipe": 1}
+    monkeypatch.setattr(stage_services.live_base, "plan_construction_status", lambda *_a: {"remaining": dict(remaining)})
+    monkeypatch.setattr(stage_services.live_base, "transferable_items", lambda *_a: dict(stock))
+    monkeypatch.setattr(stage_services.live_base, "available_items", lambda *_a: {"pipe": 999})  # Other requester WIP.
+    monkeypatch.setattr(stage_services.live_base, "pending_construction_items", lambda *_a, **_k: {})
+    monkeypatch.setattr(stage_services, "_reservation_supply_estimates", lambda *_a: ({}, {}))
+    plan = {"phases": [{"actions": [{"action_type": "place_ghost", "entity": "pipe",
+                                      "position": {"x": n + .5, "y": .5}} for n in range(10)]}]}
+    client = SimpleNamespace(command=lambda _c: pytest.fail("unexpected extra survey"))
+    with pytest.raises(MaterialShortage) as error:
+        stage_services.assert_affordable(client, "nauvis", "player", plan, "packet", lambda _m: None, True)
+    assert error.value.required == {"pipe": 2} and error.value.available == {"pipe": 1}
+    assert ledger.projects["packet"].required == {"pipe": 2}
+    stock["pipe"] = 2
+    stage_services.assert_affordable(client, "nauvis", "player", plan, "packet", lambda _m: None, True)
+    assert ledger.projects["packet"].reserved == {"pipe": 2}
+    remaining.clear()
+    stock.clear()  # Bots consumed it; replay cannot demand a second copy.
+    stage_services.assert_affordable(client, "nauvis", "player", plan, "packet", lambda _m: None, True)
+    assert ledger.projects["packet"].state == "completed" and not ledger.stock_targets()

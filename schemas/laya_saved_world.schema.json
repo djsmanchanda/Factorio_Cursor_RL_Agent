@@ -19,6 +19,7 @@
     "production": {"$ref": "#/definitions/stock"},
     "consumption": {"$ref": "#/definitions/stock"},
     "researched": {"type": "object", "additionalProperties": {"const": true}},
+    "enabled_recipes": {"type": "object", "additionalProperties": {"const": true}},
     "pending_ghosts": {"type": "integer", "minimum": 0},
     "quad_centers": {"type": "array", "items": {"$ref": "#/definitions/position"}},
     "infrastructure_counts": {"$ref": "#/definitions/stock"},

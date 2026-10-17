@@ -51,6 +51,7 @@ _DETERMINISTIC_HINTS = (
 # scheduled/manual full suite instead of masquerading as fast validation.
 _FAST_FILES = {
     "test_laya_ops_initialization.py",
+    "test_mall_cell_release_lua.py",
     "test_action_catalog.py", "test_bootstrap_district.py",
     "test_capacity_model.py", "test_construction_stock.py",
     "test_factory_invariants.py", "test_fluid_routing.py",
@@ -126,6 +127,7 @@ _SOURCE_TRIPWIRE_NODE_FRAGMENTS = {
 # owns one episode. Tests exercise many episodes in one interpreter, so restore
 # their pre-test contents explicitly instead of depending on collection order.
 _ISOLATED_MUTABLE_STATE = {
+    "planners.recipe_data": ("LINE_RECIPES",),
     "orchestrator.autonomous_builder": (
         "_STAGE_DELIVERY_PROVIDERS",
         "_REFINERY_SITE_RESERVATIONS",

@@ -184,6 +184,27 @@ def test_restore_clears_only_unique_loan_group(monkeypatch) -> None:
     assert not list(SCHEMA.iter_errors(plan))
 
 
+def test_empty_loan_tag_is_discovered_during_recovery_and_after_restore():
+    from orchestrator.mall_bootstrap import active_bootstrap_loans
+    from types import SimpleNamespace
+    group = _loan().group
+    for recipe in ("-", _loan().original_recipe):
+        client = SimpleNamespace(command=lambda _c: f"{group}|4.5|1.5|assembling-machine-1,-|assembling-machine-2,{recipe}|releasing")
+        (loan,) = active_bootstrap_loans(client, "nauvis", "player")
+        assert loan.releasing and loan.current_recipe == recipe
+
+
+def test_release_plan_is_configuration_only_and_preserves_tag_until_acknowledgement():
+    from orchestrator.mall_bootstrap import release_bootstrap_loan_plan
+    plan = release_bootstrap_loan_plan(_loan())
+    action = plan["phases"][0]["actions"][0]
+    assert action["action_type"] == "configure_entity" and action["release_cell"]["group"] == _loan().group
+    assert not action["release_cell"]["acknowledge"]
+    assert not list(SCHEMA.iter_errors(plan))
+    action["action_type"] = "place_ghost"
+    assert list(SCHEMA.iter_errors(plan))  # release settings never authorize construction
+
+
 def test_promotion_reuses_the_borrowed_cell_as_permanent_pipe_mall() -> None:
     loan = MallBootstrapLoan(
         original_recipe="splitter", target_item="pipe", target_count=100,
@@ -706,3 +727,40 @@ def test_network_item_count_fails_closed_on_negative_readings(monkeypatch):
     assert live_base.network_item_count(object(), "nauvis", "player", (1.0, 1.0), "iron-plate") is None
     assert live_base.network_item_count(object(), "nauvis", "player", (1.0, 1.0), "iron-plate") is None
     assert live_base.network_item_count(object(), "nauvis", "player", (1.0, 1.0), "iron-plate") is None
+
+
+def test_loan_facts_are_generic_and_report_only_real_deficits() -> None:
+    """A repeated nominal loan batch stalled with crafts 0/1 and no diagnostics:
+    the facts must name the step, counter, remaining bill, real input deficits,
+    owner and postconditions -- with surplus never printed as a shortage."""
+    from orchestrator.mall_bootstrap import bootstrap_loan_facts, bootstrap_loan_signature
+
+    loan = _telemetry_loan()  # copper-cable cell borrowed; transport-belt 184; gear step @ 40/52
+    facts = bootstrap_loan_facts(
+        loan, products_finished=44, requester_contents={"iron-plate": 3},
+        available={"iron-plate": 50, "transport-belt": 180}, producer_status="working",
+    )
+
+    assert facts["owner"] == "copper-cable" and facts["making"] == "transport-belt"
+    assert facts["step_recipe"] == "iron-gear-wheel"
+    assert facts["counter"] == 44 and facts["crafts_done"] == 4
+    assert facts["step_required_crafts"] == 52 and facts["remaining_crafts"] == 48
+    assert facts["remaining_bill"] == {"transport-belt": 4}
+    assert facts["producer_status"] == "working"
+    assert facts["postconditions"]["bill_met"] is False
+    assert facts["postconditions"]["crafts_met"] is False
+    # 48 remaining gears need 96 plates: 3 held + 50 spendable is a real deficit.
+    assert facts["missing_inputs"] == {"iron-plate": 43}
+    assert facts["inputs_covered"] is False
+
+    covered = bootstrap_loan_facts(
+        loan, products_finished=44, requester_contents={"iron-plate": 3},
+        available={"iron-plate": 200, "transport-belt": 180}, producer_status="working",
+    )
+    # Enough stock is coverage, never a zero or negative short.
+    assert covered["missing_inputs"] == {} and covered["inputs_covered"] is True
+    assert bootstrap_loan_signature(facts) != bootstrap_loan_signature(covered)
+
+    unknown = bootstrap_loan_facts(loan)
+    assert unknown["counter"] is None and unknown["remaining_bill"] is None
+    assert unknown["missing_inputs"] is None and unknown["producer_status"] is None

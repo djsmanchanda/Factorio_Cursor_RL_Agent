@@ -119,8 +119,8 @@ class DeterministicSession:
             # Build one missing stage toward stocking ``item`` (deepest unmet ingredient first). Before the
             # independent mall, pre-core items are rotational mall batches (upgrade_bootstrap=False), not lines.
             # stock_target is the network level wanted; the cell is capped there, so it stops when the need is met.
-            "produce": lambda item, stock_target=1: ab.produce_to_demand(c, b, SURFACE, FORCE, item, ref, emit,
-                                                                         stock_target=stock_target),
+            "produce": lambda item, stock_target=1, finite=True: ab.produce_to_demand(
+                c, b, SURFACE, FORCE, item, ref, emit, stock_target=stock_target, finite=finite),
             # One more gear/cable cell when every existing one runs flat out and other cells starve for it.
             "grow": lambda item, machines: ab.grow_producer(c, b, SURFACE, FORCE, item, ref, emit, machines=machines),
             # A standing slot in the bootstrap mall pool (the deterministic runner's "production prep").
@@ -208,6 +208,13 @@ class DeterministicSession:
             except WorkStateSignal as signal:  # Not this operation's outcome; retried after the next one.
                 self.emit(f"  {name} FAILED: {signal}")
 
+    def active_batch_crafts(self) -> dict[tuple, int]:
+        """Craft counters of the tooling's active finite batches that still owe their bill (a rising one is progress)."""
+        try:
+            return ab.active_batch_crafts(self.client, SURFACE, FORCE)
+        except Exception:  # noqa: BLE001 -- an unreadable survey is no evidence of progress
+            return {}
+
     def economics(self) -> dict:
         """Read-only mall facts; failed components stay null, independently of other surveys."""
         from orchestrator.mall_bootstrap import active_bootstrap_loans
@@ -280,8 +287,12 @@ class DeterministicSession:
             guarded_configuration = supports_configuration_preconditions(self.client)
         except Exception:
             guarded_configuration = None
+        try:
+            transactions = self.material_transactions()
+        except Exception:
+            transactions = None
         return {"version": 1, "projects": projects, "loans": loans, "slots": slots, "cells": cells,
-                "guarded_configuration": guarded_configuration}
+                "guarded_configuration": guarded_configuration, "transactions": transactions}
 
     def _submit_stock_gate(self, plan: dict, name: str) -> dict:
         # Use the shared validator/authorization/bridge submission without the
@@ -296,6 +307,20 @@ class DeterministicSession:
     def _stock_control_observation(self) -> dict:
         from training.laya_ops_runner import economics_observation
         return economics_observation(self.economics(), self.stock_networks())
+
+    def material_transactions(self) -> dict:
+        """Current material delivery facts for selected immutable transactions; unknown stays explicit."""
+        from orchestrator.oil_transaction import OilTransactionStore
+        transactions = {}
+        store = OilTransactionStore.for_bridge(self.bridge, SURFACE, FORCE)
+        if store is not None:
+            try:
+                oil = store.material_facts(self.client, ab._MATERIAL_RESERVATION_LEDGER)
+                if oil is not None:
+                    transactions["opening_oil"] = oil
+            except Exception as error:  # An unreadable bill is unknown, never paid or permission to re-site.
+                transactions["opening_oil"] = {"error": f"{type(error).__name__}: {error}"[:200]}
+        return transactions
 
     def acceptance(self) -> dict:
         """The deterministic runtime's own milestone predicates (orchestrator/checkpoint_milestones.py) on the
