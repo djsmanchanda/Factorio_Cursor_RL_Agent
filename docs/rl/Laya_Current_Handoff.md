@@ -95,8 +95,23 @@ configuration on observed owned paired cells. Atomic executor guards and explici
 capability negotiation prevent stale or unsupported writes. Configuration-only
 reservation evidence no longer hides restored cells, including legacy batched
 gate refreshes. Final scoped review passed; 239 focused checks pass in the
-working tree and staged-source export. Export fast gate: 1,094 passes, one skip
+working tree and staged-source export. Export fast gate: 1,094 passes, three skips
 and the existing four-violation import-firewall failure (working tree: 1,104 passes).
 No live result or performance improvement is claimed. Using the operation needs
 deliberate mod deployment, Factorio reload and a fresh matching Python runner.
 Starship bootstrap f7916e4 and geometry 405fe98 are ready for source integration.
+
+## Starship source integration complete (2026-10-18, 02:36 IST)
+
+Gate e7be89e, bootstrap 1b8b2cb (Starship f7916e4), and geometry 8df965a
+(Starship 405fe98) are combined on work/miniship/laya-resume-20261018.
+358 focused checks pass against an export containing only committed source.
+Combined fast gate: 1,107 passed, three skipped, one existing firewall failure;
+the two remaining violations are laya_ops importing autonomous_builder and
+stage_services. No allowlist was weakened. Geometry preserves exports and outputs.
+The support-cycle repair uses command-bearing fakes and real reservation bills,
+covering zero and partial long-handed stock. Logs: /tmp/laya-combined-focused-20261018.log
+and /tmp/laya-combined-fast-20261018.log. No campaign adoption or live validation.
+Next source work: resolve the remaining strategic-wrapper import boundary.
+Runtime use needs fresh frozen code; guarded gates also require deliberate mod
+deployment and Factorio reload. No lifecycle action was performed.

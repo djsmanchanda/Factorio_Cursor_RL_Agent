@@ -366,7 +366,21 @@ requester before writing; readback and submission evidence remain distinct.
 Configuration receipts preserve placement ownership, including legacy batched
 refreshes and loan restoration. Final review found no remaining scoped blockers.
 239 focused checks pass in both the working tree and an exact staged-source
-export. The export fast gate has 1,094 passes, one skip and the known
+export. The export fast gate has 1,094 passes, three skips and the known
 four-violation import-firewall failure (working tree: 1,104 passes). Offline evidence only. Activation needs
 deliberate executor-mod deployment, Factorio reload and a fresh matching runner;
 no live lifecycle action was performed.
+
+## Starship fixes integrated and verified (2026-10-18, 02:36 IST)
+
+Gate source e7be89e is combined with Starship's bootstrap-cycle repair
+(f7916e4 -> 1b8b2cb) and unchanged shared mining geometry
+(405fe98 -> 8df965a). The bootstrap uses the recipe dependency graph and actual
+support bill; geometry preserves deterministic exports and training coordinates.
+358 focused checks pass in a committed-source export, independent of local edits.
+Combined fast gate: 1,107 passed, three skipped, one existing firewall failure
+(two laya_ops imports remain; both laya_lines violations are removed). Evidence:
+/tmp/laya-combined-{focused,fast}-20261018.log. No live result is claimed.
+Unrelated tracked changes remain intact. Bootstrap/geometry need fresh frozen
+Python in the next runner; guarded gates additionally need deliberate mod
+deployment and Factorio reload. No runtime, installed mod, service or save changed.
