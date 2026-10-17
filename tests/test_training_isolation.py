@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -54,6 +57,7 @@ def test_training_identity_accepts_exact_paired_names() -> None:
         ("training", "experimental.legacy_autonomy.rl_advisor"),
         ("training", "orchestrator.autonomous_builder"),
         ("training", "orchestrator.stage_transport"),
+        ("training", "orchestrator.stage_extraction"),
     ],
 )
 def test_runtime_import_firewall_rejects_forbidden_dependencies(
@@ -67,4 +71,24 @@ def test_runtime_import_firewall_rejects_forbidden_dependencies(
 def test_training_import_firewall_allows_pure_current_dependencies() -> None:
     assert_runtime_import_allowed("training", "core.action_catalog")
     assert_runtime_import_allowed("training", "planners.resource_layouts")
+    assert_runtime_import_allowed("training", "planners.mining_geometry")
     assert_runtime_import_allowed("training", "orchestrator.game_bridge")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("module", ["planners.mining_geometry", "training.laya_lines"])
+def test_mining_geometry_imports_without_deterministic_stages(module: str) -> None:
+    result = subprocess.run(
+        [sys.executable, "-c", """
+import importlib
+import json
+import sys
+
+importlib.import_module(sys.argv[1])
+print(json.dumps(sorted(name for name in sys.modules if (
+    name.startswith("orchestrator.stage_") or name == "orchestrator.autonomous_builder"
+))))
+""", module],
+        cwd=_ROOT, capture_output=True, text=True, check=True,
+    )
+    assert json.loads(result.stdout) == []
