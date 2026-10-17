@@ -87,6 +87,13 @@ unborrowable assembler. A lender choice must account for displaced production.
 | `mission.stock-gates` | Gate mall stock at useful targets; products being measured for the current phase run ungated. |
 | `mission.slot-settle` | Let a feasible retargeted batch reach its target; reconsider if blocked or if its displaced output is urgently needed. |
 
+**Logistic chest budget (user intent, 2026-10-17).** Before advanced circuits are
+made, logistic chests exist only in the bootstrap kit. The tooling holds the kit's
+last passive-provider chest for the plastic cell. Once the four-assembler opening
+bank exists, new mall slots fill the top/bottom halves around existing requesters
+and providers, built with long-handed inserters, before any new left/right pair.
+New pairs remain legal.
+
 Before advanced circuits, prefer finite batches and rotating cells for occasional
 needs. After advanced circuits, prefer dedicated slots for sustained needs and
 dedicated lines for orders too large for a slot. Retain useful production while

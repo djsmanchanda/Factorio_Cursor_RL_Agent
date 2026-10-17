@@ -3581,13 +3581,16 @@ def _dense_bootstrap_mall_enabled(
     later.  Requiring a long-handed line to have already produced an item made
     this gate circular: nothing else requested long-handed inserters, so the
     quad bay could never be reached.  A recipe present in the live catalog is
-    the capability signal; the iron pioneer must still be released first so
-    the opening pair bank remains the four-slot bootstrap.
+    the capability signal.
+
+    Once the four-slot opening bank exists (``_quad_bootstrap_mall_enabled``),
+    growth fills the top/bottom halves around its existing requester and
+    providers before any new left/right pair. It no longer waits for the iron
+    pioneer's release: meanwhile each new pair spent a requester and two
+    providers from the finite pre-advanced-circuit kit (user 2026-10-17).
     """
     long_handed_ready = "long-handed-inserter" in LINE_RECIPES
     if not long_handed_ready:
-        return False
-    if not _iron_starter_released(client, surface, force):
         return False
     return bool(
         _STARTUP_METAL_STARTERS_OBSERVED
@@ -12838,6 +12841,45 @@ def _reserve_steel_starter_power_seed(
     )
 
 
+_PLASTIC_CHEST_PROJECT = "chemical_refinery_and_plastic_machines"
+
+
+def _reserve_plastic_bootstrap_chest(
+    client: RconClient, surface: str, force: str, emit: Callable[[str], None],
+) -> None:
+    """Hold the bootstrap kit's last passive-provider chest for the plastic cell.
+
+    Logistic chests need advanced circuits, which need plastic, so before
+    advanced-circuit production the save's kit is the only supply. Mall
+    pairs, refinery taps and the steel seed spent it first: the reset cohort
+    ended on that chest/plastic cycle in about 9 of 32 runs (user 2026-10-17:
+    "reserve the last chest from the bootstrap kit for the plastic"). The
+    reservation is declared under the oil packet's own project, which later
+    expands it to its full bill, like the steel starter's pole fence.
+    """
+    ledger = _MATERIAL_RESERVATION_LEDGER
+    if ledger is None:
+        return
+    if _production_started(client, surface, force, "advanced-circuit"):
+        return
+    existing = ledger.projects.get(_PLASTIC_CHEST_PROJECT)
+    if existing is not None and not ledger.project_is_active(_PLASTIC_CHEST_PROJECT):
+        return  # the plastic cell already consumed its bill
+    if existing is not None and existing.required.get("passive-provider-chest", 0) >= 1:
+        project = existing  # never shrink the packet's expanded bill on restart
+    else:
+        project = ledger.declare(
+            _PLASTIC_CHEST_PROJECT, {"passive-provider-chest": 1},
+            _transferable_or_available_stock(client, surface, force),
+            target_item="plastic-bar", priority=_STEEL_STARTER_RESERVATION_PRIORITY,
+        )
+    emit(
+        "PLASTIC CHEST RESERVE: held "
+        f"{project.reserved.get('passive-provider-chest', 0)}/1 passive-provider "
+        "chest for the plastic cell until advanced circuits are made"
+    )
+
+
 def _open_the_run(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     goal_item: str, mission_items: tuple[str, ...], script_output: Path | str,
@@ -12928,6 +12970,7 @@ def _open_the_run(
     _reserve_steel_starter_power_seed(
         client, surface, force, background_targets, emit,
     )
+    _reserve_plastic_bootstrap_chest(client, surface, force, emit)
     mall_targets: dict[str, int] = {}
     emit(
         "MALL BACKGROUND RESERVES: producers start without blocking the mission -- "
