@@ -110,6 +110,11 @@ def last_codes(results: list[dict], tick: int | None = None) -> dict[tuple, str]
     return codes
 
 
+def batch_advanced(previous: Mapping[tuple, int], current: Mapping[tuple, int]) -> bool:
+    """Whether any batch seen last check has crafted since (a first sighting is not progress)."""
+    return any(count > previous[key] for key, count in current.items() if key in previous)
+
+
 def shortages(results: list[dict], sources: dict | None = None) -> dict[str, int]:
     """Items the latest material shortage of each operation still asks for (``sources``: item -> plates blocked)."""
     latest: dict[tuple, dict] = {}
@@ -521,7 +526,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     samples: list = []
     measurement = None
     summary: dict = {"decisions": 0, "failures": 0, "phases_reached": reached, "stop": "decision_budget"}
-    stall = {"since": 0, "best_gap": math.inf, "tick": None, "machines": 0, "missing": math.inf, "made": {}}
+    stall = {"since": 0, "best_gap": math.inf, "tick": None, "machines": 0, "missing": math.inf, "made": {},
+             "batches": {}}
     accept = getattr(session, "acceptance", None)
 
     def check_acceptance(event: str) -> None:
@@ -646,7 +652,12 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         made = {item: int((after.get("production") or {}).get(item, 0)) for item in short}
         crafted = any(count > stall["made"].get(item, count) for item, count in made.items())
         stall["made"] = {**stall["made"], **made}
-        progressed = (machines > stall["machines"] or missing < stall["missing"] or crafted
+        # An active finite batch whose craft counter rose is progress the shortage map cannot see (internal
+        # chemical-ladder batches); a first sighting or an unchanged counter is not.
+        batches = session.active_batch_crafts() if hasattr(session, "active_batch_crafts") else {}
+        advancing = batch_advanced(stall["batches"], batches)
+        stall["batches"] = batches
+        progressed = (machines > stall["machines"] or missing < stall["missing"] or crafted or advancing
                       or gap < stall["best_gap"] * 0.95)
         stall["machines"], stall["missing"] = max(stall["machines"], machines), min(stall["missing"], missing)
         stall["best_gap"] = min(stall["best_gap"], gap)

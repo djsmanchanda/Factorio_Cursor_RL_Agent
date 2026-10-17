@@ -706,3 +706,40 @@ def test_network_item_count_fails_closed_on_negative_readings(monkeypatch):
     assert live_base.network_item_count(object(), "nauvis", "player", (1.0, 1.0), "iron-plate") is None
     assert live_base.network_item_count(object(), "nauvis", "player", (1.0, 1.0), "iron-plate") is None
     assert live_base.network_item_count(object(), "nauvis", "player", (1.0, 1.0), "iron-plate") is None
+
+
+def test_loan_facts_are_generic_and_report_only_real_deficits() -> None:
+    """A repeated nominal loan batch stalled with crafts 0/1 and no diagnostics:
+    the facts must name the step, counter, remaining bill, real input deficits,
+    owner and postconditions -- with surplus never printed as a shortage."""
+    from orchestrator.mall_bootstrap import bootstrap_loan_facts, bootstrap_loan_signature
+
+    loan = _telemetry_loan()  # copper-cable cell borrowed; transport-belt 184; gear step @ 40/52
+    facts = bootstrap_loan_facts(
+        loan, products_finished=44, requester_contents={"iron-plate": 3},
+        available={"iron-plate": 50, "transport-belt": 180}, producer_status="working",
+    )
+
+    assert facts["owner"] == "copper-cable" and facts["making"] == "transport-belt"
+    assert facts["step_recipe"] == "iron-gear-wheel"
+    assert facts["counter"] == 44 and facts["crafts_done"] == 4
+    assert facts["step_required_crafts"] == 52 and facts["remaining_crafts"] == 48
+    assert facts["remaining_bill"] == {"transport-belt": 4}
+    assert facts["producer_status"] == "working"
+    assert facts["postconditions"]["bill_met"] is False
+    assert facts["postconditions"]["crafts_met"] is False
+    # 48 remaining gears need 96 plates: 3 held + 50 spendable is a real deficit.
+    assert facts["missing_inputs"] == {"iron-plate": 43}
+    assert facts["inputs_covered"] is False
+
+    covered = bootstrap_loan_facts(
+        loan, products_finished=44, requester_contents={"iron-plate": 3},
+        available={"iron-plate": 200, "transport-belt": 180}, producer_status="working",
+    )
+    # Enough stock is coverage, never a zero or negative short.
+    assert covered["missing_inputs"] == {} and covered["inputs_covered"] is True
+    assert bootstrap_loan_signature(facts) != bootstrap_loan_signature(covered)
+
+    unknown = bootstrap_loan_facts(loan)
+    assert unknown["counter"] is None and unknown["remaining_bill"] is None
+    assert unknown["missing_inputs"] is None and unknown["producer_status"] is None

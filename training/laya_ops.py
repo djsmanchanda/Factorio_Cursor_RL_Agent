@@ -172,6 +172,13 @@ class DeterministicSession:
             except WorkStateSignal as signal:  # Not this operation's outcome; retried after the next one.
                 self.emit(f"  {name} FAILED: {signal}")
 
+    def active_batch_crafts(self) -> dict[tuple, int]:
+        """Craft counters of the tooling's active finite batches that still owe their bill (a rising one is progress)."""
+        try:
+            return ab.active_batch_crafts(self.client, SURFACE, FORCE)
+        except Exception:  # noqa: BLE001 -- an unreadable survey is no evidence of progress
+            return {}
+
     def economics(self) -> dict:
         """What the tooling has committed: active material projects (reserved and still missing per item) and
         live mall loans (which cell is lent to make what). ``loans`` is None when the survey fails: unknown,

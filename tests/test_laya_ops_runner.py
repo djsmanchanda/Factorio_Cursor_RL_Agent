@@ -380,3 +380,34 @@ def test_a_plate_system_still_constructing_is_waiting_until_its_retry_horizon():
     assert menu(1600)["wait.300"]["features"]["constructing"]
     # After the retry horizon the extend is worth asking again.
     assert not menu(1000 + 1800)["op.extend.copper-plate"]["features"]["waiting"]
+
+
+class _ClockWorld(FakeWorld):
+    """Game time passes between observations; nothing else in the world changes."""
+
+    def query(self):
+        self.tick += 300
+        return super().query()
+
+
+class _BatchSession(FakeSession):
+    def __init__(self, step):
+        super().__init__()
+        self.count, self.step = 100, step
+
+    def active_batch_crafts(self):
+        self.count += self.step
+        return {("copper-cable", "pipe", "pipe", 33.5, 45.5): self.count}
+
+
+def test_an_advancing_batch_survives_the_stall_detector_and_an_unchanged_one_does_not(tmp_path, monkeypatch):
+    # batch-20261017-day pipe-300-s76401: pipe crafts 240 -> 278 of 300, then STALLED 5 s later.
+    import training.laya_ops_runner as runner
+    from training.laya_ops_runner import batch_advanced
+    monkeypatch.setattr(runner, "STALL_TICKS", 1500)
+    assert not batch_advanced({}, {("a",): 5}) and not batch_advanced({("a",): 5}, {("a",): 5})
+    assert batch_advanced({("a",): 5}, {("a",): 6})
+    stop = lambda step: run(_ClockWorld(), GuidedPolicy(3), journal=tmp_path / f"j{step}.jsonl", decisions=20,
+                            measure_ticks=600, seed=3, run_id=f"t{step}", session=_BatchSession(step))["stop"]
+    assert stop(step=4) == "decision_budget"  # crafting toward its bill: not stalled
+    assert stop(step=0) == "stalled"  # an unchanged batch keeps nothing alive

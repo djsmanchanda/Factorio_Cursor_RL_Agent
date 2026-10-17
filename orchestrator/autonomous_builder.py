@@ -79,6 +79,7 @@ from orchestrator.mall_bootstrap import (
     _LOAN_REQUEST_HEADROOM_FRACTION,
     active_bootstrap_loans,
     bootstrap_external_shortages,
+    bootstrap_loan_facts,
     bootstrap_loan_plan,
     next_bootstrap_step,
     promote_bootstrap_loan_plan,
@@ -5628,6 +5629,32 @@ def grow_producer(
         upgrade_bootstrap=False, stock_target=1,
         minimum_machines=max(1, int(machines)) + 1, allow_promotion=False,
     )
+
+
+def active_batch_crafts(
+    client: RconClient, surface: str, force: str,
+) -> dict[tuple, int]:
+    """Craft counters of active finite batches whose bill is not yet met.
+
+    A rising counter is measured progress. Without it a pipe batch crafting
+    240 -> 278 of 300 read as no progress and the run stopped as stalled
+    (batch-20261017-day pipe-300-s76401). A met or unreadable batch is left out,
+    so surplus output and busy codes alone keep nothing alive.
+    """
+    if not hasattr(client, "command"):
+        return {}
+    loans = active_bootstrap_loans(client, surface, force)
+    available = live_base.transferable_items(client, surface, force) if loans else {}
+    crafts = {}
+    for loan in loans:
+        finished = _bootstrap_loan_products_finished(client, surface, loan)
+        facts = bootstrap_loan_facts(loan, products_finished=finished, available=available)
+        if finished is None or facts.get("bill_met"):
+            continue
+        key = (loan.original_recipe, loan.target_item, facts["step_recipe"],
+               round(loan.machine_position[0], 2), round(loan.machine_position[1], 2))
+        crafts[key] = int(finished)
+    return crafts
 
 
 def release_finished_bootstrap_loans(
