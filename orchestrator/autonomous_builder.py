@@ -8016,8 +8016,17 @@ def _chemical_capability_started(
     if item in _CHEMICAL_BATCH_TARGETS and _chemical_uses_rotating_batch(
         client, surface, force, item,
     ):
-        stock = live_base.available_items(client, surface, force)
-        return stock.get(item, 0) >= _CHEMICAL_BATCH_TARGETS[item]
+        # The rung exists to supply the oil cell, which reserves its stock and
+        # then places it. Count what the world holds -- physical stock with
+        # reservations included, plus placed entities. Unreserved stock alone
+        # reopened the rung as soon as the cell claimed it (~780 pipe loans in
+        # one batch); an "ever stocked" latch would prove nothing about the
+        # cell's remaining bill (audit 2026-10-17).
+        held = (
+            live_base.transferable_items(client, surface, force).get(item, 0)
+            + live_base.placed_entity_count(client, surface, force, item)
+        )
+        return held >= _CHEMICAL_BATCH_TARGETS[item]
     return _production_started(client, surface, force, item)
 
 

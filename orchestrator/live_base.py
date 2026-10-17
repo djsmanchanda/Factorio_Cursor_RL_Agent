@@ -1537,6 +1537,18 @@ def transferable_items(
     return _parse_stock_counts(raw)
 
 
+def placed_entity_count(client: RconClient, surface: str, force: str, name: str) -> int:
+    """Built entities named ``name`` on the surface (ghosts excluded)."""
+    raw = _sc(client, (
+        "local s=game.surfaces['" + surface + "'];"
+        "rcon.print(s.count_entities_filtered{name='" + name + "',force='" + force + "'})"
+    ))
+    try:
+        return int(str(raw).strip() or 0)
+    except ValueError:
+        return 0
+
+
 def transferable_item_count(
     client: RconClient, surface: str, force: str, item: str,
 ) -> int:
