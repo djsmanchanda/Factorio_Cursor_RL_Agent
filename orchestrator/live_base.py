@@ -2694,3 +2694,42 @@ def requester_logistic_groups(
     if raw in {"", "NONE"}:
         return ()
     return tuple(group for group in raw.split("|") if group)
+
+
+def mall_gate_survey(client: RconClient, surface: str, force: str) -> list[dict]:
+    """Read real assembler identity and simple logistic gates; never configure.
+
+    Compound, quality-specific and circuit-controlled conditions are ineligible
+    for the stock-control slice. Missing/unsupported telemetry fails closed.
+    """
+    lua = (
+        'local s=game.surfaces[' + json.dumps(surface) + '];local out={};'
+        'for _,e in pairs(s.find_entities_filtered{type="assembling-machine",force='
+        + json.dumps(force) + '}) do '
+        'local r=e.get_recipe();local b=e.get_control_behavior();'
+        'if r then local row={entity=e.name,unit_number=e.unit_number,recipe=r.name,'
+        'surface=s.name,force=e.force.name,position={e.position.x,e.position.y},circuit_enabled=true};'
+        'if b then local ok,v=pcall(function() return b.circuit_enable_disable end);'
+        'if ok and type(v)=="boolean" then row.circuit_enabled=v end;'
+        'local c=b.logistic_condition;c=c and (c.condition or c);'
+        'if b.connect_to_logistic_network and c and c.first_signal and '
+        '(not c.first_signal.type or c.first_signal.type=="item") and '
+        '(not c.first_signal.quality or c.first_signal.quality=="normal") and '
+        'not c.second_signal and c.constant then '
+        'row.gate={signal=c.first_signal.name,comparator=c.comparator,constant=c.constant} end end;'
+        'row.requesters={};for _,dx in ipairs({-3,3}) do '
+        'local p={e.position.x+dx,e.position.y};'
+        'local chest=s.find_entities_filtered{position=p,radius=0.01,name="requester-chest",limit=1}[1];'
+        'if chest then local groups={};local sections=chest.get_logistic_sections();'
+        'if sections then for _,section in pairs(sections.sections) do '
+        'if section.valid and section.group and section.group~="" then groups[#groups+1]=section.group end end end;'
+        'table.sort(groups);row.requesters[#row.requesters+1]={position=p,unit_number=chest.unit_number,'
+        'force=chest.force.name,groups=groups} end end;'
+        'out[#out+1]=row end end;rcon.print(helpers.table_to_json(out))'
+    )
+    result = json.loads(_sc(client, lua))
+    if result == {}:  # Factorio serializes an empty Lua table as an object.
+        return []
+    if not isinstance(result, list):
+        raise ValueError('Mall gate survey did not return a list')
+    return result

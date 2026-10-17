@@ -5054,11 +5054,12 @@ def _refresh_mall_cell(
                 mall_storage_limit = _canonical_mall_provider_limit(
                     surface, force, item, mall_storage_limit,
                 )
-            if stock_gate_target is not None:
-                gate_key = (surface, force, item)
+            gate_key = (surface, force, item)
+            gate_floor = _MALL_STOCK_GATE_FLOORS.get(gate_key, 0)
+            if stock_gate_target is not None or gate_floor > 0:
                 stock_gate_target = max(
-                    stock_gate_target,
-                    _MALL_STOCK_GATE_FLOORS.get(gate_key, 0),
+                    stock_gate_target or 0,
+                    gate_floor,
                 )
                 _MALL_STOCK_GATE_FLOORS[gate_key] = stock_gate_target
             # The provider chest has no physical bar. Production is bounded

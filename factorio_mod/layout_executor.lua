@@ -528,6 +528,87 @@ local function return_removed_items(entity, removed)
   return nil
 end
 
+-- Pure compare-before-write: never create a behavior or requester section here.
+local function configuration_precondition_error(surface, force, action)
+  if action.configuration_preconditions == nil then return nil end
+  local function check()
+    if action.action_type ~= "configure_entity" then return "wrong_action_kind" end
+    local expected = action.configuration_preconditions
+    local function exact_keys(value, keys)
+      if type(value) ~= "table" then return false end
+      for key in pairs(value) do if not keys[key] then return false end end
+      for key in pairs(keys) do if value[key] == nil then return false end end
+      return true
+    end
+    local function positive_integer(value)
+      return type(value) == "number" and value > 0 and value < math.huge and value == math.floor(value)
+    end
+    local comparators = { ["<"]=true, [">"]=true, ["="]=true, ["≥"]=true,
+      ["≤"]=true, ["≠"]=true, [">="]=true, ["<="]=true, ["!="]=true }
+    if not exact_keys(expected, {unit_number=true, recipe=true, logistic_condition=true,
+      circuit_enabled=true, requester=true}) then return "invalid_shape" end
+    local gate, requester = expected.logistic_condition, expected.requester
+    if not positive_integer(expected.unit_number) or type(expected.recipe) ~= "string"
+      or type(expected.circuit_enabled) ~= "boolean"
+      or not exact_keys(gate, {signal=true, comparator=true, constant=true})
+      or type(gate.signal) ~= "string" or gate.signal == "" or not comparators[gate.comparator]
+      or type(gate.constant) ~= "number" or math.abs(gate.constant) == math.huge
+      or gate.constant ~= math.floor(gate.constant)
+      or not exact_keys(requester, {entity=true, position=true, unit_number=true, groups=true})
+      or requester.entity ~= "requester-chest" or not positive_integer(requester.unit_number)
+      or not exact_keys(requester.position, {x=true, y=true})
+      or type(requester.position.x) ~= "number" or type(requester.position.y) ~= "number"
+      or type(requester.groups) ~= "table" then return "invalid_shape" end
+    local previous, group_count = nil, 0
+    for index, group in pairs(requester.groups) do
+      if not positive_integer(index) or index > #requester.groups
+        or type(group) ~= "string" or group == "" then return "invalid_groups" end
+      group_count = group_count + 1
+    end
+    if group_count ~= #requester.groups then return "invalid_groups" end
+    for _, group in ipairs(requester.groups) do
+      if previous and previous > group then return "invalid_groups" end
+      previous = group
+    end
+    local entity = find_exact_entity(surface, force, action.entity, action.position)
+    if not entity or not entity.valid then return "target_missing" end
+    if entity.unit_number ~= expected.unit_number then return "unit_number_mismatch" end
+    local recipe = entity.get_recipe()
+    if not recipe or recipe.name ~= expected.recipe then return "recipe_mismatch" end
+    local behavior = entity.get_control_behavior()
+    if not behavior or behavior.connect_to_logistic_network ~= true then return "logistic_disabled" end
+    if behavior.circuit_enable_disable ~= expected.circuit_enabled then return "circuit_enabled_mismatch" end
+    local condition = behavior.logistic_condition
+    condition = condition and (condition.condition or condition)
+    local signal = condition and condition.first_signal
+    if not signal or signal.type ~= "item" or signal.name ~= gate.signal
+      or (signal.quality ~= nil and signal.quality ~= "normal")
+      or condition.second_signal ~= nil or condition.comparator ~= gate.comparator
+      or condition.constant ~= gate.constant then return "logistic_condition_mismatch" end
+    local chest = find_exact_entity(surface, force, requester.entity, requester.position)
+    if not chest or not chest.valid or chest.unit_number ~= requester.unit_number then
+      return "requester_mismatch"
+    end
+    local sections = chest.get_logistic_sections()
+    if not sections or not sections.sections then return "requester_groups_unknown" end
+    local groups = {}
+    for _, section in pairs(sections.sections) do
+      if not section.valid or type(section.group) ~= "string" then return "requester_groups_unknown" end
+      if section.group ~= "" then groups[#groups + 1] = section.group end
+    end
+    table.sort(groups)
+    if #groups ~= #requester.groups then return "requester_groups_mismatch" end
+    for index, group in ipairs(groups) do
+      if group ~= requester.groups[index] then return "requester_groups_mismatch" end
+    end
+    return nil
+  end
+  local ok, detail = pcall(check)
+  if not ok then detail = "read_failed" end
+  if detail then return "configuration_precondition_failed:" .. detail end
+  return nil
+end
+
 local function configure_created_entity(entity, action)
   if action.recipe then
     local actual, read_error = recipe_name(entity)
@@ -808,6 +889,24 @@ local function execute_build_plan(authorization, build_plan)
     })
   end
 
+  -- Reject the entire submission before mutation when any guarded snapshot is stale.
+  for _, phase in ipairs(build_plan.phases) do
+    for _, action in ipairs(phase.actions or {}) do
+      local failure = configuration_precondition_error(surface, force, action)
+      if failure then
+        counts.attempted_entities = counts.attempted_entities + 1
+        record_failure(phase, action, failure)
+      end
+    end
+  end
+  if #placement_failures > 0 then
+    counts.failed_entities = #placement_failures
+    counts.failed_placements = #placement_failures
+    counts.placement_failures = placement_failures
+    counts.error = "configuration_precondition_failed"
+    return counts
+  end
+
   -- Fail before any plan mutation: production construction must consume a
   -- blueprint ghost through bots, even when legacy callers request direct placement.
   if force.name == "player" then
@@ -895,7 +994,7 @@ local function execute_build_plan(authorization, build_plan)
       if type(position) ~= "table" or position.x == nil or position.y == nil then
         error("BuildPlan action requires position with x and y")
       end
-      if action.action_type ~= "remove_entity" then
+      if action.action_type ~= "remove_entity" and action.configuration_preconditions == nil then
         if not placement_bounds then
           placement_bounds = {
             min_x = position.x, min_y = position.y,
@@ -929,7 +1028,8 @@ local function execute_build_plan(authorization, build_plan)
           counts.failed_entities = counts.failed_entities + 1
           record_failure(phase, action, "configure_target_missing")
         else
-          local configure_error = configure_created_entity(existing, action)
+          local configure_error = configuration_precondition_error(surface, force, action)
+          if not configure_error then configure_error = configure_created_entity(existing, action) end
           local mismatch = configure_error or configuration_error(existing, action, direction)
           if mismatch then
             counts.failed_entities = counts.failed_entities + 1
@@ -1094,6 +1194,10 @@ local function execute_build_plan(authorization, build_plan)
   counts.removed_entities = removed_entities
   return counts
 end
+commands.add_command("layout_executor_capabilities", "Read executor protocol capabilities.", function()
+  rcon.print('{"configuration_preconditions":1}')
+end)
+
 commands.add_command("build_layout_plan", "Execute an authorized BuildPlan with explicit positions on planner-sandbox.", function(command)
   local ok, payload = pcall(function()
     return helpers.json_to_table(command.parameter or "")

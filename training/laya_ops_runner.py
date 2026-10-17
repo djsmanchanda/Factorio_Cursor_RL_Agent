@@ -354,10 +354,23 @@ def with_economics(menu: dict, results: list[dict], economics: Mapping | None) -
             required = demand.get("required")
             if isinstance(required, Mapping):
                 bills[_key(r)] = {i: int(n) for i, n in required.items()}
+    from orchestrator.mall_control import raise_options
+    additions = raise_options(economics)
+    menu["options"].extend(additions)
+    for option in additions:
+        need = next((n for n in menu["needs"] if n["need_id"] == option["need_id"]), None)
+        if need is None:
+            need = {"need_id": option["need_id"], "condition": "available", "options": []}
+            menu["needs"].append(need)
+        need["options"].append(option["option_id"])
     loans = (economics or {}).get("loans")
     lent = {loan["lender"] for loan in loans or ()}
     for option in menu["options"]:
         if option["family"] == "wait":
+            continue
+        if option["family"] == "raise_stock_gate":
+            option["bill"] = {}
+            option["features"]["bill_known"] = True
             continue
         params = option["params"]
         bill = bills.get((option["family"], params.get("recipe") or params.get("item")))
@@ -594,6 +607,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     """
     from training.laya_ops import DeterministicSession
     session = session or DeterministicSession(adapter.root, emit=lambda line: emit(f"  TOOL {line}"))
+    session.stock_networks = lambda: adapter.query().get("networks")
     records = journal.parent / "decision-states.jsonl"
     reached: list[str] = []
     results: list[dict] = list(carried)
@@ -713,6 +727,10 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                          distribution=choice["distribution"], choice=choice,
                          outcome={**{k: result.get(k) for k in ("ok", "code", "classification", "state", "details",
                                                                  "message", "result")},
+                                  **({'configuration_receipt': {
+                                      k: result[k] for k in ('submitted', 'submission_attempted', 'verified',
+                                                            'observed', 'error') if k in result}}
+                                     if chosen['family'] == 'raise_stock_gate' else {}),
                                   "ticks": after["tick"] - facts["tick"]})
         _write_status(status_path, {"run_id": run_id, "index": index, "tick": facts["tick"], "phase": phase,
                                     "reached": reached, "board": compact, "brief": state["brief"], "choice": {**choice, "summary": chosen["summary"]},

@@ -17,7 +17,7 @@ status board, guided policy, journals and console, but expose different choices.
 | Path | Current choices | Remaining limits |
 | --- | --- | --- |
 | `--actions geometry` (default), `training/laya_clean_runner.py` | Land plan, funded starter/mine/smelting/assembly alternatives, mall retargets, coverage and waits. | Bounded site/scale menus; general fluid, research, upgrade and repair choice coverage remains incomplete. Component fixtures are separate evidence. |
-| `--actions deterministic`, `training/laya_ops_runner.py` | Plate starter/foundation/extension/retirement, baseline mall item, shortage batch, steel fence/seed and waits. | `training/laya_ops.py` still calls strategic builder wrappers that choose prerequisites, lender, site, scale, transport and recovery. Coverage can occur inside a request rather than as a separate offered choice. |
+| `--actions deterministic`, `training/laya_ops_runner.py` | Plate starter/foundation/extension/retirement, baseline mall item, shortage batch, steel fence/seed, guarded existing-cell stock-gate raises and waits. | `training/laya_ops.py` still calls strategic builder wrappers that choose prerequisites, lender, site, scale, transport and recovery. Coverage can occur inside a request rather than as a separate offered choice. |
 
 The target split is **preview legal alternatives → Laya chooses → execute the
 selected transaction → reconcile measured outcome**. Current wrapper choices
@@ -47,6 +47,14 @@ Shared service failures now distinguish `infrastructure_collision` (plan and
 observed occupant evidence) from `power_route_unavailable` (endpoints, pole,
 blocked tile count and route reason). Both remain failed bug outcomes; typing
 them does not establish a viable route or resolve the underlying placement.
+
+[Stock-gate raises](Laya_Stock_Gate_Control.md) are explicit, bill-backed
+configuration alternatives on observed owned standing cells. They require the
+deployed executor's configuration-precondition capability, reject stale entity
+facts before writing, and record submission separately from verified readback.
+They do not create cells, retarget recipes, or prove delivered output. Activating
+this operation requires deliberate mod deployment and Factorio reload followed
+by a fresh runner; old executors do not offer it.
 
 Current geometry transactions preserve submitted plans and pre/post facts.
 Current ops wraps ordinary returns, including `None`, as `ok=True` and records

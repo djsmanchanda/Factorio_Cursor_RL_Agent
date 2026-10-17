@@ -237,10 +237,10 @@
             }
            }
           }
-          }
+         }
         },
         "clear_inventory_limit": {
-          "type": "boolean"
+         "type": "boolean"
         },
         "infinity_filter": {
          "type": "string"
@@ -326,6 +326,103 @@
            "type": "integer"
           }
          }
+        },
+        "configuration_preconditions": {
+         "type": "object",
+         "additionalProperties": false,
+         "required": [
+          "unit_number",
+          "recipe",
+          "logistic_condition",
+          "circuit_enabled",
+          "requester"
+         ],
+         "properties": {
+          "unit_number": {
+           "type": "integer",
+           "minimum": 1
+          },
+          "recipe": {
+           "type": "string"
+          },
+          "logistic_condition": {
+           "type": "object",
+           "additionalProperties": false,
+           "required": [
+            "signal",
+            "comparator",
+            "constant"
+           ],
+           "properties": {
+            "signal": {
+             "type": "string",
+             "minLength": 1
+            },
+            "comparator": {
+             "enum": [
+              "<",
+              ">",
+              "=",
+              "\u2265",
+              "\u2264",
+              "\u2260",
+              ">=",
+              "<=",
+              "!="
+             ]
+            },
+            "constant": {
+             "type": "integer"
+            }
+           }
+          },
+          "circuit_enabled": {
+           "type": "boolean"
+          },
+          "requester": {
+           "type": "object",
+           "additionalProperties": false,
+           "required": [
+            "entity",
+            "position",
+            "unit_number",
+            "groups"
+           ],
+           "properties": {
+            "entity": {
+             "const": "requester-chest"
+            },
+            "position": {
+             "type": "object",
+             "required": [
+              "x",
+              "y"
+             ],
+             "additionalProperties": false,
+             "properties": {
+              "x": {
+               "type": "number"
+              },
+              "y": {
+               "type": "number"
+              }
+             }
+            },
+            "unit_number": {
+             "type": "integer",
+             "minimum": 1
+            },
+            "groups": {
+             "type": "array",
+             "items": {
+              "type": "string",
+              "minLength": 1
+             },
+             "description": "Exact sorted named logistic-section groups, preserving duplicates."
+            }
+           }
+          }
+         }
         }
        },
        "allOf": [
@@ -397,6 +494,20 @@
           "required": [
            "underground_type"
           ]
+         }
+        },
+        {
+         "if": {
+          "required": [
+           "configuration_preconditions"
+          ]
+         },
+         "then": {
+          "properties": {
+           "action_type": {
+            "const": "configure_entity"
+           }
+          }
          }
         }
        ]

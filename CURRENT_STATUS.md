@@ -357,3 +357,16 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - What: optional typed recipe_observations preserves enabled/disabled state, item/fluid ingredients and observed yields/categories/speeds while retaining the solid-only operation catalog. V2 status distinguishes missing/disabled/unsupported metadata, shows fluid demand leaves and nominal chemical-item capacity. Exporter indexes crafting prototypes once per survey; unknown fluid supply does not erase known recipe availability.
 - Evidence: 126 focused integration/consumer tests pass, including mocked Lua-to-schema-to-board checks and three enabled-state regressions from independent Sol review. Lua syntax and scoped whitespace checks pass. Required fast gate: 989 passed, 1 skipped, 1 preexisting import-firewall failure. Actual Factorio execution and effective fluid delivery remain unverified; no policy or checkpoint adoption.
 - Lifecycle: no live action. Future runs must freeze Python, schema and training/laya_saved_world.lua together and start a fresh runner. This helper is sent by the adapter, not an installed mod; no installed-mod deployment or Factorio restart required solely for this change. Logs: /tmp/laya-fluid-{integrated,fast}-20261018.log.
+
+## Guarded standing-cell stock gates (2026-10-18, 02:35 IST)
+
+Laya can explicitly raise an owned paired mall cell's stock gate against an active
+material bill. Versioned executor guards recheck identity, recipe, prior gate and
+requester before writing; readback and submission evidence remain distinct.
+Configuration receipts preserve placement ownership, including legacy batched
+refreshes and loan restoration. Final review found no remaining scoped blockers.
+239 focused checks pass in both the working tree and an exact staged-source
+export. The export fast gate has 1,094 passes, one skip and the known
+four-violation import-firewall failure (working tree: 1,104 passes). Offline evidence only. Activation needs
+deliberate executor-mod deployment, Factorio reload and a fresh matching runner;
+no live lifecycle action was performed.

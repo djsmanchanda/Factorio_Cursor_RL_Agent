@@ -87,3 +87,16 @@ Future runners need a frozen Python/schema/Lua-helper copy; no installed-mod
 redeployment or Factorio restart was performed or is required for this helper.
 The next Sol workstream is explicit bill-backed gate raises on existing owned
 mall cells; it has not yet been integrated or live-validated.
+
+## Guarded stock-gate source integrated (2026-10-18, 02:35 IST)
+
+[Standing-cell stock-gate raises](Laya_Stock_Gate_Control.md) now offer bill-backed
+configuration on observed owned paired cells. Atomic executor guards and explicit
+capability negotiation prevent stale or unsupported writes. Configuration-only
+reservation evidence no longer hides restored cells, including legacy batched
+gate refreshes. Final scoped review passed; 239 focused checks pass in the
+working tree and staged-source export. Export fast gate: 1,094 passes, one skip
+and the existing four-violation import-firewall failure (working tree: 1,104 passes).
+No live result or performance improvement is claimed. Using the operation needs
+deliberate mod deployment, Factorio reload and a fresh matching Python runner.
+Starship bootstrap f7916e4 and geometry 405fe98 are ready for source integration.

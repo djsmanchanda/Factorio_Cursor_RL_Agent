@@ -23,10 +23,12 @@ from collections.abc import Callable
 from pathlib import Path
 
 from orchestrator import autonomous_builder as ab
-from orchestrator import stage_services
+from orchestrator import stage_services, mall_control
 from orchestrator.bootstrap_district import BootstrapDistrictLedger
 from orchestrator.bootstrap_work import BootstrapWorkLedger
-from orchestrator.game_bridge import GameBridge
+from orchestrator.game_bridge import GameBridge, load_json
+from planners.sandbox_infrastructure import build_layout_authorization
+from planners.plan_validation import validate_build_plan
 from orchestrator.material_reservations import MaterialReservationLedger, set_active_material_ledger
 from orchestrator.work_state import WorkStateSignal
 from tools.rcon_client import RconClient
@@ -44,6 +46,8 @@ SUBMITTING_OPERATIONS = {"starter", "foundation", "extend"}  # their layout is s
 
 def receipt(operation: str, params: dict, result: object) -> dict:
     """A normal return as a typed receipt: ``ok`` only when the operation's own postcondition holds."""
+    if operation == "raise_stock_gate":
+        return {"operation": operation, "params": params, **result}
     if operation in PRODUCING_OPERATIONS:
         code = "producing" if result is not None else "prerequisite_advanced"
     elif operation in SUBMITTING_OPERATIONS:
@@ -82,6 +86,7 @@ class DeterministicSession:
         self.episode_id = f"laya-{root.name}"
         self.reference_point = reference_point
         self.emit = emit
+        self.stock_networks = lambda: None
         ab._BOOTSTRAP_DISTRICT_LEDGER = BootstrapDistrictLedger(
             self.script_output, episode_id=self.episode_id, surface=SURFACE, force=FORCE, bootstrap_profile=PROFILE)
         ab._MATERIAL_RESERVATION_LEDGER = MaterialReservationLedger(
@@ -133,6 +138,10 @@ class DeterministicSession:
                                                                 stock_target=max(1, int(stock_target))),
             # Finish a submitted refinery and retire its plate's starter once the refinery delivers.
             "retire_starter": self._retire_starter,
+            "raise_stock_gate": lambda item, preview: mall_control.execute_raise(
+                item, preview, observe=self._stock_control_observation,
+                submit=self._submit_stock_gate,
+                floors=ab._MALL_STOCK_GATE_FLOORS),
             # Roboport chain toward a position (construction or logistic reach).
             "coverage": lambda x, y, purpose="construction": stage_services.extend_roboport_coverage(
                 c, b, SURFACE, FORCE, (x, y), emit, purpose=purpose),
@@ -157,7 +166,8 @@ class DeterministicSession:
                        "message": str(signal)[:500]}
         else:
             outcome = receipt(operation, params, result)
-        self._maintain_mall()
+        if operation != "raise_stock_gate":
+            self._maintain_mall()
         return outcome
 
     def _maintain_mall(self) -> None:
@@ -184,7 +194,7 @@ class DeterministicSession:
                                if project.reserved.get(i, 0) < n}
                     projects[project.project_id] = {"state": project.state, "reserved": dict(project.reserved),
                                                   "missing": missing, "target_item": project.target_item,
-                                                  "required": dict(project.required)}
+                                                  "required": dict(project.required), "active": True}
         slots = {"capacity": None, "unlimited": None, "occupied": None, "free": None,
                  "scope": None, "includes_ghosts": True}
         independent = None
@@ -234,7 +244,32 @@ class DeterministicSession:
                               "completed_step_targets": dict(loan.completed_step_targets)})
         except Exception:
             loans = None
-        return {"version": 1, "projects": projects, "loans": loans, "slots": slots}
+        try:
+            cells = mall_control.observe_cells(self.client, self.script_output, SURFACE, FORCE,
+                                               self.reference_point, ab._MALL_RECIPE_ANCHORS)
+        except Exception:
+            cells = None
+        try:
+            from orchestrator.configuration_preconditions import supports_configuration_preconditions
+            guarded_configuration = supports_configuration_preconditions(self.client)
+        except Exception:
+            guarded_configuration = None
+        return {"version": 1, "projects": projects, "loans": loans, "slots": slots, "cells": cells,
+                "guarded_configuration": guarded_configuration}
+
+    def _submit_stock_gate(self, plan: dict, name: str) -> dict:
+        # Use the shared validator/authorization/bridge submission without the
+        # construction wrapper's clutter, pole relocation or ledger side effects.
+        validate_build_plan(plan)
+        authorization = build_layout_authorization([(name, plan)])
+        report = load_json(self.bridge.build_layout(authorization, plan))
+        if not report.get("ok"):
+            raise ValueError(str(report)[:200])
+        return report
+
+    def _stock_control_observation(self) -> dict:
+        from training.laya_ops_runner import economics_observation
+        return economics_observation(self.economics(), self.stock_networks())
 
     def acceptance(self) -> dict:
         """The deterministic runtime's own milestone predicates (orchestrator/checkpoint_milestones.py) on the
