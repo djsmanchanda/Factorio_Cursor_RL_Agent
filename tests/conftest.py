@@ -125,6 +125,7 @@ _SOURCE_TRIPWIRE_NODE_FRAGMENTS = {
 # owns one episode. Tests exercise many episodes in one interpreter, so restore
 # their pre-test contents explicitly instead of depending on collection order.
 _ISOLATED_MUTABLE_STATE = {
+    "planners.recipe_data": ("LINE_RECIPES",),
     "orchestrator.autonomous_builder": (
         "_STAGE_DELIVERY_PROVIDERS",
         "_REFINERY_SITE_RESERVATIONS",
