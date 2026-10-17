@@ -327,3 +327,8 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - What: AGENTS.md names T3 MCP delegate_task/task_status, requires discovering both before delegation, prohibits native collaboration tools in T3 and falls back to direct reading when tools are missing.
 - Evidence: reviewed documentation diff and whitespace checks pass. Isolated managed Codex 0.162.0 requests confirmed the upstream two flags retain native tools while adding agents.enabled=false removes them; normal inference completed in both arms. Required fast gate again stopped with 285 collection errors, including saved-run import collisions under data/; log: /tmp/factorio-t3-explicit-tools-fast-20261015.log. T3-owned delegation remains untested because its tools are unavailable here.
 - Lifecycle: instructions only; new sessions load the charter. No T3 runtime patch, runner restart, mod deployment or Factorio restart performed or required for this documentation change.
+
+## [2026-10-17 09:37 IST] Reset: prerequisite choices and demand-driven observations
+- What: Named prerequisite handoffs become selectable outside the proxy phase and shortage menu cap; current parent outcomes retire old handoffs. Enabled goal production and recipe/item counters follow live demand and its ingredient closure. No rule weights changed.
+- Evidence: 66 focused tests pass, including Lua observation behavior; fast gate 963 pass / 1 skip / 1 inherited import-firewall failure. Offline only.
+- Lifecycle: use the reset branch for new disposable runners; observation Lua travels through the adapter. No deployment, restart or campaign modification performed. Earlier recovered mod changes still require staging from frozen code before live evaluation.

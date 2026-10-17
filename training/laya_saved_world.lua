@@ -16,7 +16,7 @@ end
 local facts = {version="saved-world-v1", tick=game.tick, surface="nauvis", force="player",
   mods=script.active_mods, networks={}, ports={}, poles={}, machines={}, resources={},
   player_stock={}, production={}, consumption={}, researched={}, pending_ghosts=0,
-  infrastructure_counts={}, recipes={}}
+  infrastructure_counts={}, recipes={}, enabled_recipes={}}
 local generation = {}
 for _, e in pairs(surface.find_entities_filtered{force=force}) do
   facts.infrastructure_counts[e.name]=(facts.infrastructure_counts[e.name] or 0)+1
@@ -77,12 +77,25 @@ local recipe_names={"iron-plate","copper-plate","stone-brick","steel-plate","iro
   "electronic-circuit","transport-belt","inserter","long-handed-inserter","medium-electric-pole",
   "assembling-machine-1","electric-mining-drill","electric-furnace","requester-chest","passive-provider-chest",
   "roboport","pipe","underground-belt","splitter","assembling-machine-2","chemical-plant","oil-refinery","pumpjack"}
-for _, name in ipairs(recipe_names) do
+-- Query observed demand and its enabled item-recipe closure, including recipes machines already use.
+-- Fluid recipes are enabled capabilities, but stay out of the solid-only geometry recipe map.
+local seen={}
+for _,name in ipairs(recipe_names) do seen[name]=true end
+local function include(name)
+  if name and not seen[name] then seen[name]=true; table.insert(recipe_names,name) end
+end
+for _,name in ipairs(request.extra_recipes or {}) do include(name) end
+for _,machine in ipairs(facts.machines) do include(machine.recipe) end
+local index=1
+while index<=#recipe_names do
+  local name=recipe_names[index]; index=index+1
   local r=force.recipes[name]
   if r and r.enabled then
+    facts.enabled_recipes[name]=true
     local ingredients={}; local solid=true
     for _, part in pairs(r.ingredients) do
       if part.type=="fluid" then solid=false end
+      if part.type=="item" then include(part.name) end
       table.insert(ingredients,{name=part.name,amount=part.amount})
     end
     if solid then
@@ -97,7 +110,9 @@ for _, name in ipairs({"iron-ore","copper-ore","coal","stone"}) do
   facts.production[name]=stats.get_input_count(name); facts.consumption[name]=stats.get_output_count(name)
 end
 for _,name in ipairs(recipe_names) do
-  facts.production[name]=stats.get_input_count(name); facts.consumption[name]=stats.get_output_count(name)
+  if prototypes.item[name] then
+    facts.production[name]=stats.get_input_count(name); facts.consumption[name]=stats.get_output_count(name)
+  end
 end
 local bounds=request.bounds
 -- Survey generated terrain only. No fixture, resource or item creation.

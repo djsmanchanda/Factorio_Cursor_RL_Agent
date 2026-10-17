@@ -47,7 +47,9 @@ Fast suite on the branch: only the inherited import-firewall failure.
 
 ## Next work on this branch (P0/P1, fresh-start plastic slice)
 
-1. **Rung as world count.** A rotating chemical-ladder rung is satisfied when the world holds its target (physical stock, including reserved, plus placed entities). The latch is not used.
-2. **Named prerequisites become options.** An outcome that names the prerequisite it waits on (for example `chemical_capability_handoff` with `rung`) puts `produce <prerequisite>` on the menu whatever the proxy phase. Replay: day control-s76403, where one chest was handed off 125 times and no plastic option was ever offered.
-3. **Recipe and production facts from goals and observed demand,** not a fixed list.
+1. **Done (`c8b6d5a`): rung as world count.** A rotating chemical-ladder rung is satisfied when the world holds its target (physical stock, including reserved, plus placed entities). The latch is not used.
+2. **Implemented: named prerequisites become options.** The latest typed handoff per parent puts `produce <prerequisite>` on the menu whatever the proxy phase and outside the four-shortage limit. A newer parent outcome retires the handoff. Quantified prerequisites use a fixed absolute level; unquantified rungs request capability establishment, leaving admission and batch sizing to the toolkit. No policy weights changed. Replay: day control-s76403, where one chest was handed off 125 times and no plastic option was ever offered.
+3. **Implemented: recipe and production facts from goals and observed demand.** Queries include mission targets, outstanding shortages/prerequisites, project missing items and machine recipes, then expand enabled item ingredients. Fluid recipes have enabled-capability facts and item counters while remaining outside the solid geometry map. Disabled goals are not offered. The original geometry bootstrap list remains compatible; later goals need no list additions.
 4. **Fresh-start validation.** Require newly produced **and delivered** plastic (strict C4), then C5 sustained service, before any policy experiment.
+
+Continuation verification (October 17, 2026, 09:37 IST): 66 focused runner/adapter checks pass, including Lua observation behavior. Fast gate: 963 pass, 1 skip, inherited import-firewall failure (four existing stage imports). These are offline results; no campaign, deployment or live runtime changed. New runners must use this checkout; the observation Lua is sent by the Python adapter, not deployed as a mod.

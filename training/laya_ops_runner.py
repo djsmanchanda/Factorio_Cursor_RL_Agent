@@ -31,7 +31,7 @@ from training.laya_clean_runner import (ROOT, Settings, _append, _goal_gap, _sta
                                         _write_status, rolling_measurement)
 from training.laya_factory_status import STATUS_BUCKETS, compact_status, compile_status
 from training.laya_mall_slots import obtainable
-from training.laya_mission import current_phase, phase_reached
+from training.laya_mission import PHASES, current_phase, phase_reached
 
 PLATES = {"iron-plate": "iron-ore", "copper-plate": "copper-ore", "stone-brick": "stone"}
 # The tooling is already making it (a mall batch or loan in progress, a borrow queued): wait, and it is progress.
@@ -156,6 +156,40 @@ def shortage_levels(results: list[dict]) -> dict[str, int]:
             if missing > 0:
                 levels[item] = max(levels.get(item, 0), int(r["stock_at"].get(item, 0)) + missing)
     return levels
+
+
+def named_prerequisites(results: list[dict]) -> dict[str, dict]:
+    """Outstanding typed handoffs, retired by the parent's next outcome, independent of proxy phase.
+
+    A rung without a quantity names a capability to establish, not a claim that one item pays its bill.
+    The toolkit retains its recipe/geometry admission and internal batch sizing.
+    """
+    latest = {_key(r): r for r in results}
+    demands: dict[str, dict] = {}
+    for key, r in latest.items():
+        if r.get("ok") or r.get("code") not in {"chemical_capability_handoff", "rotating_mall_prerequisite_handoff"}:
+            continue
+        details = r.get("details") or {}
+        item = details.get("rung") or details.get("prerequisite")
+        if not isinstance(item, str) or not item or item == key[1]:
+            continue
+        quantity = details.get("required")
+        target = int(quantity) if isinstance(quantity, (int, float)) and quantity > 0 else None
+        demand = demands.setdefault(item, {"target": 1, "capability": False, "parents": []})
+        demand["target"] = max(demand["target"], target or 1)
+        demand["capability"] |= target is None
+        demand["parents"].append(f"{key[0]}:{key[1]}")
+    return demands
+
+
+def recipe_demand(results: list[dict], economics: Mapping | None = None) -> tuple[str, ...]:
+    """Prototype queries follow mission data and outstanding work; no phase-specific recipe whitelist."""
+    items = {item for phase in PHASES for item in phase["targets"]}
+    items.update(shortages(results))
+    items.update(named_prerequisites(results))
+    for project in ((economics or {}).get("projects") or {}).values():
+        items.update(project.get("missing") or {})
+    return tuple(sorted(items))
 
 
 RECENT = 8  # decisions kept verbatim in the history; older ones survive only in the per-operation summary
@@ -369,7 +403,7 @@ def saturated_feedstock(machines: list[Mapping], recipes: Mapping, stock: Mappin
 
 def compile_options(board: Mapping, results: list[dict], tick: int | None = None, recipes: Mapping | None = None,
                     stock: Mapping[str, int] | None = None, machines: list[Mapping] | None = None,
-                    growable: tuple[str, ...] = ()) -> dict:
+                    growable: tuple[str, ...] = (), enabled_recipes: Mapping | None = None) -> dict:
     """Operations worth offering now, each tagged with the need it serves and the facts rules weigh."""
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
     goal = {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
@@ -442,21 +476,41 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     producible = {i: m for i, m in short.items() if plates_in(i, recipes or {}) <= started
                   and obtainable(recipes, i, stock or {})} if recipes else short
     levels = shortage_levels(results)
-    for item, missing in (sorted(producible.items(), key=lambda kv: -kv[1])[:MAX_PRODUCE] if slots else ()):
+    demands = {item: {"target": levels.get(item, int((stock or {}).get(item, 0)) + missing),
+                      "missing": missing, "capability": False, "parents": []}
+               for item, missing in (sorted(producible.items(), key=lambda kv: -kv[1])[:MAX_PRODUCE] if slots else ())}
+    # Typed prerequisites must remain selectable even when four larger construction shortages exist.
+    # They can establish upstream capability that obtainable() cannot yet prove (e.g. plastic before oil).
+    for item, demand in named_prerequisites(results).items():
+        if item in PLATES or not plates_in(item, recipes or {}) <= started:
+            continue
+        if enabled_recipes is not None and not enabled_recipes.get(item):
+            continue
+        existing = demands.setdefault(item, {**demand, "missing": 0})
+        existing.update(target=max(existing["target"], demand["target"]),
+                        capability=demand["capability"], parents=demand["parents"])
+    for need in board["needs"]:
+        item = need["item"]
+        if (item in goal and item not in PLATES and need["condition"] in {"unbuilt", "recipe_unavailable"}
+                and (enabled_recipes or recipes or {}).get(item) and plates_in(item, recipes or {}) <= started):
+            demand = demands.setdefault(item, {"target": 1, "missing": 0, "parents": []})
+            demand["capability"] = True
+    for item, demand in demands.items():
         # The tooling's stock_target is a network level (the mall's stock gate), not a delta: asking for the
         # bare shortage gated a drill cell at 4 while the network held 6 and the starter needed 8.
         have = int((stock or {}).get(item, 0))
-        target = levels.get(item, have + missing)
-        if have >= target and item in levels:
+        target, missing = demand["target"], demand["missing"]
+        if have >= target and not demand["capability"]:
             continue  # Made since the failure: retrying the blocked operation is the next step, not more stock.
         options.append({
             "option_id": f"op.produce.{item}", "family": "produce", "product": item, "need_id": f"stock:{item}",
             "summary": f"produce {item} (short {missing})", "params": {"item": item, "stock_target": target},
             # Items a goal plate's operation is blocked on serve that goal.
             "features": {"last_code": codes.get(("produce", item), "new"), "shortage": missing,
+                         "prerequisite_for": sorted(demand["parents"]),
                          "waiting": in_progress(codes.get(("produce", item))),
                          "unchanged_failure": ("produce", item) in stuck, "batch_active": batch_active,
-                         "goal_need": bool(sources.get(item, set()) & goal)}})
+                         "goal_need": item in goal or bool(sources.get(item, set()) & goal)}})
     # A feedstock producer at its limit (live 2026-10-15: one gear AM1 behind every belt, inserter and drill).
     for item, fact in saturated_feedstock(machines or [], recipes or {}, stock or {}, growable).items():
         if any(r["operation"] == "grow" and (r.get("params") or {}) == {"item": item, "machines": fact["machines"]}
@@ -549,6 +603,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         if should_stop():
             summary["stop"] = "stopped"
             break
+        economics = session.economics() if hasattr(session, "economics") else None
+        adapter.extra_recipes = recipe_demand(results, economics)
         facts = adapter.query()
         samples.append((facts["tick"], dict(facts["production"]), dict(facts["consumption"])))
         measurement = rolling_measurement(samples, settings.rate_window_ticks) or measurement
@@ -577,9 +633,9 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         for network in (facts.get("networks") or {}).values():
             for name, count in (network.get("items") or {}).items():
                 stock[name] = stock.get(name, 0) + int(count)
-        economics = session.economics() if hasattr(session, "economics") else None
         menu = with_economics(compile_options(board, results, facts["tick"], facts.get("recipes"), stock,
-                                              facts.get("machines"), getattr(session, "growable", ())),
+                                              facts.get("machines"), getattr(session, "growable", ()),
+                                              enabled_recipes=facts.get("enabled_recipes")),
                               results, economics)
         reserved: Counter = Counter()
         for project in ((economics or {}).get("projects") or {}).values():

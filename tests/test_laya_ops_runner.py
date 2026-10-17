@@ -411,3 +411,67 @@ def test_an_advancing_batch_survives_the_stall_detector_and_an_unchanged_one_doe
                             measure_ticks=600, seed=3, run_id=f"t{step}", session=_BatchSession(step))["stop"]
     assert stop(step=4) == "decision_budget"  # crafting toward its bill: not stalled
     assert stop(step=0) == "stalled"  # an unchanged batch keeps nothing alive
+
+
+def test_named_prerequisites_are_choices_outside_the_phase_and_shortage_limit():
+    # Day control-s76403 handed one chest off to plastic 125 times in C2 without a plastic choice.
+    handoff = {"ok": False, "operation": "produce", "params": {"item": "passive-provider-chest"},
+               "code": "chemical_capability_handoff", "details": {"rung": "plastic-bar"}}
+    results = [{"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}},
+               dict(SHORT, details={"required": {f"part-{n}": 100 for n in range(5)}}), handoff]
+    options = {o["option_id"]: o for o in compile_options(BOARD, results)["options"]}
+    plastic = options["op.produce.plastic-bar"]
+    assert plastic["params"] == {"item": "plastic-bar", "stock_target": 1}
+    assert plastic["features"]["prerequisite_for"] == ["produce:passive-provider-chest"]
+    assert len([o for o in options.values() if o["family"] == "produce"]) == 5
+    # The parent's new result supersedes its handoff, so old prerequisites cannot accumulate forever.
+    results.append(dict(handoff, ok=True, code="producing", details=None))
+    assert "op.produce.plastic-bar" not in {o["option_id"] for o in compile_options(BOARD, results)["options"]}
+
+
+def test_named_quantity_is_an_absolute_target_and_deduplicates_other_demand():
+    handoff = {"ok": False, "operation": "produce", "params": {"item": "inserter"},
+               "code": "rotating_mall_prerequisite_handoff",
+               "details": {"prerequisite": "electronic-circuit", "required": 6}}
+    slot = {"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}}
+    def produce(stock):
+        return [o for o in compile_options(BOARD, [slot, handoff], stock=stock)["options"]
+                if o["option_id"] == "op.produce.electronic-circuit"]
+    assert produce({"electronic-circuit": 2})[0]["params"]["stock_target"] == 6
+    assert not produce({"electronic-circuit": 6})
+
+
+def test_goal_production_requires_an_enabled_recipe_and_preserves_plate_lifecycle():
+    board = {"needs": [{"item": "plastic-bar", "condition": "recipe_unavailable", "goal_required_per_s": .5}]}
+    def ids(enabled):
+        return {o["option_id"] for o in compile_options(board, [], enabled_recipes=enabled)["options"]}
+    assert "op.produce.plastic-bar" in ids({"plastic-bar": True})
+    assert "op.produce.plastic-bar" not in ids({})
+    assert "op.produce.iron-plate" not in {o["option_id"] for o in compile_options(
+        BOARD, [], enabled_recipes={"iron-plate": True})["options"]}
+
+
+def test_runner_queries_goal_and_new_prerequisite_facts_before_the_next_choice(tmp_path):
+    class DemandWorld(FakeWorld):
+        def query(self):
+            return {**super().query(), "queried": list(self.extra_recipes)}
+
+    class HandoffSession(FakeSession):
+        def run(self, operation, **params):
+            return {"ok": False, "operation": operation, "params": params,
+                    "code": "chemical_capability_handoff", "details": {"rung": "audit-part"}}
+
+    class Policy:
+        authority = "test"
+        def choose(self, state, menu):
+            if world.tick == 1000:
+                world.tick += 1
+            else:
+                assert "audit-part" in world.extra_recipes
+            assert "plastic-bar" in world.extra_recipes  # mission data, even before C4
+            option = next(o for o in menu["options"] if o["family"] != "wait")
+            return {**option, "probability": 1., "rules": [], "distribution": []}
+
+    world = DemandWorld()
+    run(world, Policy(), journal=tmp_path / "journal.jsonl", decisions=2, measure_ticks=600,
+        seed=3, run_id="facts", session=HandoffSession())

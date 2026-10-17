@@ -168,3 +168,43 @@ def test_quad_chest_inventory_settings_are_deferred_until_bot_construction():
     assert any(a.get("recipe") for a in configs)
     assert all(a["action_type"] == "configure_entity" for a in configs)
     assert original == candidate["plan"]
+
+
+@pytest.mark.lua
+def test_demand_query_expands_enabled_recipes_and_measures_fluid_recipe_items():
+    import shutil
+    import subprocess
+
+    lua = shutil.which("lua")
+    if lua is None:
+        pytest.skip("Lua interpreter required for saved-world observation")
+    source = Path("training/laya_saved_world.lua").read_text()
+    fixture = """
+local function recipe(name, ingredient, kind, enabled)
+  return {enabled=enabled, ingredients={{name=ingredient,amount=1,type=kind}},
+    products={{name=name,amount=1}}, energy=.5}
+end
+request={extra_recipes={'audit-product','plastic-bar','disabled-product','unknown-product'},
+  bounds={x_min=0,x_max_exclusive=0,y_min=0,y_max_exclusive=0}}
+local recipes={['audit-product']=recipe('audit-product','audit-input','item',true),
+  ['audit-input']=recipe('audit-input','audit-input','item',true),
+  ['plastic-bar']=recipe('plastic-bar','petroleum-gas','fluid',true),
+  ['disabled-product']=recipe('disabled-product','audit-input','item',false)}
+local stats={get_input_count=function(name) return name=='plastic-bar' and 9 or 3 end,
+  get_output_count=function() return 2 end}
+local surface={find_entities_filtered=function() return {} end}
+game={tick=100,tick_paused=true,ticks_to_run=0,surfaces={nauvis=surface},players={},
+  forces={player={recipes=recipes,technologies={},get_item_production_statistics=function() return stats end}}}
+defines={entity_status={}}; script={active_mods={}}
+prototypes={item={['audit-product']={},['audit-input']={},['plastic-bar']={},['disabled-product']={}}}
+"""
+    assertions = """
+assert(facts.recipes['audit-product'] and facts.recipes['audit-input'])
+assert(facts.enabled_recipes['plastic-bar'] and not facts.recipes['plastic-bar'])
+assert(not facts.enabled_recipes['disabled-product'] and not facts.enabled_recipes['unknown-product'])
+assert(facts.production['plastic-bar']==9 and facts.consumption['plastic-bar']==2)
+assert(facts.production['audit-input']==3)
+"""
+    result = subprocess.run([lua, "-"], input=fixture + "\nlocal facts=(function()\n" + source +
+                            "\nend)()\n" + assertions, text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
