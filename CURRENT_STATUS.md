@@ -332,3 +332,8 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - What: default pytest discovery targets tests/; frozen campaign copies remain independently verifiable from their own code roots.
 - Evidence: root discovery previously entered data/ and produced import/collection collisions; bounded fast gate collected the current suite. One preexisting import-firewall test still fails; committed HEAD independently reproduces the same four violations in laya_lines.py/laya_ops.py. No safety rule was relaxed.
 - Lifecycle: none; test configuration only.
+
+## [2026-10-18 01:38 IST] Two-machine task workspaces
+- What: added local-only task_workspace.py status/create commands and documented one explicit base SHA, branch and worktree per task. Parent work and machine-local runtime state stay separate; all synchronization/integration is explicit.
+- Evidence: nine disposable-Git integration tests pass, including dirty/staged parent preservation, collisions, literal shell characters in paths, upstream counts and hook suppression. Current host is miniship; other laptop checkout has not been inspected or configured.
+- Lifecycle: none; no remote push, machine provisioning or runtime action performed.
