@@ -581,7 +581,8 @@ local function configuration_precondition_error(surface, force, action)
     local condition = behavior.logistic_condition
     condition = condition and (condition.condition or condition)
     local signal = condition and condition.first_signal
-    if not signal or signal.type ~= "item" or signal.name ~= gate.signal
+    -- Factorio 2.1 reads item signals back without `type` (SignalID defaults to item).
+    if not signal or (signal.type ~= nil and signal.type ~= "item") or signal.name ~= gate.signal
       or (signal.quality ~= nil and signal.quality ~= "normal")
       or condition.second_signal ~= nil or condition.comparator ~= gate.comparator
       or condition.constant ~= gate.constant then return "logistic_condition_mismatch" end

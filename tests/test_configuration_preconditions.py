@@ -221,6 +221,16 @@ assert(report.wires_connected == 0)
 ''')
 
 
+def test_guard_accepts_engine_item_signal_without_type(tmp_path):
+    # Live Factorio 2.1.21 readback (2026-10-18 probe): first_signal={name="transport-belt"}, no type.
+    run_lua(tmp_path, '''
+behavior.logistic_condition.first_signal.type=nil
+execute()
+assert(report.ok == true, report.error)
+assert(behavior.logistic_condition.constant == 50)
+''')
+
+
 def test_changed_after_python_snapshot_and_before_lua_write(tmp_path):
     run_lua(tmp_path, '''
 -- The captured guard is the earlier Python snapshot; the first Lua preflight
