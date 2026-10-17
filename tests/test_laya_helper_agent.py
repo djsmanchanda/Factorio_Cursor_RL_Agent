@@ -59,7 +59,7 @@ def test_review_writes_findings_through_one_read_only_opencode_session(tmp_path,
     setup(tmp_path, monkeypatch)
     fake = tmp_path / "opencode"
     fake.write_text("#!/bin/sh\necho '{\"sessionID\": \"ses_1\"}'\nfor a; do last=$a; done\n"
-                    "echo \"$last\" > \"$(dirname \"$0\")/prompt.txt\"\n")
+                    "echo \"$last\" > \"$(dirname \"$0\")/prompt.txt\"\necho \"$@\" > \"$(dirname \"$0\")/argv.txt\"\n")
     fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setattr(helper, "OPENCODE", [str(fake)])
     report = helper.review("now")
@@ -67,6 +67,8 @@ def test_review_writes_findings_through_one_read_only_opencode_session(tmp_path,
     message = (tmp_path / "prompt.txt").read_text()
     assert "read-only" in message and "context management" in message and "fine-tuning" in message
     assert "do not edit code" in message
+    argv = (tmp_path / "argv.txt").read_text()  # OpenCode v2: variant inside the model id, no --dir/--variant flags.
+    assert "--model m#v" in argv and "--dir" not in argv and "--variant" not in argv
 
 
 def test_live_observer_checkpoints_then_reviews_in_the_same_session(tmp_path, monkeypatch):
