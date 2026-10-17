@@ -113,7 +113,7 @@ def journal_summary(journal: Path, run_id: str) -> dict:
     last = done[-1] if done else {}
     return {"decisions": len(done), "failures": sum(r.get("event") == "failure" for r in rows),
             "needs_chosen": dict(Counter(r["choice"]["need_id"] for r in done if "choice" in r)),
-            "statuses": dict(Counter(r["status"] for r in done)),
+            "statuses": dict(Counter(r["status"] for r in done if "status" in r)),  # ops journal rows carry no status
             "phases_reached": [r["phase"] for r in rows if r.get("event") == "phase_reached"],
             "failure_messages": [r.get("error", "")[:200] for r in rows if r.get("event") == "failure"][-5:],
             "final_board": last.get("board"), "final_blocked": last.get("blocked"),
