@@ -763,7 +763,7 @@ def test_split_oil_submission_reserves_later_pipe_footprints(monkeypatch) -> Non
     )
     monkeypatch.setattr(stage_chemical, "_wait_for_ghosts", lambda *_args, **_kwargs: 0)
     monkeypatch.setattr(
-        stage_chemical.live_base, "available_items",
+        stage_chemical.live_base, "transferable_items",
         lambda *_args: {"chemical-plant": 1, "landfill": 1, "pipe": 1},
     )
     machine = {"phases": [{"name": "machine", "actions": [{
@@ -802,7 +802,7 @@ def test_oil_packets_refuse_partial_submission_when_later_supply_is_missing(
         }]}]}),
     ]
     monkeypatch.setattr(
-        stage_chemical.live_base, "available_items",
+        stage_chemical.live_base, "transferable_items",
         lambda *_args: {"substation": 1, "pipe": 0},
     )
     monkeypatch.setattr(
@@ -836,7 +836,7 @@ def test_oil_power_connects_before_later_packets(monkeypatch) -> None:
         }]}]}),
     ]
     monkeypatch.setattr(
-        stage_chemical.live_base, "available_items",
+        stage_chemical.live_base, "transferable_items",
         lambda *_args: {"substation": 1, "chemical-plant": 1},
     )
     monkeypatch.setattr(

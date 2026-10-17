@@ -372,6 +372,8 @@ def test_funded_bridge_accounts_for_another_packets_unbuilt_poles(
     monkeypatch.setattr(stage_services, "active_material_ledger", lambda: ledger)
     monkeypatch.setattr(stage_services.live_base, "transferable_items", lambda *_a: stock)
     monkeypatch.setattr(stage_services, "_reservation_supply_estimates", lambda *_a: ({}, {}))
+    monkeypatch.setattr(stage_services.live_base, "plan_construction_status",
+                        lambda *_a: {"remaining": {"medium-electric-pole": 4}})
     client = SimpleNamespace(command=lambda *_a: "")
     pending = {("medium-electric-pole", (0.5, 0.5)),
                ("medium-electric-pole", (1.5, 0.5)),
@@ -2787,3 +2789,29 @@ def test_binding_loan_at_bill_yields_to_preempt(monkeypatch) -> None:
 
     assert any("PREEMPT" in message for message in messages)
     assert "RESTORED" in messages
+
+
+def test_retry_reserves_only_uninstalled_material_and_releases_a_paid_bill(monkeypatch, tmp_path):
+    ledger = _ledger(tmp_path)
+    ledger.declare("packet", {"pipe": 10}, {})
+    monkeypatch.setattr(stage_services, "active_material_ledger", lambda: ledger)
+    remaining, stock = {"pipe": 2}, {"pipe": 1}
+    monkeypatch.setattr(stage_services.live_base, "plan_construction_status", lambda *_a: {"remaining": dict(remaining)})
+    monkeypatch.setattr(stage_services.live_base, "transferable_items", lambda *_a: dict(stock))
+    monkeypatch.setattr(stage_services.live_base, "available_items", lambda *_a: {"pipe": 999})  # Other requester WIP.
+    monkeypatch.setattr(stage_services.live_base, "pending_construction_items", lambda *_a, **_k: {})
+    monkeypatch.setattr(stage_services, "_reservation_supply_estimates", lambda *_a: ({}, {}))
+    plan = {"phases": [{"actions": [{"action_type": "place_ghost", "entity": "pipe",
+                                      "position": {"x": n + .5, "y": .5}} for n in range(10)]}]}
+    client = SimpleNamespace(command=lambda _c: pytest.fail("unexpected extra survey"))
+    with pytest.raises(MaterialShortage) as error:
+        stage_services.assert_affordable(client, "nauvis", "player", plan, "packet", lambda _m: None, True)
+    assert error.value.required == {"pipe": 2} and error.value.available == {"pipe": 1}
+    assert ledger.projects["packet"].required == {"pipe": 2}
+    stock["pipe"] = 2
+    stage_services.assert_affordable(client, "nauvis", "player", plan, "packet", lambda _m: None, True)
+    assert ledger.projects["packet"].reserved == {"pipe": 2}
+    remaining.clear()
+    stock.clear()  # Bots consumed it; replay cannot demand a second copy.
+    stage_services.assert_affordable(client, "nauvis", "player", plan, "packet", lambda _m: None, True)
+    assert ledger.projects["packet"].state == "completed" and not ledger.stock_targets()

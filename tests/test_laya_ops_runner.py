@@ -475,3 +475,66 @@ def test_runner_queries_goal_and_new_prerequisite_facts_before_the_next_choice(t
     world = DemandWorld()
     run(world, Policy(), journal=tmp_path / "journal.jsonl", decisions=2, measure_ticks=600,
         seed=3, run_id="facts", session=HandoffSession())
+
+
+def test_selected_bill_exposes_missing_work_without_failure_and_retires_its_old_shortage():
+    from training.laya_ops_runner import recipe_demand
+    slot = {"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}}
+    bill = {"complete": False, "remaining": {"pipe-to-ground": 7}, "missing": {"pipe-to-ground": 3},
+            "stock_levels": {"pipe-to-ground": 7}, "replaces_shortage_stages": ["chemical_packet"]}
+    def menu(results, tx):
+        return {o["option_id"]: o for o in compile_options(BOARD, results, transactions={"oil": tx})["options"]}
+    option = menu([slot], bill)["op.produce.pipe-to-ground"]
+    assert option["params"]["stock_target"] == 7 and option["features"]["transactions"] == ["oil"]
+    assert "pipe-to-ground" in recipe_demand([], {"transactions": {"oil": bill}})
+    old = dict(SHORT, details={"stage": "chemical_packet", "required": {"pipe-to-ground": 12}, "available": {}})
+    done = dict(bill, remaining={}, missing={}, stock_levels={})
+    assert "op.produce.pipe-to-ground" not in menu([slot, old], done)
+    # An unreadable transaction cannot erase the last known shortage; another consumer keeps its own bill.
+    assert "op.produce.pipe-to-ground" in menu([slot, old], {"error": "survey failed"})
+    other = dict(old, details={**old["details"], "stage": "other_packet"})
+    assert "op.produce.pipe-to-ground" in menu([slot, other], done)
+
+
+def test_required_construction_delivery_is_progress_but_rebuild_cycles_are_bounded(tmp_path, monkeypatch):
+    import training.laya_ops_runner as runner
+    monkeypatch.setattr(runner, "STALL_TICKS", 1500)
+    class Deliveries(FakeSession):
+        def __init__(self, cycling):
+            super().__init__()
+            self.count, self.cycling = 0, cycling
+        def material_transactions(self):
+            self.count = (1 - self.count) if self.cycling else self.count + 1
+            return {"test": {"intent_sha256": "fixed", "installed": {"pipe": self.count}}}
+    for cycling in (False, True):
+        summary = run(_ClockWorld(), GuidedPolicy(3), journal=tmp_path / f"{cycling}.jsonl", decisions=20,
+                      measure_ticks=600, seed=3, run_id="delivery", session=Deliveries(cycling))
+        assert summary["stop"] == ("stalled" if cycling else "decision_budget")
+
+
+def test_selected_parent_option_carries_its_current_owned_bill():
+    from training.laya_ops_runner import with_economics
+    board = {"needs": [{"item": "plastic-bar", "condition": "unbuilt", "goal_required_per_s": .5}]}
+    tx = {"target_item": "plastic-bar", "remaining": {"pipe": 2}, "missing": {}, "stock_levels": {},
+          "complete": False, "replaces_shortage_stages": ["chemical_packet"]}
+    old = {"ok": False, "operation": "produce", "params": {"item": "plastic-bar"}, "code": "material_shortage",
+           "details": {"stage": "chemical_packet", "required": {"pipe": 10}, "available": {}}}
+    def option():
+        menu = compile_options(board, [old], enabled_recipes={"plastic-bar": True}, transactions={"oil": tx})
+        return next(o for o in with_economics(menu, [old], {"transactions": {"oil": tx}})["options"]
+                    if o["option_id"] == "op.produce.plastic-bar")
+    assert option()["bill"] == {"pipe": 2} and option()["bill_owner"] == "oil"
+    tx["remaining"] = {}
+    assert option()["bill"] == {} and option()["features"]["bill_known"]  # Known paid material bill, service still pending.
+
+
+def test_named_prerequisites_and_their_bill_items_inherit_the_consumers_goal():
+    blocked = dict(SHORT, details={"required": {"passive-provider-chest": 1}, "available": {}})
+    handoff = {"ok": False, "operation": "produce", "params": {"item": "passive-provider-chest"},
+               "code": "chemical_capability_handoff", "details": {"rung": "plastic-bar"}}
+    slot = {"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}}
+    tx = {"target_item": "plastic-bar", "missing": {"pipe": 4}, "stock_levels": {"pipe": 4}}
+    options = {o["option_id"]: o for o in compile_options(BOARD, [slot, blocked, handoff],
+                                                         transactions={"oil": tx})["options"]}
+    assert options["op.produce.plastic-bar"]["features"]["goal_need"]
+    assert options["op.produce.pipe"]["features"]["goal_need"]

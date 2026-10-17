@@ -189,7 +189,17 @@ def recipe_demand(results: list[dict], economics: Mapping | None = None) -> tupl
     items.update(named_prerequisites(results))
     for project in ((economics or {}).get("projects") or {}).values():
         items.update(project.get("missing") or {})
+    for transaction in ((economics or {}).get("transactions") or {}).values():
+        items.update(transaction.get("remaining") or {})
     return tuple(sorted(items))
+
+
+def material_results(results: list[dict], transactions: Mapping | None) -> list[dict]:
+    """A current owned remaining bill supersedes its historical shortage, never another consumer's."""
+    stages = {stage for tx in (transactions or {}).values() if not tx.get("error")
+              for stage in tx.get("replaces_shortage_stages", ())}
+    return [r for r in results if r.get("code") != "material_shortage"
+            or (r.get("details") or {}).get("stage") not in stages]
 
 
 RECENT = 8  # decisions kept verbatim in the history; older ones survive only in the per-operation summary
@@ -284,6 +294,9 @@ def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, pha
         sections["RESERVED"] = [f"{pid} {project['state']} missing "
                                 + ", ".join(f"{i} {n}" for i, n in project["missing"].items())
                                 for pid, project in (economics.get("projects") or {}).items() if project["missing"]]
+        sections["BILLS"] = [f"{tid}: " + (f"unknown ({tx['error']})" if tx.get("error") else
+                             "remaining " + str(tx.get("remaining", {})) + "; missing " + str(tx.get("missing", {})))
+                             for tid, tx in (economics.get("transactions") or {}).items()]
     sections["SINCE LAST BUILD"] = [f"{since_build(results)} decisions"]
 
     def render() -> str:
@@ -307,7 +320,7 @@ def with_economics(menu: dict, results: list[dict], economics: Mapping | None) -
     ``cell_lent``: the item's own mall cell is lent to make something else, so producing it waits on that loan.
     """
     bills = {}
-    for r in results:
+    for r in material_results(results, (economics or {}).get("transactions")):
         required = (r.get("details") or {}).get("required")
         if r.get("code") == "material_shortage" and isinstance(required, Mapping):
             bills[_key(r)] = {i: int(n) for i, n in required.items()}
@@ -318,7 +331,12 @@ def with_economics(menu: dict, results: list[dict], economics: Mapping | None) -
             continue
         params = option["params"]
         bill = bills.get((option["family"], params.get("recipe") or params.get("item")))
-        if bill:
+        for tid, transaction in ((economics or {}).get("transactions") or {}).items():
+            if (not transaction.get("error") and "remaining" in transaction
+                    and option["family"] == "produce" and params.get("item") == transaction.get("target_item")):
+                bill = transaction["remaining"]
+                option["bill_owner"] = tid
+        if bill is not None:
             option["bill"] = bill
         option["features"]["bill_known"] = bill is not None
         if option["family"] in ("produce", "mall_slot"):
@@ -403,13 +421,31 @@ def saturated_feedstock(machines: list[Mapping], recipes: Mapping, stock: Mappin
 
 def compile_options(board: Mapping, results: list[dict], tick: int | None = None, recipes: Mapping | None = None,
                     stock: Mapping[str, int] | None = None, machines: list[Mapping] | None = None,
-                    growable: tuple[str, ...] = (), enabled_recipes: Mapping | None = None) -> dict:
+                    growable: tuple[str, ...] = (), enabled_recipes: Mapping | None = None,
+                    transactions: Mapping | None = None) -> dict:
     """Operations worth offering now, each tagged with the need it serves and the facts rules weigh."""
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
     goal = {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
-    stuck = unchanged_failures(results, stock or {})
+    current_materials = material_results(results, transactions)
+    stuck = unchanged_failures(current_materials, stock or {})
     sources: dict[str, set] = {}
-    stages, codes, short = plate_stages(results), last_codes(results, tick), shortages(results, sources)
+    stages, codes, short = plate_stages(results), last_codes(results, tick), shortages(current_materials, sources)
+    prerequisites = named_prerequisites(results)
+    for item, demand in prerequisites.items():
+        sources.setdefault(item, set()).update(parent.split(":", 1)[1] for parent in demand["parents"])
+    for tx in (transactions or {}).values():
+        if not tx.get("error") and tx.get("target_item"):
+            for item in tx.get("missing", {}):
+                sources.setdefault(item, set()).add(tx["target_item"])
+    # A bill item or named prerequisite serves the same goals as the consumer it unblocks.
+    # This is dependency evidence for the existing rules, not a new recipe priority or policy weight.
+    changed = True
+    while changed:
+        changed = False
+        for parents in sources.values():
+            before = len(parents)
+            parents.update(*(sources.get(parent, set()) for parent in tuple(parents)))
+            changed |= len(parents) != before
     waiting = any(in_progress(c) for c in codes.values())
     # A mall batch or loan is under way: asking for other items makes the loans preempt each other.
     batch_active = any(in_progress(code) for (operation, _), code in codes.items() if operation in ("produce", "mall_slot"))
@@ -475,13 +511,13 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     # so plastic): its loan never finishes and blocks every other batch (chemical_capability_handoff).
     producible = {i: m for i, m in short.items() if plates_in(i, recipes or {}) <= started
                   and obtainable(recipes, i, stock or {})} if recipes else short
-    levels = shortage_levels(results)
+    levels = shortage_levels(current_materials)
     demands = {item: {"target": levels.get(item, int((stock or {}).get(item, 0)) + missing),
                       "missing": missing, "capability": False, "parents": []}
                for item, missing in (sorted(producible.items(), key=lambda kv: -kv[1])[:MAX_PRODUCE] if slots else ())}
     # Typed prerequisites must remain selectable even when four larger construction shortages exist.
     # They can establish upstream capability that obtainable() cannot yet prove (e.g. plastic before oil).
-    for item, demand in named_prerequisites(results).items():
+    for item, demand in prerequisites.items():
         if item in PLATES or not plates_in(item, recipes or {}) <= started:
             continue
         if enabled_recipes is not None and not enabled_recipes.get(item):
@@ -489,10 +525,27 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
         existing = demands.setdefault(item, {**demand, "missing": 0})
         existing.update(target=max(existing["target"], demand["target"]),
                         capability=demand["capability"], parents=demand["parents"])
+    # A persisted selected bill supplies current demand before another operation has to fail.
+    # Every missing bill item is a choice; neither proxy phase nor larger unrelated shortages hide it.
+    for tid, transaction in (transactions or {}).items():
+        if transaction.get("error") or transaction.get("complete") or not slots:
+            continue
+        for item, missing in (transaction.get("missing") or {}).items():
+            if (item in PLATES or not plates_in(item, recipes or {}) <= started
+                    or (recipes and not obtainable(recipes, item, stock or {}))
+                    or (enabled_recipes is not None and not enabled_recipes.get(item))):
+                continue
+            target = transaction["stock_levels"][item]
+            demand = demands.setdefault(item, {"target": target, "missing": missing, "capability": False,
+                                                "parents": []})
+            demand["target"] = max(demand["target"], target)
+            demand["missing"] = max(demand["missing"], missing)
+            demand.setdefault("transactions", []).append(tid)
     for need in board["needs"]:
         item = need["item"]
         if (item in goal and item not in PLATES and need["condition"] in {"unbuilt", "recipe_unavailable"}
-                and (enabled_recipes or recipes or {}).get(item) and plates_in(item, recipes or {}) <= started):
+                and ((recipes or {}) if enabled_recipes is None else enabled_recipes).get(item)
+                and plates_in(item, recipes or {}) <= started):
             demand = demands.setdefault(item, {"target": 1, "missing": 0, "parents": []})
             demand["capability"] = True
     for item, demand in demands.items():
@@ -500,7 +553,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
         # bare shortage gated a drill cell at 4 while the network held 6 and the starter needed 8.
         have = int((stock or {}).get(item, 0))
         target, missing = demand["target"], demand["missing"]
-        if have >= target and not demand["capability"]:
+        if have >= target and not demand["capability"] and not demand.get("transactions"):
             continue  # Made since the failure: retrying the blocked operation is the next step, not more stock.
         options.append({
             "option_id": f"op.produce.{item}", "family": "produce", "product": item, "need_id": f"stock:{item}",
@@ -508,6 +561,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
             # Items a goal plate's operation is blocked on serve that goal.
             "features": {"last_code": codes.get(("produce", item), "new"), "shortage": missing,
                          "prerequisite_for": sorted(demand["parents"]),
+                         "transactions": sorted(demand.get("transactions", [])),
                          "waiting": in_progress(codes.get(("produce", item))),
                          "unchanged_failure": ("produce", item) in stuck, "batch_active": batch_active,
                          "goal_need": item in goal or bool(sources.get(item, set()) & goal)}})
@@ -581,7 +635,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     measurement = None
     summary: dict = {"decisions": 0, "failures": 0, "phases_reached": reached, "stop": "decision_budget"}
     stall = {"since": 0, "best_gap": math.inf, "tick": None, "machines": 0, "missing": math.inf, "made": {},
-             "batches": {}}
+             "batches": {}, "installed": {}}
     accept = getattr(session, "acceptance", None)
 
     def check_acceptance(event: str) -> None:
@@ -635,7 +689,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                 stock[name] = stock.get(name, 0) + int(count)
         menu = with_economics(compile_options(board, results, facts["tick"], facts.get("recipes"), stock,
                                               facts.get("machines"), getattr(session, "growable", ()),
-                                              enabled_recipes=facts.get("enabled_recipes")),
+                                              enabled_recipes=facts.get("enabled_recipes"),
+                                              transactions=(economics or {}).get("transactions")),
                               results, economics)
         reserved: Counter = Counter()
         for project in ((economics or {}).get("projects") or {}).values():
@@ -653,7 +708,9 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                          {g["rule_id"] for g in rules}, economics=economics)
         state = {"brief": told,
                  "observation_digest": {"factory_status": compact, "mission_phase": phase["phase_id"],
+                                        "transactions": (economics or {}).get("transactions", {}),
                                         "saved_world": {"provider_stock": {"network": stock},
+                                                        "source_networks": facts.get("networks", {}),
                                                         "reserved_stock": {"network": dict(reserved)}}},
                  "guidelines": rules}
         choice = policy.choose(state, menu)
@@ -681,15 +738,16 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             result["stock_at"] = {item: stock.get(item, 0) for item in ((result.get("details") or {}).get("required") or {})}
         results.append(result)
         after = adapter.query()
+        after_transactions = session.material_transactions() if hasattr(session, "material_transactions") else {}
         emit(f"  OUTCOME: {'ok' if result.get('ok') else result.get('code')}"
              + (f" -- {result.get('message', '')[:200]}" if not result.get("ok") else ""))
         _training_record(records, run_id=run_id, index=index, tick=facts["tick"], phase=phase["phase_id"],
                          state=state, options=[{k: o.get(k) for k in ("option_id", "family", "need_id", "product",
-                                                                      "params", "features")} for o in menu["options"]],
+                                                                      "params", "features", "bill", "bill_owner")} for o in menu["options"]],
                          distribution=choice["distribution"], choice=choice,
                          outcome={**{k: result.get(k) for k in ("ok", "code", "classification", "state", "details",
                                                                  "message", "result")},
-                                  "ticks": after["tick"] - facts["tick"]})
+                                  "ticks": after["tick"] - facts["tick"], "material_transactions": after_transactions})
         _write_status(status_path, {"run_id": run_id, "index": index, "tick": facts["tick"], "phase": phase,
                                     "reached": reached, "board": compact, "brief": state["brief"], "choice": {**choice, "summary": chosen["summary"]},
                                     "menu": {o["option_id"]: o["summary"] for o in menu["options"]},
@@ -713,7 +771,13 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         batches = session.active_batch_crafts() if hasattr(session, "active_batch_crafts") else {}
         advancing = batch_advanced(stall["batches"], batches)
         stall["batches"] = batches
-        progressed = (machines > stall["machines"] or missing < stall["missing"] or crafted or advancing
+        installed = {(tid, tx["intent_sha256"]): sum(tx["installed"].values())
+                     for tid, tx in after_transactions.items() if not tx.get("error") and "installed" in tx}
+        delivered = batch_advanced(stall["installed"], installed)
+        # Keep a high-water mark per immutable intent: demolition/rebuild cycles cannot reset the guard.
+        for key, count in installed.items():
+            stall["installed"][key] = max(stall["installed"].get(key, 0), count)
+        progressed = (machines > stall["machines"] or missing < stall["missing"] or crafted or advancing or delivered
                       or gap < stall["best_gap"] * 0.95)
         stall["machines"], stall["missing"] = max(stall["machines"], machines), min(stall["missing"], missing)
         stall["best_gap"] = min(stall["best_gap"], gap)

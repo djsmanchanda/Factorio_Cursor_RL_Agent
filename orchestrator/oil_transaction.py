@@ -52,6 +52,44 @@ class OilTransactionStore:
         except (OSError, ValueError, TypeError, jsonschema.ValidationError) as error:
             raise OilTransactionError(f"Invalid oil transaction {self.path}: {error}") from error
 
+    def material_facts(self, client, ledger=None) -> dict | None:
+        """Read the selected packet bill without replanning, advancing or certifying service completion.
+
+        Installed placements credit only this immutable manifest. Requester/buffer WIP cannot fund it;
+        packet reservations are its own claims, while other projects and ghosts retain their claims.
+        """
+        from orchestrator import live_base
+
+        transaction = self.load()
+        if transaction is None:
+            return None
+        base = {"identity": dict(self.identity), "intent_sha256": transaction["intent_sha256"],
+                "target_item": transaction["intent"]["target_output"], "complete": transaction["complete"]}
+        packet_ids = [name for name, _packet in transaction["intent"]["packets"]]
+        base["packet_ids"] = packet_ids
+        base["replaces_shortage_stages"] = ["chemical_oil_cell_packets", *packet_ids,
+                                            *(f"{name}_foundation" for name in packet_ids)]
+        if transaction["complete"]:
+            return {**base, "remaining": {}, "missing": {}, "stock_levels": {}}
+        packets = transaction["intent"]["packets"]
+        plan = {"phases": [phase for _name, packet in packets for phase in packet["phases"]]}
+        observed = live_base.plan_construction_status(client, self.identity["surface"], self.identity["force"], plan)
+        stock = live_base.transferable_items(client, self.identity["surface"], self.identity["force"])
+        owned = tuple((a["entity"], (a["position"]["x"], a["position"]["y"]))
+                      for phase in plan["phases"] for a in phase["actions"]
+                      if a.get("action_type") in {"place_entity", "place_ghost"})
+        pending = live_base.pending_construction_items(
+            client, self.identity["surface"], self.identity["force"], exclude=owned)
+        uncommitted = {item: max(0, count - pending.get(item, 0)) for item, count in stock.items()}
+        claimants = {name for name, _packet in packets} | {f"{name}_foundation" for name, _packet in packets}
+        available = ledger.allocatable_stock(uncommitted, claimants=claimants) if ledger else uncommitted
+        missing = {item: count - available.get(item, 0) for item, count in observed["remaining"].items()
+                   if count > available.get(item, 0)}
+        return {**base, **observed,
+                "transferable_stock": stock, "available_to_owner": available,
+                "foreign_pending": pending, "missing": missing,
+                "stock_levels": {item: stock.get(item, 0) + count for item, count in missing.items()}}
+
     def save(self, intent: dict, *, complete: bool) -> None:
         # Normalize tuples before comparing, and reject replacement after submission.
         intent = json.loads(_encoded(intent))

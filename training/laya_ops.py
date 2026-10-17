@@ -197,7 +197,21 @@ class DeterministicSession:
                      for loan in active_bootstrap_loans(self.client, SURFACE, FORCE)]
         except Exception:  # A failed survey is an unknown, never "no loans".
             loans = None
-        return {"projects": projects, "loans": loans}
+        return {"projects": projects, "loans": loans, "transactions": self.material_transactions()}
+
+    def material_transactions(self) -> dict:
+        """Current material delivery facts for selected immutable transactions; unknown stays explicit."""
+        from orchestrator.oil_transaction import OilTransactionStore
+        transactions = {}
+        store = OilTransactionStore.for_bridge(self.bridge, SURFACE, FORCE)
+        if store is not None:
+            try:
+                oil = store.material_facts(self.client, ab._MATERIAL_RESERVATION_LEDGER)
+                if oil is not None:
+                    transactions["opening_oil"] = oil
+            except Exception as error:  # An unreadable bill is unknown, never paid or permission to re-site.
+                transactions["opening_oil"] = {"error": f"{type(error).__name__}: {error}"[:200]}
+        return transactions
 
     def acceptance(self) -> dict:
         """The deterministic runtime's own milestone predicates (orchestrator/checkpoint_milestones.py) on the

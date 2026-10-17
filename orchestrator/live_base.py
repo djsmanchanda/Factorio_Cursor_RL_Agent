@@ -2018,6 +2018,56 @@ def pending_construction_items(
     return {name: int(count) for name, count in (part.split('=') for part in raw.split(',') if part)}
 
 
+def plan_construction_status(
+    client: RconClient, surface: str, force: str, plan: Mapping,
+) -> dict[str, dict[str, int]]:
+    """Exact selected-plan placements: installed material, pending ghosts and unplaced work.
+
+    Adapted from the queue branch's unbuilt_plan_items observation (0a50565), with tile support,
+    duplicate-placement reconciliation and strict reply validation. A ghost is never delivered credit.
+    """
+    placements = {}
+    for phase in plan.get("phases", ()):
+        for action in phase.get("actions", ()):
+            kind = action.get("action_type")
+            if kind not in {"place_entity", "place_ghost", "place_tile_ghost"}:
+                continue
+            tile = kind == "place_tile_ghost"
+            name = action["tile" if tile else "entity"]
+            x, y = action["position"]["x"], action["position"]["y"]
+            placements[(tile, name, x, y)] = {"tile": tile, "name": name, "x": x, "y": y}
+    if not placements:
+        return {key: {} for key in ("required", "installed", "pending", "unplaced", "remaining")}
+    payload = json.dumps(list(placements.values()), separators=(",", ":"), allow_nan=False)
+    lua = (
+        f"local s=game.surfaces[{json.dumps(surface)}];local f=game.forces[{json.dumps(force)}];"
+        "local out={};for _,a in ipairs(helpers.json_to_table(" + json.dumps(payload) + ")) do "
+        "local p={x=a.x,y=a.y};local state='unplaced';"
+        "if a.tile then if s.get_tile(p).name==a.name then state='installed' "
+        "elseif #s.find_entities_filtered{type='tile-ghost',ghost_name=a.name,position=p,force=f}>0 "
+        "then state='pending' end else "
+        "for _,e in pairs(s.find_entities_filtered{name=a.name,position=p,radius=0.05,force=f}) do "
+        "if e.type~='entity-ghost' and math.abs(e.position.x-a.x)<0.01 "
+        "and math.abs(e.position.y-a.y)<0.01 then state='installed';break end end;"
+        "if state~='installed' and #s.find_entities_filtered{type='entity-ghost',ghost_name=a.name,"
+        "position=p,radius=0.05,force=f}>0 then state='pending' end end;"
+        "out[#out+1]=state end;rcon.print(helpers.table_to_json(out))"
+    )
+    try:
+        states = json.loads(_sc(client, lua))
+    except (ValueError, TypeError) as error:
+        raise TelemetryError("unreadable selected-plan construction survey") from error
+    if (not isinstance(states, list) or len(states) != len(placements)
+            or any(state not in {"installed", "pending", "unplaced"} for state in states)):
+        raise TelemetryError("incomplete selected-plan construction survey")
+    result = {key: {} for key in ("required", "installed", "pending", "unplaced", "remaining")}
+    for action, state in zip(placements.values(), states, strict=True):
+        name = action["name"]
+        for key in ("required", state) + (() if state == "installed" else ("remaining",)):
+            result[key][name] = result[key].get(name, 0) + 1
+    return result
+
+
 def stock_capped_mall_positions(client: RconClient, surface: str, force: str, recipe: str) -> list[Point]:
     """Real powered assemblers deliberately stopped by a satisfied item cap."""
     lua = (

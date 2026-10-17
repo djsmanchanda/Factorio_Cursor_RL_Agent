@@ -276,8 +276,9 @@ def _submit_oil_cell_packets(
     reserved = planned_footprint_tiles(future) | {
         tuple(tile) for tile in future.get("reserved_tiles", ())
     }
-    required = _ghost_materials(future)
-    available = live_base.available_items(client, surface, force)
+    required = (live_base.plan_construction_status(client, surface, force, future)["remaining"]
+                if hasattr(client, "command") else _ghost_materials(future))
+    available = live_base.transferable_items(client, surface, force)
     unscheduled = {
         item: count for item, count in required.items()
         if available.get(item, 0) < count

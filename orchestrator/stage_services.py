@@ -418,8 +418,14 @@ def assert_affordable(
     ``reservation_priority`` lets an upstream construction capability retain
     finite stock ahead of downstream or concurrent projects.
     """
-    required = _ghost_materials(plan)
+    # Replaying an owned plan owes only placements that do not yet exist. Charging its original
+    # full bill again after bots consumed it can manufacture a second copy of every installed part.
+    required = (live_base.plan_construction_status(client, surface, force, plan)["remaining"]
+                if hasattr(client, "command") else _ghost_materials(plan))
     if not required:
+        ledger = active_material_ledger()
+        if ledger is not None:
+            ledger.complete(name)
         return
     # Requester/buffer contents are already committed work-in-progress. They
     # cannot revive construction ghosts or be moved into a stage provider, so
