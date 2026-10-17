@@ -53,3 +53,22 @@ The two-machine Git helper and workflow are in tools/task_workspace.py and
 Future runs need fresh frozen code; no server, mod or save action was performed.
 Next: user-requested Luna log review, then choose substantial independent
 workstreams with explicit file ownership and a shared commit SHA.
+
+## Mall economics integrated (2026-10-18, 01:52 IST)
+
+The ops decision digest and bounded brief now expose read-only slot headroom,
+reservation ownership, network plate stock and observed loan progress. See
+[Laya mall economics](Laya_Mall_Economics.md). 67 focused checks pass; the fast
+gate retains its single baseline import-firewall failure. No live improvement
+is established. Explicit gate/reclaim operations remain future work.
+
+Luna's raw-log recheck corrects the earlier normal-run description: seed 76900
+reached proxy C0 at +95s and C1 at +277s, then stalled toward C2 at +581s.
+Strict acceptance passed C0/C1; C2/C3/C4/C6 failed, and C5 was unknown.
+The missing-breaking-option judgment is 88/113 known, with five additional
+unknown judgments out of 118. Helper evidence is not an adoption result.
+
+The shared source branch is work/miniship/laya-resume-20261018. STARSHIP is the
+other laptop, but its SSH endpoint refuses connections and Miniship's T3
+read/send tools return thread_not_found for its thread 221d6531-9248-440b-8c76-bffebb12851d.
+No work has been launched on that machine through this thread's tools.

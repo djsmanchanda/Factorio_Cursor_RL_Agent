@@ -204,6 +204,35 @@ def _outcome(r: Mapping) -> str:
     return (r.get("code") or "error") + (f" ({short})" if short else "")
 
 
+def economics_observation(economics: Mapping | None, networks: Mapping | None) -> dict:
+    """Project independent surveys without rebalancing or spending the material ledger.
+
+    Network stock is the saved-world logistic-network survey, not requester WIP or
+    transferable stock. Unreserved counts subtract the ledger's recorded owners;
+    they do not establish a claim's affordability or a cell's borrowability.
+    """
+    observed = {"version": 1, "projects": None, "loans": None, "slots": None, **(economics or {})}
+    stock = None
+    if isinstance(networks, Mapping) and all(isinstance(n, Mapping) and isinstance(n.get("items"), Mapping)
+                                             for n in networks.values()):
+        stock = dict(sum((Counter(n["items"]) for n in networks.values()), Counter()))
+    projects = observed.get("projects")
+    reserved = None
+    if projects is not None:
+        reserved = dict(sum((Counter(p["reserved"]) for p in projects.values()), Counter()))
+    observed["stock"] = {
+        "scope": "logistic_networks", "network": stock,
+        "reserved": reserved,
+        "unreserved": ({i: max(0, n - reserved.get(i, 0)) for i, n in stock.items()}
+                       if stock is not None and reserved is not None else None)}
+    if observed.get("loans") is not None:
+        observed["loans"] = [dict(loan, network_stock=None if stock is None else stock.get(loan["making"], 0),
+                                   remaining_to_target=None if stock is None else
+                                   max(0, loan["target"] - stock.get(loan["making"], 0)))
+                             for loan in observed["loans"]]
+    return observed
+
+
 def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, phase_ticks: Mapping[str, int],
           start_tick: int, rules: set[str] = frozenset(), limit: int = BRIEF_CHARS,
           economics: Mapping | None = None) -> str:
@@ -249,13 +278,41 @@ def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, pha
             tried[name] = [attempts, r.get("code") or ("ok" if r.get("ok") else "error")]
     sections["TRIED"] = [f"{name} {n}x last {code}" for name, (n, code) in tried.items()]
     if economics is not None:
+        value = lambda n: "?" if n is None else str(n)
         loans = economics.get("loans")
         sections["MALL"] = (["loans unknown (survey failed)"] if loans is None else
                             [f"{loan['lender']} cell lent to make {loan['making']} (to {loan['target']})" for loan in loans]
                             or ["no loans"])
-        sections["RESERVED"] = [f"{pid} {project['state']} missing "
-                                + ", ".join(f"{i} {n}" for i, n in project["missing"].items())
-                                for pid, project in (economics.get("projects") or {}).items() if project["missing"]]
+        # Keep the old loan vocabulary while adding identity and measured stock progress.
+        if loans:
+            sections["MALL"] = [text + (f" owner={loan['owner']} step={loan.get('current_recipe')}"
+                                       f" network={value(loan.get('network_stock'))}/{loan['target']}"
+                                       f" remaining={value(loan.get('remaining_to_target'))}"
+                                       f" crafts={value(loan.get('step_completed_crafts'))}/{value(loan.get('step_required_crafts'))}"
+                                       f" status={value(loan.get('machine_status'))}"
+                                       f" credits={loan.get('completed_step_targets', {})}"
+                                       if "owner" in loan else "")
+                                for text, loan in zip(sections["MALL"], loans)]
+        slots = economics.get("slots")
+        if slots is not None:
+            sections["SLOTS"] = [f"{slots.get('scope', 'bootstrap')} capacity="
+                                 + ("unlimited" if slots.get("unlimited") else value(slots.get("capacity")))
+                                 + f" occupied={value(slots.get('occupied'))} free={value(slots.get('free'))}"
+                                   " (committed incl ghosts; materials/borrowability separate)"]
+        stock = economics.get("stock")
+        if stock is not None:
+            def count(field, item):
+                values = stock.get(field)
+                return "?" if values is None else str(values.get(item, 0))
+            sections["STOCK"] = [f"{item} network={count('network', item)} reserved={count('reserved', item)}"
+                                 f" unreserved={count('unreserved', item)}"
+                                 for item in ("iron-plate", "copper-plate")]
+        projects = economics.get("projects")
+        sections["RESERVED"] = (["owners unknown"] if projects is None else
+                                [f"{pid} {project['state']} missing "
+                                 + (", ".join(f"{i} {n}" for i, n in project["missing"].items()) or "none")
+                                 + " reserved " + (", ".join(f"{i} {n}" for i, n in project["reserved"].items()) or "none")
+                                 for pid, project in projects.items()] or ["no active owners"])
     sections["SINCE LAST BUILD"] = [f"{since_build(results)} decisions"]
 
     def render() -> str:
@@ -265,9 +322,22 @@ def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, pha
             lines.append(f"{name}{' [' + ', '.join(tags) + ']' if tags else ''}: {' | '.join(entries) or 'none yet'}")
         return "\n".join(lines)
     # Over budget: drop the least recent attempts summary first, then the oldest major change and recent move.
-    trim = ("TRIED", "RESERVED", "MAJOR", "RECENT")
+    trim = ("TRIED", "MAJOR", "RECENT")
     while len(text := render()) > limit and any(sections.get(k) for k in trim):
         next(sections[k] for k in trim if sections.get(k)).pop(0)
+    # Economic lists can grow independently of history. Mark omitted entries and
+    # bound even unusually long names/bills; never silently claim complete coverage.
+    for name in ("MALL", "RESERVED"):
+        omitted = 0
+        while len(text := render()) > limit and len(sections.get(name, [])) > 1:
+            sections[name].pop()
+            omitted += 1
+        if omitted:
+            sections[name].append(f"+{omitted} omitted")
+    text = render()
+    if len(text) > limit:
+        marker = " … [brief truncated]"
+        return (text[:max(0, limit - len(marker))] + marker)[:max(0, limit)]
     return text
 
 
@@ -585,7 +655,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         for network in (facts.get("networks") or {}).values():
             for name, count in (network.get("items") or {}).items():
                 stock[name] = stock.get(name, 0) + int(count)
-        economics = session.economics() if hasattr(session, "economics") else None
+        economics = economics_observation(session.economics() if hasattr(session, "economics") else None,
+                                          facts.get("networks"))
         menu = with_economics(compile_options(board, results, facts["tick"], facts.get("recipes"), stock,
                                               facts.get("machines"), getattr(session, "growable", ())),
                               results, economics)
@@ -605,6 +676,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                          {g["rule_id"] for g in rules}, economics=economics)
         state = {"brief": told,
                  "observation_digest": {"factory_status": compact, "mission_phase": phase["phase_id"],
+                                        "mall_economics": economics,
                                         "saved_world": {"provider_stock": {"network": stock},
                                                         "reserved_stock": {"network": dict(reserved)}}},
                  "guidelines": rules}

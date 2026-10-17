@@ -347,3 +347,8 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - What: unsafe power routes return power_route_unavailable with endpoints/pole/blocked-count/reason; collisions with real infrastructure return infrastructure_collision with plan and occupant evidence. Failure classification and placement/clearing behavior are preserved.
 - Evidence: 28 service/economy tests and 74 collision/ghost/quad regressions pass. Required fast gate: 968 passed, 1 skipped, 1 preexisting import-firewall failure. No routing improvement or live recovery claimed; this fixes failure evidence only. Logs: /tmp/laya-service-{typed,regressions,fast}-20261018.log.
 - Lifecycle: no runtime action; future Python runners need fresh frozen source. No Lua deployment required.
+
+## [2026-10-18 01:52 IST] Mall capacity and loan economics observations
+- What: integrated Sol worktree's read-only economics projection: committed slot headroom, reservation owners including fully allocated bills, logistic-network plate stock, loan identity/targets/measured crafts and durable prerequisite credits. Decision digest and bounded brief retain unknown observations and distinguish headroom from affordability/borrowability.
+- Evidence: 67 focused policy/runner/economics/budget checks pass. Required fast gate: 968 passed, 1 skipped, 1 preexisting import-firewall failure. Evidence is unit and mocked runner integration only; no replay, live result or policy adoption. Logs: /tmp/laya-economics-{integrated,fast}-20261018.log.
+- Lifecycle: no runtime action; fresh frozen Python source is required in future runners. No mod redeployment or Factorio restart required for this slice.

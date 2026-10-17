@@ -173,24 +173,68 @@ class DeterministicSession:
                 self.emit(f"  {name} FAILED: {signal}")
 
     def economics(self) -> dict:
-        """What the tooling has committed: active material projects (reserved and still missing per item) and
-        live mall loans (which cell is lent to make what). ``loans`` is None when the survey fails: unknown,
-        not empty."""
+        """Read-only mall facts; failed components stay null, independently of other surveys."""
         from orchestrator.mall_bootstrap import active_bootstrap_loans
         ledger = ab._MATERIAL_RESERVATION_LEDGER
-        projects = {}
-        for project in ledger.projects.values():
-            if ledger._active(project):
-                missing = {i: n - project.reserved.get(i, 0) for i, n in project.required.items()
-                           if project.reserved.get(i, 0) < n}
-                projects[project.project_id] = {"state": project.state, "reserved": dict(project.reserved),
-                                                "missing": missing}
+        projects = None if ledger is None else {}
+        if ledger is not None:
+            for project in ledger.projects.values():
+                if ledger._active(project):
+                    missing = {i: n - project.reserved.get(i, 0) for i, n in project.required.items()
+                               if project.reserved.get(i, 0) < n}
+                    projects[project.project_id] = {"state": project.state, "reserved": dict(project.reserved),
+                                                  "missing": missing, "target_item": project.target_item,
+                                                  "required": dict(project.required)}
+        slots = {"capacity": None, "unlimited": None, "occupied": None, "free": None,
+                 "scope": None, "includes_ghosts": True}
+        independent = None
         try:
-            loans = [{"lender": loan.original_recipe, "making": loan.target_item, "target": loan.target_count}
-                     for loan in active_bootstrap_loans(self.client, SURFACE, FORCE)]
-        except Exception:  # A failed survey is an unknown, never "no loans".
+            independent = ab._independent_mall_ready(self.client, SURFACE, FORCE)
+            slots["scope"] = "demand" if independent else "bootstrap"
+            # The operational cap helper catches telemetry errors and defaults to eight.
+            # Observe its admission facts strictly here, so failure cannot become capacity.
+            advanced = independent or ab._production_started(self.client, SURFACE, FORCE, "advanced-circuit")
+            slots["capacity"] = (None if advanced else ab.DEMAND_MALL_SLOT_TARGET
+                                 if ab._dense_bootstrap_mall_enabled(self.client, SURFACE, FORCE)
+                                 else ab._PRE_ADVANCED_CIRCUIT_MALL_SLOT_TARGET)
+            slots["unlimited"] = bool(advanced)
+        except Exception:
+            pass
+        try:
+            if independent is not None:
+                survey = ab.mall_demand_slot_count if independent else ab.mall_slot_count
+                slots["occupied"] = survey(self.client, SURFACE, self.reference_point)
+                if slots["capacity"] is not None:
+                    slots["free"] = max(0, slots["capacity"] - slots["occupied"])
+        except Exception:
+            pass
+        try:
+            loans = []
+            active = active_bootstrap_loans(self.client, SURFACE, FORCE)
+            try:
+                statuses, counters = ab.live_base.machine_health(self.client, SURFACE,
+                                                                 [loan.machine_position for loan in active])
+            except Exception:
+                statuses, counters = {}, {}
+            for loan in active:
+                counter = counters.get(loan.machine_position)
+                # machine_health encodes finished crafts * 1000 plus fractional progress.
+                crafts = (int(counter // 1000) - loan.step_baseline_finished
+                          if counter is not None and loan.step_baseline_finished is not None
+                          and loan.current_recipe == loan.step_recipe else None)
+                crafts = crafts if crafts is not None and crafts >= 0 else None
+                loans.append({"lender": loan.original_recipe, "making": loan.target_item, "target": loan.target_count,
+                              "owner": ab._material_project_id(loan.target_item),
+                              "requester_position": list(loan.requester_position), "side": loan.side,
+                              "current_recipe": loan.current_recipe, "production_target": loan.production_target,
+                              "step_recipe": loan.step_recipe, "step_target": loan.step_target_count,
+                              "step_required_crafts": loan.step_required_crafts,
+                              "step_completed_crafts": crafts,
+                              "machine_status": statuses.get(loan.machine_position),
+                              "completed_step_targets": dict(loan.completed_step_targets)})
+        except Exception:
             loans = None
-        return {"projects": projects, "loans": loans}
+        return {"version": 1, "projects": projects, "loans": loans, "slots": slots}
 
     def acceptance(self) -> dict:
         """The deterministic runtime's own milestone predicates (orchestrator/checkpoint_milestones.py) on the

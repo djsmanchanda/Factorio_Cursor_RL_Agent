@@ -78,6 +78,11 @@ not increased also sets the existing `unchanged_failure` option fact; a bare
 handoff without a material snapshot does not establish that fact. This covers that failure path;
 other requester bills and lender consequences remain incomplete.
 
+The [mall economics projection](Laya_Mall_Economics.md) now records slot
+headroom, reservation owners, network plate stock and measured loan craft
+progress in the decision digest and bounded brief. These are independent
+observations; free slots do not establish affordability or borrowability.
+
 Use the [strategy document](Laya_Strategy_Guidelines.md) for preferences.
 Geometry uses `laya_mission_guidelines.json` and ranks applicable rules for its
 count limit. Ops normally uses `laya_ops_guidelines.json`, then keeps rules in
