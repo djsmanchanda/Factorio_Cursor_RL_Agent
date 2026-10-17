@@ -330,6 +330,65 @@
         "mirroring": {
          "type": "boolean",
          "description": "Physical engine mirroring around the entity facing axis; required when reflecting asymmetric fluid ports."
+        },
+        "release_cell": {
+         "type": "object",
+         "additionalProperties": false,
+         "required": [
+          "group",
+          "expected_recipe",
+          "requester",
+          "provider"
+         ],
+         "properties": {
+          "group": {
+           "type": "string",
+           "minLength": 1
+          },
+          "expected_recipe": {
+           "type": "string",
+           "minLength": 1
+          },
+          "requester": {
+           "type": "object",
+           "additionalProperties": false,
+           "required": [
+            "x",
+            "y"
+           ],
+           "properties": {
+            "x": {
+             "type": "number"
+            },
+            "y": {
+             "type": "number"
+            }
+           }
+          },
+          "provider": {
+           "type": "object",
+           "additionalProperties": false,
+           "required": [
+            "x",
+            "y"
+           ],
+           "properties": {
+            "x": {
+             "type": "number"
+            },
+            "y": {
+             "type": "number"
+            }
+           }
+          },
+          "acknowledge": {
+           "type": "boolean"
+          },
+          "restore_recipe": {
+           "type": "string",
+           "minLength": 1
+          }
+         }
         }
        },
        "allOf": [
@@ -401,6 +460,25 @@
           "required": [
            "underground_type"
           ]
+         }
+        },
+        {
+         "if": {
+          "required": [
+           "release_cell"
+          ]
+         },
+         "then": {
+          "properties": {
+           "action_type": {
+            "const": "configure_entity"
+           }
+          },
+          "not": {
+           "required": [
+            "recipe"
+           ]
+          }
          }
         }
        ]

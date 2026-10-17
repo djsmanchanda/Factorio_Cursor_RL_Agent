@@ -421,7 +421,7 @@ def test_named_prerequisites_are_choices_outside_the_phase_and_shortage_limit():
                dict(SHORT, details={"required": {f"part-{n}": 100 for n in range(5)}}), handoff]
     options = {o["option_id"]: o for o in compile_options(BOARD, results)["options"]}
     plastic = options["op.produce.plastic-bar"]
-    assert plastic["params"] == {"item": "plastic-bar", "stock_target": 1}
+    assert plastic["params"] == {"item": "plastic-bar", "stock_target": 1, "finite": False}
     assert plastic["features"]["prerequisite_for"] == ["produce:passive-provider-chest"]
     assert len([o for o in options.values() if o["family"] == "produce"]) == 5
     # The parent's new result supersedes its handoff, so old prerequisites cannot accumulate forever.

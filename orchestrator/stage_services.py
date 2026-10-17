@@ -624,7 +624,7 @@ def _submit(
         "logistic_request", "logistic_requests", "logistic_sections",
         "clear_logistic_groups", "inventory_limit", "clear_inventory_limit",
         "logistic_condition",
-        "clear_logistic_condition", "input_priority", "output_priority", "recipe", "mirroring",
+        "clear_logistic_condition", "input_priority", "output_priority", "recipe", "mirroring", "release_cell",
     }
     for action in direct_actions:
         if action["action_type"] == "place_entity" and setting_fields.intersection(action):

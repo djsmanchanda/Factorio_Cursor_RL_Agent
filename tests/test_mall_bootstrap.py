@@ -184,6 +184,27 @@ def test_restore_clears_only_unique_loan_group(monkeypatch) -> None:
     assert not list(SCHEMA.iter_errors(plan))
 
 
+def test_empty_loan_tag_is_discovered_during_recovery_and_after_restore():
+    from orchestrator.mall_bootstrap import active_bootstrap_loans
+    from types import SimpleNamespace
+    group = _loan().group
+    for recipe in ("-", _loan().original_recipe):
+        client = SimpleNamespace(command=lambda _c: f"{group}|4.5|1.5|assembling-machine-1,-|assembling-machine-2,{recipe}|releasing")
+        (loan,) = active_bootstrap_loans(client, "nauvis", "player")
+        assert loan.releasing and loan.current_recipe == recipe
+
+
+def test_release_plan_is_configuration_only_and_preserves_tag_until_acknowledgement():
+    from orchestrator.mall_bootstrap import release_bootstrap_loan_plan
+    plan = release_bootstrap_loan_plan(_loan())
+    action = plan["phases"][0]["actions"][0]
+    assert action["action_type"] == "configure_entity" and action["release_cell"]["group"] == _loan().group
+    assert not action["release_cell"]["acknowledge"]
+    assert not list(SCHEMA.iter_errors(plan))
+    action["action_type"] = "place_ghost"
+    assert list(SCHEMA.iter_errors(plan))  # release settings never authorize construction
+
+
 def test_promotion_reuses_the_borrowed_cell_as_permanent_pipe_mall() -> None:
     loan = MallBootstrapLoan(
         original_recipe="splitter", target_item="pipe", target_count=100,

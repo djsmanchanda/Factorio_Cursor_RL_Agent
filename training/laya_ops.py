@@ -118,8 +118,8 @@ class DeterministicSession:
             # Build one missing stage toward stocking ``item`` (deepest unmet ingredient first). Before the
             # independent mall, pre-core items are rotational mall batches (upgrade_bootstrap=False), not lines.
             # stock_target is the network level wanted; the cell is capped there, so it stops when the need is met.
-            "produce": lambda item, stock_target=1: ab.produce_to_demand(c, b, SURFACE, FORCE, item, ref, emit,
-                                                                         stock_target=stock_target),
+            "produce": lambda item, stock_target=1, finite=True: ab.produce_to_demand(
+                c, b, SURFACE, FORCE, item, ref, emit, stock_target=stock_target, finite=finite),
             # One more gear/cable cell when every existing one runs flat out and other cells starve for it.
             "grow": lambda item, machines: ab.grow_producer(c, b, SURFACE, FORCE, item, ref, emit, machines=machines),
             # A standing slot in the bootstrap mall pool (the deterministic runner's "production prep").

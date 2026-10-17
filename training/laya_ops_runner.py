@@ -557,7 +557,8 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
             continue  # Made since the failure: retrying the blocked operation is the next step, not more stock.
         options.append({
             "option_id": f"op.produce.{item}", "family": "produce", "product": item, "need_id": f"stock:{item}",
-            "summary": f"produce {item} (short {missing})", "params": {"item": item, "stock_target": target},
+            "summary": f"produce {item} (short {missing})", "params": {"item": item, "stock_target": target,
+                                                                          **({"finite": False} if demand["capability"] else {})},
             # Items a goal plate's operation is blocked on serve that goal.
             "features": {"last_code": codes.get(("produce", item), "new"), "shortage": missing,
                          "prerequisite_for": sorted(demand["parents"]),

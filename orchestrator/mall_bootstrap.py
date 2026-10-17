@@ -51,6 +51,7 @@ class MallBootstrapLoan:
     step_minimum_crafts: int | None = None
     completed_step_targets: tuple[tuple[str, int], ...] = ()
     machine_name: str = "assembling-machine-1"
+    releasing: bool = False
 
     @property
     def production_target(self) -> int:
@@ -347,10 +348,11 @@ def active_bootstrap_loans(
         "local ok,sections=pcall(function() return c.get_logistic_sections() end);"
         "if ok and sections then for _,section in pairs(sections.sections) do "
         "local g=section.group or '';if string.sub(g,1,#prefix)==prefix then "
-        "local slot=section.get_slot(1);if slot and slot.value then "
+        "local slot=section.get_slot(1);"
         "out[#out+1]=g..'|'..c.position.x..'|'..c.position.y..'|'"
         "..machine_at(c.position.x-3,c.position.y)..'|'"
-        "..machine_at(c.position.x+3,c.position.y) end end end end end;"
+        "..machine_at(c.position.x+3,c.position.y)..'|'..(slot and slot.value and 'active' or 'releasing') "
+        "end end end end;"
         "rcon.print(table.concat(out,';'))"
     )
     raw = client.command("/sc " + lua).strip()
@@ -358,7 +360,9 @@ def active_bootstrap_loans(
     for record in raw.split(";"):
         if not record:
             continue
-        group, raw_x, raw_y, left_state, right_state = record.split("|", 4)
+        parts = record.split("|")
+        group, raw_x, raw_y, left_state, right_state = parts[:5]
+        releasing = len(parts) > 5 and parts[5] == "releasing"
         def _parse_side_state(state: str) -> tuple[str, str]:
             if "," in state:
                 machine, recipe = state.split(",", 1)
@@ -381,6 +385,9 @@ def active_bootstrap_loans(
             original, target, count, spare, side, step, step_target, baseline,
             required, minimum, completed,
         ) = parsed
+        current = left_recipe if side == "left" else right_recipe
+        if releasing and current not in {"-", original, step or target}:
+            continue  # An empty historical label alone does not authorize clearing a working recipe.
         loans.append(MallBootstrapLoan(
             original_recipe=original,
             target_item=target,
@@ -388,7 +395,7 @@ def active_bootstrap_loans(
             spare_target_count=spare,
             side=side,
             requester_position=(float(raw_x), float(raw_y)),
-            current_recipe=left_recipe if side == "left" else right_recipe,
+            current_recipe=current,
             step_recipe=step,
             step_target_count=step_target,
             step_baseline_finished=baseline,
@@ -396,6 +403,7 @@ def active_bootstrap_loans(
             step_minimum_crafts=minimum,
             completed_step_targets=completed,
             machine_name=left_machine if side == "left" else right_machine,
+            releasing=releasing,
         ))
     return tuple(loans)
 
@@ -606,10 +614,24 @@ def bootstrap_loan_plan(
     }]}
 
 
+def release_bootstrap_loan_plan(loan: MallBootstrapLoan, *, acknowledge: bool = False,
+                                restore_recipe: str | None = None) -> dict:
+    """Stop one tagged borrowed cell and recover WIP before its original recipe is restored."""
+    return {"phases": [{"name": f"release_bootstrap_loan_{loan.target_item}", "actions": [{
+        "action_type": "configure_entity", "entity": loan.machine_name,
+        "position": {"x": loan.machine_position[0], "y": loan.machine_position[1]},
+        "release_cell": {"group": loan.group, "expected_recipe": loan.current_recipe,
+                         "acknowledge": acknowledge, **({"restore_recipe": restore_recipe} if restore_recipe else {}),
+                         "requester": {"x": loan.requester_position[0], "y": loan.requester_position[1]},
+                         "provider": {"x": loan.provider_position[0], "y": loan.provider_position[1]}},
+    }]}]}
+
+
 def restore_bootstrap_loan_plan(
     loan: MallBootstrapLoan, *, provider_stock_target: int | None = None,
     provider_fill_chest: bool = False, stock_gate_target: int | None = None,
     chest_gate_target: int | None = None,
+    retain_loan_tag: bool = False,
 ) -> dict:
     """Restore the original recipe and request group after the seed is stocked.
 
@@ -649,7 +671,7 @@ def restore_bootstrap_loan_plan(
                 # Original mall groups are shared by every matching cell on
                 # this side. Leave them intact while the unique loan group is
                 # removed, or restoring one borrower would rewrite its peers.
-                "clear_logistic_groups": [loan.group],
+                **({} if retain_loan_tag else {"clear_logistic_groups": [loan.group]}),
                 "logistic_sections": [requester_section],
             },
             {

@@ -83,6 +83,7 @@ from orchestrator.mall_bootstrap import (
     bootstrap_loan_plan,
     next_bootstrap_step,
     promote_bootstrap_loan_plan,
+    release_bootstrap_loan_plan,
     restore_bootstrap_loan_plan,
 )
 from orchestrator.material_reservations import (
@@ -5588,7 +5589,7 @@ def refresh_feedstock_chest_caps(
 
 def produce_to_demand(
     client: RconClient, bridge: GameBridge, surface: str, force: str, item: str,
-    reference_point: Point, emit: Callable[[str], None], *, stock_target: int,
+    reference_point: Point, emit: Callable[[str], None], *, stock_target: int, finite: bool = True,
 ) -> Point | None:
     """Make ``item`` up to an absolute network level and cap its cell there.
 
@@ -5599,11 +5600,53 @@ def produce_to_demand(
     circuits). Gear and cable keep their own-chest cap instead.
     """
     target = max(1, int(stock_target))
-    return ensure_produced(
+    if finite and item not in _MALL_RECIPE_ANCHORS:
+        _MALL_STOCK_GATE_FLOORS[(surface, force, item)] = target
+    output = ensure_produced(
         client, bridge, surface, force, item, reference_point, emit,
         upgrade_bootstrap=False, stock_target=target,
         stock_gate_target=None if item in _MALL_RECIPE_ANCHORS else target,
     )
+    if output is not None and finite and item not in _MALL_RECIPE_ANCHORS and hasattr(client, "command"):
+        _tag_finite_mall_cells(client, bridge, surface, force, item, target, reference_point, emit)
+    return output
+
+
+def _tag_finite_mall_cells(client, bridge, surface, force, item, target, reference_point, emit) -> None:
+    """A standing finite cell is a loan to its own recipe: reuse the same durable completion/recovery path."""
+    spec = LINE_RECIPES.get(item)
+    if not spec or spec["machine"] not in live_base.ASSEMBLER_TIERS:
+        return
+    line = live_base.find_line(client, surface, force, item, spec["machine"], include_ghosts=False)
+    if line is None:
+        return
+    active = {loan.machine_position: loan for loan in active_bootstrap_loans(client, surface, force)}
+    stock = live_base.transferable_items(client, surface, force)
+    crafts = max(1, math.ceil(max(0, target - stock.get(item, 0)) / spec.get("product_amount", 1)))
+    for position in line.machine_positions:
+        previous = active.get(tuple(position))
+        if previous and (previous.original_recipe != item or previous.target_item != item
+                         or previous.target_count == target or previous.releasing):
+            continue
+        located = locate_mall_cell(position, reference_point)
+        if located is None:
+            continue  # Geometry outside the owned mall is not a releaseable slot.
+        origin, side = located
+        requester = (origin[0] + 4.5, origin[1] + 1.5)
+        if not previous and recipe_group_name(item, side) not in live_base.requester_logistic_groups(client, surface, requester):
+            continue  # Do not seize an unlabelled or another consumer's cell.
+        machine = live_base.entity_at(client, surface, position)
+        if not machine or machine["name"] not in live_base.ASSEMBLER_TIERS:
+            continue
+        loan = MallBootstrapLoan(item, item, target, side, requester, item, machine_name=machine["name"])
+        finished = _bootstrap_loan_products_finished(client, surface, loan)
+        if finished is None:
+            continue
+        plan = bootstrap_loan_plan(loan, MallBootstrapStep(item, target, crafts), baseline_finished=finished,
+                                   previous_group=previous.group if previous else None)
+        plan["surface"], plan["force"] = surface, force
+        _submit(client, bridge, surface, plan, f"finite_mall_cell_{item}", emit)
+        _MALL_REFRESH_SIGNATURES.clear()
 
 
 #: Feedstock every other mall cell draws on; a second cell keeps the own-chest
@@ -5676,7 +5719,7 @@ def release_finished_bootstrap_loans(
         return
     stock = live_base.transferable_items(client, surface, force)
     for loan in loans:
-        if int(stock.get(loan.target_item, 0)) < loan.target_count:
+        if not loan.releasing and int(stock.get(loan.target_item, 0)) < loan.target_count:
             continue
         _submit_bootstrap_loan(
             client, bridge, surface, force, loan, emit,
@@ -5972,6 +6015,29 @@ def _restore_bootstrap_loan(
 ) -> None:
     """Restore the borrowed cell before another dependency may claim it."""
     global _BOOTSTRAP_LOAN_CONFIGURATION_REVISION
+    if hasattr(client, "command") and not (loan.releasing and loan.current_recipe == loan.original_recipe
+                                           and loan.original_recipe != loan.target_item):
+        release = release_bootstrap_loan_plan(loan)
+        release["surface"], release["force"] = surface, force
+        try:
+            _submit(client, bridge, surface, release, f"release_bootstrap_loan_{loan.target_item}", emit)
+        except StuckError as error:
+            if "release_destination_full" not in str(error):
+                raise
+            raise ProductionPrerequisiteDeferred(
+                f"{loan.target_item} cell recovery waits for provider space",
+                code="mall_cell_release_wait", state="supply_wait",
+                details={"item": loan.target_item, "requester": list(loan.requester_position),
+                         "provider": list(loan.provider_position)},
+            ) from error
+    if loan.original_recipe == loan.target_item:
+        acknowledgement = release_bootstrap_loan_plan(loan, acknowledge=True)
+        acknowledgement["surface"], acknowledgement["force"] = surface, force
+        _submit(client, bridge, surface, acknowledgement, f"vacate_finite_cell_{loan.target_item}", emit)
+        MANAGED_INTERMEDIATE_SOURCES.pop(loan.target_item, None)
+        _MALL_REFRESH_SIGNATURES.clear()
+        emit(f"  FINITE CELL RELEASED: {loan.target_item} at {loan.machine_position}; requests and owned WIP cleared")
+        return
     try:
         shared_provider = mall_slot_uses_shared_provider(
             client, surface, loan.machine_position,
@@ -5991,12 +6057,17 @@ def _restore_bootstrap_loan(
             (surface, force, loan.original_recipe),
         ),
         chest_gate_target=_feedstock_chest_cap(loan.original_recipe),
+        retain_loan_tag=hasattr(client, "command"),
     )
     plan["surface"], plan["force"] = surface, force
     _submit(
         client, bridge, surface, plan,
         f"restore_bootstrap_loan_{loan.target_item}", emit,
     )
+    if hasattr(client, "command"):
+        acknowledgement = release_bootstrap_loan_plan(loan, acknowledge=True, restore_recipe=loan.original_recipe)
+        acknowledgement["surface"], acknowledgement["force"] = surface, force
+        _submit(client, bridge, surface, acknowledgement, f"acknowledge_loan_restore_{loan.target_item}", emit)
     _BOOTSTRAP_LOAN_CONFIGURATION_REVISION += 1
     _MALL_REFRESH_SIGNATURES.clear()
     emit(
@@ -6155,6 +6226,10 @@ def _submit_bootstrap_loan(
     count is stocked, skipping spare production: nothing else asks for more.
     """
     global _BOOTSTRAP_LOAN_PROGRESS_REVISION, _BOOTSTRAP_LOAN_CONFIGURATION_REVISION
+    if loan.releasing:
+        _restore_bootstrap_loan(client, bridge, surface, force, loan, emit,
+                                reason="finish pending WIP recovery", reference_point=reference_point)
+        return f"released {loan.target_item} cell after WIP recovery"
     # A managed persistent source points at a provider chest, not at an
     # immutable machine. Once that cell is borrowed for another recipe the
     # pointer is stale; leaving it cached makes later pole/assembler loans
@@ -6191,6 +6266,11 @@ def _submit_bootstrap_loan(
         int(spendable.get(loan.target_item, 0))
         if spendable is not None else None
     )
+    if (release_when_met and loan.original_recipe == loan.target_item
+            and target_spendable is not None and target_spendable >= loan.target_count):
+        _restore_bootstrap_loan(client, bridge, surface, force, loan, emit,
+                                reason="finite bill stocked", reference_point=reference_point)
+        return f"released finite {loan.target_item} cell"
     products_finished = (
         _bootstrap_loan_products_finished(client, surface, loan)
         if loan.step_recipe is not None else None
