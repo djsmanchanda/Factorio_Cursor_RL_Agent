@@ -8117,13 +8117,40 @@ def _chemical_capability_started(
         # reopened the rung as soon as the cell claimed it (~780 pipe loans in
         # one batch); an "ever stocked" latch would prove nothing about the
         # cell's remaining bill (audit 2026-10-17).
+        stock = live_base.transferable_items(client, surface, force)
         held = (
-            live_base.transferable_items(client, surface, force).get(item, 0)
+            stock.get(item, 0)
             + live_base.placed_entity_count(client, surface, force, item)
             + _ladder_loan_draw(client, surface, force, item)
+            + _ladder_embodied(client, surface, force, item, stock)
         )
         return held >= _CHEMICAL_BATCH_TARGETS[item]
     return _production_started(client, surface, force, item)
+
+
+def _ladder_embodied(
+    client: RconClient, surface: str, force: str, item: str,
+    stock: Mapping[str, int],
+) -> int:
+    """`item` already crafted into later ladder rungs the world holds or has placed.
+
+    The rung exists to feed the later rungs. Their crafts consume it, so a
+    plain world count fell below target after each later craft and reopened
+    the rung mid-ladder: reset-chest rung arm, 14 runs ending at C4, 124
+    regressions all back to pipe, 428/679 plastic-bar choices blocked
+    (rung-s76714 runner log 2384-2402: pumpjack loan cut off by pipe).
+    """
+    if item not in CHEMICAL_BOOTSTRAP_LADDER:
+        return 0
+    embodied = 0
+    for rung in CHEMICAL_BOOTSTRAP_LADDER[CHEMICAL_BOOTSTRAP_LADDER.index(item) + 1:]:
+        spec = LINE_RECIPES.get(rung) or {}
+        per_craft = dict(zip(spec.get("ingredients", ()), spec.get("amounts", ()))).get(item, 0)
+        if not per_craft:
+            continue
+        units = stock.get(rung, 0) + live_base.placed_entity_count(client, surface, force, rung)
+        embodied += per_craft * math.ceil(units / max(1, spec.get("product_amount") or 1))
+    return embodied
 
 
 def _ladder_loan_draw(

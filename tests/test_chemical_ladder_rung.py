@@ -63,3 +63,26 @@ def test_pipe_consumed_outside_the_ladder_still_reopens_the_rung(monkeypatch):
     _world(monkeypatch, stock={"pipe": 10}, placed={})
     _drawing(monkeypatch, _loan("oil-refinery"))  # a real shortage is not hidden by the draw
     assert not ab._chemical_capability_started(Client(), "nauvis", "player", "pipe")
+
+
+def _later_rungs(monkeypatch):
+    for rung, pipe in (("chemical-plant", 5), ("oil-refinery", 10), ("offshore-pump", 1), ("pumpjack", 10)):
+        monkeypatch.setitem(ab.LINE_RECIPES, rung, {"ingredients": ["steel-plate", "pipe"], "amounts": [5, pipe],
+                                                    "product_amount": 1})
+    monkeypatch.setattr(ab, "active_bootstrap_loans", lambda *a: ())
+
+
+def test_pipe_crafted_into_later_rungs_still_satisfies_its_rung(monkeypatch):
+    # reset-chest rung arm: 124 regressions, all back to pipe, after later rungs consumed it (rung-s76714).
+    stock, placed = {"pipe": 70, "chemical-plant": 2, "pumpjack": 1}, {"oil-refinery": 1, "offshore-pump": 1}
+    _world(monkeypatch, stock, placed)
+    _later_rungs(monkeypatch)
+    assert ab._chemical_capability_started(Client(), "nauvis", "player", "pipe")  # 70 + 10 + 10 + 10 + 1
+    stock.update({"chemical-plant": 0, "pumpjack": 0})
+    assert not ab._chemical_capability_started(Client(), "nauvis", "player", "pipe")  # 70 + 10 + 1
+
+
+def test_embodied_rungs_do_not_hide_a_real_pipe_shortage(monkeypatch):
+    _world(monkeypatch, stock={"pipe": 10, "chemical-plant": 2}, placed={})
+    _later_rungs(monkeypatch)
+    assert not ab._chemical_capability_started(Client(), "nauvis", "player", "pipe")
