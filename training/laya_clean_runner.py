@@ -310,7 +310,9 @@ def _need_key(facts: Mapping, candidate: dict, unmet: set[str]) -> str:
 
 def _compile(facts: Mapping, products: set[str], seed: int, request_multiplier: int | None = None) -> list[dict]:
     """Generator candidates for only the products a need can use (speed, not a choice)."""
-    recipes = {k: v for k, v in facts["recipes"].items() if k in products}
+    recipes = {k: v for k, v in facts["recipes"].items() if k in products
+               and v.get("enabled", True)
+               and all(part.get("type", "item") == "item" for part in v.get("ingredients", []))}
     candidates = compile_candidates({**facts, "recipes": recipes}, seed)
     if request_multiplier is not None:
         from training.laya_experiment_context import with_request_multiplier
@@ -333,7 +335,8 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     rng = random.Random(seed)
     from training.laya_experiment_context import reservation_view
     land_plan = reservation_view(site_plan, reservation_mode)
-    unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
+    unmet = {n["item"] for n in board["needs"]
+             if n["condition"] != "satisfied" and n.get("material_type", "item") == "item"}
     proposed = _compile(facts, unmet, seed, request_multiplier)
     # Iron, copper and stone start with direct starters (drills feeding furnaces); the
     # generator's single-drill-into-chest mines and requester-fed furnaces are not offered.
@@ -441,11 +444,11 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     for need, counts in pre_rejected.items():
         reasons[need].update(counts)
         rejected.update({r.split(":", 1)[0]: c for r, c in counts.items()})
-    conditions = {f"item:{n['item']}": n["condition"] for n in board["needs"]}
+    conditions = {n["need_id"]: n["condition"] for n in board["needs"]}
     # The decision state holds at most MAX_MENU options (waits included). Order needs by the
     # board's goal-tree order (not by gap), then stock and coverage; shrink to one option per
     # need when crowded, and journal what did not fit.
-    board_order = [f"item:{n['item']}" for n in board["needs"]]
+    board_order = [n["need_id"] for n in board["needs"]]
     ordered = sorted(legal, key=lambda n: (board_order.index(n) if n in board_order else len(board_order),
                                            n.startswith("coverage"), n))
     room = MAX_MENU - len(WAIT_TICKS)

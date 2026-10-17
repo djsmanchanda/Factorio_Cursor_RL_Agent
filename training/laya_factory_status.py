@@ -23,7 +23,7 @@ from typing import Any
 
 from planners.recipe_data import MACHINE_SPEEDS
 
-VERSION = "laya-factory-status-v1"
+VERSION = "laya-factory-status-v2"
 RAW_ITEMS = frozenset({"iron-ore", "copper-ore", "stone", "coal"})
 SMELTED_ITEMS = frozenset({"iron-plate", "copper-plate", "stone-brick", "steel-plate"})
 FURNACE_SPEEDS = {"stone-furnace": 1.0, "steel-furnace": 2.0, "electric-furnace": 2.0}
@@ -52,41 +52,91 @@ def _bucket(status: str) -> str:
     return next((name for name, members in STATUS_BUCKETS.items() if status in members), "other")
 
 
+def _deterministic_product(product: Mapping) -> bool:
+    """Require observed yield probability, including Factorio 2.1's shared roll."""
+    if (product.get("extra_count_fraction", 0) or product.get("ignored_by_productivity", 0)
+            or "amount_min" in product or "amount_max" in product):
+        return False
+    if "independent_probability" in product:
+        shared = product.get("shared_probability")
+        return (product["independent_probability"] == 1 and isinstance(shared, Mapping)
+                and shared.get("min") == 0 and shared.get("max") == 1)
+    return product.get("probability") == 1  # Older explicit probability metadata.
+
+
+def observed_recipes(facts: Mapping) -> dict[str, Mapping]:
+    """Normalize the measured single-output subset without choosing oil routes.
+
+    Legacy recipes are enabled solid operation recipes. The observation catalog
+    is authoritative when present, including disabled and unsupported entries.
+    Multi-output/alternative routes retain their raw facts but are not expanded.
+    """
+    catalog = facts.get("recipe_observations")
+    if catalog is None:
+        return dict(facts.get("recipes") or {})
+    normalized = {}
+    for name, spec in catalog.items():
+        products = spec.get("products") or []
+        product = products[0] if len(products) == 1 else None
+        normalized[name] = {**spec, "enabled": spec.get("enabled"), "arithmetic_supported": False}
+        if (product and product["name"] == name and product.get("amount", 0) > 0
+                and _deterministic_product(product)
+                and spec.get("energy_ticks", 0) > 0
+                and all(part.get("amount", 0) > 0 for part in spec.get("ingredients") or [])):
+            normalized[name] = {**spec, "enabled": spec.get("enabled"), "product_amount": product["amount"],
+                                "product_type": product.get("type", "item"), "arithmetic_supported": True}
+    return normalized
+
+
+def recipe_availability(recipe: Mapping | None) -> str:
+    if recipe is None:
+        return "unknown"
+    enabled = recipe.get("enabled", True)  # Legacy operation recipes were enabled-only.
+    return "enabled" if enabled is True else "disabled" if enabled is False else "unknown"
+
+
 def goal_demand(targets: Mapping[str, float], recipes: Mapping[str, Mapping]) -> dict[str, dict]:
-    """Expand target rates through enabled solid recipes into per-item demand.
+    """Expand supported single-output recipes; typed fluids remain prerequisite leaves.
 
     Returns ``{item: {"required_per_s", "depth", "consumers"}}``.  Items with no
-    enabled recipe are leaves; the board marks non-raw leaves as unavailable.
+    observed recipe are unknown leaves. Fluid routing and coproduct allocation are not inferred.
     """
     demand: dict[str, float] = defaultdict(float)
     depth: dict[str, int] = {}
     consumers: dict[str, set[str]] = defaultdict(set)
+    kinds: dict[str, str] = {}
 
-    def visit(item: str, rate: float, level: int, path: tuple[str, ...]) -> None:
+    def visit(item: str, rate: float, level: int, path: tuple[str, ...], kind: str = "item") -> None:
+        kinds[item] = kind
         if item in path:
             raise FactoryStatusError(f"recipe cycle through {item}: {' -> '.join(path + (item,))}")
         demand[item] += rate
         depth[item] = min(depth.get(item, level), level)
         recipe = recipes.get(item)
-        if recipe is None or item in RAW_ITEMS:
+        if (kind == "fluid" or recipe is None or item in RAW_ITEMS
+                or recipe.get("arithmetic_supported") is False):
             return
         crafts = rate / (float(recipe["product_amount"]) * (1 + float(recipe.get('productivity_bonus',0))))
         for part in recipe["ingredients"]:
             consumers[part["name"]].add(item)
-            visit(part["name"], crafts * float(part["amount"]), level + 1, path + (item,))
+            visit(part["name"], crafts * float(part["amount"]), level + 1, path + (item,), part.get("type", "item"))
 
     for item, rate in sorted(targets.items()):
         if not rate or rate <= 0:
             raise FactoryStatusError(f"goal rate for {item} must be positive")
-        visit(item, float(rate), 0, ())
-    return {item: {"required_per_s": demand[item], "depth": depth[item], "consumers": sorted(consumers[item])}
+        visit(item, float(rate), 0, (), (recipes.get(item) or {}).get("product_type", "item"))
+    return {item: {"required_per_s": demand[item], "depth": depth[item], "consumers": sorted(consumers[item]), "material_type": kinds[item]}
             for item in demand}
 
 
 def machine_rate(machine: str, item: str, recipe: Mapping | None) -> float | None:
     """Theoretical items/s of one machine on ``item``; ``None`` when unknown."""
-    if recipe is None:
+    if recipe is None or recipe.get("arithmetic_supported") is False:
         return None
+    if "machine_speeds" in recipe:
+        speed = recipe["machine_speeds"].get(machine)
+        return (None if not speed else float(speed) * float(recipe["product_amount"])
+                * (1 + float(recipe.get("productivity_bonus", 0))) * 60 / float(recipe["energy_ticks"]))
     speed = FURNACE_SPEEDS.get(machine) if item in SMELTED_ITEMS else None
     speed = speed if speed is not None else MACHINE_SPEEDS.get(machine)
     if not speed:
@@ -135,9 +185,10 @@ def _upgrade_fact(machines: Sequence[Mapping], item: str, recipe: Mapping | None
         return None
     target = ASSEMBLER_TIERS[index + 1]
     before, after = machine_rate(lowest, item, recipe), machine_rate(target, item, recipe)
+    availability = recipe_availability(recipes.get(target))
     return {"from": lowest, "to": target, "eligible_machines": tiers.count(lowest),
             "gain_per_machine_per_s": None if before is None or after is None else after - before,
-            "target_in_stock": int(stock.get(target, 0)), "target_recipe_enabled": target in recipes}
+            "target_in_stock": int(stock.get(target, 0)), "target_recipe_enabled": None if availability == "unknown" else availability == "enabled"}
 
 
 def _diagnose(item: str, recipe: Mapping | None, buckets: Mapping[str, int], machine_count: int,
@@ -149,8 +200,12 @@ def _diagnose(item: str, recipe: Mapping | None, buckets: Mapping[str, int], mac
         return "satisfied"  # A full mall measures 0/s while its stock meets demand.
     if item in RAW_ITEMS:
         return "short" if measured is not None else "unmeasured"
-    if recipe is None:
-        return "recipe_unavailable"
+    if recipe_availability(recipe) == "disabled":
+        return "recipe_disabled"
+    if recipe_availability(recipe) == "unknown":
+        return "recipe_unknown"
+    if recipe.get("arithmetic_supported") is False:
+        return "recipe_unsupported"
     if machine_count == 0:
         return "unbuilt"
     for bucket, condition in (("power", "power_limited"), ("starved", "input_starved"), ("blocked", "output_blocked")):
@@ -173,7 +228,7 @@ def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Ma
     # Construction items reported short join the demand tree at a small rate, so their
     # inputs (e.g. steel for poles) become visible needs; goals stay the phase targets.
     stock_targets = {item: rate for item, rate in (stock or {}).items() if item not in targets}
-    recipes = facts.get("recipes") or {}
+    recipes = observed_recipes(facts)
     demand = goal_demand({**targets, **stock_targets}, recipes)
     goal_only = goal_demand(targets, recipes)  # Phase goals are judged on these rates alone.
     stock = accessible_stock(facts)
@@ -185,7 +240,8 @@ def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Ma
     needs = []
     for item, info in demand.items():
         recipe = None if item in RAW_ITEMS else recipes.get(item)
-        machines = by_recipe.get(item, [])
+        kind = info["material_type"]
+        machines = [] if kind == "fluid" else by_recipe.get(item, [])
         statuses: dict[str, int] = defaultdict(int)
         buckets: dict[str, int] = defaultdict(int)
         tiers: dict[str, int] = defaultdict(int)
@@ -197,26 +253,40 @@ def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Ma
             rates.append(machine_rate(machine["name"], item, recipe))
         capacity = None if not machines or None in rates else sum(rates)
         required = info["required_per_s"]
-        measured = _measured(measurement, "production", item)
+        measured = None if kind == "fluid" else _measured(measurement, "production", item)
         machines_needed = {}
-        candidates = list(FURNACE_SPEEDS) if item in SMELTED_ITEMS else list(ASSEMBLER_TIERS)
+        candidates = (list(recipe["machine_speeds"]) if recipe and "machine_speeds" in recipe
+                      else list(FURNACE_SPEEDS) if item in SMELTED_ITEMS else list(ASSEMBLER_TIERS))
+        if kind == "fluid":
+            candidates = []
         for tier in candidates if recipe is not None else ():
             per_machine = machine_rate(tier, item, recipe)
             if per_machine:
                 machines_needed[tier] = math.ceil(required / per_machine - 1e-9)
         condition = _diagnose(item, recipe, buckets, len(machines), required, capacity, measured,
                               int(stock.get(item, 0)))
+        if kind == "fluid":
+            condition = "fluid_supply_unknown"
         if condition == "unbuilt" and built.get(item, 0) > 0:
             condition = "built_idle"  # Built by the runner but never ran (usually starved of input).
         needs.append({
-            "need_id": f"item:{item}", "item": item, "built": int(built.get(item, 0)), "depth": info["depth"], "consumers": info["consumers"],
+            "need_id": f"{kind}:{item}", "item": item, "material_type": kind,
+            "recipe_availability": recipe_availability(recipe),
+            "recipe_observation_state": "unobserved" if recipe is None else "observed",
+            "recipe_arithmetic_supported": None if recipe is None else recipe.get("arithmetic_supported", True),
+            "category": None if recipe is None else recipe.get("category"),
+            "fluid_supply": None if kind != "fluid" else {"routing": None, "connected_stock": None},
+            "built": int(built.get(item, 0)), "depth": info["depth"], "consumers": info["consumers"],
             "required_per_s": required, "measured_per_s": measured,
             "goal_required_per_s": goal_only[item]["required_per_s"] if item in goal_only else 0.0,
-            "consumed_per_s": _measured(measurement, "consumption", item),
+            "consumed_per_s": None if kind == "fluid" else _measured(measurement, "consumption", item),
             "gap_per_s": None if measured is None else max(0.0, required - measured),
-            "capacity_per_s": capacity, "machines": dict(tiers), "status_counts": dict(statuses),
-            "machines_needed": machines_needed, "stock": int(stock.get(item, 0)),
-            "upgrade": None if recipe is None else _upgrade_fact(machines, item, recipe, recipes, stock),
+            "capacity_per_s": capacity,
+            "capacity_basis": (None if kind == "fluid" or recipe is None or recipe.get("arithmetic_supported") is False
+                               else "prototype_speed" if "machine_speeds" in recipe else "legacy_speed"),
+            "effective_capacity_per_s": None, "machines": dict(tiers), "status_counts": dict(statuses),
+            "machines_needed": machines_needed, "stock": None if kind == "fluid" else int(stock.get(item, 0)),
+            "upgrade": None if recipe is None or kind == "fluid" else _upgrade_fact(machines, item, recipe, recipes, stock),
             "condition": condition,
         })
     conditions = {n["item"]: n["condition"] for n in needs}
@@ -274,6 +344,14 @@ def compact_status(board: Mapping, limit: int = 12) -> dict:
         row = {"item": need["item"], "condition": need["condition"],
                "required": round(need["required_per_s"], 3),
                "measured": None if need["measured_per_s"] is None else round(need["measured_per_s"], 3),
+               "material_type": need.get("material_type", "item"),
+               "recipe_availability": need.get("recipe_availability", "unknown"),
+               "recipe_observation_state": need.get("recipe_observation_state", "unobserved"),
+               "capacity_basis": need.get("capacity_basis"),
+               "effective_capacity_per_s": need.get("effective_capacity_per_s"),
+               "category": need.get("category"),
+               "recipe_arithmetic_supported": need.get("recipe_arithmetic_supported"),
+               "fluid_supply": need.get("fluid_supply"),
                "capacity": None if need["capacity_per_s"] is None else round(need["capacity_per_s"], 3),
                "machines": sum(need["machines"].values()), "stock": need["stock"]}
         if "goal_required_per_s" in need and abs(need["goal_required_per_s"] - need["required_per_s"]) > 1e-9:

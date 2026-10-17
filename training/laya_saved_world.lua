@@ -16,7 +16,7 @@ end
 local facts = {version="saved-world-v1", tick=game.tick, surface="nauvis", force="player",
   mods=script.active_mods, networks={}, ports={}, poles={}, machines={}, resources={},
   player_stock={}, production={}, consumption={}, researched={}, pending_ghosts=0,
-  infrastructure_counts={}, recipes={}}
+  infrastructure_counts={}, recipes={}, recipe_observations={}}
 local generation = {}
 for _, e in pairs(surface.find_entities_filtered{force=force}) do
   facts.infrastructure_counts[e.name]=(facts.infrastructure_counts[e.name] or 0)+1
@@ -77,18 +77,58 @@ local recipe_names={"iron-plate","copper-plate","stone-brick","steel-plate","iro
   "electronic-circuit","transport-belt","inserter","long-handed-inserter","medium-electric-pole",
   "assembling-machine-1","electric-mining-drill","electric-furnace","requester-chest","passive-provider-chest",
   "roboport","pipe","underground-belt","splitter","assembling-machine-2","chemical-plant","oil-refinery","pumpjack"}
+-- Full observation catalog is separate from the solid-only operation menu.
+-- No route selection: multi-product oil recipes remain raw observed metadata.
+-- Index crafting prototypes once per survey, rather than scanning every entity
+-- prototype again for each recipe.
+local crafting_machines={}
+for machine,p in pairs(prototypes.entity) do
+  if p.type=="assembling-machine" or p.type=="furnace" then
+    crafting_machines[machine]={categories=p.crafting_categories or {},
+      ingredient_count=p.ingredient_count or 0,speed=p.get_crafting_speed("normal")}
+  end
+end
+for name,r in pairs(force.recipes) do
+  local ingredients={}; local products={}
+  for _,part in pairs(r.ingredients) do
+    table.insert(ingredients,{name=part.name,type=part.type,amount=part.amount})
+  end
+  for _,part in pairs(r.products) do
+    table.insert(products,{name=part.name,type=part.type,amount=part.amount,
+      amount_min=part.amount_min,amount_max=part.amount_max,probability=part.probability,
+      independent_probability=part.independent_probability,shared_probability=part.shared_probability,
+      extra_count_fraction=part.extra_count_fraction,
+      ignored_by_productivity=part.ignored_by_productivity})
+    if part.type=="item" then
+      facts.production[part.name]=stats.get_input_count(part.name)
+      facts.consumption[part.name]=stats.get_output_count(part.name)
+    end
+  end
+  local categories=r.categories or r.prototype.categories or {}
+  local speeds={}
+  for machine,p in pairs(crafting_machines) do
+    local compatible=false
+    for _,category in pairs(categories) do
+      if p.categories[category] then compatible=true end
+    end
+    if compatible and p.speed>0 and (p.ingredient_count==0 or #r.ingredients<=p.ingredient_count) then
+      speeds[machine]=p.speed
+    end
+  end
+  facts.recipe_observations[name]={enabled=r.enabled,ingredients=ingredients,products=products,
+    category=categories[1],categories=categories,machine_speeds=speeds,
+    energy_ticks=r.energy*60,productivity_bonus=r.productivity_bonus}
+end
 for _, name in ipairs(recipe_names) do
   local r=force.recipes[name]
   if r and r.enabled then
-    local ingredients={}; local solid=true
-    for _, part in pairs(r.ingredients) do
-      if part.type=="fluid" then solid=false end
-      table.insert(ingredients,{name=part.name,amount=part.amount})
-    end
+    local observation=facts.recipe_observations[name]
+    local solid=true
+    for _,part in pairs(observation.ingredients) do if part.type=="fluid" then solid=false end end
     if solid then
       local amount=0
       for _,part in pairs(r.products) do if part.name==name then amount=part.amount or 0 end end
-      if amount>0 then facts.recipes[name]={ingredients=ingredients,product_amount=amount,
+      if amount>0 then facts.recipes[name]={ingredients=observation.ingredients,product_amount=amount,
         energy_ticks=math.max(1,math.floor(r.energy*60+.5))} end
     end
   end

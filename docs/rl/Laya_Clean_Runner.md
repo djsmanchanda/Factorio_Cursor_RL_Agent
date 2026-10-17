@@ -83,6 +83,13 @@ headroom, reservation owners, network plate stock and measured loan craft
 progress in the decision digest and bounded brief. These are independent
 observations; free slots do not establish affordability or borrowability.
 
+The [fluid observation contract](Laya_Fluid_Observation.md) adds typed recipe
+observations alongside the solid-only operation catalog. The v2 board separates
+unknown, disabled and unsupported recipes, shows fluid prerequisites as leaves,
+and estimates supported chemical-item capacity from observed prototype speeds.
+Fluid routing and delivered throughput remain unknown; these facts grant no
+new fluid construction operation.
+
 Use the [strategy document](Laya_Strategy_Guidelines.md) for preferences.
 Geometry uses `laya_mission_guidelines.json` and ranks applicable rules for its
 count limit. Ops normally uses `laya_ops_guidelines.json`, then keeps rules in

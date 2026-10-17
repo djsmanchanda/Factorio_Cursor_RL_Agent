@@ -72,3 +72,18 @@ The shared source branch is work/miniship/laya-resume-20261018. STARSHIP is the
 other laptop, but its SSH endpoint refuses connections and Miniship's T3
 read/send tools return thread_not_found for its thread 221d6531-9248-440b-8c76-bffebb12851d.
 No work has been launched on that machine through this thread's tools.
+
+## Fluid observation integrated (2026-10-18, 01:59 IST)
+
+[Fluid-aware recipe observations](Laya_Fluid_Observation.md) now preserve the
+solid-only construction catalog while exposing typed item/fluid facts to the
+v2 status board. Missing metadata is unknown, explicit disabling is separate,
+and supported chemical-item capacity uses observed prototype speeds. Fluid
+routing, connected stock and effective throughput remain unknown.
+126 focused tests pass, including mocked Lua/schema/board checks and review
+regressions. The fast gate has 989 passes, one skip and its single preexisting
+import-firewall failure. No actual Factorio run or matched improvement is claimed.
+Future runners need a frozen Python/schema/Lua-helper copy; no installed-mod
+redeployment or Factorio restart was performed or is required for this helper.
+The next Sol workstream is explicit bill-backed gate raises on existing owned
+mall cells; it has not yet been integrated or live-validated.

@@ -67,7 +67,8 @@ def test_board_separates_starved_undersized_blocked_unpowered_and_locked_needs()
     assert needs["copper-cable"]["machines_needed"]["assembling-machine-1"] == 2
     assert needs["copper-plate"]["condition"] == "output_blocked"
     assert needs["iron-plate"]["condition"] == "power_limited"
-    assert needs["plastic-bar"]["condition"] == "recipe_unavailable"
+    assert needs["plastic-bar"]["condition"] == "recipe_unknown"
+    assert needs["plastic-bar"]["recipe_availability"] == "unknown"
     assert needs["iron-ore"]["condition"] == "unmeasured" and needs["iron-ore"]["gap_per_s"] is None
     # Goal items come first; order is goal-tree depth, never gap size.
     assert [n["depth"] for n in board["needs"]] == sorted(n["depth"] for n in board["needs"])
@@ -75,7 +76,7 @@ def test_board_separates_starved_undersized_blocked_unpowered_and_locked_needs()
     assert upgrade["to"] == "assembling-machine-2" and upgrade["target_recipe_enabled"]
     assert upgrade["gain_per_machine_per_s"] == pytest.approx(1.0)
     assert bottleneck_chain(board)[0].startswith("electronic-circuit:input_starved <- copper-cable:under_capacity")
-    assert bottleneck_chain(board)[1] == "plastic-bar:recipe_unavailable"  # One chain per unmet goal.
+    assert bottleneck_chain(board)[1] == "plastic-bar:recipe_unknown"  # One chain per unmet goal.
 
 
 def test_unbuilt_and_satisfied_needs_and_unknown_measurement_stays_unknown():
