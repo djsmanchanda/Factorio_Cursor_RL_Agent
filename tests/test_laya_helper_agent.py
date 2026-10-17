@@ -84,3 +84,12 @@ def test_live_observer_checkpoints_then_reviews_in_the_same_session(tmp_path, mo
     assert report.is_file() and len(calls) == 2
     assert "live observer" in calls[0] and "--session ses_live" in calls[1] and "Live observations" in calls[1]
     assert (tmp_path / "data/now/checkpoint-001.md").is_file()
+
+
+def test_journal_summary_accepts_ops_rows_without_status(tmp_path):
+    journal = tmp_path / "clean-decisions.jsonl"
+    rows = [{"event": "decision", "run_id": "r", "index": 0, "phase": "C1", "choice": {"need_id": "wait"}},
+            {"event": "phase_reached", "run_id": "r", "phase": "C1"}]
+    journal.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    summary = helper.journal_summary(journal, "r")
+    assert summary["decisions"] == 1 and summary["statuses"] == {} and summary["phases_reached"] == ["C1"]
