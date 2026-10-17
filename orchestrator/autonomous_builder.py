@@ -3596,15 +3596,19 @@ def _quad_bootstrap_mall_enabled(
         return False
     if not hasattr(client, "command"):
         return True
-    # The long-handed line must be seeded in a horizontal paired cell.  A
-    # vertical dense cell needs long-handed supports before it can be built;
-    # admitting it with regular supports only creates a producer that cannot
-    # satisfy its own geometry and eventually stalls the run.  Once one real
-    # long-handed item is transferable, the dense path is safe again.
-    if recipe == "long-handed-inserter":
-        stock = _transferable_or_available_stock(client, surface, force)
-        if stock.get("long-handed-inserter", 0) <= 0:
-            return False
+    # Seed the supports and their recipe prerequisites in paired cells. A
+    # dense inserter cell needs long-handed supports, whose recipe in turn
+    # needs inserters. Use the catalog dependency graph and the actual support
+    # bill so a partial support stock cannot recreate that construction cycle.
+    if recipe is not None:
+        support = quad_support_inserter_type(recipe)
+        if _recipe_depends_on(support, recipe):
+            stock = _transferable_or_available_stock(client, surface, force)
+            support_bill = quad_mall_project_bill(
+                recipe, "top", support_inserter_type=support,
+            )
+            if stock.get(support, 0) < support_bill.get(support, 0):
+                return False
     try:
         return mall_slot_count(client, surface, reference_point or (3.0, -1.0)) >= (
             _DENSE_MALL_EXPANSION_TRIGGER_SLOTS
@@ -5750,13 +5754,13 @@ def _pipe_is_temporary_batch(
     return not _independent_mall_ready(client, surface, force)
 
 
-def _recipe_depends_on_fast_transport_belt(item: str) -> bool:
-    """Whether a mall recipe would bypass the fast-belt capability gate."""
+def _recipe_depends_on(item: str, prerequisite: str) -> bool:
+    """Whether an item or its solid recipe inputs require a prerequisite."""
     pending = [item]
     visited: set[str] = set()
     while pending:
         current = pending.pop()
-        if current == "fast-transport-belt":
+        if current == prerequisite:
             return True
         if current in visited:
             continue
@@ -5766,6 +5770,11 @@ def _recipe_depends_on_fast_transport_belt(item: str) -> bool:
             continue
         pending.extend(str(ingredient) for ingredient in spec.get("ingredients", ()))
     return False
+
+
+def _recipe_depends_on_fast_transport_belt(item: str) -> bool:
+    """Whether a mall recipe would bypass the fast-belt capability gate."""
+    return _recipe_depends_on(item, "fast-transport-belt")
 
 
 def _fast_transport_belt_gate_open(
