@@ -148,8 +148,15 @@ def run_fix(tmp_path, monkeypatch, *, fixer_outputs, review_outputs, pytest_resu
         return subprocess.CompletedProcess(command, 0, '', '')
 
     monkeypatch.setattr(campaign, '_run', run)
+    # The real writer appends to the source checkout's CURRENT_STATUS.md; record into the temporary root.
+    sink = root / 'milestones.jsonl'
+    monkeypatch.setattr(campaign, '_record_milestone', lambda fields, fix_id: sink.open('a').write(
+        json.dumps({'fix_id': fix_id, **fields}) + '\n'))
+    source_status = campaign.REPO_ROOT / 'CURRENT_STATUS.md'
+    before = source_status.read_bytes() if source_status.is_file() else None
     outcome = fix_flow.run_fix_cycle(cfg, state, 1, 'episode-1', synthesis, board,
                                      {'status': 'unavailable', 'path': None, 'reason': 'none'}, 5)
+    assert (source_status.read_bytes() if source_status.is_file() else None) == before
     return outcome, state, calls, root
 
 
@@ -166,6 +173,16 @@ def test_verified_change_commits_declared_files_and_status(tmp_path, monkeypatch
     assert [line for line in calls if line.startswith('git commit')]
     record = [fix for fix in fix_ledger(root).values()][-1]
     assert record['status'] == 'committed' and record['files'] == ['fix.py']
+    milestones = [json.loads(line) for line in (root / 'milestones.jsonl').read_text().splitlines()]
+    assert [m['files'] for m in milestones] == ['fix.py']
+
+
+def test_milestone_writer_appends_to_its_repository_status(tmp_path, monkeypatch):
+    status = tmp_path / 'CURRENT_STATUS.md'
+    status.write_text('# Status\n')
+    monkeypatch.setattr(campaign, 'REPO_ROOT', tmp_path)
+    assert campaign._record_milestone({'kind': 'behavior', 'files': 'fix.py'}, 'fix-7') == 'CURRENT_STATUS.md'
+    assert 'Campaign fix fix-7' in status.read_text() and 'Files: fix.py' in status.read_text()
 
 
 def test_review_cannot_commit_if_verification_fails(tmp_path, monkeypatch):

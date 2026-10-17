@@ -128,6 +128,7 @@ _ISOLATED_MUTABLE_STATE = {
     "planners.recipe_data": ("LINE_RECIPES",),
     "orchestrator.autonomous_builder": (
         "_STAGE_DELIVERY_PROVIDERS",
+        "_STAGE_DELIVERY_ATTEMPTS",
         "_REFINERY_SITE_RESERVATIONS",
         "_TRANSFERABLE_WAITS",
         "_BLOCKING_MALL_ITEMS",
