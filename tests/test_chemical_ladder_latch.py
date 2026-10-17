@@ -25,3 +25,7 @@ def test_a_rung_never_stocked_is_still_missing(monkeypatch):
     monkeypatch.setattr(ab.live_base, "available_items", lambda *a: {"pumpjack": 0})
     ab._CHEMICAL_RUNGS_STOCKED.clear()
     assert not ab._chemical_capability_started(Client(), "nauvis", "player", "pumpjack")
+
+
+def test_the_pipe_rung_batches_three_stacks():
+    assert ab._CHEMICAL_BATCH_TARGETS["pipe"] == 300

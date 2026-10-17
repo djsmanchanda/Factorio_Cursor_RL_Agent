@@ -7967,7 +7967,9 @@ _CHEMICAL_RUNG_PARK_CODES = frozenset({
 
 _CHEMICAL_RUNGS_STOCKED: set[tuple[str, str, str]] = set()
 _CHEMICAL_BATCH_TARGETS = {
-    "pipe": ITEM_STACK_SIZES.get("pipe", 100),
+    # Three stacks: the oil cell's crude and petroleum pipelines need far more than one stack, and a
+    # one-stack rung left C4 attempts short of pipe (batch 2026-10-17 early, Haiku/Luna).
+    "pipe": 300,
     "chemical-plant": 2,
     "oil-refinery": 1,
     "offshore-pump": 1,
