@@ -421,3 +421,36 @@ one-pole plan bill is never dropped (Opus review P2, reproduced and fixed).
 Evidence: 46 focused tests; exact staged-source export fast gate 1,121 passed,
 3 skipped, 1 known firewall failure (same two laya_ops imports). Unit level
 only. Lifecycle: fresh frozen Python for the next runner; nothing deployed.
+
+## Ten-hour Opus testing window (2026-10-18, 02:50-12:50 IST)
+
+What: Claude Opus 5.5 orchestrated disposable-world testing of the integrated
+fixes. Live smoke and cohort 1 showed every stock-gate raise rejected: Factorio
+2.1.21 reads item signals back without `type`, the executor guard required it
+(fixed 8a3bcc8). The cohort-tested reset line (laya/reset-20261017, f1469e1)
+was not in this branch; merged it (dbd385f, 88093ab), added the chemical-ladder
+embodied-rung credit (09c093a) and the review's two cross-line fixes (dabdfd5).
+The d0851ec status entry above says 03:05 IST; the commit was 02:56 IST.
+
+Evidence (frozen worktrees, Factorio 2.1.21, save 347eba650650, guided, speed 2,
+360,000-tick window, seeds disjoint from earlier cohorts):
+- Cohort 1 `opus-10h-20261018` (base eeb3900 -> gate e7be89e -> starship c4745ce
+  -> startup d0851ec): 128 planned, 103 completed, 8 interrupted, 17 not started
+  (truncated by a decision recorded before reading outcomes). 24 matched seeds:
+  proxy C3 16/19/14/19, C4 0 everywhere; strict final C2 14/15/14/12. No
+  significant factor effect. 0 tool failures. Raises 202/202 rejected (guard
+  defect). Steel fence 27/27 `reserved`.
+- Cohort 2 `opus-10h-c2-20261018` (rung f1469e1 / merged 88093ab / ladder
+  09c093a): 108 planned, 72 completed, 36 not started at the deadline; 24 matched
+  seeds. Proxy C2 13/13/15, C3 9/12/13, C4 2/0/1. Strict ever C2 8/6/11, C3 2/2/4
+  (rung final acceptance unknown: older runner). Pipe-rung regressions 38/39/25.
+  0 tool errors. Raises 35/35 `stock_gate_verified`. Steel fence 72/72 `reserved`.
+  Paired merged->ladder strict C2 +9/-4, rung->merged +6/-8: not significant.
+- Offline: full suite on dabdfd5 4,074 passed, 39 skipped, 3 failed (two also
+  fail on both parents, plus the known two-import firewall).
+
+Decision: no adoption claim. The merged line is a regression-free integration
+(no tool errors, no proxy/strict loss beyond noise); the ladder credit reduces
+but does not remove pipe regressions. The guard fix is verified at deployed-
+runtime level. Lifecycle: no units or worlds left running; future runners need a
+fresh frozen copy of dabdfd5 with its mods staged into each disposable world.

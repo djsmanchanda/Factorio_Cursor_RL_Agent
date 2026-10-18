@@ -126,3 +126,19 @@ seed lost its bill to the re-declared fence) is fixed with a real-bill
 regression. Fast gate 1,121 passed, 3 skipped, known firewall failure. A
 ten-hour Claude Opus orchestration window (to 12:50 IST) now tests these
 fixes on disposable worlds; see CURRENT_STATUS.md for results.
+
+## Ten-hour Opus window complete (2026-10-18, 12:05 IST)
+
+work/miniship/laya-resume-20261018 now carries the reset line merged with the
+resume line (dabdfd5). Two cohorts ran on disposable worlds; results and exact
+denominators are in CURRENT_STATUS.md, campaign roots under
+data/laya-experiments/opus-10h-20261018/ (cohort/, cohort2/ with analyze.py and
+analysis.txt). Stock-gate raises now verify live; the Laya-selected steel fence
+reserves on every selection. No adoption claim.
+
+Next: the remaining pipe-rung regressions (25 in 24 ladder runs: check whether
+later-rung recipes are absent from LINE_RECIPES, pipe consumed outside the ladder,
+or the oil district bill); the only-circuit-cell lend (reset-chest s76700); strict
+C1 rarely passes; the ladder double credit with active loan draws (review P3);
+the two laya_ops strategic-wrapper imports. Run a matched cohort of dabdfd5 (it
+was not live-tested; cohort 2 ran 88093ab/09c093a) against the ladder arm.
