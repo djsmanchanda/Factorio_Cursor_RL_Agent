@@ -421,23 +421,3 @@ one-pole plan bill is never dropped (Opus review P2, reproduced and fixed).
 Evidence: 46 focused tests; exact staged-source export fast gate 1,121 passed,
 3 skipped, 1 known firewall failure (same two laya_ops imports). Unit level
 only. Lifecycle: fresh frozen Python for the next runner; nothing deployed.
-
-- 2026-10-17: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-10-17: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: tests/test_reliability_campaign.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-10-17: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-10-17: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-10-17: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-10-17: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-10-17: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: tests/test_reliability_campaign.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-10-17: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-10-17: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.
-
-- 2026-10-17: Campaign fix FIX-0001 passed persistent-primary review and verification. Kind: behavior. Files: fix.py. Prediction: sustained plastic. Reason: fix.

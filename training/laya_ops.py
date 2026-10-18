@@ -18,6 +18,7 @@ become observations instead of crashing the run.  The world must be live
 
 from __future__ import annotations
 
+import copy
 import json
 from collections.abc import Callable
 from pathlib import Path
@@ -134,10 +135,7 @@ class DeterministicSession:
                                                                 stock_target=max(1, int(stock_target))),
             # Finish a submitted refinery and retire its plate's starter once the refinery delivers.
             "retire_starter": self._retire_starter,
-            "raise_stock_gate": lambda item, preview: mall_control.execute_raise(
-                item, preview, observe=self._stock_control_observation,
-                submit=self._submit_stock_gate,
-                floors=ab._MALL_STOCK_GATE_FLOORS),
+            "raise_stock_gate": self._raise_stock_gate,
             # Roboport chain toward a position (construction or logistic reach).
             "coverage": lambda x, y, purpose="construction": stage_services.extend_roboport_coverage(
                 c, b, SURFACE, FORCE, (x, y), emit, purpose=purpose),
@@ -294,6 +292,16 @@ class DeterministicSession:
         return {"version": 1, "projects": projects, "loans": loans, "slots": slots, "cells": cells,
                 "guarded_configuration": guarded_configuration, "transactions": transactions}
 
+    def _raise_stock_gate(self, item: str, preview: dict) -> dict:
+        result = mall_control.execute_raise(item, preview, observe=self._stock_control_observation,
+                                            submit=self._submit_stock_gate, floors=ab._MALL_STOCK_GATE_FLOORS)
+        if result.get("submitted"):
+            # Record the raise separately so a later finite produce cannot lower it.
+            key = (SURFACE, FORCE, item)
+            ab._RAISED_STOCK_GATE_FLOORS[key] = max(ab._RAISED_STOCK_GATE_FLOORS.get(key, 0),
+                                                    ab._MALL_STOCK_GATE_FLOORS.get(key, 0))
+        return result
+
     def _submit_stock_gate(self, plan: dict, name: str) -> dict:
         # Use the shared validator/authorization/bridge submission without the
         # construction wrapper's clutter, pole relocation or ledger side effects.
@@ -315,7 +323,10 @@ class DeterministicSession:
         store = OilTransactionStore.for_bridge(self.bridge, SURFACE, FORCE)
         if store is not None:
             try:
-                oil = store.material_facts(self.client, ab._MATERIAL_RESERVATION_LEDGER)
+                # A survey must not rebalance the live ledger: allocatable_stock rebalances in place, so
+                # a raise preview and its pre-write recheck disagreed whenever stock moved (review 2026-10-18).
+                ledger = ab._MATERIAL_RESERVATION_LEDGER
+                oil = store.material_facts(self.client, None if ledger is None else copy.deepcopy(ledger))
                 if oil is not None:
                     transactions["opening_oil"] = oil
             except Exception as error:  # An unreadable bill is unknown, never paid or permission to re-site.

@@ -176,3 +176,43 @@ def test_dense_capacity_and_empty_occupied_are_independent(session, monkeypatch)
     slots = session.economics()["slots"]
     assert slots["capacity"] == ab.DEMAND_MALL_SLOT_TARGET
     assert slots["occupied"] == 0 and slots["free"] == slots["capacity"]
+
+
+def test_transaction_survey_leaves_the_live_ledger_unbalanced(tmp_path, monkeypatch):
+    # Review 2026-10-18: the oil survey's allocatable_stock rebalanced the live ledger, so a stock-gate
+    # preview and its pre-write recheck disagreed (stock_gate_snapshot_changed) whenever stock moved.
+    from orchestrator.material_reservations import MaterialReservationLedger
+    from orchestrator import oil_transaction
+    ledger = MaterialReservationLedger(tmp_path, episode_id="episode", surface="nauvis", force="player")
+    ledger.declare("conversion_steel-plate", {"inserter": 40}, {"inserter": 30})
+    monkeypatch.setattr(ab, "_MATERIAL_RESERVATION_LEDGER", ledger)
+
+    class Store:
+        def material_facts(self, client, ledger):
+            return {"available_to_owner": ledger.allocatable_stock({"inserter": 32})}
+    monkeypatch.setattr(oil_transaction.OilTransactionStore, "for_bridge", classmethod(lambda cls, *a: Store()))
+    session = DeterministicSession.__new__(DeterministicSession)
+    session.client, session.bridge = object(), object()
+
+    facts = session.material_transactions()
+
+    assert facts["opening_oil"]["available_to_owner"] == {"inserter": 0}
+    assert ledger.projects["conversion_steel-plate"].reserved == {"inserter": 30}
+
+
+def test_submitted_raise_is_recorded_as_a_floor_finite_demand_cannot_lower(monkeypatch):
+    from orchestrator import mall_control
+    session = DeterministicSession.__new__(DeterministicSession)
+    monkeypatch.setattr(ab, "_MALL_STOCK_GATE_FLOORS", {})
+    monkeypatch.setattr(ab, "_RAISED_STOCK_GATE_FLOORS", {})
+
+    def raised(item, preview, *, observe, submit, floors, submitted=True):
+        floors[("nauvis", "player", item)] = 200
+        return {"ok": True, "submitted": submitted}
+    monkeypatch.setattr(mall_control, "execute_raise", raised)
+    assert session._raise_stock_gate("inserter", {})["ok"]
+    assert ab._RAISED_STOCK_GATE_FLOORS == {("nauvis", "player", "inserter"): 200}
+    monkeypatch.setattr(mall_control, "execute_raise", lambda item, preview, **k: {"ok": False, "submitted": False})
+    ab._MALL_STOCK_GATE_FLOORS[("nauvis", "player", "pipe")] = 30
+    session._raise_stock_gate("pipe", {})
+    assert ("nauvis", "player", "pipe") not in ab._RAISED_STOCK_GATE_FLOORS  # an unsubmitted raise is not a floor

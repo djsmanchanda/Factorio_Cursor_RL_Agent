@@ -58,3 +58,17 @@ def test_growth_adds_one_feedstock_machine_and_refuses_other_items(monkeypatch):
     import pytest
     with pytest.raises(ValueError):
         ab.grow_producer(Client(), None, "nauvis", "player", "inserter", (0, 0), lambda m: None, machines=1)
+
+
+def test_finite_demand_keeps_a_gate_laya_raised_against_a_bill(monkeypatch):
+    # Review 2026-10-18: a later produce inserter stock_target=50 rewrote a verified raise (20 -> 200) down to 50,
+    # finite-tagged the cell at 50 and vacated it, so the verified raise had no lasting effect.
+    calls, tags = [], []
+    monkeypatch.setattr(ab, "ensure_produced", lambda *a, **k: calls.append((k["stock_target"], k["stock_gate_target"])) or (1.5, 2.5))
+    monkeypatch.setattr(ab, "_tag_finite_mall_cells", lambda *a: tags.append(a[5]))
+    monkeypatch.setitem(ab._RAISED_STOCK_GATE_FLOORS, ("nauvis", "player", "inserter"), 200)
+    ab.produce_to_demand(Client(), None, "nauvis", "player", "inserter", (0, 0), print, stock_target=50)
+    assert calls == [(200, 200)] and tags == [200]
+    assert ab._MALL_STOCK_GATE_FLOORS[("nauvis", "player", "inserter")] == 200
+    ab.produce_to_demand(Client(), None, "nauvis", "player", "inserter", (0, 0), print, stock_target=300)
+    assert calls[-1] == (300, 300)  # demand above the raise still governs

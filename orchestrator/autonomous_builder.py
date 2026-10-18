@@ -5609,7 +5609,8 @@ def produce_to_demand(
     an ungated inserter cell made 711 while drills starved for gears and
     circuits). Gear and cable keep their own-chest cap instead.
     """
-    target = max(1, int(stock_target))
+    # A gate Laya raised against an owned bill stays the floor of a later finite demand (review 2026-10-18).
+    target = max(1, int(stock_target), _RAISED_STOCK_GATE_FLOORS.get((surface, force, item), 0))
     if finite and item not in _MALL_RECIPE_ANCHORS:
         _MALL_STOCK_GATE_FLOORS[(surface, force, item)] = target
     output = ensure_produced(
@@ -5753,6 +5754,9 @@ _BOOTSTRAP_SHARED_PROVIDER_ITEMS: set[str] = set()
 _MALL_REFRESH_SIGNATURES: set[tuple[object, ...]] = set()
 _MALL_PROVIDER_CAPACITY_FLOORS: dict[tuple[str, str, str, Point], int] = {}
 _MALL_STOCK_GATE_FLOORS: dict[tuple[str, str, str], int] = {}
+#: Gates raised by an explicit bill-backed raise (training/laya_ops raise_stock_gate). Finite produce caps
+#: its cell at its own demand; it may not lower a raised gate. Deterministic runs never write this.
+_RAISED_STOCK_GATE_FLOORS: dict[tuple[str, str, str], int] = {}
 #: Canonical provider count per item: every live cell making the same item
 #: carries the same limit (user standard 2026-09-04). Twins diverged whenever
 #: each refreshed against its own transient demand -- or a loan restore reset
@@ -12920,6 +12924,7 @@ def initialize_operation_runtime(
     _MALL_REFRESH_SIGNATURES.clear()
     _MALL_PROVIDER_CAPACITY_FLOORS.clear()
     _MALL_STOCK_GATE_FLOORS.clear()
+    _RAISED_STOCK_GATE_FLOORS.clear()
     _MALL_ITEM_PROVIDER_LIMITS.clear()
     _REFINERY_SITE_RESERVATIONS.clear()
     _STARTUP_METAL_STARTERS_OBSERVED = False
