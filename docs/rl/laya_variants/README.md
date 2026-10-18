@@ -23,6 +23,16 @@ Windows:
 - **Local:** `--until-phase C0` or `C1` with a tick cap; fast, many seeds.
 - **Long:** a later phase and a larger cap; fewer seeds.
 
+Matched cohorts run under `tools/run_laya_batch.py`. Its slot count adapts by
+itself: every window (default 300 s) it reads each running world's UPS from its
+runner log and the decision loop's health (fresh heartbeat, decisions advancing,
+no new tracebacks, timeouts or RCON connection errors), plus host memory. It
+grows one slot after two healthy windows while work waits and shrinks one on
+any unhealthy window; running trials are never stopped. Ports are reserved for
+`max_concurrency` (default `concurrency + 4`); `"adaptive": false` pins slots.
+Decisions go to `controller.jsonl`, and each job records `slots_at_start`.
+Seed-major order starts both arms of a seed under the same load.
+
 Before comparing, inspect effective option weights: every matching preference
 multiplies, including overlapping entries in one rule. Change only the intended
 factor, or declare all affected groups. Current other-slots-1 arms also reduce

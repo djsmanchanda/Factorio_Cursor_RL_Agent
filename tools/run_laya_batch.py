@@ -4,13 +4,24 @@
 Every arm runs the same seeds from the same base save. Jobs are ordered seed-major
 and arm round-robin, so a deadline cut leaves the arms matched. Each trial is a
 fresh `run_laya_clean prepare` + `run` with a game-tick window and a wall cap;
-the world is stopped afterwards. Concurrency is fixed (no adaptive ramp: the host
-is a laptop). Unstarted jobs stay listed as such in job-status.json.
+the world is stopped afterwards. Unstarted jobs stay listed as such in job-status.json.
+
+Concurrency adapts by itself (SlotController): every window it measures each running
+world's UPS from its own runner log (game ticks per wall second between decisions)
+and the Laya decision loop's health (fresh heartbeat, decisions still advancing, no
+new tracebacks, timeouts or RCON connection errors), plus host memory. It grows one slot
+after consecutive healthy windows and shrinks one on any unhealthy window, using the
+RL scheduler's hysteresis. Shrinking only stops new starts; running trials finish.
+Ports are reserved for `max_concurrency` slots. Every decision is journaled to
+controller.jsonl and each job records the slots it started under. Seed-major order
+keeps both arms of a seed under the same load, so the comparison stays matched.
 
 batch.json:
   {"name": str, "until": ISO time, "concurrency": int, "game_port_base": int, "rcon_port_base": int,
    "trial_wall_seconds": int, "max_game_ticks": int, "source_save": path, "python": path,
-   "seeds": [int, ...],
+   "seeds": [int, ...], "max_concurrency": optional int (default concurrency + 4),
+   "adaptive": optional false | {"min", "window_seconds", "min_ups_p95", "min_ups_p98",
+               "grow_after", "min_available_gb", "max_decision_gap_s", "target_ups"},
    "arms": [{"id": str, "code": frozen worktree, "mods": staged mods dir, "revision": sha,
              "change": str, "variant": optional path, "extra_args": optional [str]}]}
 """
@@ -31,9 +42,120 @@ from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from training.scheduler import AdaptiveScaleState, UpsWindow, adjust_adaptive_slots
+
 PHASE = re.compile(r"^\+(\d+)s PHASE REACHED: (C\d) .* at tick (\d+)")
 SUMMARY = re.compile(r"SUMMARY: stop=(\S+) decisions=(\d+) failures=(\d+) phases=(\S*) accepted=(\S*)")
 FINAL_ACCEPTANCE = re.compile(r"\baccepted_final=(\S+)")
+DECISION = re.compile(r"^\+(\d+)s DECISION \d+ .*?\btick=(\d+)", re.M)
+# Load symptoms only: a plain tool_error is usually a logic bug and must not ratchet the slot count down.
+UNSTABLE = re.compile(r"Traceback|TimeoutError|timed out|Connection(?:Refused|Reset)Error")
+_TAIL_BYTES = 262144
+
+
+def _available_gb() -> float | None:
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) / 1048576
+    except OSError:
+        pass
+    return None
+
+
+def world_signals(world: Path, window_s: float, offsets: dict[str, int]) -> dict:
+    """One running world over the last window: UPS from its decisions, loop liveness, new error lines."""
+    out: dict = {"ups": None, "decision_gap_s": None, "errors": 0}
+    log = world / "logs/laya-runner.log"
+    for path in (log, world / "laya-runner.heartbeat.json"):
+        if not path.exists():
+            return out
+    size = log.stat().st_size
+    with log.open("rb") as handle:
+        handle.seek(max(0, size - _TAIL_BYTES))
+        tail = handle.read().decode(errors="replace")
+    points = [(int(e), int(t)) for e, t in DECISION.findall(tail)]
+    if points:
+        last_e = points[-1][0]
+        recent = [p for p in points if p[0] >= last_e - window_s]
+        span = recent[-1][0] - recent[0][0]
+        if span >= min(60.0, window_s / 2) and recent[-1][1] > recent[0][1]:
+            out["ups"] = (recent[-1][1] - recent[0][1]) / span
+        try:
+            beat = json.loads((world / "laya-runner.heartbeat.json").read_text())
+            out["decision_gap_s"] = float(beat.get("elapsed_s", last_e)) - last_e
+        except (OSError, ValueError):
+            pass
+    start = offsets.get(str(log), max(0, size - _TAIL_BYTES))
+    if size > start:
+        with log.open("rb") as handle:
+            handle.seek(start)
+            out["errors"] = len(UNSTABLE.findall(handle.read().decode(errors="replace")))
+    offsets[str(log)] = size
+    out["heartbeat_age_s"] = time.time() - (world / "laya-runner.heartbeat.json").stat().st_mtime
+    return out
+
+
+class SlotController:
+    """Automatic slot count from UPS stability and Laya decision-loop health (no operator input)."""
+
+    def __init__(self, cfg: dict, journal: Path) -> None:
+        options = cfg.get("adaptive", {})
+        self.enabled = options is not False
+        options = options or {}
+        start = int(cfg["concurrency"])
+        self.maximum = int(cfg.get("max_concurrency", start + 4))
+        self.minimum = int(options.get("min", max(1, start // 2)))
+        target_ups = float(options.get("target_ups", 120.0))  # the batch runs every trial at speed 2
+        self.window_s = float(options.get("window_seconds", 300))
+        self.min_p95 = float(options.get("min_ups_p95", 0.85 * target_ups))
+        self.min_p98 = float(options.get("min_ups_p98", 0.75 * target_ups))
+        self.grow_after = int(options.get("grow_after", 2))
+        self.min_gb = float(options.get("min_available_gb", 3.0))
+        self.max_gap_s = float(options.get("max_decision_gap_s", 600))
+        self.state = AdaptiveScaleState(min(self.maximum, max(self.minimum, start)))
+        self.journal = journal
+        self.next_at = 0.0  # the first pass journals the starting state; worlds count once they ran a full window
+        self.offsets: dict[str, int] = {}
+        self.last: dict = {"decision": "start", "slots": self.state.slots}
+
+    @property
+    def slots(self) -> int:
+        return self.state.slots
+
+    def update(self, running: list[dict], queued: int, now: float | None = None) -> str | None:
+        now = time.time() if now is None else now
+        if not self.enabled or now < self.next_at:
+            return None
+        self.next_at = now + self.window_s
+        measured = [j for j in running if j.get("status") == "running" and now - j.get("started", now) >= self.window_s]
+        signals = {j["id"]: world_signals(Path(j["world"]), self.window_s, self.offsets) for j in measured}
+        unstable = sorted(i for i, s in signals.items() if s["errors"] or (s["decision_gap_s"] or 0) > self.max_gap_s
+                          or s.get("heartbeat_age_s", 0) > 60)
+        samples = [s["ups"] for s in signals.values() if s["ups"]]
+        memory = _available_gb()
+        before = self.state.slots
+        if memory is not None and memory < self.min_gb:
+            self.state, decision = AdaptiveScaleState(max(self.minimum, before - 1)), "decrease_memory"
+        elif unstable:
+            self.state, decision = AdaptiveScaleState(max(self.minimum, before - 1)), "decrease_laya_unstable"
+        else:
+            state, decision = adjust_adaptive_slots(
+                self.state, UpsWindow(tuple(samples)) if samples else None, minimum=self.minimum,
+                maximum=self.maximum, step=1, minimum_safe_ups_p95=self.min_p95, minimum_safe_ups_p98=self.min_p98,
+                healthy_windows_to_grow=self.grow_after, unhealthy_windows_to_shrink=1)
+            if decision == "increase_safe_ups" and (not queued or len(running) < before):
+                # Grow only when the current slots are all in use and work is waiting; keep the healthy streak.
+                state, decision = AdaptiveScaleState(before, self.state.healthy_windows + 1, 0), "hold_no_demand"
+            self.state = state
+        self.last = {"at": now, "decision": decision, "slots_before": before, "slots": self.state.slots,
+                     "running": len(running), "measured": len(measured), "queued": queued,
+                     "ups_min": min(samples) if samples else None,
+                     "ups_mean": statistics.fmean(samples) if samples else None,
+                     "unstable": unstable, "available_gb": memory}
+        with self.journal.open("a") as out:
+            out.write(json.dumps(self.last, sort_keys=True) + "\n")
+        return decision
 
 
 def _atomic(path: Path, data: object) -> None:
@@ -79,10 +201,13 @@ class Batch:
         self.jobs = [{"id": f"{arm['id']}-s{seed}", "arm": arm["id"], "seed": seed, "status": "queued"}
                      for seed in self.cfg["seeds"] for arm in self.cfg["arms"]]
         self.arms = {arm["id"]: arm for arm in self.cfg["arms"]}
+        self.controller = SlotController(self.cfg, self.root / "controller.jsonl")
 
     def save(self) -> None:
+        controller = getattr(self, "controller", None)
         with self.lock:
-            _atomic(self.root / "job-status.json", {"name": self.cfg["name"], "updated": time.time(), "jobs": self.jobs})
+            _atomic(self.root / "job-status.json", {"name": self.cfg["name"], "updated": time.time(), "jobs": self.jobs,
+                                                    **({"controller": controller.last} if controller else {})})
 
     def _cmd(self, arm: dict, *args: str) -> list[str]:
         return [self.cfg["python"], str(Path(arm["code"]) / "tools/run_laya_clean.py"), *args]
@@ -137,24 +262,32 @@ class Batch:
     def run(self) -> None:
         (self.root / "logs").mkdir(exist_ok=True)
         signal.signal(signal.SIGTERM, lambda *_: self.stopping.set())
-        slots = list(range(self.cfg["concurrency"]))
+        controller = self.controller
+        slots = list(range(controller.maximum))
         active: dict = {}
+        running: dict = {}
         self.save()
-        with ThreadPoolExecutor(self.cfg["concurrency"]) as pool:
+        with ThreadPoolExecutor(controller.maximum) as pool:
             queue = list(self.jobs)
             while (queue or active) and not (self.stopping.is_set() and not active):
                 for future in [f for f in active if f.done()]:
                     future.result()
                     slots.append(active.pop(future))
+                    running.pop(future, None)
+                    slots.sort()
+                if controller.update(list(running.values()), len(queue)) is not None:
+                    self.save()
                 # A trial that cannot finish its wall window before the deadline is not started (censored, listed).
-                while queue and slots and not self.stopping.is_set():
+                while queue and slots and len(active) < controller.slots and not self.stopping.is_set():
                     if time.time() + self.cfg["trial_wall_seconds"] > self.until:
                         for job in queue:
                             job["status"] = "not_started_deadline"
                         queue.clear()
                         break
                     job, slot = queue.pop(0), slots.pop(0)
-                    active[pool.submit(self.run_job, job, slot)] = slot
+                    job.update(slots_at_start=controller.slots, active_at_start=len(active) + 1)
+                    future = pool.submit(self.run_job, job, slot)
+                    active[future], running[future] = slot, job
                 if self.stopping.is_set():
                     for job in queue:
                         job["status"] = "not_started_interrupted"
@@ -186,6 +319,13 @@ class Batch:
         lines += ["", "Proxy phases and deterministic checkpoint predicates are separate measurements. "
                   "Ever-passed predicates may later regress; final observations do not prove sustained service. "
                   "Legacy logs without accepted_final have unknown final acceptance."]
+        journal = self.root / "controller.jsonl"
+        if journal.exists():
+            events = [json.loads(line) for line in journal.read_text().splitlines() if line.strip()]
+            if events:
+                lines += ["", f"Slots (automatic): {events[0]['slots_before']} -> {events[-1]['slots']}, range "
+                          f"{min(e['slots'] for e in events)}-{max(e['slots'] for e in events)}; decisions "
+                          f"{dict(Counter(e['decision'] for e in events))} (controller.jsonl)."]
         lines += ["", "Arms:"] + [f"- {a['id']} @ {a.get('revision', '?')[:9]}: {a.get('change', '')}" for a in self.cfg["arms"]]
         (self.root / "report.md").write_text("\n".join(lines) + "\n")
 

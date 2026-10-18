@@ -48,3 +48,88 @@ def test_report_counts_phases_per_arm_and_lists_unstarted_jobs(tmp_path):
     report = (tmp_path / "report.md").read_text()
     assert "| control | 1/1 | {'stalled': 1} | 1/1/0/0 | 30.0 (n=1) |" in report
     assert "| fix | 0/1 |" in report and "not_started_deadline" in report
+
+
+def _world(root, name, ups=120.0, extra="", gap=5):
+    world = root / name
+    (world / "logs").mkdir(parents=True)
+    lines = [f"+{e}s DECISION {i} phase=C1 tick={240000 + int(e * ups)} need=x" for i, e in enumerate(range(0, 301, 30))]
+    (world / "logs/laya-runner.log").write_text("\n".join(lines) + "\n" + extra)
+    (world / "laya-runner.heartbeat.json").write_text(json.dumps({"elapsed_s": 300 + gap}))
+    return {"id": name, "status": "running", "started": 0.0, "world": str(world)}
+
+
+def _controller(tmp_path, monkeypatch, gb=20.0, **adaptive):
+    import tools.run_laya_batch as harness
+    monkeypatch.setattr(harness, "_available_gb", lambda: gb)
+    cfg = {"concurrency": 4, "max_concurrency": 6, "adaptive": {"window_seconds": 300, **adaptive}}
+    return harness.SlotController(cfg, tmp_path / "controller.jsonl")
+
+
+def test_slots_grow_after_steady_ups_while_work_waits(tmp_path, monkeypatch):
+    control = _controller(tmp_path, monkeypatch)
+    running = [_world(tmp_path, f"w{i}") for i in range(4)]
+    assert control.update(running, queued=10, now=301) == "hold_safe_ups"
+    assert control.update(running, queued=10, now=602) == "increase_safe_ups" and control.slots == 5
+    assert json.loads((tmp_path / "controller.jsonl").read_text().splitlines()[-1])["ups_min"] == 120.0
+
+
+def test_slots_shrink_on_low_ups_but_never_below_the_floor(tmp_path, monkeypatch):
+    control = _controller(tmp_path, monkeypatch, min=3)
+    running = [_world(tmp_path, "fast"), _world(tmp_path, "slow", ups=70.0)]
+    assert control.update(running, queued=10, now=301) == "decrease_safe_ups" and control.slots == 3
+    control.update(running, queued=10, now=602)
+    assert control.slots == 3
+
+
+def test_laya_loop_trouble_and_low_memory_shrink_without_waiting_for_ups(tmp_path, monkeypatch):
+    control = _controller(tmp_path, monkeypatch)
+    timed_out = _world(tmp_path, "rcon", extra="+301s   OUTCOME: tool_error -- TimeoutError: rcon timed out\n")
+    assert control.update([timed_out], queued=5, now=301) == "decrease_laya_unstable" and control.slots == 3
+    stuck = _world(tmp_path, "stuck", gap=900)
+    assert control.update([stuck], queued=5, now=602) == "decrease_laya_unstable"
+    assert _controller(tmp_path, monkeypatch, gb=1.0).update([_world(tmp_path, "m")], 5, now=301) == "decrease_memory"
+
+
+def test_a_plain_tool_error_or_no_waiting_work_does_not_move_slots(tmp_path, monkeypatch):
+    control = _controller(tmp_path, monkeypatch, grow_after=1)
+    bug = _world(tmp_path, "bug", extra="+301s   OUTCOME: tool_error -- KeyError: 'splitter'\n")
+    assert control.update([bug] * 4, queued=0, now=301) == "hold_no_demand" and control.slots == 4
+    assert control.update([bug] * 4, queued=3, now=302) is None  # one decision per window
+
+
+def test_adaptive_false_keeps_the_configured_slots(tmp_path, monkeypatch):
+    import tools.run_laya_batch as harness
+    control = harness.SlotController({"concurrency": 4, "adaptive": False}, tmp_path / "c.jsonl")
+    assert control.update([_world(tmp_path, "w", ups=10.0)], queued=9, now=10**9) is None and control.slots == 4
+
+
+def test_the_batch_starts_jobs_only_up_to_the_controllers_current_slots(tmp_path, monkeypatch):
+    import threading
+    import tools.run_laya_batch as harness
+    monkeypatch.setattr(harness.time, "sleep", lambda _s: None)
+    batch = _batch(tmp_path, seeds=(1, 2, 3, 4))
+    live, peak, lock = [0], [0], threading.Lock()
+
+    class Controller:
+        maximum, slots, last = 4, 1, {}
+
+        def update(self, running, queued, now=None):
+            self.slots = 1 if queued > 4 else 3  # grows mid-run once two jobs have finished
+            return None
+
+    def job(item, slot):
+        with lock:
+            live[0] += 1
+            peak[0] = max(peak[0], live[0])
+            assert live[0] <= batch.controller.slots
+        with lock:
+            live[0] -= 1
+        item["status"] = "completed"
+
+    batch.controller = Controller()
+    monkeypatch.setattr(batch, "run_job", job)
+    monkeypatch.setattr(batch, "report", lambda: None)
+    batch.run()
+    assert all(j["status"] == "completed" for j in batch.jobs)
+    assert [j["slots_at_start"] for j in batch.jobs][:2] == [1, 1] and batch.jobs[-1]["slots_at_start"] == 3
