@@ -59,3 +59,41 @@ def test_batch_report_discloses_final_observation_denominator(tmp_path):
     assert "{'C0': 2, 'C1': 1}" in report
     assert "{'C0': 1} (n=2/3)" in report
     assert "final observations do not prove sustained service" in report
+
+
+def test_acceptance_names_the_checks_that_block_each_milestone(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    import orchestrator.checkpoint_observer as observer
+    from orchestrator.checkpoint_milestones import FactorySnapshot
+    from training.laya_ops import DeterministicSession
+
+    ready = {"present": True, "healthy": True, "producing": True, "output_count": 5}
+    snapshot = FactorySnapshot.from_mapping({
+        "tick": 60, "base_valid": True,
+        "starters": {"iron": ready, "copper": ready, "stone": {**ready, "producing": False}},
+        "mall_assemblers": [{"recipe": r, "working": True} for r in
+                            ("iron-gear-wheel", "copper-cable", "electronic-circuit", "transport-belt")]})
+
+    class Adapter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def observe(self):
+            return SimpleNamespace(snapshot=snapshot)
+
+    monkeypatch.setattr(observer, "LiveCheckpointObservationAdapter", Adapter)
+    session = object.__new__(DeterministicSession)
+    session.client = session.bridge = session.reference_point = None
+    statuses = session.acceptance()
+    assert statuses["C0"] == "passed" and statuses["C1"] == "failed"
+    assert "C0" not in session.acceptance_checks
+    assert session.acceptance_checks["C1"]["failed"] == ["stone_starter_ready"]
+    assert session.acceptance_checks["C1"]["working_mall_count"] == 4
+
+    session.close = lambda: None
+    run(object(), object(), journal=tmp_path / "journal.jsonl", decisions=0, measure_ticks=600, seed=1,
+        run_id="checks", session=session, emit=lambda line: None)
+    record = json.loads((tmp_path / "journal.jsonl").read_text().splitlines()[0])
+    assert record["checks"]["C1"]["failed"] == ["stone_starter_ready"]

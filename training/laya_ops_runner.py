@@ -750,7 +750,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         summary["accepted"] = sorted(set(summary.get("accepted", [])) | set(passed))
         summary["accepted_ever"] = list(summary["accepted"])
         summary["accepted_final"] = None if "error" in statuses else sorted(passed)
-        _append(journal, {"run_id": run_id, "event": "acceptance", "at": event, "statuses": statuses})
+        _append(journal, {"run_id": run_id, "event": "acceptance", "at": event, "statuses": statuses,
+                          "checks": getattr(session, "acceptance_checks", None)})
     check_acceptance("start")
     index = -1
     while decisions is None or index + 1 < decisions:

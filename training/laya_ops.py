@@ -346,12 +346,20 @@ class DeterministicSession:
                                                         reference_point=self.reference_point,
                                                         bootstrap_profile=PROFILE).observe().snapshot
         except ObservationUnsupported as error:  # Telemetry failure: unknown, never a failed milestone.
+            self.acceptance_checks = None
             return {"error": str(error)[:200]}
         self._baseline = self._baseline or snapshot
         self._history = (self._history + [snapshot])[-20:]
-        return {m.checkpoint_id: self._evaluator.evaluate(m.checkpoint_id, snapshot, baseline=self._baseline,
-                                                          history=self._history).status.value
-                for m in self._evaluator.milestones}
+        results = {m.checkpoint_id: self._evaluator.evaluate(m.checkpoint_id, snapshot, baseline=self._baseline,
+                                                             history=self._history)
+                   for m in self._evaluator.milestones}
+        # Which check blocks each unpassed milestone: a bare "failed" cannot tell a missing fact from a real gap.
+        self.acceptance_checks = {
+            cid: {"failed": sorted(k for k, v in (r.evidence.get("checks") or {}).items() if v is False),
+                  "unknown": sorted(r.missing),
+                  **{k: v for k, v in r.evidence.items() if isinstance(v, (bool, int, float, str))}}
+            for cid, r in results.items() if not r.passed}
+        return {cid: r.status.value for cid, r in results.items()}
 
     def close(self) -> None:
         set_active_material_ledger(None)
