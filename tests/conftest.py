@@ -6,6 +6,7 @@ import copy
 import importlib
 import inspect
 import textwrap
+from dataclasses import fields, is_dataclass
 from pathlib import Path
 
 import pytest
@@ -147,7 +148,7 @@ _ISOLATED_MUTABLE_STATE = {
     ),
     "orchestrator.resource_patches": ("_PATCH_CACHE",),
     "orchestrator.stage_extraction": ("_NEW_DIRECT_MINE_CACHE",),
-    "orchestrator.stage_services": (
+    "orchestrator.construction_coverage": (
         "_PENDING_POWER_BRIDGES", "_COVERAGE_PROGRESS",
     ),
     "orchestrator.stage_chemical": ("_CRUDE_EXPANSION_FAILED_CELLS",),
@@ -236,6 +237,9 @@ def _restore_mutable_value(module, name: str, snapshot) -> None:
     elif isinstance(snapshot, list) and isinstance(current, list):
         current.clear()
         current.extend(copy.deepcopy(snapshot))
+    elif is_dataclass(snapshot) and type(current) is type(snapshot):
+        for field in fields(snapshot):
+            _restore_mutable_value(current, field.name, getattr(snapshot, field.name))
     else:
         setattr(module, name, copy.deepcopy(snapshot))
 

@@ -454,3 +454,6 @@ Decision: no adoption claim. The merged line is a regression-free integration
 but does not remove pipe regressions. The guard fix is verified at deployed-
 runtime level. Lifecycle: no units or worlds left running; future runners need a
 fresh frozen copy of dabdfd5 with its mods staged into each disposable world.
+
+- 2026-10-18 20:51 IST: Starship cohort 4 started at 20:38:51 IST, deadline October 19 03:38:51 IST (unit cap 03:48:51), 96 planned jobs on 48 matched seeds, concurrency 8. Frozen review 421e3de vs cell 5271f7f; source save/harness/mod hashes verified. First four-minute snapshot: all eight jobs deciding, zero actual tool/runner errors; no adoption claim. Terminal accounting scheduled 03:50 IST. Existing servers/GUI/mods untouched.
+- 2026-10-18 20:51 IST: Construction coverage now owns its real funded submission, power bridge, roboport and run-state definitions; 33 moved definitions remain AST-identical and stage exports/state keep identity. Focused: 347 passed plus one clean-base pole-shortage fixture failure; fast: 1150 passed, 3 skipped, only the deferred autonomous_builder firewall violation. Lifecycle: source-only; future runners require fresh frozen code. Active cohort arms were not changed.

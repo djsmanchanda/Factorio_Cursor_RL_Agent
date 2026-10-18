@@ -20,7 +20,7 @@ from orchestrator.controller_budget import (
     consume_wait,
     end_run_budget,
 )
-from orchestrator.stage_services import (
+from orchestrator.construction_coverage import (
     StuckError, _ghost_materials, _ghostify_direct_infrastructure, _submit,
 )
 from orchestrator.parts_mall import MaterialShortage
@@ -106,8 +106,8 @@ def test_empty_plan_is_rejected_without_game_mutation(monkeypatch) -> None:
     def fail_build(*_args, **_kwargs):
         raise AssertionError("empty plan reached Factorio")
 
-    monkeypatch.setattr("orchestrator.stage_services.clear_plan_clutter", lambda *_a: 0)
-    monkeypatch.setattr("orchestrator.stage_services.assert_affordable", lambda *_a: None)
+    monkeypatch.setattr("orchestrator.construction_coverage.clear_plan_clutter", lambda *_a: 0)
+    monkeypatch.setattr("orchestrator.construction_coverage.assert_affordable", lambda *_a: None)
     bridge = SimpleNamespace(build_layout=fail_build)
     plan = {"phases": [{"name": "empty", "actions": []}]}
     with pytest.raises(StuckError, match="zero actions"):
@@ -115,14 +115,14 @@ def test_empty_plan_is_rejected_without_game_mutation(monkeypatch) -> None:
 
 
 def test_zero_placement_execution_is_not_treated_as_success(monkeypatch) -> None:
-    monkeypatch.setattr("orchestrator.stage_services.clear_plan_clutter", lambda *_a: 0)
-    monkeypatch.setattr("orchestrator.stage_services.assert_affordable", lambda *_a: None)
+    monkeypatch.setattr("orchestrator.construction_coverage.clear_plan_clutter", lambda *_a: 0)
+    monkeypatch.setattr("orchestrator.construction_coverage.assert_affordable", lambda *_a: None)
     report = {
         "ok": True, "attempted_placements": 0, "succeeded_placements": 0,
         "placed_ghosts": 0, "placed_entities": 0,
     }
     bridge = SimpleNamespace(build_layout=lambda *_a: report)
-    monkeypatch.setattr("orchestrator.stage_services.load_json", lambda value: value)
+    monkeypatch.setattr("orchestrator.construction_coverage.load_json", lambda value: value)
     plan = {"phases": [{"name": "p", "actions": [
         {"action_type": "place_entity", "entity": "medium-electric-pole",
          "position": {"x": 0, "y": 0}},
@@ -150,15 +150,15 @@ def test_submit_ghosts_and_bills_every_power_and_coverage_entity(
     bills: list[dict[str, int]] = []
     submitted: list[dict] = []
     monkeypatch.setattr(
-        "orchestrator.stage_services.clear_plan_clutter", lambda *_a: 0,
+        "orchestrator.construction_coverage.clear_plan_clutter", lambda *_a: 0,
     )
     monkeypatch.setattr(
-        "orchestrator.stage_services.assert_affordable",
+        "orchestrator.construction_coverage.assert_affordable",
         lambda _c, _s, _f, candidate, *_a, **_k:
             bills.append(_ghost_materials(candidate)),
     )
     monkeypatch.setattr(
-        "orchestrator.stage_services.load_json", lambda value: value,
+        "orchestrator.construction_coverage.load_json", lambda value: value,
     )
     bridge = SimpleNamespace(build_layout=lambda _authorization, candidate: (
         submitted.append(candidate) or {
@@ -202,7 +202,7 @@ def test_infrastructure_ghostification_reports_only_former_direct_actions() -> N
 def test_submit_waits_for_a_formerly_direct_pole_to_be_bot_built(
     monkeypatch,
 ) -> None:
-    from orchestrator import stage_services
+    from orchestrator import construction_coverage
 
     plan = {"surface": "nauvis", "force": "player", "phases": [{
         "actions": [{"action_type": "place_entity",
@@ -214,14 +214,14 @@ def test_submit_waits_for_a_formerly_direct_pole_to_be_bot_built(
         {(10.5, 20.5): "medium-electric-pole"},
     ))
     waits: list[str] = []
-    monkeypatch.setattr(stage_services, "clear_plan_clutter", lambda *_a: 0)
-    monkeypatch.setattr(stage_services, "assert_affordable", lambda *_a, **_k: None)
-    monkeypatch.setattr(stage_services, "load_json", lambda value: value)
+    monkeypatch.setattr(construction_coverage, "clear_plan_clutter", lambda *_a: 0)
+    monkeypatch.setattr(construction_coverage, "assert_affordable", lambda *_a, **_k: None)
+    monkeypatch.setattr(construction_coverage, "load_json", lambda value: value)
     monkeypatch.setattr(
-        stage_services.live_base, "entity_names_at", lambda *_a: next(observations),
+        construction_coverage.live_base, "entity_names_at", lambda *_a: next(observations),
     )
-    monkeypatch.setattr(stage_services, "consume_wait", waits.append)
-    monkeypatch.setattr(stage_services.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(construction_coverage, "consume_wait", waits.append)
+    monkeypatch.setattr(construction_coverage.time, "sleep", lambda _seconds: None)
     client = SimpleNamespace(command=lambda _command: "")
     bridge = SimpleNamespace(build_layout=lambda *_a: {
         "ok": True, "attempted_placements": 1, "succeeded_placements": 1,
@@ -238,21 +238,21 @@ def test_infrastructure_wait_returns_an_unbacked_pole_bill_to_the_mall(
 ) -> None:
     """A legal reachable ghost must not hold the controller for five minutes
     when the network has no item and no producer can replenish it."""
-    from orchestrator import stage_services
+    from orchestrator import construction_coverage
 
     clock = [0.0]
     messages: list[str] = []
-    monkeypatch.setattr(stage_services.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(construction_coverage.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(
-        stage_services.time, "sleep",
+        construction_coverage.time, "sleep",
         lambda seconds: clock.__setitem__(0, clock[0] + seconds),
     )
     monkeypatch.setattr(
-        stage_services.live_base, "entity_names_at",
+        construction_coverage.live_base, "entity_names_at",
         lambda *_a: {(57.5, 46.5): "entity-ghost"},
     )
     monkeypatch.setattr(
-        stage_services.live_base, "ghost_blockages", lambda *_a: [{
+        construction_coverage.live_base, "ghost_blockages", lambda *_a: [{
             "position": (57.5, 46.5),
             "entity": "medium-electric-pole",
             "reason": "missing_material:medium-electric-pole:1:0",
@@ -266,19 +266,19 @@ def test_infrastructure_wait_returns_an_unbacked_pole_bill_to_the_mall(
         }],
     )
     monkeypatch.setattr(
-        stage_services, "construction_supply_chain_is_scheduled",
+        construction_coverage, "construction_supply_chain_is_scheduled",
         lambda *_a: False,
     )
 
     with pytest.raises(MaterialShortage) as caught:
-        stage_services._await_bot_built_infrastructure(
+        construction_coverage._await_bot_built_infrastructure(
             SimpleNamespace(command=lambda *_a: ""),
             "nauvis", "player",
             (("medium-electric-pole", (57.5, 46.5)),),
             messages.append, owner="power_bridge",
         )
 
-    assert clock[0] == stage_services._INFRASTRUCTURE_DIAGNOSIS_SECONDS
+    assert clock[0] == construction_coverage._INFRASTRUCTURE_DIAGNOSIS_SECONDS
     assert caught.value.required == {"medium-electric-pole": 1}
     assert caught.value.available == {"medium-electric-pole": 0}
     assert messages == [
@@ -320,7 +320,7 @@ def test_recovered_post_starter_pole_shortage_builds_a_complete_stack(
 def test_infrastructure_timeout_carries_owner_and_live_ghost_diagnostics(
     monkeypatch,
 ) -> None:
-    from orchestrator import stage_services
+    from orchestrator import construction_coverage
 
     clock = [0.0]
     blockage = {
@@ -332,22 +332,22 @@ def test_infrastructure_timeout_carries_owner_and_live_ghost_diagnostics(
         "available_construction_robots": 0,
         "can_revive": True,
     }
-    monkeypatch.setattr(stage_services, "_INFRASTRUCTURE_BUILD_SECONDS", 12.0)
-    monkeypatch.setattr(stage_services.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(construction_coverage, "_INFRASTRUCTURE_BUILD_SECONDS", 12.0)
+    monkeypatch.setattr(construction_coverage.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(
-        stage_services.time, "sleep",
+        construction_coverage.time, "sleep",
         lambda seconds: clock.__setitem__(0, clock[0] + seconds),
     )
     monkeypatch.setattr(
-        stage_services.live_base, "entity_names_at",
+        construction_coverage.live_base, "entity_names_at",
         lambda *_a: {(4.5, 5.5): "entity-ghost"},
     )
     monkeypatch.setattr(
-        stage_services.live_base, "ghost_blockages", lambda *_a: [blockage],
+        construction_coverage.live_base, "ghost_blockages", lambda *_a: [blockage],
     )
 
     with pytest.raises(StuckError) as caught:
-        stage_services._await_bot_built_infrastructure(
+        construction_coverage._await_bot_built_infrastructure(
             SimpleNamespace(command=lambda *_a: ""),
             "nauvis", "player",
             (("medium-electric-pole", (4.5, 5.5)),),
@@ -363,14 +363,14 @@ def test_removal_only_plans_are_not_churn(monkeypatch) -> None:
     pure remove_entity plan; the executor counts only place actions, so the
     zero-placement guard killed the run AFTER the removals had already run.
     Removal-only plans are governed by the report's ok status alone."""
-    monkeypatch.setattr("orchestrator.stage_services.clear_plan_clutter", lambda *_a: 0)
-    monkeypatch.setattr("orchestrator.stage_services.assert_affordable", lambda *_a: None)
+    monkeypatch.setattr("orchestrator.construction_coverage.clear_plan_clutter", lambda *_a: 0)
+    monkeypatch.setattr("orchestrator.construction_coverage.assert_affordable", lambda *_a: None)
     report = {
         "ok": True, "attempted_placements": 0, "succeeded_placements": 0,
         "placed_ghosts": 0, "placed_entities": 0, "removed_entities": 6,
     }
     bridge = SimpleNamespace(build_layout=lambda *_a: report)
-    monkeypatch.setattr("orchestrator.stage_services.load_json", lambda value: value)
+    monkeypatch.setattr("orchestrator.construction_coverage.load_json", lambda value: value)
     plan = {"phases": [{"name": "retire", "actions": [
         {"action_type": "remove_entity", "entity": "stone-furnace",
          "position": {"x": 145.5, "y": -77.5}},
@@ -384,9 +384,9 @@ def test_removal_only_plans_are_not_churn(monkeypatch) -> None:
 def test_successful_plans_record_exact_pending_footprints(
     monkeypatch, tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr("orchestrator.stage_services.clear_plan_clutter", lambda *_a: 0)
-    monkeypatch.setattr("orchestrator.stage_services.assert_affordable", lambda *_a: None)
-    monkeypatch.setattr("orchestrator.stage_services.load_json", lambda value: value)
+    monkeypatch.setattr("orchestrator.construction_coverage.clear_plan_clutter", lambda *_a: 0)
+    monkeypatch.setattr("orchestrator.construction_coverage.assert_affordable", lambda *_a: None)
+    monkeypatch.setattr("orchestrator.construction_coverage.load_json", lambda value: value)
     report = {
         "ok": True, "attempted_placements": 1, "succeeded_placements": 1,
         "placed_ghosts": 1, "placed_entities": 0,
@@ -684,7 +684,7 @@ def test_sandbox_supply_cannot_enter_deterministic_submit():
 
 
 def test_existing_direct_chest_is_configuration_without_new_material(monkeypatch):
-    from orchestrator import stage_services as services
+    from orchestrator import construction_coverage as services
     plan = {"phases": [{"actions": [{"action_type": "place_entity", "entity": "requester-chest", "position": {"x": 1, "y": 2}}]}]}
     monkeypatch.setattr(services.live_base, 'entity_names_at', lambda *_: {(1, 2): 'requester-chest'})
     monkeypatch.setattr(services, 'clear_plan_clutter', lambda *_: None)
@@ -701,7 +701,7 @@ def test_existing_direct_chest_is_configuration_without_new_material(monkeypatch
 
 
 def test_new_chest_settings_wait_for_real_bot_construction(monkeypatch):
-    from orchestrator import stage_services as services
+    from orchestrator import construction_coverage as services
     plan = {"phases": [{"actions": [{"action_type": "place_entity", "entity": "requester-chest", "position": {"x": 1, "y": 2}, "logistic_requests": [{"name": "iron-plate", "count": 5}]}]}]}
     monkeypatch.setattr(services, 'clear_plan_clutter', lambda *_: None)
     monkeypatch.setattr(services, 'assert_affordable', lambda *_a, **_k: None)

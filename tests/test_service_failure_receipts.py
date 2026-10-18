@@ -2,7 +2,7 @@
 
 import pytest
 
-from orchestrator import stage_services as services
+from orchestrator import construction_coverage as services
 from training.laya_ops import DeterministicSession
 
 pytestmark = [pytest.mark.deterministic, pytest.mark.fast]

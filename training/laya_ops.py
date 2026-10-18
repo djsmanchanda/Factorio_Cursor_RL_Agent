@@ -24,7 +24,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from orchestrator import autonomous_builder as ab
-from orchestrator import stage_services, mall_control
+from orchestrator import construction_coverage, mall_control
 from orchestrator.bootstrap_district import BootstrapDistrictLedger
 from orchestrator.bootstrap_work import BootstrapWorkLedger
 from orchestrator.game_bridge import GameBridge, load_json
@@ -96,7 +96,7 @@ class DeterministicSession:
         self.client = RconClient("127.0.0.1", manifest["rcon_port"], password)
         self.bridge = GameBridge(script_output=self.script_output, host="127.0.0.1", port=manifest["rcon_port"],
                                  password=password, command_timeout=30.0, episode_id=self.episode_id)
-        stage_services.reset_coverage_progress()
+        construction_coverage.reset_coverage_progress()
         ab._TRANSFERABLE_WAITS.clear()
         ab._STAGE_DELIVERY_ATTEMPTS.clear()
         ab.initialize_operation_runtime(self.bridge, SURFACE, FORCE, goal_item, emit)
@@ -137,7 +137,7 @@ class DeterministicSession:
             "retire_starter": self._retire_starter,
             "raise_stock_gate": self._raise_stock_gate,
             # Roboport chain toward a position (construction or logistic reach).
-            "coverage": lambda x, y, purpose="construction": stage_services.extend_roboport_coverage(
+            "coverage": lambda x, y, purpose="construction": construction_coverage.extend_roboport_coverage(
                 c, b, SURFACE, FORCE, (x, y), emit, purpose=purpose),
         }
 

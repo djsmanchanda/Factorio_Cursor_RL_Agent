@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from orchestrator import autonomous_builder as builder, stage_services as services
+from orchestrator import autonomous_builder as builder, construction_coverage as services
 from orchestrator.material_reservations import plan_material_bill
 from planners.infrastructure import POLE_SPECS, strip_local_power
 from planners.infrastructure_geometry import distance, footprint_tile_indices

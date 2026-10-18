@@ -142,3 +142,36 @@ or the oil district bill); the only-circuit-cell lend (reset-chest s76700); stri
 C1 rarely passes; the ladder double credit with active loan draws (review P3);
 the two laya_ops strategic-wrapper imports. Run a matched cohort of dabdfd5 (it
 was not live-tested; cohort 2 ran 88093ab/09c093a) against the ladder arm.
+
+## Starship matched cohort 4 and coverage owner (2026-10-18 20:51 IST)
+
+Starship's `laya-c4-starship-20261018.service` began October 18 at 20:38:51 IST
+from frozen review `421e3de` and cell `5271f7f`. The prepared `78eb785` arm was
+superseded before launch after independent review. The decision factor is
+bounded predecessor pipe credit in a later-rung loan cell; acceptance-check
+names and held/target diagnostics are observational. Same save, mods, harness,
+policy and 48 seeds (77400–77447), 96 planned jobs, concurrency 8. Deadline is
+October 19 03:38:51 IST; cleanup unit cap 03:48:51 IST. Count every planned job,
+including censored or failed jobs; terminal accounting is scheduled 03:50 IST.
+At 20:43:10 IST all eight initial jobs were deciding with no actual tool/runner
+errors. Normal typed supply/coverage deferrals remain separate. Neither held
+ladder lines nor unreadable-cell diagnostics had appeared in that early window.
+No adoption or complete-window result is established. Campaign identity and
+hashes are in `data/laya-experiments/laya-c4-starship-20261018/freeze.json`;
+existing persistent servers, GUI profile and installed mods remain untouched.
+
+Independently, source branch `work/codex/laya-coverage-owner-20261018` from
+`5271f7f` moves the actual funded construction/power/roboport mechanics and
+shared run state into `orchestrator/construction_coverage.py`. All 33 moved
+definitions and three retained stage definitions are AST-identical to the base.
+`stage_services` imports the real definitions; Laya calls their owner directly.
+The pending bridge dictionary and coverage frontier state retain shared identity;
+test fixture restoration now restores shared dataclass state in place. Existing
+service tests patch the new owner without weakening their assertions.
+
+Focused verification: 347 passed, with the same pole-shortage fake-client failure
+on pristine `5271f7f`. Required fast gate: 1150 passed, three skipped, only the
+remaining `laya_ops -> autonomous_builder` firewall violation. No allowlist change
+or ladder/loan source edit. The full production-operation API redesign remains
+deferred. Source use needs fresh frozen runners; these edits are absent from
+the already active matched cohort. No deployment/restart was performed.

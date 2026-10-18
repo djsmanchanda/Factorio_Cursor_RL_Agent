@@ -12,6 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 from orchestrator import autonomous_builder as builder  # noqa: E402
 from orchestrator import live_base  # noqa: E402
 from orchestrator import stage_services  # noqa: E402
+from orchestrator import construction_coverage  # noqa: E402
 from orchestrator.parts_mall import MaterialShortage  # noqa: E402
 
 
@@ -27,10 +28,10 @@ class _Client:
 
 @pytest.fixture(autouse=True)
 def _clear_pending_power_bridges() -> None:
-    stage_services._PENDING_POWER_BRIDGES.clear()
+    construction_coverage._PENDING_POWER_BRIDGES.clear()
     builder._STAGE_DELIVERY_PROVIDERS.clear()
     yield
-    stage_services._PENDING_POWER_BRIDGES.clear()
+    construction_coverage._PENDING_POWER_BRIDGES.clear()
     builder._STAGE_DELIVERY_PROVIDERS.clear()
 
 
@@ -70,21 +71,21 @@ def test_coherent_earmark_submits_ghosts_despite_queued_shortage(monkeypatch) ->
             }
         ),
     })()
-    monkeypatch.setattr(stage_services, "consume_plan_submission", lambda *_a: None)
-    monkeypatch.setattr(stage_services, "clear_plan_clutter", lambda *_a: None)
-    monkeypatch.setattr(stage_services, "load_json", lambda report: report)
+    monkeypatch.setattr(construction_coverage, "consume_plan_submission", lambda *_a: None)
+    monkeypatch.setattr(construction_coverage, "clear_plan_clutter", lambda *_a: None)
+    monkeypatch.setattr(construction_coverage, "load_json", lambda report: report)
     monkeypatch.setattr(
-        stage_services, "assert_affordable",
+        construction_coverage, "assert_affordable",
         lambda *_a: (_ for _ in ()).throw(MaterialShortage(
             "iron-expansion", {"electric-mining-drill": 6}, {},
         )),
     )
     monkeypatch.setattr(
-        stage_services, "_shortage_has_complete_supply_chains",
+        construction_coverage, "_shortage_has_complete_supply_chains",
         lambda *_a: True,
     )
 
-    stage_services._submit(
+    construction_coverage._submit(
         object(), bridge, "nauvis", plan, "iron-expansion",
         lambda _message: None, allow_unfunded_ghosts=True,
     )
@@ -106,13 +107,13 @@ def test_configuration_only_plan_is_not_logged_as_zero_placement_churn(
             "placed_entities": 0,
         },
     })()
-    monkeypatch.setattr(stage_services, "consume_plan_submission", lambda *_a: None)
-    monkeypatch.setattr(stage_services, "clear_plan_clutter", lambda *_a: None)
-    monkeypatch.setattr(stage_services, "assert_affordable", lambda *_a: None)
-    monkeypatch.setattr(stage_services, "load_json", lambda report: report)
+    monkeypatch.setattr(construction_coverage, "consume_plan_submission", lambda *_a: None)
+    monkeypatch.setattr(construction_coverage, "clear_plan_clutter", lambda *_a: None)
+    monkeypatch.setattr(construction_coverage, "assert_affordable", lambda *_a: None)
+    monkeypatch.setattr(construction_coverage, "load_json", lambda report: report)
     messages = []
 
-    stage_services._submit(
+    construction_coverage._submit(
         object(), bridge, "nauvis", plan, "request_update", messages.append,
     )
 
@@ -138,22 +139,22 @@ def test_explicit_additive_earmark_can_precede_a_missing_supply_chain(
             }
         ),
     })()
-    monkeypatch.setattr(stage_services, "consume_plan_submission", lambda *_a: None)
-    monkeypatch.setattr(stage_services, "clear_plan_clutter", lambda *_a: None)
-    monkeypatch.setattr(stage_services, "load_json", lambda report: report)
+    monkeypatch.setattr(construction_coverage, "consume_plan_submission", lambda *_a: None)
+    monkeypatch.setattr(construction_coverage, "clear_plan_clutter", lambda *_a: None)
+    monkeypatch.setattr(construction_coverage, "load_json", lambda report: report)
     monkeypatch.setattr(
-        stage_services, "assert_affordable",
+        construction_coverage, "assert_affordable",
         lambda *_a: (_ for _ in ()).throw(MaterialShortage(
             "oil-cell", {"pipe": 500}, {},
         )),
     )
     monkeypatch.setattr(
-        stage_services, "_shortage_has_complete_supply_chains",
+        construction_coverage, "_shortage_has_complete_supply_chains",
         lambda *_a: False,
     )
     messages: list[str] = []
 
-    stage_services._submit(
+    construction_coverage._submit(
         object(), bridge, "nauvis", plan, "oil-cell", messages.append,
         allow_unfunded_ghosts=True,
     )
@@ -175,17 +176,17 @@ def test_additive_earmark_still_funds_synchronously_awaited_infrastructure(
             "position": {"x": 12.5, "y": 8.5},
         },
     ]}]}
-    monkeypatch.setattr(stage_services, "consume_plan_submission", lambda *_a: None)
-    monkeypatch.setattr(stage_services, "clear_plan_clutter", lambda *_a: None)
+    monkeypatch.setattr(construction_coverage, "consume_plan_submission", lambda *_a: None)
+    monkeypatch.setattr(construction_coverage, "clear_plan_clutter", lambda *_a: None)
     monkeypatch.setattr(
-        stage_services, "assert_affordable",
+        construction_coverage, "assert_affordable",
         lambda *_a: (_ for _ in ()).throw(MaterialShortage(
             "iron-foundation", {"substation": 1}, {},
         )),
     )
 
     with pytest.raises(MaterialShortage):
-        stage_services._submit(
+        construction_coverage._submit(
             object(), object(), "nauvis", plan, "iron-foundation",
             lambda _message: None, allow_unfunded_ghosts=True,
         )
@@ -214,17 +215,17 @@ def test_funded_service_anchor_does_not_block_an_unfunded_additive_machine(
             }
         ),
     })()
-    monkeypatch.setattr(stage_services, "consume_plan_submission", lambda *_a: None)
-    monkeypatch.setattr(stage_services, "clear_plan_clutter", lambda *_a: None)
-    monkeypatch.setattr(stage_services, "load_json", lambda report: report)
+    monkeypatch.setattr(construction_coverage, "consume_plan_submission", lambda *_a: None)
+    monkeypatch.setattr(construction_coverage, "clear_plan_clutter", lambda *_a: None)
+    monkeypatch.setattr(construction_coverage, "load_json", lambda report: report)
     monkeypatch.setattr(
-        stage_services, "assert_affordable",
+        construction_coverage, "assert_affordable",
         lambda *_a: (_ for _ in ()).throw(MaterialShortage(
             "iron-foundation", {"electric-mining-drill": 6}, {},
         )),
     )
 
-    stage_services._submit(
+    construction_coverage._submit(
         object(), bridge, "nauvis", plan, "iron-foundation",
         lambda _message: None, allow_unfunded_ghosts=True,
     )
@@ -236,24 +237,24 @@ def test_funded_service_anchor_does_not_block_an_unfunded_additive_machine(
 def test_unfunded_blueprint_requires_the_complete_solid_supply_chain(monkeypatch) -> None:
     lines = []
     monkeypatch.setattr(
-        stage_services.live_base, "find_line",
+        construction_coverage.live_base, "find_line",
         lambda _c, _s, _f, recipe, _machine: lines.append(recipe) or object(),
     )
     monkeypatch.setattr(
-        stage_services.extraction_state, "resource_drill_count",
+        construction_coverage.extraction_state, "resource_drill_count",
         lambda _c, _s, _f, resource: 6 if resource == "iron-ore" else 0,
     )
 
-    assert stage_services._item_supply_chain_is_scheduled(
+    assert construction_coverage._item_supply_chain_is_scheduled(
         object(), "nauvis", "player", "pipe",
     )
     assert lines == ["pipe", "iron-plate"]
 
     monkeypatch.setattr(
-        stage_services.extraction_state, "resource_drill_count",
+        construction_coverage.extraction_state, "resource_drill_count",
         lambda *_a: 0,
     )
-    assert not stage_services._item_supply_chain_is_scheduled(
+    assert not construction_coverage._item_supply_chain_is_scheduled(
         object(), "nauvis", "player", "pipe",
     )
 
@@ -470,21 +471,21 @@ def test_producer_backed_shortage_places_blueprint_without_explicit_override(
             }
         ),
     })()
-    monkeypatch.setattr(stage_services, "consume_plan_submission", lambda *_a: None)
-    monkeypatch.setattr(stage_services, "clear_plan_clutter", lambda *_a: None)
-    monkeypatch.setattr(stage_services, "load_json", lambda report: report)
+    monkeypatch.setattr(construction_coverage, "consume_plan_submission", lambda *_a: None)
+    monkeypatch.setattr(construction_coverage, "clear_plan_clutter", lambda *_a: None)
+    monkeypatch.setattr(construction_coverage, "load_json", lambda report: report)
     monkeypatch.setattr(
-        stage_services, "assert_affordable",
+        construction_coverage, "assert_affordable",
         lambda *_a: (_ for _ in ()).throw(MaterialShortage(
             "oil-cell", {"pipe": 500}, {},
         )),
     )
     monkeypatch.setattr(
-        stage_services, "_shortage_has_complete_supply_chains",
+        construction_coverage, "_shortage_has_complete_supply_chains",
         lambda *_a: True,
     )
 
-    stage_services._submit(
+    construction_coverage._submit(
         object(), bridge, "nauvis", plan, "oil-cell", lambda _message: None,
     )
 
@@ -510,21 +511,21 @@ def test_synchronous_infrastructure_rejects_producer_backed_shortage(
     bridge = type("Bridge", (), {
         "build_layout": lambda _self, _authorization, _plan: submitted.append(_plan),
     })()
-    monkeypatch.setattr(stage_services, "consume_plan_submission", lambda *_a: None)
-    monkeypatch.setattr(stage_services, "clear_plan_clutter", lambda *_a: None)
+    monkeypatch.setattr(construction_coverage, "consume_plan_submission", lambda *_a: None)
+    monkeypatch.setattr(construction_coverage, "clear_plan_clutter", lambda *_a: None)
     monkeypatch.setattr(
-        stage_services, "assert_affordable",
+        construction_coverage, "assert_affordable",
         lambda *_a, **_k: (_ for _ in ()).throw(MaterialShortage(
             "power_bridge", {"medium-electric-pole": 5}, {},
         )),
     )
     monkeypatch.setattr(
-        stage_services, "_shortage_has_complete_supply_chains",
+        construction_coverage, "_shortage_has_complete_supply_chains",
         lambda *_a: True,
     )
 
     with pytest.raises(MaterialShortage):
-        stage_services._submit(
+        construction_coverage._submit(
             object(), bridge, "nauvis", plan, "power_bridge",
             lambda _message: None, require_funded=require_funded,
         )
@@ -685,14 +686,14 @@ def test_construction_affordability_rejects_requester_held_stock(
     """Twelve inserters in a fast-inserter requester are not a budget that
     can revive ten refinery ghosts."""
     monkeypatch.setattr(
-        stage_services.live_base, "transferable_items", lambda *_args: {},
+        construction_coverage.live_base, "transferable_items", lambda *_args: {},
     )
     plan = {"phases": [{"actions": [{
         "action_type": "place_ghost", "entity": "inserter",
     }]}]}
 
     with pytest.raises(MaterialShortage) as raised:
-        stage_services.assert_affordable(
+        construction_coverage.assert_affordable(
             object(), "nauvis", "player", plan, "iron-refinery",
             lambda _message: None,
         )
@@ -824,7 +825,7 @@ def test_power_bridge_racing_a_concurrent_build_replans_once(monkeypatch) -> Non
     """A substation built by another stage between our survey and our bots'
     arrival is construction in flight, not a wall -- replan once on fresh
     ground (live run of 2026-08-22 02:46 ended the mission on this)."""
-    from orchestrator import stage_services as ss
+    from orchestrator import construction_coverage as ss
 
     surveys = {"n": 0}
 
@@ -866,7 +867,7 @@ def test_power_bridge_racing_a_concurrent_build_replans_once(monkeypatch) -> Non
 
 def test_power_bridge_race_accepts_a_network_that_merged_mid_retry(monkeypatch) -> None:
     """A partial first submission can join power before its retry re-surveys."""
-    from orchestrator import stage_services as ss
+    from orchestrator import construction_coverage as ss
 
     network_ids = iter((3, 1))
     monkeypatch.setattr(
@@ -883,7 +884,7 @@ def test_power_bridge_race_accepts_a_network_that_merged_mid_retry(monkeypatch) 
 
 def test_power_bridge_skips_consumer_inside_medium_pole_supply_area(monkeypatch) -> None:
     """A consumer clearly inside the seven-tile supply width needs no pole."""
-    from orchestrator import stage_services as ss
+    from orchestrator import construction_coverage as ss
 
     monkeypatch.setattr(ss.live_base, "pole_network_id", lambda *_a: None)
     monkeypatch.setattr(
@@ -904,7 +905,7 @@ def test_power_bridge_skips_consumer_inside_medium_pole_supply_area(monkeypatch)
 def test_power_bridge_repairs_roboport_on_supply_boundary(monkeypatch) -> None:
     """Boundary contact is not enough to charge the remote coverage port."""
     from orchestrator import autonomous_builder as builder_module
-    from orchestrator import stage_services as ss
+    from orchestrator import construction_coverage as ss
 
     submitted: list[dict] = []
     monkeypatch.setattr(ss.live_base, "pole_network_id", lambda *_a: None)
@@ -935,7 +936,7 @@ def test_power_bridge_defers_dense_stage_without_transmission_pole_terminal(
 ) -> None:
     """A packed layout yields for a later retry, not an implicit upgrade."""
     from orchestrator import autonomous_builder as builder_module
-    from orchestrator import stage_services as ss
+    from orchestrator import construction_coverage as ss
 
     submitted: list[dict] = []
     medium_terminal_tiles = {
@@ -981,7 +982,7 @@ def test_power_bridge_defers_dense_stage_without_transmission_pole_terminal(
 def test_power_bridge_keeps_a_small_pole_bootstrap_low_tier(monkeypatch) -> None:
     """Connecting the first steel starter must not demand medium-pole steel."""
     from orchestrator import autonomous_builder as builder_module
-    from orchestrator import stage_services as ss
+    from orchestrator import construction_coverage as ss
 
     submitted: list[dict] = []
     monkeypatch.setattr(ss.live_base, "pole_network_id", lambda *_a: 7)
@@ -1016,7 +1017,7 @@ def test_power_bridge_keeps_a_small_pole_bootstrap_low_tier(monkeypatch) -> None
 def test_power_bridge_routes_around_a_reserved_refinery_footprint(monkeypatch) -> None:
     """Emergency power may not consume a belt tile planned by an expansion."""
     from orchestrator import autonomous_builder as builder_module
-    from orchestrator import stage_services as ss
+    from orchestrator import construction_coverage as ss
 
     submitted = []
     monkeypatch.setattr(ss.live_base, "pole_network_id", lambda *_a: None)
@@ -1070,7 +1071,7 @@ def test_power_bridge_retries_when_placed_chain_is_still_disconnected(
 ) -> None:
     """A successful placement report is not proof of electrical continuity."""
     from orchestrator import autonomous_builder as builder_module
-    from orchestrator import stage_services as ss
+    from orchestrator import construction_coverage as ss
 
     submissions: list[dict] = []
     messages: list[str] = []
@@ -1110,7 +1111,7 @@ def test_disconnected_roboport_is_repaired_again_on_a_later_survey(
     monkeypatch,
 ) -> None:
     """An attempted repair must not suppress a still-live power fault."""
-    from orchestrator import stage_services as ss
+    from orchestrator import construction_coverage as ss
 
     repairs: list[tuple[float, float]] = []
     monkeypatch.setattr(
@@ -1134,7 +1135,7 @@ def test_neighboring_power_remedy_waits_for_the_first_bridge_to_settle(
     monkeypatch,
 ) -> None:
     from orchestrator import autonomous_builder as builder_module
-    from orchestrator import stage_services as ss
+    from orchestrator import construction_coverage as ss
 
     ss._PENDING_POWER_BRIDGES.clear()
     network_ids = iter((None, 7))
