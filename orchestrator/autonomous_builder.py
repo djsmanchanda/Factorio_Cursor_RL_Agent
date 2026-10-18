@@ -6255,7 +6255,7 @@ def _submit_bootstrap_loan(
     # believe iron-stick (or inserter) production still exists.
     if loan.original_recipe != loan.target_item:
         MANAGED_INTERMEDIATE_SOURCES.pop(loan.original_recipe, None)
-    live_loan_group = loan.group
+    live_loan_group = loan.live_group
     actual, usable = _bootstrap_loan_stock(
         client, surface, force, loan.target_item,
     )

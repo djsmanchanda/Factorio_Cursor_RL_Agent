@@ -764,3 +764,26 @@ def test_loan_facts_are_generic_and_report_only_real_deficits() -> None:
     unknown = bootstrap_loan_facts(loan)
     assert unknown["counter"] is None and unknown["remaining_bill"] is None
     assert unknown["missing_inputs"] is None and unknown["producer_status"] is None
+
+
+def test_a_step_credited_in_memory_still_releases_the_requesters_tag():
+    # cohort 4 cell-s77403: belts finished, the step was credited and the loan preempted in one pass;
+    # the release named the credited tag the chest never carried, 21 release_owner_missing retries.
+    from types import SimpleNamespace
+
+    from orchestrator.mall_bootstrap import promote_bootstrap_loan_plan, release_bootstrap_loan_plan, restore_bootstrap_loan_plan
+
+    observed = "mall-bootstrap:v4:electronic-circuit:splitter:3:3:right:transport-belt:202:89:2:2:-"
+    client = SimpleNamespace(command=lambda _c: f"{observed}|42.5|38.5|assembling-machine-1,-|assembling-machine-1,transport-belt")
+    (loan,) = active_bootstrap_loans(client, "nauvis", "player")
+    credited = loan.credit_completed_step("transport-belt", 202)
+    assert credited.group != observed and credited.live_group == observed
+
+    release = release_bootstrap_loan_plan(credited)["phases"][0]["actions"][0]["release_cell"]
+    assert release["group"] == observed
+    restore = restore_bootstrap_loan_plan(credited)["phases"][0]["actions"][0]
+    assert restore["clear_logistic_groups"] == [observed]
+    from dataclasses import replace
+    promotable = replace(credited, target_item="transport-belt")  # promotion needs a line recipe
+    promote = json.dumps(promote_bootstrap_loan_plan(promotable, stock_target=10))
+    assert observed in promote and promotable.group not in promote

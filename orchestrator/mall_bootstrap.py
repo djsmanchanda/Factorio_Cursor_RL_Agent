@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Mapping
 
 from planners.mall_layout import (
@@ -52,6 +52,13 @@ class MallBootstrapLoan:
     completed_step_targets: tuple[tuple[str, int], ...] = ()
     machine_name: str = "assembling-machine-1"
     releasing: bool = False
+    # The tag read from the requester. `group` is recomputed from the fields, so it runs ahead of
+    # the chest as soon as a step is credited in memory; releasing or clearing must name the chest's tag.
+    observed_group: str | None = field(default=None, compare=False)
+
+    @property
+    def live_group(self) -> str:
+        return self.observed_group or self.group
 
     @property
     def production_target(self) -> int:
@@ -404,6 +411,7 @@ def active_bootstrap_loans(
             completed_step_targets=completed,
             machine_name=left_machine if side == "left" else right_machine,
             releasing=releasing,
+            observed_group=group,
         ))
     return tuple(loans)
 
@@ -595,8 +603,8 @@ def bootstrap_loan_plan(
             recipe_group_name(loan.original_recipe, loan.side),
         ],
     }
-    if active.group != loan.group:
-        requester["clear_logistic_groups"].append(loan.group)
+    if active.group != loan.live_group:
+        requester["clear_logistic_groups"].append(loan.live_group)
     if previous_group and previous_group not in requester["clear_logistic_groups"]:
         requester["clear_logistic_groups"].append(previous_group)
     provider = generate_mall_provider_limit_update(
@@ -620,7 +628,7 @@ def release_bootstrap_loan_plan(loan: MallBootstrapLoan, *, acknowledge: bool = 
     return {"phases": [{"name": f"release_bootstrap_loan_{loan.target_item}", "actions": [{
         "action_type": "configure_entity", "entity": loan.machine_name,
         "position": {"x": loan.machine_position[0], "y": loan.machine_position[1]},
-        "release_cell": {"group": loan.group, "expected_recipe": loan.current_recipe,
+        "release_cell": {"group": loan.live_group, "expected_recipe": loan.current_recipe,
                          "acknowledge": acknowledge, **({"restore_recipe": restore_recipe} if restore_recipe else {}),
                          "requester": {"x": loan.requester_position[0], "y": loan.requester_position[1]},
                          "provider": {"x": loan.provider_position[0], "y": loan.provider_position[1]}},
@@ -671,7 +679,7 @@ def restore_bootstrap_loan_plan(
                 # Original mall groups are shared by every matching cell on
                 # this side. Leave them intact while the unique loan group is
                 # removed, or restoring one borrower would rewrite its peers.
-                **({} if retain_loan_tag else {"clear_logistic_groups": [loan.group]}),
+                **({} if retain_loan_tag else {"clear_logistic_groups": [loan.live_group]}),
                 "logistic_sections": [requester_section],
             },
             {
@@ -716,7 +724,7 @@ def promote_bootstrap_loan_plan(
         loan.target_item, loan.provider_position, stock_target,
         fill_chest=True,
     )["phases"][0]["actions"][0]
-    clear_groups = [loan.group]
+    clear_groups = [loan.live_group]
     if clear_original_groups:
         # A core promotion may be entered from a legacy/no-step loan whose
         # unique tag is not the only request group still on the shared chest.
