@@ -2382,7 +2382,9 @@ def loan_cell_item_count(
         "rcon.print(n)"
     )
     raw = _sc(client, lua)
-    return int(raw) if raw.isdigit() else 0
+    if not raw.isdigit():
+        raise RuntimeError(f"loan cell query returned {raw[:80]!r}")
+    return int(raw)
 
 
 def bot_and_power_summary(client: RconClient, surface: str, force: str) -> dict:

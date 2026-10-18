@@ -8122,14 +8122,20 @@ def _chemical_capability_started(
         # one batch); an "ever stocked" latch would prove nothing about the
         # cell's remaining bill (audit 2026-10-17).
         stock = live_base.transferable_items(client, surface, force)
-        held = (
-            stock.get(item, 0)
-            + live_base.placed_entity_count(client, surface, force, item)
-            + _ladder_loan_draw(client, surface, force, item)
-            + _ladder_embodied(client, surface, force, item, stock)
-        )
-        return held >= _CHEMICAL_BATCH_TARGETS[item]
+        parts = {
+            "stock": stock.get(item, 0),
+            "placed": live_base.placed_entity_count(client, surface, force, item),
+            "loan": _ladder_loan_draw(client, surface, force, item),
+            "embodied": _ladder_embodied(client, surface, force, item, stock),
+        }
+        _LADDER_CREDIT[item] = parts
+        return sum(parts.values()) >= _CHEMICAL_BATCH_TARGETS[item]
     return _production_started(client, surface, force, item)
+
+
+# Last rung credit per ladder item, shown when the rung reopens so a reopen is explainable.
+_LADDER_CREDIT: dict[str, dict[str, int]] = {}
+_LADDER_CREDIT_ERRORS: dict[str, str] = {}
 
 
 def _ladder_embodied(
@@ -8192,9 +8198,12 @@ def _ladder_loan_draw(
             held = live_base.loan_cell_item_count(
                 client, surface, loan.requester_position, loan.machine_position, item,
             )
-        except Exception:  # noqa: BLE001 -- an unreadable cell keeps the planned credit
+        except Exception as error:  # noqa: BLE001 -- an unreadable cell keeps the planned credit
+            _LADDER_CREDIT_ERRORS[item] = f"{type(error).__name__}: {error}"[:120]
             held = 0
-        drawn += max(requested, held)
+        # The cell's input buffer and inserter hand hold at most a few crafts beyond the request;
+        # anything more is stock left from the cell's original recipe, not drawn from the ladder.
+        drawn += max(requested, min(held, requested + 3 * per_craft))
     return drawn
 
 
@@ -8319,9 +8328,14 @@ def _ensure_chemical_ladder_predecessor(
     stop = len(predecessors)
     if predecessor is not None:
         target = _CHEMICAL_BATCH_TARGETS.get(predecessor)
+        credit = _LADDER_CREDIT.pop(predecessor, None)
+        error = _LADDER_CREDIT_ERRORS.pop(predecessor, None)
         emit(
             f"  CHEMICAL LADDER: {item} waits at {predecessor} "
             f"({stop}/{len(CHEMICAL_BOOTSTRAP_LADDER)} rungs required)"
+            + (f"; held {sum(credit.values())}/{target} = "
+               + " + ".join(f"{k} {v}" for k, v in credit.items()) if credit and target else "")
+            + (f"; loan cell unreadable: {error}" if error else "")
         )
         if target is not None and _chemical_uses_rotating_batch(
             client, surface, force, predecessor,

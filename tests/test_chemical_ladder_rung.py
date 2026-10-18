@@ -1,5 +1,7 @@
 # Path: tests/test_chemical_ladder_rung.py | Purpose: Protect the chemical ladder rung as a world count: reserved and placed rung items satisfy it, nothing is latched.
 
+import pytest
+
 from orchestrator import autonomous_builder as ab
 
 
@@ -126,4 +128,33 @@ def test_loan_cell_item_count_reads_one_number():
     client = Reply("18\n")
     assert ab.live_base.loan_cell_item_count(client, "nauvis", (42.5, 38.5), (39.5, 38.5), "pipe") == 18
     assert "assembling_machine_input" in client.sent[0] and "held_stack" in client.sent[0]
-    assert ab.live_base.loan_cell_item_count(Reply(""), "nauvis", (0, 0), (3, 0), "pipe") == 0
+    with pytest.raises(RuntimeError):  # a broken query must surface, not read as an empty cell
+        ab.live_base.loan_cell_item_count(Reply("Cannot execute command"), "nauvis", (0, 0), (3, 0), "pipe")
+
+
+def test_original_recipe_stock_left_in_a_loan_cell_is_not_ladder_credit(monkeypatch):
+    # review 2026-10-18: a cell that made pipe-to-ground keeps its pipe; only a few crafts of buffer count.
+    _world(monkeypatch, stock={"pipe": 60}, placed={})
+    _chemical_plant_loan(monkeypatch, held=80)
+    assert not ab._chemical_capability_started(Client(), "nauvis", "player", "pipe")  # 60 + min(80, 15 + 15)
+
+
+def test_a_reopened_rung_explains_its_count_and_an_unreadable_cell(monkeypatch):
+    _world(monkeypatch, stock={"pipe": 60}, placed={})
+    _chemical_plant_loan(monkeypatch, held=0)
+
+    def unreadable(*args):
+        raise RuntimeError("loan cell query returned 'error'")
+
+    monkeypatch.setattr(ab.live_base, "loan_cell_item_count", unreadable)
+    monkeypatch.setattr(ab, "_chemical_ladder_predecessors", lambda item: ("pipe",))
+    monkeypatch.setattr(ab, "_missing_chemical_ladder_predecessor",
+                        lambda c, s, f, item: "pipe" if not ab._chemical_capability_started(c, s, f, "pipe") else None)
+    monkeypatch.setattr(ab, "_start_bootstrap_loan", lambda *a: "loan")
+    lines = []
+    with pytest.raises(ab.ProductionPrerequisiteDeferred):  # the borrowed rung parks the caller
+        ab._ensure_chemical_ladder_predecessor(Client(), object(), "nauvis", "player", "chemical-plant", (0, 0),
+                                               lines.append)
+    assert "waits at pipe" in lines[0]
+    assert "held 75/100 = stock 60 + placed 0 + loan 15 + embodied 0" in lines[0]
+    assert "loan cell unreadable: RuntimeError" in lines[0]

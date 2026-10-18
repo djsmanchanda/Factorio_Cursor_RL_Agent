@@ -341,12 +341,12 @@ class DeterministicSession:
         from orchestrator.checkpoint_observer import LiveCheckpointObservationAdapter, ObservationUnsupported
         if not hasattr(self, "_evaluator"):
             self._evaluator, self._baseline, self._history = CheckpointEvaluator(), None, []
+        self.acceptance_checks = None  # never journal an earlier sample's checks beside a new error
         try:
             snapshot = LiveCheckpointObservationAdapter(self.client, self.bridge, surface=SURFACE, force=FORCE,
                                                         reference_point=self.reference_point,
                                                         bootstrap_profile=PROFILE).observe().snapshot
         except ObservationUnsupported as error:  # Telemetry failure: unknown, never a failed milestone.
-            self.acceptance_checks = None
             return {"error": str(error)[:200]}
         self._baseline = self._baseline or snapshot
         self._history = (self._history + [snapshot])[-20:]
