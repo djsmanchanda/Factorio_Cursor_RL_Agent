@@ -86,3 +86,44 @@ def test_embodied_rungs_do_not_hide_a_real_pipe_shortage(monkeypatch):
     _world(monkeypatch, stock={"pipe": 10, "chemical-plant": 2}, placed={})
     _later_rungs(monkeypatch)
     assert not ab._chemical_capability_started(Client(), "nauvis", "player", "pipe")
+
+
+def _chemical_plant_loan(monkeypatch, held):
+    monkeypatch.setitem(ab.LINE_RECIPES, "chemical-plant", {
+        "ingredients": ["steel-plate", "iron-gear-wheel", "electronic-circuit", "pipe"], "amounts": [5, 5, 5, 5],
+    })
+    monkeypatch.setattr(ab, "active_bootstrap_loans", lambda *a: (_loan("chemical-plant", crafts=2),))
+    monkeypatch.setattr(ab.live_base, "loan_cell_item_count", lambda c, s, requester, machine, item: held)
+
+
+def test_pipe_inside_a_later_rungs_loan_cell_is_still_the_ladders(monkeypatch):
+    # opus-10h cohort 2 ladder arm: 24/25 pipe reopenings during a later rung's first craft; the cell
+    # held more than its 15-pipe request (requester refilled after the inserter loaded the assembler).
+    _world(monkeypatch, stock={"pipe": 82}, placed={})
+    _chemical_plant_loan(monkeypatch, held=18)
+    assert ab._chemical_capability_started(Client(), "nauvis", "player", "pipe")  # 82 + 18
+
+
+def test_a_loan_cell_does_not_hide_a_real_pipe_shortage(monkeypatch):
+    _world(monkeypatch, stock={"pipe": 60}, placed={})
+    _chemical_plant_loan(monkeypatch, held=18)
+    assert not ab._chemical_capability_started(Client(), "nauvis", "player", "pipe")
+    _chemical_plant_loan(monkeypatch, held=0)  # an empty or unreadable cell keeps the planned request credit
+    stock_82 = {"pipe": 82}
+    _world(monkeypatch, stock=stock_82, placed={})
+    assert not ab._chemical_capability_started(Client(), "nauvis", "player", "pipe")  # 82 + 15
+
+
+def test_loan_cell_item_count_reads_one_number():
+    class Reply:
+        def __init__(self, text):
+            self.text, self.sent = text, []
+
+        def command(self, text):
+            self.sent.append(text)
+            return self.text
+
+    client = Reply("18\n")
+    assert ab.live_base.loan_cell_item_count(client, "nauvis", (42.5, 38.5), (39.5, 38.5), "pipe") == 18
+    assert "assembling_machine_input" in client.sent[0] and "held_stack" in client.sent[0]
+    assert ab.live_base.loan_cell_item_count(Reply(""), "nauvis", (0, 0), (3, 0), "pipe") == 0

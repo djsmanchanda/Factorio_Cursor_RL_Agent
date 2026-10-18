@@ -2361,6 +2361,30 @@ def chest_contents(client: RconClient, surface: str, position: Point) -> dict[st
     return {pair.split("=")[0]: int(pair.split("=")[1]) for pair in raw.split(",") if pair}
 
 
+def loan_cell_item_count(
+    client: RconClient, surface: str, requester_position: Point, machine_position: Point, item: str,
+) -> int:
+    """`item` physically inside one mall cell: its requester chest, its assembler's input slots and the
+    hands of inserters feeding that assembler. None of these are logistic-network stock."""
+    def at(point: Point, kind: str) -> str:
+        return (f"s.find_entities_filtered{{position={{{point[0]},{point[1]}}},radius=0.5,"
+                f"type='{kind}',limit=1}}[1]")
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local n=0;"
+        "local c=" + at(requester_position, "logistic-container") + ";"
+        "if c then n=n+c.get_inventory(defines.inventory.chest).get_item_count('" + item + "') end;"
+        "local m=" + at(machine_position, "assembling-machine") + ";"
+        "if m then local inv=m.get_inventory(defines.inventory.assembling_machine_input);"
+        "if inv then n=n+inv.get_item_count('" + item + "') end;"
+        "for _,i in pairs(s.find_entities_filtered{position=m.position,radius=4,type='inserter'}) do "
+        "local h=i.held_stack;if i.drop_target==m and h and h.valid_for_read and h.name=='" + item + "' then "
+        "n=n+h.count end end end;"
+        "rcon.print(n)"
+    )
+    raw = _sc(client, lua)
+    return int(raw) if raw.isdigit() else 0
+
+
 def bot_and_power_summary(client: RconClient, surface: str, force: str) -> dict:
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"

@@ -8168,6 +8168,11 @@ def _ladder_loan_draw(
     recovery then returned the draw, which satisfied the rung again. The cycle
     repeated with no progress (reset cohort network-s76601: oil-refinery drew
     pipe 101 -> 81, six restores, stalled).
+
+    The cell holds more than its request: the inserter loads the assembler and
+    the requester refills. Credit what the cell physically holds when that is
+    larger (opus-10h cohort 2 ladder arm: 24/25 pipe reopenings came during a
+    later rung's first craft, network pipe 15-44 below target, s77209 100 -> 74).
     """
     drawn = 0
     for loan in active_bootstrap_loans(client, surface, force):
@@ -8178,9 +8183,18 @@ def _ladder_loan_draw(
         per_craft = dict(zip(
             spec.get("ingredients", ()), spec.get("amounts", ()),
         )).get(item, 0)
-        drawn += per_craft * max(1, math.ceil(
+        if not per_craft:
+            continue
+        requested = per_craft * max(1, math.ceil(
             loan.step_required_crafts * (1 + _LOAN_REQUEST_HEADROOM_FRACTION),
         ))
+        try:
+            held = live_base.loan_cell_item_count(
+                client, surface, loan.requester_position, loan.machine_position, item,
+            )
+        except Exception:  # noqa: BLE001 -- an unreadable cell keeps the planned credit
+            held = 0
+        drawn += max(requested, held)
     return drawn
 
 
