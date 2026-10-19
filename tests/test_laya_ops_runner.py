@@ -559,3 +559,36 @@ def test_named_prerequisites_and_their_bill_items_inherit_the_consumers_goal():
                                                          transactions={"oil": tx})["options"]}
     assert options["op.produce.plastic-bar"]["features"]["goal_need"]
     assert options["op.produce.pipe"]["features"]["goal_need"]
+
+
+def test_a_fluid_starved_or_unreleased_goal_item_keeps_its_capability_choice():
+    # Cohort 7: plastic machines stood, flipped to input_starved on petroleum, and the menu went wait-only.
+    def board(statuses):
+        return {"needs": [{"item": "plastic-bar", "condition": "input_starved", "goal_required_per_s": .5,
+                           "status_counts": statuses}]}
+    fluid, solid = board({"fluid_ingredient_shortage": 2}), board({"item_ingredient_shortage": 2})
+    oil = {"target_item": "plastic-bar", "complete": False, "missing": {},
+           "packets_pending": ["chemical_crude_pipeline", "chemical_plastic_petroleum_pipeline"]}
+    def menu(board, results=(), tx=None):
+        return {o["option_id"]: o for o in compile_options(board, list(results), enabled_recipes={"plastic-bar": True},
+                                                           transactions=tx)["options"]}
+    plastic = menu(fluid, tx={"opening_oil": oil})["op.produce.plastic-bar"]
+    assert plastic["params"]["finite"] is False and plastic["features"]["packets_pending"] == 2
+    assert "packets_pending" not in menu(fluid)["op.produce.plastic-bar"]["features"]
+    # Solid starvation is unchanged, unless the item's own packets are still unreleased.
+    assert "op.produce.plastic-bar" not in menu(solid)
+    assert "op.produce.plastic-bar" not in menu(solid, tx={"opening_oil": dict(oil, packets_pending=[])})
+    assert "op.produce.plastic-bar" in menu(solid, tx={"opening_oil": oil})
+    # A re-pick that changes nothing is visible as no progress.
+    stalled = {"ok": False, "operation": "produce", "params": {"item": "plastic-bar"}, "code": "stuck",
+               "message": "petroleum-gas route blocked"}
+    again = menu(fluid, [stalled, stalled])["op.produce.plastic-bar"]["features"]
+    assert again["no_progress"] == 2 and again["last_code"] == "stuck"
+
+
+def test_the_brief_counts_unreleased_chemical_packets():
+    from training.laya_ops_runner import brief
+    economics = {"transactions": {"opening_oil": {"remaining": {}, "missing": {}, "packets_pending": ["a", "b"]}}}
+    assert "packets_pending 2" in brief([], None, None, {}, 0, economics=economics)
+    economics["transactions"]["opening_oil"]["packets_pending"] = None
+    assert "packets_pending ?" in brief([], None, None, {}, 0, economics=economics)

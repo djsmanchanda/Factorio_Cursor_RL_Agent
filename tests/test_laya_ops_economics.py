@@ -216,3 +216,22 @@ def test_submitted_raise_is_recorded_as_a_floor_finite_demand_cannot_lower(monke
     ab._MALL_STOCK_GATE_FLOORS[("nauvis", "player", "pipe")] = 30
     session._raise_stock_gate("pipe", {})
     assert ("nauvis", "player", "pipe") not in ab._RAISED_STOCK_GATE_FLOORS  # an unsubmitted raise is not a floor
+
+
+def test_unreleased_oil_packets_are_read_without_mutation_and_unknown_when_unreadable(monkeypatch):
+    from orchestrator import live_base
+    session = DeterministicSession.__new__(DeterministicSession)
+    session.client = object()
+    packets = [["chemical_refinery_and_plastic_machines", {"phases": ["built"]}],
+               ["chemical_plastic_petroleum_pipeline", {"phases": ["unplaced"]}]]
+
+    class Store:
+        transaction = {"complete": False, "intent": {"packets": packets}}
+        def load(self):
+            return self.transaction
+    monkeypatch.setattr(live_base, "plan_construction_status",
+                        lambda client, surface, force, plan: {"unplaced": {"pipe": 3} if plan["phases"] == ["unplaced"] else {}})
+    assert session._packets_pending(Store()) == ["chemical_plastic_petroleum_pipeline"]
+    Store.transaction = {"complete": True, "intent": {"packets": packets}}
+    assert session._packets_pending(Store()) == []
+    assert session._packets_pending(object()) is None

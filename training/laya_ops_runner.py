@@ -39,6 +39,8 @@ IN_PROGRESS = {"temporary_mall_batch", "production_prerequisite_deferred", "rati
                "rotating_mall_prerequisite_handoff", "prerequisite_advanced",
                # The ore's plate system is still being built by bots (stage_extraction.PendingSystemDeferred).
                "pending_system_construction"}
+# Machine statuses of a recipe waiting on a fluid ingredient (laya_factory_status's "starved" bucket).
+FLUID_STARVED = ("fluid_ingredient_shortage", "no_input_fluid")
 # Receipts that put something into the world (training/laya_ops.receipt); a reservation or a wait does not.
 BUILT = {"producing", "submitted", "prerequisite_advanced"}
 STALL_TICKS = 18000  # five game minutes without measurable progress (loan batches are slow by design)
@@ -409,7 +411,9 @@ def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, pha
                                  + " reserved " + (", ".join(f"{i} {n}" for i, n in project["reserved"].items()) or "none")
                                  for pid, project in projects.items()] or ["no active owners"])
         sections["BILLS"] = [f"{tid}: " + (f"unknown ({tx['error']})" if tx.get("error") else
-                             "remaining " + str(tx.get("remaining", {})) + "; missing " + str(tx.get("missing", {})))
+                             "remaining " + str(tx.get("remaining", {})) + "; missing " + str(tx.get("missing", {}))
+                             + ("" if "packets_pending" not in tx else "; packets_pending "
+                                + value(None if tx["packets_pending"] is None else len(tx["packets_pending"]))))
                              for tid, tx in (economics.get("transactions") or {}).items()]
         capacity = economics.get("capacity")
         if capacity is not None:
@@ -708,9 +712,18 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
             demand["target"] = max(demand["target"], target)
             demand["missing"] = max(demand["missing"], missing)
             demand.setdefault("transactions", []).append(tid)
+    # Unreleased packets of each selected chemical transaction, by its output item (None: survey unreadable).
+    packets_pending = {tx["target_item"]: None if tx["packets_pending"] is None else len(tx["packets_pending"])
+                       for tx in (transactions or {}).values()
+                       if not tx.get("error") and tx.get("target_item") and "packets_pending" in tx}
     for need in board["needs"]:
         item = need["item"]
-        if (item in goal and item not in PLATES and need["condition"] in {"unbuilt", "recipe_unavailable"}
+        # Built but starved of a fluid, or its packets not all released: capability is still missing upstream
+        # (cohort 7: plastic machines stood, petroleum never arrived, and the menu went wait-only).
+        starved = need["condition"] == "input_starved" and (
+            any((need.get("status_counts") or {}).get(status) for status in FLUID_STARVED)
+            or packets_pending.get(item))
+        if (item in goal and item not in PLATES and (need["condition"] in {"unbuilt", "recipe_unavailable"} or starved)
                 and ((recipes or {}) if enabled_recipes is None else enabled_recipes).get(item)
                 and plates_in(item, recipes or {}) <= started):
             demand = demands.setdefault(item, {"target": 1, "missing": 0, "parents": []})
@@ -732,7 +745,8 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                          "transactions": sorted(demand.get("transactions", [])),
                          "waiting": in_progress(codes.get(("produce", item))),
                          "unchanged_failure": ("produce", item) in stuck, "batch_active": batch_active,
-                         "goal_need": item in goal or bool(sources.get(item, set()) & goal)}})
+                         "goal_need": item in goal or bool(sources.get(item, set()) & goal),
+                         **({"packets_pending": packets_pending[item]} if item in packets_pending else {})}})
     # A feedstock producer at its limit (live 2026-10-15: one gear AM1 behind every belt, inserter and drill).
     for item, fact in saturated_feedstock(machines or [], recipes or {}, stock or {}, growable).items():
         if any(r["operation"] == "grow" and (r.get("params") or {}) == {"item": item, "machines": fact["machines"]}
