@@ -8232,7 +8232,7 @@ def _chemical_ladder_predecessors(item: str) -> tuple[str, ...]:
 
 
 def _unfunded_ladder_ingredient(
-    client: RconClient, surface: str, force: str, item: str,
+    client: RconClient, surface: str, force: str, item: str, target: int = 1,
 ) -> str | None:
     """First unstarted chemical rung in `item`'s recipe closure.
 
@@ -8254,9 +8254,21 @@ def _unfunded_ladder_ingredient(
         CHEMICAL_BOOTSTRAP_LADDER.index("plastic-bar"):
     ]
     closure = _recipe_ingredient_closure(item)
+    # Finite consumers can spend delivered seed intermediates without
+    # asserting that the seed is a standing producer. Only the complete
+    # direct ingredient bill authorizes this path; one arbitrary unit cannot.
+    spec = LINE_RECIPES.get(item, {})
+    amounts = dict(zip(spec.get("ingredients", ()), spec.get("amounts", ()), strict=True))
+    stocked = None
     for rung in oil_half:
         if rung not in closure:
             continue
+        if rung in amounts:
+            if stocked is None:
+                stocked = _transferable_or_available_stock(client, surface, force)
+            crafts = math.ceil(max(0, target - stocked.get(item, 0)) / max(1, spec.get("product_amount", 1)))
+            if stocked.get(rung, 0) >= math.ceil(crafts * amounts[rung]):
+                continue
         try:
             started = _chemical_capability_started(client, surface, force, rung)
         except Exception as error:
@@ -9160,7 +9172,7 @@ def _rationed_mall_batch(
     )
     if stock.get(item, 0) >= done_at and not force_temporary:
         return False
-    ladder_block = _unfunded_ladder_ingredient(client, surface, force, item)
+    ladder_block = _unfunded_ladder_ingredient(client, surface, force, item, target)
     if ladder_block is not None:
         # The bill's advanced ingredients cannot exist yet; borrowing a cell
         # for it just churns against whoever holds one. Park on the rung

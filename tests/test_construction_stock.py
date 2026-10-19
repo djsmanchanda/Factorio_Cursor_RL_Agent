@@ -4446,3 +4446,13 @@ def test_advanced_seed_is_not_standing_production(monkeypatch):
     loan = SimpleNamespace(machine_position=(1.5, 2.5))
     monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: [loan])
     assert not builder._production_started(client, "nauvis", "player", "advanced-circuit")
+
+
+@pytest.mark.parametrize("circuits,blocked", [(1, "advanced-circuit"), (2, None)])
+def test_finite_consumer_can_spend_the_complete_delivered_seed_bill(monkeypatch, circuits, blocked):
+    monkeypatch.setitem(builder.LINE_RECIPES, "passive-provider-chest", {
+        "ingredients": ["advanced-circuit", "steel-chest"], "amounts": [1, 1], "product_amount": 1,
+    })
+    monkeypatch.setattr(builder, "_chemical_capability_started", lambda _c, _s, _f, item: item != "advanced-circuit")
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: {"advanced-circuit": circuits, "passive-provider-chest": 2})
+    assert builder._unfunded_ladder_ingredient(object(), "nauvis", "player", "passive-provider-chest", 4) == blocked

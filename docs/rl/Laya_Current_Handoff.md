@@ -215,3 +215,9 @@ starters only until their foundations exist?) before more C1 work. Starship offl
 - Next candidates: terminal-code fact for `district_expansion_unbuildable`; ladder not lending the
   circuit cell for a circuit-consuming rung; known gap: `training/laya_ops.py` imports
   `orchestrator.autonomous_builder` (import-firewall test fails since `982ba99`).
+
+## Cohort 7 complete; C9 integration (2026-10-20 05:23 IST)
+
+All 396 planned miniship jobs completed (198 pairs). See [complete C7 result](Laya_C7_Result_2026-10-20.md). Historical C5 is 1/198 base versus 4/198 netstall; C6 is zero in both. C7 final statuses were latched. Collision events/affected runs rose from 13/12 to 26/20. No adoption: netstall remains an experimental reference. C8 was superseded before starting.
+
+Source fixes 4a5c057 and 2efb3ef cover robot occupant surveys and the first bill-sized advanced-circuit batch. An earned-C5 disposable replay delivered four circuits and restored the cable loan; downstream finite-consumer admission is being verified before C9. No real-base or Starship action. C9’s frozen manifest and unit, once launched, are recorded in the next entry; do not infer launch from preparation.
