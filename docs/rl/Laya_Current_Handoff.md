@@ -221,3 +221,21 @@ starters only until their foundations exist?) before more C1 work. Starship offl
 All 396 planned miniship jobs completed (198 pairs). See [complete C7 result](Laya_C7_Result_2026-10-20.md). Historical C5 is 1/198 base versus 4/198 netstall; C6 is zero in both. C7 final statuses were latched. Collision events/affected runs rose from 13/12 to 26/20. No adoption: netstall remains an experimental reference. C8 was superseded before starting.
 
 Source fixes 4a5c057 and 2efb3ef cover robot occupant surveys and the first bill-sized advanced-circuit batch. An earned-C5 disposable replay delivered four circuits and restored the cable loan; downstream finite-consumer admission is being verified before C9. No real-base or Starship action. C9’s frozen manifest and unit, once launched, are recorded in the next entry; do not infer launch from preparation.
+
+## Cohort 9 launched (2026-10-20 05:24 IST)
+
+Unit `laya-c9-miniship-20261020.service` started at 05:24:07 IST from immutable arm worktrees. All 240 planned jobs are 48 seeds (79300–79347) × five cumulative arms. Source changes: 4a5c057 (robot survey), 2efb3ef (advanced seed), 6423837 (funded finite consumers). The two raw-start smoke jobs each completed eight decisions with zero failures. Earned-C5 mechanics delivered four circuits and restored the cable lender; a second disposable clone crafted two providers, consumed two circuits and restored its lender. These are mechanics checks, not matched C6 success.
+
+| Arm | Frozen SHA | Added factor |
+| --- | --- | --- |
+| ref | `f17b28c22` | netstall + one plastic chest; common robot survey fix, fresh acceptance and whole-block harness |
+| plastic | `5221fbac8` | ref + fluid-starved capability menu |
+| rung | `827835788` | plastic + rung progress only; phase budget remains disabled |
+| extend | `dbd186170` | rung + starter-drill exclusion |
+| batch | `cf03dbb75` | extend + bounded advanced-circuit seed operation and ingredient-source protection |
+
+All arms share one plastic output chest, robot-survey fix, stateless final acceptance and complete-seed/rotated-order harness; same save and mod hashes, engine 2.1.22. Rung arm has progress credit only; phase limit off. Full trial 540000 ticks / 6000 seconds; adaptive 18 initially, 6–25. Ports 36500–36524 / 29500–29524. New seed admission ends at 19:20 IST (full trial must fit before the 21:00 budget deadline); admitted seed blocks can drain later, hard user-unit cap 23:00 IST. Every planned status remains counted.
+
+Primary endpoints C5-v1 and C6-v1, historical and fresh final; C2/C3 guards and all typed safety/tool failures. No adoption on smoke, C3-only gains, or incomplete accounting. Guided-policy decision-volume evaluation, no learned checkpoint fitting or unseen-terrain claim. Source docs/rl/Laya_C7_Result_2026-10-20.md records the complete previous cohort and no-adoption decision. Campaign manifest: data/laya-experiments/laya-c9-20261020/freeze.json in the main repository.
+
+The 06:15 IST T3 one-shot sends completed changes and “Continue from here” to Claude thread import:claudeAgent:14dfe1ab-afe7-4f55-bd4a-27eabe7cf3ea and re-enables its updated 55-minute C9 check-in. Previous 06:16 task is disabled. Root handoff: docs/handoffs/Laya_Usage_Cover_2026-10-20.md. Lifecycle: only disposable worlds were started/stopped; no installed mod, GUI, real save or Starship action. Do not modify or restart frozen active arms.
