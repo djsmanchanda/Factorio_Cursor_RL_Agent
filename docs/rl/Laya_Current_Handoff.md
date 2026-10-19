@@ -200,3 +200,17 @@ data/laya-experiments/laya-c5-20261018/analysis-all.txt.
 dominate strict C1 failures. Decide C1 intent (count gate-idle cells as working? require
 starters only until their foundations exist?) before more C1 work. Starship offline since
 ~04:45 IST; no Starship testing thread was launched.
+
+## Cohort 7 on Factorio 2.1.22, both hosts (2026-10-19, 16:40 IST)
+
+- Stall classification of cohort 6 (log replay, 96 jobs): chemical ladder 42, mall borrow churn 20,
+  steel seed 13, material shortage 13, district unbuildable 5. In 40 jobs the stop came while roboport
+  and power chains advanced toward a site outside the facts' bounds.
+- Arms: base `e18d8d0` (cohort-6 facts arm + 2.1.22 runtime) vs netstall `d633957` (built poles and
+  roboports count as stall-detector progress, `9668c39`; the harness flip-flop settling is scheduling only).
+- miniship: seeds 78000-78047 (96 jobs), slots 12 (6-25), unit `laya-c7-miniship-20261019`.
+  Starship: seeds 78100-78249 (300 jobs), slots 20 (6-50), unit `laya-c7-starship-20261019`, same path.
+- Window until 2026-10-20 08:00 IST, 540k ticks, 6000 s per trial. Not comparable with 2.1.21 cohorts.
+- Next candidates: terminal-code fact for `district_expansion_unbuildable`; ladder not lending the
+  circuit cell for a circuit-consuming rung; known gap: `training/laya_ops.py` imports
+  `orchestrator.autonomous_builder` (import-firewall test fails since `982ba99`).
