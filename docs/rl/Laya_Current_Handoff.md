@@ -191,3 +191,12 @@ treating rationed_mall_borrow_deferred as progress. Next: matched cohort of 5d1d
 37dc304 (adaptive harness, up to 25 slots); Starship offline since ~04:45 IST.
 Data: data/laya-experiments/laya-c3-20261018/analysis.txt,
 data/laya-experiments/laya-c5-20261018/analysis-all.txt.
+
+## Cohort 6: live loan-cell credit (2026-10-19, 12:30 IST)
+
+5d1d866 vs 37dc304, 48 matched seeds: pipe-rung reopenings 24 vs 41; strict C2 21 vs 17
+(+10/-6, not significant); no C4. C1 evidence shows stock-gated cells
+(disabled_by_control_behavior, 1,800 of 3,417 machine observations) and retired starters
+dominate strict C1 failures. Decide C1 intent (count gate-idle cells as working? require
+starters only until their foundations exist?) before more C1 work. Starship offline since
+~04:45 IST; no Starship testing thread was launched.
