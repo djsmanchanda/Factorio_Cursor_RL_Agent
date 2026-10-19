@@ -2387,6 +2387,19 @@ def loan_cell_item_count(
     return int(raw)
 
 
+def built_network_count(client: RconClient, surface: str, force: str) -> int:
+    """Built (not ghost) electric poles and roboports of `force` on the whole surface: the power and
+    coverage chains the tooling builds toward distant sites, which no machine count sees."""
+    lua = (
+        "rcon.print(game.surfaces['" + surface + "'].count_entities_filtered{force='" + force + "',"
+        "type={'electric-pole','roboport'}})"
+    )
+    raw = _sc(client, lua)
+    if not raw.isdigit():
+        raise RuntimeError(f"network count query returned {raw[:80]!r}")
+    return int(raw)
+
+
 def bot_and_power_summary(client: RconClient, surface: str, force: str) -> dict:
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"

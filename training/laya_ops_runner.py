@@ -809,7 +809,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     measurement = None
     summary: dict = {"decisions": 0, "failures": 0, "phases_reached": reached, "stop": "decision_budget"}
     stall = {"since": 0, "best_gap": math.inf, "tick": None, "machines": 0, "missing": math.inf, "made": {},
-             "batches": {}, "installed": {}}
+             "batches": {}, "installed": {}, "network": None}
     accept = getattr(session, "acceptance", None)
 
     def check_acceptance(event: str) -> None:
@@ -963,8 +963,14 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         # Keep a high-water mark per immutable intent: demolition/rebuild cycles cannot reset the guard.
         for key, count in installed.items():
             stall["installed"][key] = max(stall["installed"].get(key, 0), count)
+        # Poles and roboports the tooling chains out to a distant site (outside the facts' bounds) are
+        # construction progress; a high-water mark keeps demolition/rebuild from counting twice.
+        network = session.built_network() if hasattr(session, "built_network") else None
+        extended = network is not None and stall["network"] is not None and network > stall["network"]
+        if network is not None:
+            stall["network"] = max(stall["network"] or 0, network)
         progressed = (machines > stall["machines"] or missing < stall["missing"] or crafted or advancing or delivered
-                      or gap < stall["best_gap"] * 0.95)
+                      or extended or gap < stall["best_gap"] * 0.95)
         stall["machines"], stall["missing"] = max(stall["machines"], machines), min(stall["missing"], missing)
         stall["best_gap"] = min(stall["best_gap"], gap)
         if progressed or stall["tick"] is None:

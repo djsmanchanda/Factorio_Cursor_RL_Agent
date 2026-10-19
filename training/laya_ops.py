@@ -220,6 +220,14 @@ class DeterministicSession:
         except Exception:  # noqa: BLE001 -- an unreadable survey is no evidence of progress
             return {}
 
+    def built_network(self) -> int | None:
+        """Built poles and roboports surface-wide (a rising count is construction progress), or None."""
+        from orchestrator.live_base import built_network_count
+        try:
+            return built_network_count(self.client, SURFACE, FORCE)
+        except Exception:  # noqa: BLE001 -- an unreadable survey is no evidence of progress
+            return None
+
     def economics(self) -> dict:
         """Read-only mall facts; failed components stay null, independently of other surveys."""
         from orchestrator.mall_bootstrap import active_bootstrap_loans

@@ -413,6 +413,27 @@ def test_an_advancing_batch_survives_the_stall_detector_and_an_unchanged_one_doe
     assert stop(step=0) == "stalled"  # an unchanged batch keeps nothing alive
 
 
+class _NetworkSession(FakeSession):
+    def __init__(self, counts):
+        super().__init__()
+        self.counts = iter(counts)
+
+    def built_network(self):
+        return next(self.counts, None)
+
+
+def test_poles_and_roboports_chained_to_a_far_site_survive_the_stall_detector(tmp_path, monkeypatch):
+    # laya-c6a-20261019 facts-s77605: roboports chained toward coal at (-334.5, 12.5), outside the facts'
+    # bounds, one hop per decision -- then STALLED. Demolish/rebuild (40 -> 30 -> 40) is not progress.
+    import training.laya_ops_runner as runner
+    monkeypatch.setattr(runner, "STALL_TICKS", 1500)
+    stop = lambda name, counts: run(_ClockWorld(), GuidedPolicy(3), journal=tmp_path / f"{name}.jsonl", decisions=20,
+                                    measure_ticks=600, seed=3, run_id=name, session=_NetworkSession(counts))["stop"]
+    assert stop("chain", range(40, 80, 2)) == "decision_budget"
+    assert stop("cycle", [40, 30, 40] * 7) == "stalled"
+    assert stop("unreadable", []) == "stalled"
+
+
 def test_named_prerequisites_are_choices_outside_the_phase_and_shortage_limit():
     # Day control-s76403 handed one chest off to plastic 125 times in C2 without a plastic choice.
     handoff = {"ok": False, "operation": "produce", "params": {"item": "passive-provider-chest"},
