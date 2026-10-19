@@ -352,7 +352,7 @@ def _starter_ready(snapshot: FactorySnapshot, name: str) -> bool | None:
     return True
 
 
-def _starter_blocker(snapshot: FactorySnapshot, name: str) -> str:
+def starter_blocker(snapshot: FactorySnapshot, name: str) -> str:
     """First failing starter fact, for evidence only; readiness is still decided by _starter_ready."""
     starter = snapshot.starters.get(name)
     if starter is None:
@@ -390,7 +390,7 @@ def _c1(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, _history: 
         "recipes": has_recipe,
         "recipes_present": {recipe: any(machine.recipe == recipe for machine in observed) for recipe in recipes},
         "mall_status_counts": dict(sorted(status_counts.items())),
-        "starter_blockers": {name: _starter_blocker(snapshot, name) for name in ("iron", "copper", "stone")},
+        "starter_blockers": {name: starter_blocker(snapshot, name) for name in ("iron", "copper", "stone")},
     }
     return _all_checks("C1", "c1-v1", checks, evidence)
 

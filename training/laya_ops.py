@@ -344,7 +344,7 @@ class DeterministicSession:
         """The deterministic runtime's own milestone predicates (orchestrator/checkpoint_milestones.py) on the
         live world: passed / failed / unknown per C0..C6, monotonic once passed. The runner's C phases are rate
         proxies; these are the acceptance checks results are compared on. The first call is the baseline."""
-        from orchestrator.checkpoint_milestones import CheckpointEvaluator
+        from orchestrator.checkpoint_milestones import CheckpointEvaluator, starter_blocker
         from orchestrator.checkpoint_observer import LiveCheckpointObservationAdapter, ObservationUnsupported
         if not hasattr(self, "_evaluator"):
             self._evaluator, self._baseline, self._history = CheckpointEvaluator(), None, []
@@ -356,6 +356,14 @@ class DeterministicSession:
         except ObservationUnsupported as error:  # Telemetry failure: unknown, never a failed milestone.
             return {"error": str(error)[:200]}
         self._baseline = self._baseline or snapshot
+        # Per-starter facts for the ops brief, from this acceptance sample (refreshed with each check).
+        self.starter_facts = {name: {"present": snapshot.starters[name].present,
+                                     "healthy": snapshot.starters[name].healthy,
+                                     "producing": snapshot.starters[name].producing,
+                                     "output_count": snapshot.starters[name].output_count,
+                                     "blocker": starter_blocker(snapshot, name), "tick": snapshot.tick}
+                              if name in snapshot.starters else {"blocker": "unobserved", "tick": snapshot.tick}
+                              for name in ("iron", "copper", "stone")}
         self._history = (self._history + [snapshot])[-20:]
         results = {m.checkpoint_id: self._evaluator.evaluate(m.checkpoint_id, snapshot, baseline=self._baseline,
                                                              history=self._history)

@@ -225,6 +225,8 @@ def _key(r: Mapping) -> tuple:
 
 
 MAJOR = {"starter", "foundation", "extend", "steel", "retire_starter"}  # operations that change the factory's shape
+PLATE_OPERATIONS = {"starter", "foundation", "extend", "retire_starter"}
+NO_PROGRESS_CAP = 5  # blocked-attempt streaks are capped so catalog rules can match exact values
 BRIEF_CHARS = 8000  # ~2k tokens: the brief's room, reserved before the doc rules
 CONTEXT_CHARS = 16000  # brief + doc rules; rules past what fits are left out, lowest priority first
 # Doc rules that act on each brief line: the brief carries the values, the rules the strategy, so neither repeats
@@ -238,6 +240,9 @@ USES = {"GOAL": ("mission.goal", "mission.science"),
         "TRIED": ("mission.ops-no-blind-retry", "mission.ops-no-idle-loans"),
         "MALL": ("mission.ops-no-idle-loans", "mission.ops-one-batch"),
         "RESERVED": ("mission.ops-shortage",),
+        "CAPACITY": ("mission.rotating-mall", "mission.ops-no-idle-loans"),
+        "STARTERS": ("mission.ops-starters-before-foundations",),
+        "BLOCKED": ("mission.ops-history-no-repeat", "mission.ops-no-blind-retry"),
         "SINCE LAST BUILD": ("mission.ops-history-unstick",)}
 
 
@@ -282,6 +287,45 @@ def economics_observation(economics: Mapping | None, networks: Mapping | None) -
                                    max(0, loan["target"] - stock.get(loan["making"], 0)))
                              for loan in observed["loans"]]
     return observed
+
+
+def mall_capacity(economics: Mapping | None, results: list[dict]) -> dict:
+    """Mall capacity facts: slots, observed cells, recipes covered, and why the latest borrow was refused.
+
+    Unknown surveys stay None. ``lendable`` counts observed non-anchor cells not already lent; it is an
+    observation, not the tooling's borrowability decision, which ``borrow_blocked`` reports when it refused.
+    """
+    economics = economics or {}
+    slots, cells, loans = economics.get("slots") or {}, economics.get("cells"), economics.get("loans")
+    fact = {"slot_capacity": slots.get("capacity"), "slots_committed": slots.get("occupied"),
+            "slots_free": slots.get("free"), "unlimited": slots.get("unlimited"),
+            "cells": None, "anchors": None, "loaned": None, "lendable": None, "covered_recipes": None,
+            "active_loans": None if loans is None else len(loans), "borrow_blocked": None}
+    if cells is not None:
+        fact.update(cells=len(cells), anchors=sum(bool(c.get("anchor")) for c in cells),
+                    loaned=sum(bool(c.get("loaned")) for c in cells),
+                    lendable=sum(not c.get("anchor") and not c.get("loaned") for c in cells),
+                    covered_recipes=sorted({c["recipe"] for c in cells if c.get("recipe")}))
+    last = next((r for r in reversed(results) if r["operation"] in ("produce", "mall_slot")), None)
+    if last is not None and last.get("code") == "rationed_mall_borrow_deferred":
+        details = last.get("details") or {}
+        reason = (f"no borrowable assembler for {details.get('item') or _key(last)[1]}"
+                  f" ({len(details.get('active_loans') or ())} active loan(s))")
+        claim = (details.get("slot_claim") or {}).get("required")
+        if isinstance(claim, Mapping) and claim:
+            reason += "; a new slot is short of " + ", ".join(f"{i} {n}" for i, n in sorted(claim.items()))
+        fact["borrow_blocked"] = reason
+    return fact
+
+
+def no_progress(attempts: list[dict]) -> int:
+    """Trailing attempts that ended blocked with the latest one's unchanged outcome (nothing ok or built)."""
+    count = 0
+    for r in reversed(attempts):
+        if r.get("ok") or r.get("code") in BUILT or _outcome(r) != _outcome(attempts[-1]):
+            break
+        count += 1
+    return count
 
 
 def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, phase_ticks: Mapping[str, int],
@@ -367,6 +411,25 @@ def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, pha
         sections["BILLS"] = [f"{tid}: " + (f"unknown ({tx['error']})" if tx.get("error") else
                              "remaining " + str(tx.get("remaining", {})) + "; missing " + str(tx.get("missing", {})))
                              for tid, tx in (economics.get("transactions") or {}).items()]
+        capacity = economics.get("capacity")
+        if capacity is not None:
+            sections["CAPACITY"] = [
+                f"cells={value(capacity['cells'])} anchors={value(capacity['anchors'])}"
+                f" loaned={value(capacity['loaned'])} lendable={value(capacity['lendable'])}"
+                f" covers {'?' if capacity['covered_recipes'] is None else ', '.join(capacity['covered_recipes']) or 'nothing'}"]
+            if capacity.get("borrow_blocked"):
+                sections["CAPACITY"].append(f"last borrow refused: {capacity['borrow_blocked']}")
+        starters = economics.get("starters")
+        if starters is not None:
+            sections["STARTERS"] = [f"{name} {fact['blocker']} out={value(fact.get('output_count'))}"
+                                    for name, fact in starters.items()]
+    blocked = []
+    for key in dict.fromkeys(_key(r) for r in results if r["operation"] != "wait"):
+        attempts = [r for r in results if r["operation"] != "wait" and _key(r) == key]
+        if (count := no_progress(attempts)) >= 2:
+            blocked.append(f"{' '.join(str(k) for k in key if k)} {_outcome(attempts[-1])} x{count}")
+    if blocked:
+        sections["BLOCKED"] = blocked
     sections["SINCE LAST BUILD"] = [f"{since_build(results)} decisions"]
 
     def render() -> str:
@@ -381,7 +444,7 @@ def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, pha
         next(sections[k] for k in trim if sections.get(k)).pop(0)
     # Economic lists can grow independently of history. Mark omitted entries and
     # bound even unusually long names/bills; never silently claim complete coverage.
-    for name in ("MALL", "RESERVED"):
+    for name in ("MALL", "RESERVED", "BLOCKED"):
         omitted = 0
         while len(text := render()) > limit and len(sections.get(name, [])) > 1:
             sections[name].pop()
@@ -419,7 +482,12 @@ def with_economics(menu: dict, results: list[dict], economics: Mapping | None) -
         need["options"].append(option["option_id"])
     loans = (economics or {}).get("loans")
     lent = {loan["lender"] for loan in loans or ()}
+    capacity = (economics or {}).get("capacity") or {}
+    starters = (economics or {}).get("starters")
     for option in menu["options"]:
+        if option["family"] in PLATE_OPERATIONS and option.get("product") in PLATES:
+            starter = None if starters is None else starters.get(PLATES[option["product"]].removesuffix("-ore"))
+            option["features"]["starter_blocker"] = None if starter is None else starter["blocker"]
         if option["family"] == "wait":
             continue
         if option["family"] == "raise_stock_gate":
@@ -438,6 +506,8 @@ def with_economics(menu: dict, results: list[dict], economics: Mapping | None) -
         option["features"]["bill_known"] = bill is not None
         if option["family"] in ("produce", "mall_slot"):
             option["features"]["cell_lent"] = None if loans is None else option["product"] in lent
+            option["features"]["borrow_blocked"] = bool(capacity.get("borrow_blocked")) if capacity else None
+            option["features"]["lendable_cells"] = capacity.get("lendable")
     return menu
 
 
@@ -675,10 +745,15 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
             "features": {"last_code": codes.get(("grow", item), "new"), "saturated": True,
                          "starved_consumers": fact["starved_consumers"], "batch_active": batch_active,
                          "goal_need": bool(sources.get(item, set()) & goal)}})
-    for option in options:  # Laya's own recent decisions, per option
+    for option in options:  # Laya's own recent decisions, per option and per need
         params = option["params"]
-        option["features"].update(history_features(results, (option["family"], params.get("recipe") or params.get("item")),
-                                                   option["family"]))
+        key = (option["family"], params.get("recipe") or params.get("item"))
+        option["features"].update(history_features(results, key, option["family"]))
+        mine = [r for r in results if r["operation"] != "wait" and _key(r) == key]
+        served = [r for r in results if r["operation"] != "wait" and r.get("need_id") == option["need_id"]]
+        # Capped like repeat_fails so catalog rules can match exact values; the brief shows the full count.
+        option["features"].update(no_progress=min(no_progress(mine), NO_PROGRESS_CAP) if mine else 0,
+                                  need_no_progress=min(no_progress(served), NO_PROGRESS_CAP) if served else 0)
     stuck = since_build(results) >= STUCK_DECISIONS
     for ticks in WAIT_TICKS:
         options.append({"option_id": f"wait.{ticks}", "family": "wait", "need_id": "wait", "wait_ticks": ticks,
@@ -790,6 +865,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             for name, count in (network.get("items") or {}).items():
                 stock[name] = stock.get(name, 0) + int(count)
         economics = economics_observation(economics, facts.get("networks"))
+        economics["capacity"] = mall_capacity(economics, results)
+        economics["starters"] = getattr(session, "starter_facts", None)
         menu = with_economics(compile_options(board, results, facts["tick"], facts.get("recipes"), stock,
                                               facts.get("machines"), getattr(session, "growable", ()),
                                               enabled_recipes=facts.get("enabled_recipes"),
@@ -838,6 +915,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                           "code": "tool_error", "message": f"{type(error).__name__}: {error}"[:400]}
                 summary["failures"] += 1
         result["tick"] = facts["tick"]
+        result["need_id"] = chosen["need_id"]  # per-need no-progress facts
         if result.get("code") == "material_shortage":  # What was in stock when it failed, to see change later.
             result["stock_at"] = {item: stock.get(item, 0) for item in ((result.get("details") or {}).get("required") or {})}
         results.append(result)
