@@ -1,8 +1,8 @@
-# Path: tools/run_laya_batch.py | Purpose: Run a matched-seed Laya experiment batch (one factor per arm) at a fixed concurrency until a deadline, and report per-arm outcomes.
-"""Fixed-concurrency experiment batch over frozen code arms.
+# Path: tools/run_laya_batch.py | Purpose: Run a matched-seed Laya experiment batch (one factor per arm) at an adaptive concurrency until a deadline, and report per-arm outcomes.
+"""Adaptive-concurrency experiment batch over frozen code arms.
 
 Every arm runs the same seeds from the same base save. Jobs are ordered seed-major
-and arm round-robin, so a deadline cut leaves the arms matched. Each trial is a
+with the arm order rotated per seed; the deadline admits whole seed blocks, so the arms stay matched. Each trial is a
 fresh `run_laya_clean prepare` + `run` with a game-tick window and a wall cap;
 the world is stopped afterwards. Unstarted jobs stay listed as such in job-status.json.
 
@@ -210,8 +210,11 @@ class Batch:
         self.until = dt.datetime.fromisoformat(self.cfg["until"]).timestamp()
         self.stopping = threading.Event()
         self.lock = threading.Lock()
+        # Seed-major, with the arm order rotated per seed so no arm always starts first (or last) in a block.
+        arms = self.cfg["arms"]
         self.jobs = [{"id": f"{arm['id']}-s{seed}", "arm": arm["id"], "seed": seed, "status": "queued"}
-                     for seed in self.cfg["seeds"] for arm in self.cfg["arms"]]
+                     for index, seed in enumerate(self.cfg["seeds"])
+                     for arm in arms[index % len(arms):] + arms[:index % len(arms)]]
         self.arms = {arm["id"]: arm for arm in self.cfg["arms"]}
         self.controller = SlotController(self.cfg, self.root / "controller.jsonl")
 
@@ -250,7 +253,9 @@ class Batch:
                                            start_new_session=True)
                 job.update(status="running", started=time.time())
                 self.save()
-                end = min(job["started"] + self.cfg["trial_wall_seconds"], self.until)
+                # Every trial gets the full wall window, also past the deadline: an admitted seed block finishes
+                # with identical budgets (the unit's runtime cap must allow until + the wall window).
+                end = job["started"] + self.cfg["trial_wall_seconds"]
                 while process.poll() is None and time.time() < end and not self.stopping.is_set():
                     time.sleep(1)
                 if process.poll() is None:  # The runner stops after its current decision on SIGTERM.
@@ -281,6 +286,7 @@ class Batch:
         self.save()
         with ThreadPoolExecutor(controller.maximum) as pool:
             queue = list(self.jobs)
+            admitted: set = set()
             while (queue or active) and not (self.stopping.is_set() and not active):
                 for future in [f for f in active if f.done()]:
                     future.result()
@@ -289,14 +295,18 @@ class Batch:
                     slots.sort()
                 if controller.update(list(running.values()), len(queue)) is not None:
                     self.save()
-                # A trial that cannot finish its wall window before the deadline is not started (censored, listed).
+                # The deadline admits seed blocks, not jobs: a new seed starts only if its trials can finish their
+                # wall window before the deadline, and every arm of an admitted seed then runs (complete blocks).
+                # Seeds never admitted are censored and listed.
                 while queue and slots and len(active) < controller.slots and not self.stopping.is_set():
-                    if time.time() + self.cfg["trial_wall_seconds"] > self.until:
+                    if queue[0]["seed"] not in admitted and time.time() + self.cfg["trial_wall_seconds"] > self.until:
                         for job in queue:
-                            job["status"] = "not_started_deadline"
-                        queue.clear()
-                        break
+                            if job["seed"] not in admitted:
+                                job["status"] = "not_started_deadline"
+                        queue[:] = [job for job in queue if job["seed"] in admitted]
+                        continue
                     job, slot = queue.pop(0), slots.pop(0)
+                    admitted.add(job["seed"])
                     job.update(slots_at_start=controller.slots, active_at_start=len(active) + 1)
                     future = pool.submit(self.run_job, job, slot)
                     active[future], running[future] = slot, job

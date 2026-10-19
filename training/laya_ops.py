@@ -109,6 +109,8 @@ class DeterministicSession:
         ab.initialize_operation_runtime(self.bridge, SURFACE, FORCE, goal_item, emit)
         ab._restore_bootstrap_reservations()
         ab._reconcile_bootstrap_work(self.client, SURFACE, FORCE)
+        # The mission's C4-C6 need plastic: fence its one output chest before mall cells spend the kit's.
+        ab._reserve_plastic_output_chest(self.client, SURFACE, FORCE, {"plastic-bar": 1}, emit)
 
     def _operations(self) -> dict[str, Callable[..., object]]:
         c, b, ref, emit = self.client, self.bridge, self.reference_point, self.emit
@@ -352,11 +354,12 @@ class DeterministicSession:
         """The deterministic runtime's own milestone predicates (orchestrator/checkpoint_milestones.py) on the
         live world: passed / failed / unknown per C0..C6, monotonic once passed. The runner's C phases are rate
         proxies; these are the acceptance checks results are compared on. The first call is the baseline."""
-        from orchestrator.checkpoint_milestones import CheckpointEvaluator, starter_blocker
+        from orchestrator.checkpoint_milestones import CheckpointEvaluator, evaluate_milestone, starter_blocker
         from orchestrator.checkpoint_observer import LiveCheckpointObservationAdapter, ObservationUnsupported
         if not hasattr(self, "_evaluator"):
             self._evaluator, self._baseline, self._history = CheckpointEvaluator(), None, []
         self.acceptance_checks = None  # never journal an earlier sample's checks beside a new error
+        self.acceptance_fresh = None
         try:
             snapshot = LiveCheckpointObservationAdapter(self.client, self.bridge, surface=SURFACE, force=FORCE,
                                                         reference_point=self.reference_point,
@@ -373,16 +376,21 @@ class DeterministicSession:
                               if name in snapshot.starters else {"blocker": "unobserved", "tick": snapshot.tick}
                               for name in ("iron", "copper", "stone")}
         self._history = (self._history + [snapshot])[-20:]
-        results = {m.checkpoint_id: self._evaluator.evaluate(m.checkpoint_id, snapshot, baseline=self._baseline,
-                                                             history=self._history)
-                   for m in self._evaluator.milestones}
-        # Which check blocks each unpassed milestone: a bare "failed" cannot tell a missing fact from a real gap.
+        # Fresh: the stateless predicates on this sample. The evaluator's latch answers "passed" forever once
+        # reached, so a latched final could not show a regression (review 2026-10-20).
+        fresh = {m.checkpoint_id: evaluate_milestone(m.checkpoint_id, snapshot, baseline=self._baseline,
+                                                     history=self._history, milestones=self._evaluator.milestones)
+                 for m in self._evaluator.milestones}
+        self._evaluator.reached.update(cid for cid, r in fresh.items() if r.passed)
+        self.acceptance_fresh = {cid: r.status.value for cid, r in fresh.items()}
+        # Which check blocks each milestone not passing now: a bare "failed" cannot tell a missing fact from a gap.
         self.acceptance_checks = {
             cid: {"failed": sorted(k for k, v in (r.evidence.get("checks") or {}).items() if v is False),
                   "unknown": sorted(r.missing),
                   **{k: v for k, v in r.evidence.items() if _journal_scalar(v)}}
-            for cid, r in results.items() if not r.passed}
-        return {cid: r.status.value for cid, r in results.items()}
+            for cid, r in fresh.items() if not r.passed}
+        # Historical (monotonic) statuses: reached once, passed for the rest of the run.
+        return {cid: "passed" if cid in self._evaluator.reached else r.status.value for cid, r in fresh.items()}
 
     def close(self) -> None:
         set_active_material_ledger(None)
