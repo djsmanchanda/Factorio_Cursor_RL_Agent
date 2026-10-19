@@ -413,6 +413,7 @@ class LiveCheckpointObservationAdapter:
                     "producing": None if status is None else status == "working",
                     "craft_count": int(counters[position]) if position in counters else None,
                     "name": recipe,
+                    "status": status,
                 })
 
         production: dict[str, dict[str, int]] = {}
