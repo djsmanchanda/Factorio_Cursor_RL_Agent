@@ -5361,7 +5361,7 @@ _CORE_MALL_PREREQUISITE_ORDER = ("steel-chest", "advanced-circuit")
 _CORE_MALL_RECIPE_ITEMS = frozenset({
     "passive-provider-chest", "requester-chest",
 })
-_CORE_MALL_TEMPORARY_PREREQUISITES = frozenset({"steel-chest"})
+_CORE_MALL_TEMPORARY_PREREQUISITES = frozenset({"steel-chest", "advanced-circuit"})
 # A goal conversion that has already requested a logistic chest owns the next
 # mall pass. Optional core promotion (especially fast-inserter) must not consume
 # the final pre-advanced-circuit slot while the chest's chemical ladder is
@@ -5968,6 +5968,10 @@ def _bootstrap_loan_minimum_fulfilled(
 ) -> bool:
     if int(actual.get(loan.target_item, 0)) >= loan.target_count:
         return True
+    if loan.target_item == "advanced-circuit":
+        # A seed must be transferable to its chest consumer. Lifetime crafts
+        # alone can describe output still inside the borrowed machine.
+        return False
     if (
         loan.production_target > loan.target_count
         and loan.step_minimum_crafts == 0
@@ -6907,6 +6911,10 @@ def _borrow_free_mall_cell(
         if require_stocked_original and stock.get(original_recipe, 0) < 1:
             continue
         anchor_minimum = _MALL_RECIPE_ANCHORS.get(original_recipe, 0)
+        if original_recipe in _recipe_ingredient_closure(target_item):
+            # A loan cannot consume the only producer of its own inputs.
+            # Stock is a buffer; keeping it stocked does not replace supply.
+            anchor_minimum = max(1, anchor_minimum)
         if line.machine_count <= anchor_minimum:
             # Gear and cable are the bootstrap mall's feedstock anchors. A
             # recipe loan may use a duplicate, never the last producer.
@@ -8386,6 +8394,42 @@ def _ensure_chemical_ladder_predecessor(
             details={"target": item, "rung": predecessor},
         )
 
+
+def _bootstrap_advanced_circuit_batch(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    target: int, reference_point: Point, emit: Callable[[str], None],
+) -> None:
+    """Seed a bill in an existing cell, without buying chests with circuits.
+
+    The chemical ladder is checked by ensure_produced before this operation.
+    Existing loan tags, bounded craft gates and restoration own the lifecycle;
+    this operation adds no geometry, items or standing reserve.
+    """
+    if not hasattr(client, "command"):
+        return
+    own = next((loan for loan in active_bootstrap_loans(client, surface, force)
+                if loan.target_item == "advanced-circuit"), None)
+    if own is None and _production_started(client, surface, force, "advanced-circuit"):
+        return
+    stock = _transferable_or_available_stock(client, surface, force)
+    if stock.get("advanced-circuit", 0) >= target:
+        if own is not None:
+            _restore_bootstrap_loan(client, bridge, surface, force, own, emit,
+                                    reference_point=reference_point,
+                                    reason="advanced-circuit bill delivered")
+        return
+    remedy = _start_bootstrap_loan(
+        client, bridge, surface, force, "advanced-circuit", target,
+        reference_point, emit, spare_target_count=target,
+    )
+    raise ProductionPrerequisiteDeferred(
+        remedy or "advanced-circuit seed waits for an eligible existing mall cell",
+        code="temporary_mall_batch" if remedy else "rationed_mall_borrow_deferred",
+        state="supply_wait", details={"item": "advanced-circuit", "target": target,
+                                     "available_stock": stock.get("advanced-circuit", 0)},
+    )
+
+
 def ensure_produced(
     client: RconClient, bridge: GameBridge, surface: str, force: str, item: str,
     reference_point: Point, emit: Callable[[str], None], *,
@@ -8408,6 +8452,10 @@ def ensure_produced(
     _ensure_chemical_ladder_predecessor(
         client, bridge, surface, force, item, reference_point, emit,
     )
+    if item == "advanced-circuit":
+        _bootstrap_advanced_circuit_batch(
+            client, bridge, surface, force, max(1, stock_target), reference_point, emit,
+        )
     if item == "steel-plate":
         minimum_machines = max(minimum_machines, STEEL_BASELINE_FURNACES)
     if item == "copper-cable":
@@ -11448,6 +11496,9 @@ def _production_started(
     )
     if line is None:
         return False
+    if item == "advanced-circuit" and not _unborrowed_recipe_positions(client, surface, force, line):
+        # A finite seed supplies a bill, not standing production capability.
+        return False
     if getattr(line, "working_count", 0) > 0:
         return True
     produced = getattr(line, "produced_count", 0) > 0
@@ -11509,7 +11560,7 @@ def _independent_mall_ready(
 
 
 def _core_mall_prerequisites(
-    client: RconClient, surface: str, force: str, item: str,
+    client: RconClient, surface: str, force: str, item: str, target_count: int = 1,
 ) -> tuple[str, ...]:
     """Return the unstarted inputs that must precede a logistic chest cell.
 
@@ -11538,12 +11589,14 @@ def _core_mall_prerequisites(
         if _production_started(client, surface, force, prerequisite):
             continue
         if prerequisite in _CORE_MALL_TEMPORARY_PREREQUISITES:
-            # Query inventory only when the temporary-batch exception is
-            # relevant. Advanced-circuit-only callers should stay a pure
-            # producer-state check and avoid an unnecessary RCON round trip.
+            # Delivered seeds may fund a bill after their loan has restored;
+            # requester WIP does not count as transferable consumer funding.
             if stock is None:
-                stock = live_base.available_items(client, surface, force)
-            if stock.get(prerequisite, 0) >= ingredient_amounts[prerequisite]:
+                stock = _transferable_or_available_stock(client, surface, force)
+            required = ingredient_amounts[prerequisite]
+            if prerequisite == "advanced-circuit":
+                required *= math.ceil(max(1, target_count) / max(1, spec.get("product_amount", 1)))
+            if stock.get(prerequisite, 0) >= required:
                 continue
         if (
             prerequisite == "steel-chest"
@@ -11571,6 +11624,15 @@ def _core_mall_wait_spent_pass(
     return _BOOTSTRAP_LOAN_CONFIGURATION_REVISION != configuration_before
 
 
+
+def _core_mall_seed_target(item: str, prerequisite: str, mall_targets: Mapping[str, int]) -> int:
+    """Ingredient bill for the current chest demand, with no reserve multiplier."""
+    spec = LINE_RECIPES[item]
+    crafts = math.ceil(max(1, mall_targets.get(item, 1)) / max(1, spec.get("product_amount", 1)))
+    amount = dict(zip(spec.get("ingredients", ()), spec.get("amounts", ()), strict=True))[prerequisite]
+    return max(1, math.ceil(crafts * amount))
+
+
 def _prepare_core_mall_prerequisite(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     item: str, mall_targets: dict[str, int], reference_point: Point,
@@ -11581,9 +11643,11 @@ def _prepare_core_mall_prerequisite(
     ``True`` means a stage, changed cell, or coverage wait consumed this pass;
     ``False`` hands a supply wait or shortage to the mall in the same pass;
     ``None`` means the core recipe is admitted. Steel chests are a finite
-    borrowed-mall batch; advanced circuits remain a dedicated capability line.
+    borrowed-mall batch; advanced circuits seed their current bill in the mall.
     """
-    prerequisites = _core_mall_prerequisites(client, surface, force, item)
+    prerequisites = _core_mall_prerequisites(
+        client, surface, force, item, max(1, mall_targets.get(item, 1)),
+    )
     if not prerequisites:
         return None
     prerequisite = prerequisites[0]
@@ -11596,14 +11660,17 @@ def _prepare_core_mall_prerequisite(
         # Steel chests must stay inside the temporary mall until it is
         # self-sustaining. In particular, never upgrade this one-chest seed
         # into the generic conversion layout: that layout rate-sizes several
-        # requester feeders for two assemblers. Advanced circuits retain the
-        # dedicated path so their oil/plastic prerequisite ladder is enforced.
+        # requester feeders for two assemblers. Advanced circuits pass their
+        # oil/plastic ladder before borrowing an existing cell for the bill.
         ensure_produced(
             client, bridge, surface, force, prerequisite, reference_point,
             emit,
-            upgrade_bootstrap=prerequisite not in _CORE_MALL_TEMPORARY_PREREQUISITES,
-            temporary_mall=prerequisite in _CORE_MALL_TEMPORARY_PREREQUISITES,
-            stock_target=1,
+            upgrade_bootstrap=prerequisite != "steel-chest",
+            temporary_mall=prerequisite == "steel-chest",
+            stock_target=(
+                _core_mall_seed_target(item, prerequisite, mall_targets)
+                if prerequisite == "advanced-circuit" else 1
+            ),
             minimum_machines=1, allow_promotion=False,
         )
     except MaterialShortage as shortage:

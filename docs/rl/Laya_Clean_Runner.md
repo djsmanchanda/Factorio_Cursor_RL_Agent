@@ -183,3 +183,20 @@ Next reusable work: truthful receipts/economic facts, the partial-foundation
 steel cycle, explicit loan alternatives, faithful measured labels and a
 compatible learned policy; then missing goal actions and matched acceptance.
 Coordinate shared mall/adapter files through their latest ownership handoff.
+
+## First advanced-circuit bill (2026-10-20)
+
+Before a standing advanced-circuit producer exists, the shared deterministic
+operation walks the oil/plastic ladder, then borrows an existing owned paired
+mall cell for the requested circuit stock target. It reuses the cell's chests,
+sets no spare reserve, and restores the original recipe after transferable
+circuits satisfy the bill. A loan cannot take the last producer of any
+transitive ingredient. Craft counters alone do not prove seed delivery, and a
+working temporary seed does not unlock permanent-mall capability. Logistic
+chest preparation accepts delivered circuit stock and requests the ingredient
+bill for its current chest demand, breaking the chest/circuit construction
+cycle without claiming a standing circuit producer.
+
+This remains behind the documented shared-wrapper migration boundary. It adds
+no Laya-specific layout or preference, and does not establish C6 acceptance: the
+real downstream consumer must still craft.

@@ -1377,6 +1377,7 @@ def test_logistic_chest_core_waits_for_advanced_circuit_ladder(
         builder, "_production_started",
         lambda _c, _s, _f, item: item in started,
     )
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: {})
     calls: list[str] = []
 
     def defer(*args, **_kwargs):

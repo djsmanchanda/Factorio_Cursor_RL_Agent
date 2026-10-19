@@ -4349,3 +4349,100 @@ def test_verdict_distinguishes_reserved_partial_and_unreadable_stock(
         assert "have=?" in messages[0]
     if contents is None:
         assert "splitter@(3.0,0.0){?}" in messages[0]
+
+
+@pytest.mark.parametrize("circuits,target,expected", [(0, 4, ("advanced-circuit",)),
+                                                      (1, 4, ("advanced-circuit",)),
+                                                      (4, 4, ())])
+def test_chest_seed_requires_delivered_circuits_for_the_whole_bill(monkeypatch, circuits, target, expected):
+    monkeypatch.setitem(builder.LINE_RECIPES, "passive-provider-chest", {
+        "machine": "assembling-machine-2", "ingredients": ["steel-chest", "advanced-circuit"],
+        "amounts": [1, 1], "product_amount": 1, "craft_time": 0.5,
+    })
+    monkeypatch.setattr(builder, "_production_started", lambda _c, _s, _f, item: item == "steel-chest")
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: {"advanced-circuit": circuits})
+    assert builder._core_mall_prerequisites(object(), "nauvis", "player", "passive-provider-chest", target) == expected
+
+
+def test_advanced_seed_borrows_only_the_requested_bill(monkeypatch):
+    client = SimpleNamespace(command=lambda *_a: "")
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: [])
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: {})
+    calls = []
+    monkeypatch.setattr(builder, "_start_bootstrap_loan", lambda *a, **k: calls.append((a[4:6], k)) or "batch started")
+    with pytest.raises(builder.ProductionPrerequisiteDeferred) as caught:
+        builder._bootstrap_advanced_circuit_batch(client, object(), "nauvis", "player", 4, (0, 0), print)
+    assert caught.value.code == "temporary_mall_batch"
+    assert caught.value.details["available_stock"] == 0
+    assert calls == [(("advanced-circuit", 4), {"spare_target_count": 4})]
+
+
+def test_advanced_seed_restores_only_after_delivered_stock(monkeypatch):
+    client = SimpleNamespace(command=lambda *_a: "")
+    loan = SimpleNamespace(target_item="advanced-circuit")
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: [loan])
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: {"advanced-circuit": 4})
+    restored = []
+    monkeypatch.setattr(builder, "_restore_bootstrap_loan", lambda *a, **k: restored.append(a[4]))
+    monkeypatch.setattr(builder, "_start_bootstrap_loan", lambda *_a, **_k: pytest.fail("delivered batch must restore"))
+    builder._bootstrap_advanced_circuit_batch(client, object(), "nauvis", "player", 4, (0, 0), print)
+    assert restored == [loan]
+
+
+def test_advanced_seed_waits_safely_without_a_lender(monkeypatch):
+    client = SimpleNamespace(command=lambda *_a: "")
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: [])
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: {})
+    monkeypatch.setattr(builder, "_start_bootstrap_loan", lambda *_a, **_k: None)
+    with pytest.raises(builder.ProductionPrerequisiteDeferred) as caught:
+        builder._bootstrap_advanced_circuit_batch(client, object(), "nauvis", "player", 4, (0, 0), print)
+    assert caught.value.code == "rationed_mall_borrow_deferred"
+
+
+def test_advanced_seed_checks_chemical_ladder_before_borrowing(monkeypatch):
+    def blocked(*_a, **_k):
+        raise builder.ProductionPrerequisiteDeferred("plastic not ready", code="chemical_capability_wait")
+    monkeypatch.setattr(builder, "_ensure_chemical_ladder_predecessor", blocked)
+    monkeypatch.setattr(builder, "_bootstrap_advanced_circuit_batch", lambda *_a: pytest.fail("ladder gate bypassed"))
+    with pytest.raises(builder.ProductionPrerequisiteDeferred, match="plastic not ready"):
+        builder.ensure_produced(SimpleNamespace(command=lambda *_a: ""), object(), "nauvis", "player",
+                                "advanced-circuit", (0, 0), print, stock_target=4)
+
+
+@pytest.mark.parametrize("count,borrowable", [(1, False), (2, True)])
+def test_loan_preserves_last_electronic_circuit_ingredient_source(monkeypatch, count, borrowable):
+    # The electronic-circuit cell used to be lent to a circuit-consuming rung.
+    positions = [(36.5 + i * 6, 32.5) for i in range(count)]
+    line = SimpleNamespace(machine_count=count, machine_positions=positions)
+    monkeypatch.setattr(builder.live_base, "find_line", lambda _c, _s, _f, item, _m, **_k:
+                        line if item == "electronic-circuit" else None)
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {"electronic-circuit": 100})
+    monkeypatch.setattr(builder, "locate_mall_cell", lambda *_a: ((35, 31), "left"))
+    monkeypatch.setattr(builder, "mall_slot_uses_shared_provider", lambda *_a: False)
+    def entity(_c, _s, pos):
+        return {"name": {(39.5, 32.5): "requester-chest", (39.5, 31.5): "passive-provider-chest"}.get(pos, "assembling-machine-1")}
+    monkeypatch.setattr(builder.live_base, "entity_at", entity)
+    borrowed = builder._borrow_free_mall_cell(object(), "nauvis", "player", "advanced-circuit", (0, 0),
+                                             allowed_original_recipes=None, allow_shared_provider=False,
+                                             require_stocked_original=False, excluded_origins=set())
+    assert (borrowed is not None) == borrowable
+
+
+def test_advanced_seed_craft_counter_alone_does_not_fulfill_delivery():
+    from orchestrator.mall_bootstrap import MallBootstrapLoan
+    loan = MallBootstrapLoan("transport-belt", "advanced-circuit", 4, "left", (39.5, 32.5),
+                             "advanced-circuit", step_recipe="advanced-circuit",
+                             step_baseline_finished=10, step_minimum_crafts=4)
+    assert not builder._bootstrap_loan_minimum_fulfilled(loan, {}, 14)
+    assert builder._bootstrap_loan_minimum_fulfilled(loan, {"advanced-circuit": 4}, 14)
+
+
+def test_advanced_seed_is_not_standing_production(monkeypatch):
+    client = SimpleNamespace(command=lambda *_a: "")
+    line = SimpleNamespace(working_count=1, produced_count=4000, machine_positions=((1.5, 2.5),))
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: line)
+    loan = SimpleNamespace(machine_position=(1.5, 2.5))
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: [loan])
+    assert not builder._production_started(client, "nauvis", "player", "advanced-circuit")
