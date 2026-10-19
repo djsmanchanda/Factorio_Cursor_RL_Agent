@@ -175,3 +175,19 @@ remaining `laya_ops -> autonomous_builder` firewall violation. No allowlist chan
 or ladder/loan source edit. The full production-operation API redesign remains
 deferred. Source use needs fresh frozen runners; these edits are absent from
 the already active matched cohort. No deployment/restart was performed.
+
+## Cohorts 3 and 5 complete; post-review facts pushed (2026-10-19, 08:50 IST)
+
+work/miniship/laya-next-20261018 = 5d1d866. Cohort 5 (421e3de vs 37dc304, 95 matched
+seeds) is an exact tie on strict C1-C3; the loan-cell pipe credit failed live on the
+Factorio 2.1 inventory rename (fixed fba641b), so its effect is still untested. Haiku 5.5
+and GPT-6-Luna reviews agree strict C1 fails because mall cells are almost never four
+working at once (C1 samples: 0-1 working in ~75%). 90284f6 records per-status mall
+counts and starter blockers in acceptance evidence; 5d1d866 gives Laya capacity,
+starter-blocker and no-progress facts (no default rule uses them; variant
+ops-need-no-progress.json). Pending user decisions: whether C1 should require the
+stone starter and count output-capped cells as working; whether the runner should stop
+treating rationed_mall_borrow_deferred as progress. Next: matched cohort of 5d1d866 vs
+37dc304 (adaptive harness, up to 25 slots); Starship offline since ~04:45 IST.
+Data: data/laya-experiments/laya-c3-20261018/analysis.txt,
+data/laya-experiments/laya-c5-20261018/analysis-all.txt.
