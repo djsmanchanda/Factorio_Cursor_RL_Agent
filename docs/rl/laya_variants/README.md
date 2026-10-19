@@ -28,7 +28,8 @@ itself: every window (default 300 s) it reads each running world's UPS from its
 runner log and the decision loop's health (fresh heartbeat, decisions advancing,
 no new tracebacks, timeouts or RCON connection errors), plus host memory. It
 grows one slot after two healthy windows while work waits and shrinks one on
-any unhealthy window; running trials are never stopped. Ports are reserved for
+any unhealthy window; running trials are never stopped. After an up/down/up
+(or down/up/down) flip-flop it stops growing for `settle_windows` (default 6). Ports are reserved for
 `max_concurrency` (default `concurrency + 4`); `"adaptive": false` pins slots.
 Decisions go to `controller.jsonl`, and each job records `slots_at_start`.
 Seed-major order starts both arms of a seed under the same load.

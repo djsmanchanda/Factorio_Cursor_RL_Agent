@@ -113,6 +113,10 @@ class SlotController:
         self.grow_after = int(options.get("grow_after", 2))
         self.min_gb = float(options.get("min_available_gb", 3.0))
         self.max_gap_s = float(options.get("max_decision_gap_s", 600))
+        # After an up/down/up (or down/up/down) flip-flop, stop growing for this many windows.
+        self.settle_windows = int(options.get("settle_windows", 6))
+        self.moves: list[int] = []
+        self.settle_until = 0.0
         self.state = AdaptiveScaleState(min(self.maximum, max(self.minimum, start)))
         self.journal = journal
         self.next_at = 0.0  # the first pass journals the starting state; worlds count once they ran a full window
@@ -148,11 +152,19 @@ class SlotController:
                 # Grow only when the current slots are all in use and work is waiting; keep the healthy streak.
                 state, decision = AdaptiveScaleState(before, self.state.healthy_windows + 1, 0), "hold_no_demand"
             self.state = state
+        if self.state.slots > before and now < self.settle_until:
+            self.state, decision = AdaptiveScaleState(before), "hold_settling"
+        if self.state.slots != before:
+            self.moves = (self.moves + [1 if self.state.slots > before else -1])[-3:]
+            if len(self.moves) == 3 and self.moves[0] == self.moves[2] != self.moves[1]:
+                self.settle_until, self.moves = now + self.settle_windows * self.window_s, []
+                decision += "+settle"
         self.last = {"at": now, "decision": decision, "slots_before": before, "slots": self.state.slots,
                      "running": len(running), "measured": len(measured), "queued": queued,
                      "ups_min": min(samples) if samples else None,
                      "ups_mean": statistics.fmean(samples) if samples else None,
-                     "unstable": unstable, "available_gb": memory}
+                     "unstable": unstable, "available_gb": memory,
+                     "settling": now < self.settle_until}
         with self.journal.open("a") as out:
             out.write(json.dumps(self.last, sort_keys=True) + "\n")
         return decision

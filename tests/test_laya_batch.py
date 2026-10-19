@@ -91,6 +91,19 @@ def test_laya_loop_trouble_and_low_memory_shrink_without_waiting_for_ups(tmp_pat
     assert _controller(tmp_path, monkeypatch, gb=1.0).update([_world(tmp_path, "m")], 5, now=301) == "decrease_memory"
 
 
+def test_an_up_down_up_flip_flop_holds_slots_steady_before_growing_again(tmp_path, monkeypatch):
+    import tools.run_laya_batch as harness
+    control = _controller(tmp_path, monkeypatch, grow_after=1, settle_windows=3)
+    control.maximum = 10
+    running = [_world(tmp_path, f"w{i}") for i in range(10)]
+    memory = iter([20.0, 1.0, 20.0, 20.0, 20.0, 20.0, 20.0])
+    monkeypatch.setattr(harness, "_available_gb", lambda: next(memory))
+    decisions = [control.update(running, queued=10, now=301 * (i + 1)) for i in range(5)]
+    assert decisions == ["increase_safe_ups", "decrease_memory", "increase_safe_ups+settle",
+                         "hold_settling", "hold_settling"] and control.slots == 5
+    assert control.update(running, queued=10, now=301 * 6) == "increase_safe_ups" and control.slots == 6
+
+
 def test_a_plain_tool_error_or_no_waiting_work_does_not_move_slots(tmp_path, monkeypatch):
     control = _controller(tmp_path, monkeypatch, grow_after=1)
     bug = _world(tmp_path, "bug", extra="+301s   OUTCOME: tool_error -- KeyError: 'splitter'\n")
