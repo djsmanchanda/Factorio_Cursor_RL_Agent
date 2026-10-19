@@ -59,7 +59,8 @@ def test_opening_session_loads_facts_and_clears_caches_without_reserving_stock(w
 
     assert world.exports == ["player"]
     assert not builder.UNBACKED_DRAWS and not builder._MALL_STOCK_GATE_FLOORS
-    assert builder._MATERIAL_RESERVATION_LEDGER.projects == {}
+    # Its only reservation is the plastic stage's output chest (user rule, 2026-10-20).
+    assert set(builder._MATERIAL_RESERVATION_LEDGER.projects) == {builder._PLASTIC_OUTPUT_PACKET}
     assert not (world.server / "logs" / "autonomous-priorities.json").exists()
 
 
@@ -124,7 +125,8 @@ def test_committed_belt_side_seed_keeps_its_plan_bill(world, monkeypatch, submit
     # The belt-side seed bills one pole, fewer than the two-pole opening fence (review 2026-10-18).
     bill = material_reservations.plan_material_bill(steel_seed((0.5, 0.5), "east"))
     assert bill["medium-electric-pole"] == 1
-    stock = {**bill, "medium-electric-pole": 4}
+    # One more passive-provider chest than the seed bills: the startup fence holds one for plastic.
+    stock = {**bill, "medium-electric-pole": 4, "passive-provider-chest": bill.get("passive-provider-chest", 0) + 1}
     monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *args: stock)
     session = open_session(world)
     ledger = builder._MATERIAL_RESERVATION_LEDGER
@@ -197,7 +199,7 @@ def test_session_loads_live_recipes_before_validating_a_new_goal(world, monkeypa
     open_session(world, goal_item="startup-live-item")
 
     assert recipes["startup-live-item"]["ingredients"] == ["iron-plate"]
-    assert builder._MATERIAL_RESERVATION_LEDGER.projects == {}
+    assert set(builder._MATERIAL_RESERVATION_LEDGER.projects) == {builder._PLASTIC_OUTPUT_PACKET}
 
 
 def test_reopening_restores_district_space_and_reconciles_only_measured_work(world, monkeypatch):

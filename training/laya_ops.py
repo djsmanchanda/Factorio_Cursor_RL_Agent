@@ -109,6 +109,8 @@ class DeterministicSession:
         ab.initialize_operation_runtime(self.bridge, SURFACE, FORCE, goal_item, emit)
         ab._restore_bootstrap_reservations()
         ab._reconcile_bootstrap_work(self.client, SURFACE, FORCE)
+        # The mission's C4-C6 need plastic: fence its one output chest before mall cells spend the kit's.
+        ab._reserve_plastic_output_chest(self.client, SURFACE, FORCE, {"plastic-bar": 1}, emit)
 
     def _operations(self) -> dict[str, Callable[..., object]]:
         c, b, ref, emit = self.client, self.bridge, self.reference_point, self.emit

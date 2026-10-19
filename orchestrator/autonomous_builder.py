@@ -12876,6 +12876,42 @@ def _refuse_to_spin(
     )
 
 
+# The plastic stage's own output chest (stage_transport._publish_output_chest): the one passive-provider
+# chest the oil cell places. Passive-provider chests need advanced circuits, which need plastic, so a mall
+# that spends the start kit's chests first deadlocks the cell (cohort 7: 7/48 runs). Only this chest is
+# fenced (user, 2026-10-20); the first advanced circuits come from the mall as usual.
+_PLASTIC_OUTPUT_PACKET = "chemical_refinery_and_plastic_machines"
+_PLASTIC_OUTPUT_RESERVE = {"passive-provider-chest": 1}
+
+
+def _reserve_plastic_output_chest(
+    client: RconClient, surface: str, force: str,
+    construction_targets: Mapping[str, int], emit: Callable[[str], None],
+) -> None:
+    """Hold one passive-provider chest for the plastic stage under the packet's own ledger name, so the
+    packet's later reservation inherits it and no other project can spend it."""
+    ledger = _MATERIAL_RESERVATION_LEDGER
+    needs_plastic = any(
+        item == "plastic-bar" or "plastic-bar" in _recipe_ingredient_closure(item)
+        for item in construction_targets
+    )
+    if ledger is None or not needs_plastic:
+        return
+    if ledger.project_is_active(_PLASTIC_OUTPUT_PACKET):
+        return  # the fence, or the packet's own full bill, already owns the chest
+    if _production_started(client, surface, force, "plastic-bar"):
+        return
+    stock = _transferable_or_available_stock(client, surface, force)
+    project = ledger.declare(
+        _PLASTIC_OUTPUT_PACKET, _PLASTIC_OUTPUT_RESERVE, stock, target_item="plastic-bar",
+        priority=_STEEL_STARTER_RESERVATION_PRIORITY,
+    )
+    emit(
+        "PLASTIC OUTPUT RESERVE: held "
+        f"{project.reserved.get('passive-provider-chest', 0)}/1 passive-provider chest for the plastic stage"
+    )
+
+
 def _reserve_steel_starter_power_seed(
     client: RconClient, surface: str, force: str,
     construction_targets: Mapping[str, int], emit: Callable[[str], None],
@@ -13027,6 +13063,9 @@ def _open_the_run(
         mission_items or (goal_item,), LINE_RECIPES,
     )
     _reserve_steel_starter_power_seed(
+        client, surface, force, background_targets, emit,
+    )
+    _reserve_plastic_output_chest(
         client, surface, force, background_targets, emit,
     )
     mall_targets: dict[str, int] = {}

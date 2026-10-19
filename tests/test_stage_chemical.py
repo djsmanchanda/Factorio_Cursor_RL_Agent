@@ -1760,3 +1760,35 @@ def test_reserved_coal_source_does_not_switch_or_duplicate_mines(monkeypatch, mi
             object(), object(), "nauvis", "player", (10.5, 20.5),
             lambda *_a: pytest.fail("unowned mine must not be serviced"), lambda _m: None,
         )
+
+
+def _plastic_fence(tmp_path, monkeypatch, stock, targets=None):
+    from orchestrator import autonomous_builder as builder
+    from orchestrator.material_reservations import MaterialReservationLedger
+    ledger = MaterialReservationLedger(tmp_path / "script-output" / "factorio_cursor_rl",
+                                       episode_id="episode-plastic-fence", surface="nauvis", force="player")
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", ledger)
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: stock)
+    builder._reserve_plastic_output_chest(object(), "nauvis", "player", targets or {"plastic-bar": 1}, lambda _m: None)
+    return builder, ledger
+
+
+def test_the_plastic_output_chest_is_fenced_before_mall_cells_spend_the_kit(tmp_path, monkeypatch):
+    # Cohort 7: mall cells spent the start kit's passive-provider chests before the oil cell, which needs
+    # one and cannot get more without plastic (7/48 runs deadlocked).
+    stock = {"passive-provider-chest": 2}
+    builder, ledger = _plastic_fence(tmp_path, monkeypatch, stock)
+    assert ledger.projects[builder._PLASTIC_OUTPUT_PACKET].reserved == {"passive-provider-chest": 1}
+    ledger.declare("paired_mall_iron-gear-wheel", {"passive-provider-chest": 2}, stock, priority=100)
+    assert ledger.shortage_targets("paired_mall_iron-gear-wheel", stock)  # only one chest is free
+    # The packet's own full bill later replaces the fence under the same name and keeps the chest.
+    ledger.declare(builder._PLASTIC_OUTPUT_PACKET, {"passive-provider-chest": 1, "pipe": 3}, stock, priority=100)
+    assert ledger.projects[builder._PLASTIC_OUTPUT_PACKET].reserved["passive-provider-chest"] == 1
+    builder._reserve_plastic_output_chest(object(), "nauvis", "player", {"plastic-bar": 1}, lambda _m: None)
+    assert ledger.projects[builder._PLASTIC_OUTPUT_PACKET].required == {"passive-provider-chest": 1, "pipe": 3}
+
+
+def test_no_plastic_in_the_mission_fences_nothing(tmp_path, monkeypatch):
+    builder, ledger = _plastic_fence(tmp_path, monkeypatch, {"passive-provider-chest": 2}, {"iron-gear-wheel": 1})
+    assert builder._PLASTIC_OUTPUT_PACKET not in ledger.projects
