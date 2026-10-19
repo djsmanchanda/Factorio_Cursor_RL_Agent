@@ -69,6 +69,7 @@ class MachineEvidence:
     craft_count: int | None = None
     output_count: int | None = None
     name: str | None = None
+    status: str | None = None  # raw entity status, e.g. "working" or "output_full"; measurement only
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any] | Any) -> "MachineEvidence":
@@ -87,6 +88,7 @@ class MachineEvidence:
             craft_count=_item_counter(value, "craft_count", "crafts", "products_finished"),
             output_count=_item_counter(value, "output_count", "output", "produced"),
             name=value.get("name"),
+            status=None if value.get("status") is None else str(value.get("status")),
         )
 
 
@@ -350,19 +352,47 @@ def _starter_ready(snapshot: FactorySnapshot, name: str) -> bool | None:
     return True
 
 
+def _starter_blocker(snapshot: FactorySnapshot, name: str) -> str:
+    """First failing starter fact, for evidence only; readiness is still decided by _starter_ready."""
+    starter = snapshot.starters.get(name)
+    if starter is None:
+        return "unobserved"
+    for fact, label in (("present", "absent"), ("healthy", "unhealthy"), ("producing", "not_producing")):
+        if getattr(starter, fact) is False:
+            return label
+    return "ready" if _starter_ready(snapshot, name) else "unknown"
+
+
 def _c1(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, _history: Sequence[FactorySnapshot]) -> CheckpointResult:
-    working = [machine for machine in snapshot.mall_assemblers if machine.working is True]
-    has_recipe = {recipe: any(machine.recipe == recipe for machine in working) for recipe in (IRON_GEAR_RECIPE, COPPER_CABLE_RECIPE)}
-    count_ok: bool | None = len(working) >= 4 if snapshot.mall_assemblers else None
+    observed = snapshot.mall_assemblers
+    working = [machine for machine in observed if machine.working is True]
+    recipes = (IRON_GEAR_RECIPE, COPPER_CABLE_RECIPE)
+    has_recipe = {recipe: any(machine.recipe == recipe for machine in working) for recipe in recipes}
+    count_ok: bool | None = len(working) >= 4 if observed else None
+    # Producer checks read every observed machine: with no working machine a present-but-idle producer is a
+    # measured False, and only an empty survey is unknown. Status cannot change: an observed survey with no
+    # working machine already fails the count check.
     checks = {
         "iron_starter_ready": _starter_ready(snapshot, "iron"),
         "copper_starter_ready": _starter_ready(snapshot, "copper"),
         "stone_starter_ready": _starter_ready(snapshot, "stone"),
         "at_least_four_working_mall_assemblers": count_ok,
-        "iron_gear_producer_working": has_recipe[IRON_GEAR_RECIPE] if working else None,
-        "copper_cable_producer_working": has_recipe[COPPER_CABLE_RECIPE] if working else None,
+        "iron_gear_producer_working": has_recipe[IRON_GEAR_RECIPE] if observed else None,
+        "copper_cable_producer_working": has_recipe[COPPER_CABLE_RECIPE] if observed else None,
     }
-    return _all_checks("C1", "c1-v1", checks, {"working_mall_count": len(working), "recipes": has_recipe})
+    status_counts: dict[str, int] = {}
+    for machine in observed:
+        key = machine.status or "unreported"
+        status_counts[key] = status_counts.get(key, 0) + 1
+    evidence = {
+        "working_mall_count": len(working),
+        "observed_mall_count": len(observed),
+        "recipes": has_recipe,
+        "recipes_present": {recipe: any(machine.recipe == recipe for machine in observed) for recipe in recipes},
+        "mall_status_counts": dict(sorted(status_counts.items())),
+        "starter_blockers": {name: _starter_blocker(snapshot, name) for name in ("iron", "copper", "stone")},
+    }
+    return _all_checks("C1", "c1-v1", checks, evidence)
 
 
 def _foundation_ready(snapshot: FactorySnapshot, name: str) -> bool | None:

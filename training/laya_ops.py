@@ -46,6 +46,13 @@ PRODUCING_OPERATIONS = {"produce", "mall_slot", "steel", "grow"}
 SUBMITTING_OPERATIONS = {"starter", "foundation", "extend"}  # their layout is submitted (bots build it)
 
 
+def _journal_scalar(value: object) -> bool:
+    """Journal scalar evidence and flat scalar maps (status histograms, starter blockers), not nested blobs."""
+    if isinstance(value, dict):
+        return all(isinstance(v, (bool, int, float, str)) or v is None for v in value.values())
+    return isinstance(value, (bool, int, float, str))
+
+
 def receipt(operation: str, params: dict, result: object) -> dict:
     """A normal return as a typed receipt: ``ok`` only when the operation's own postcondition holds."""
     if operation in {"raise_stock_gate", "reserve_steel_seed"}:
@@ -357,7 +364,7 @@ class DeterministicSession:
         self.acceptance_checks = {
             cid: {"failed": sorted(k for k, v in (r.evidence.get("checks") or {}).items() if v is False),
                   "unknown": sorted(r.missing),
-                  **{k: v for k, v in r.evidence.items() if isinstance(v, (bool, int, float, str))}}
+                  **{k: v for k, v in r.evidence.items() if _journal_scalar(v)}}
             for cid, r in results.items() if not r.passed}
         return {cid: r.status.value for cid, r in results.items()}
 

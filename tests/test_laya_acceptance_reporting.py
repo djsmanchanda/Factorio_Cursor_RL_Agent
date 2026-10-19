@@ -91,6 +91,8 @@ def test_acceptance_names_the_checks_that_block_each_milestone(tmp_path, monkeyp
     assert "C0" not in session.acceptance_checks
     assert session.acceptance_checks["C1"]["failed"] == ["stone_starter_ready"]
     assert session.acceptance_checks["C1"]["working_mall_count"] == 4
+    assert session.acceptance_checks["C1"]["starter_blockers"]["stone"] == "not_producing"
+    assert session.acceptance_checks["C1"]["mall_status_counts"] == {"unreported": 4}
 
     session.close = lambda: None
     run(object(), object(), journal=tmp_path / "journal.jsonl", decisions=0, measure_ticks=600, seed=1,
