@@ -55,3 +55,20 @@ Validation here uses survey/ledger fakes and the runner's recorded decision stat
 there is no deployed or live-world evidence. Integration requires a newly started
 runner using the integrated code; no mod redeploy or Factorio restart is needed
 for this Python observation change.
+
+## Decision facts (2026-10-19)
+
+The runner adds `capacity` and `starters` to `mall_economics`, the brief's
+CAPACITY, STARTERS and BLOCKED lines, and option features. No default rule
+weighs these features; `docs/rl/laya_variants/ops-need-no-progress.json` is the
+only rule that uses one, as an untested variant.
+
+| Fact | Meaning |
+| --- | --- |
+| `capacity.cells/anchors/loaned/lendable` | Observed mall cells; `lendable` = non-anchor cells not already lent. An observation, not the tooling's borrowability decision. Null when the cell survey failed. |
+| `capacity.covered_recipes` | Recipes of the observed cells. |
+| `capacity.borrow_blocked` | When the latest produce/mall_slot attempt was `rationed_mall_borrow_deferred`: its item, active loans and the slot claim's shortfall. Otherwise null. |
+| `starters[name]` | Present/healthy/producing/output and the first failing fact (`blocker`) from the latest acceptance sample, with its tick; may be up to ten decisions old. |
+| `features.borrow_blocked`, `lendable_cells` | Produce and mall_slot options: the two capacity facts above. |
+| `features.starter_blocker` | Plate options: the plate's starter blocker. |
+| `features.no_progress`, `need_no_progress` | Number of latest attempts in a row, for this option or for any option serving its need, that ended blocked with the same outcome (nothing ok or built). Capped at 5. |

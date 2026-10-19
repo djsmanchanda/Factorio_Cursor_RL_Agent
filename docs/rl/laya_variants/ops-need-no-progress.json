@@ -1,0 +1,14 @@
+{
+  "version": "1.0.0",
+  "variant_id": "ops-need-no-progress",
+  "description": "Options for a need whose latest attempts ended blocked with the same outcome: two or three in a row x0.2, four or more x0.05 (need_no_progress, capped at 5). laya-c5d-20261018 runs repeated rationed_mall_borrow_deferred across produce options until the stall.",
+  "catalog": "docs/rl/laya_ops_guidelines.json",
+  "catalog_patch": {
+    "mission.ops-history-no-repeat": {
+      "prefer": [
+        {"when": {"need_no_progress": [2, 3]}, "weight": 0.2},
+        {"when": {"need_no_progress": [4, 5]}, "weight": 0.05}
+      ]
+    }
+  }
+}
