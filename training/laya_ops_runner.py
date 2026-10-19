@@ -47,7 +47,9 @@ STALL_TICKS = 18000  # five game minutes without measurable progress (loan batch
 # Game time a run may go without a new proxy phase or strict acceptance, however busy it is. Cohort 7 part a
 # (96 runs, 2.1.22): the longest gap that still ended in a new milestone was 206,803 ticks (base-s78010; the C5
 # runs 144,255 and 110,392); four C0 loops went 379k-405k ticks without one. 80 minutes sits between.
-PHASE_BUDGET_TICKS = 288000
+# Off by default (None): the 2026-10-20 review separated it from rung progress, since an arm-specific
+# stop changes the opportunity to reach C5/C6. Set it only in a variant that tests it on its own.
+PHASE_BUDGET_TICKS: int | None = None
 # Outcomes of the deterministic ladder step: their "rung" is the first missing predecessor, so its ladder
 # index is the number of rungs already established.
 LADDER_WAIT_CODES = {"chemical_capability_batch", "chemical_capability_wait", "chemical_ladder_borrow_deferred"}
@@ -1022,7 +1024,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         if mark != stall["mark"]:
             stall["mark_tick"] = samples[0][0] if stall["mark"] is None else after["tick"]
             stall["mark"] = mark
-        if after["tick"] - stall["mark_tick"] >= PHASE_BUDGET_TICKS:
+        if PHASE_BUDGET_TICKS is not None and after["tick"] - stall["mark_tick"] >= PHASE_BUDGET_TICKS:
             summary["stop"] = "phase_budget"
             emit(f"PHASE BUDGET: {PHASE_BUDGET_TICKS} ticks without a new proxy phase or strict acceptance")
             break
