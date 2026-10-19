@@ -1546,3 +1546,33 @@ def test_fully_fed_iron_module_does_not_expand(monkeypatch) -> None:
         object(), object(), "nauvis", "player", "iron-plate",
         (0.0, 0.0), lambda _message: None,
     )
+
+
+@pytest.mark.parametrize("expand", [False, True])
+def test_starter_drills_never_count_toward_the_owned_districts_next_phase(monkeypatch, expand) -> None:
+    # Cohort 7: in expand mode the two starter drills were counted with the six-drill mine, so the
+    # 12-drill phase asked for 4 and the six-drill prefix cut that to 0 (3,029 iron/stone
+    # district_expansion_unbuildable outcomes; both successful extends counted exactly 6 drills).
+    from types import SimpleNamespace
+    from orchestrator import autonomous_builder as builder
+
+    seen = {}
+
+    class Captured(Exception):
+        pass
+
+    def capture(*_args, **kwargs):
+        seen.update(kwargs)
+        raise Captured
+
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(builder, "_essential_belt_type", lambda *_a: "transport-belt")
+    monkeypatch.setattr(builder, "_bootstrap_state", lambda _r: SimpleNamespace(
+        pioneer_actions=[{"entity": "electric-mining-drill", "position": {"x": 17.5, "y": 1.5}}],
+        lifecycle_state="pioneer", replacement_origin=None))
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder, "plan_local_extraction", capture)
+    with pytest.raises(Captured):
+        builder.build_mining_stage(object(), object(), "nauvis", "player", "iron-plate", (0, 0),
+                                   lambda _m: None, expand=expand)
+    assert seen["excluded_drill_positions"] == ((17.5, 1.5),)
