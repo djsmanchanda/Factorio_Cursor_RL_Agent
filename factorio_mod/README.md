@@ -8,6 +8,7 @@ For the complete 19-command inventory, RCON/GameBridge usage, output directories
 ## Files
 - `info.json` (exception): Factorio requires strict JSON, so it cannot include comments.
 - `control.lua`: Loads the modules that register the mod's console-command surface.
+- `data.lua`: Declares the read-only Laya Coach area selection tool.
 
 ## Assumptions / Constraints
 - Targets **Factorio 2.0** (`factorio_version: 2.0`); uses the 2.0 API (`storage`, `helpers.*`, `event.entity`).
@@ -29,6 +30,20 @@ discovered mods on next launch.
    - `script-output/factorio_mod/snapshots/snapshot_<tick>.json`
 
 For a dedicated server, send `/snapshot` over RCON and read that server's own `script-output`, not a client-side directory. A snapshot is read-only, but raw `/sc` Lua and many other registered commands can mutate state.
+
+## Laya Coach area tool
+
+The **Laya Coach** window (top-left button) has **Select area**, which puts the
+read-only `laya-coach-area-tool` (declared in `data.lua`) in your cursor.
+Drag a box over an ore patch, mall cell or place to avoid. Shift-drag records
+`alt_select` instead of `select`. While you drag, the status line shows a
+throttled preview: box size, entity count and ore totals. When you release, the
+area is attached to the next **Capture observation** or **Save guidance** record
+as `area`, with bounds, `selection_mode`, entity count, up to 160 sampled
+entities and the ore totals. **Clear area** drops it. The tool never builds,
+mines or changes entities. `training/laya_workflow.py` validates `area` against
+`schemas/laya_coach_record.schema.json` and copies a digest of it into
+`state.observation_digest.area`.
 
 ## Recipe knowledge export
 

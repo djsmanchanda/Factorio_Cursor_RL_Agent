@@ -8,6 +8,10 @@ local TOGGLE_NAME = "laya_coach_toggle"
 local OUTPUT_DIRECTORY = "factorio_mod/laya_guidance/"
 local MAX_SAMPLE_ENTITIES = 160
 local MAX_TEXT = 2000
+local AREA_TOOL = "laya-coach-area-tool"
+local PREVIEW_INTERVAL_TICKS = 10
+local PREVIEW_RESOURCE_LIMIT = 2000
+local COMMIT_RESOURCE_LIMIT = 20000
 
 local DECISION_KINDS = {
   "serve_goal", "choose_operation", "select_site", "select_scale", "select_route",
@@ -19,6 +23,8 @@ local OUTCOMES = { "unknown", "success", "failure", "blocked" }
 local function coach_storage()
   local state = shared.ensure_storage()
   state.laya_coach = state.laya_coach or { sequence = 0 }
+  state.laya_coach.pending_area = state.laya_coach.pending_area or {}
+  state.laya_coach.preview_tick = state.laya_coach.preview_tick or {}
   return state.laya_coach
 end
 
@@ -103,6 +109,70 @@ local function render_worlds(frame)
   controls.add({ type = "button", name = "laya_coach_worlds_leave", caption = "Leave training world" })
 end
 
+-- Area selection: read-only queries over a dragged box. Nothing here builds,
+-- mines or changes an entity; the box only annotates the next coach record.
+local function bounds(area)
+  local lt, rb = area.left_top or area[1], area.right_bottom or area[2]
+  return {
+    left_top = { x = lt.x or lt[1], y = lt.y or lt[2] },
+    right_bottom = { x = rb.x or rb[1], y = rb.y or rb[2] }
+  }
+end
+
+local function mode_name(event, fallback)
+  local mode = event.selection_mode
+  if type(mode) == "string" then return mode end
+  if mode ~= nil and defines.selection_mode then
+    for name, value in pairs(defines.selection_mode) do
+      if value == mode then return name end
+    end
+  end
+  return fallback
+end
+
+local function area_summary(surface, box, resource_limit, with_sample)
+  local resources = {}
+  local found = surface.find_entities_filtered({ area = box, type = "resource", limit = resource_limit })
+  for _, resource in pairs(found) do
+    resources[resource.name] = (resources[resource.name] or 0) + resource.amount
+  end
+  local summary = {
+    entity_count = surface.count_entities_filtered({ area = box, type = { "resource", "character" }, invert = true }),
+    resource_entity_count = #found,
+    resources = resources,
+    truncated = #found >= resource_limit
+  }
+  if with_sample then
+    summary.entities = {}
+    local sample = surface.find_entities_filtered({
+      area = box, type = { "resource", "character" }, invert = true, limit = MAX_SAMPLE_ENTITIES
+    })
+    for _, entity in pairs(sample) do
+      summary.entities[#summary.entities + 1] = {
+        name = entity.name, type = entity.type, position = { x = entity.position.x, y = entity.position.y }
+      }
+    end
+  end
+  return summary
+end
+
+local function summary_text(box, summary)
+  local width = box.right_bottom.x - box.left_top.x
+  local height = box.right_bottom.y - box.left_top.y
+  local ores = {}
+  for name, amount in pairs(summary.resources) do ores[#ores + 1] = name .. " " .. amount end
+  table.sort(ores)
+  local text = string.format("%dx%d tiles, %d entities", math.floor(width + 0.5), math.floor(height + 0.5), summary.entity_count)
+  if #ores > 0 then text = text .. ", ore: " .. table.concat(ores, ", ") end
+  if summary.truncated then text = text .. " (ore totals truncated)" end
+  return text
+end
+
+local function area_caption(area)
+  if not area then return "Area: none (use Select area to attach one)" end
+  return "Area [" .. area.selection_mode .. "]: " .. summary_text(area, area)
+end
+
 local function open_window(player)
   close_window(player)
   local frame = player.gui.screen.add({
@@ -129,6 +199,13 @@ local function open_window(player)
   local outcome_flow = frame.add({ type = "flow", direction = "horizontal" })
   outcome_flow.add({ type = "label", caption = "Observed outcome" })
   outcome_flow.add({ type = "drop-down", name = "laya_coach_outcome", items = OUTCOMES, selected_index = 1 })
+
+  local area_flow = frame.add({ type = "flow", direction = "horizontal" })
+  area_flow.add({ type = "button", name = "laya_coach_area", caption = "Select area",
+    tooltip = "Drag a box to attach an area to the next saved record. Shift-drag records alt_select (e.g. avoid)." })
+  area_flow.add({ type = "button", name = "laya_coach_area_clear", caption = "Clear area" })
+  local area_label = frame.add({ type = "label", name = "laya_coach_area_status", caption = area_caption(coach_storage().pending_area[player.index]) })
+  area_label.style.single_line = false
 
   local buttons = frame.add({ type = "flow", direction = "horizontal" })
   buttons.add({ type = "button", name = "laya_coach_capture", caption = "Capture observation" })
@@ -245,7 +322,8 @@ local function new_record(player, frame, feedback_kind)
     options = options,
     chosen_option_id = choice,
     confidence = choice and 1.0 or 0.5,
-    observation = observation
+    observation = observation,
+    area = state.pending_area[player.index]
   }
 end
 
@@ -261,13 +339,63 @@ local function write_record(player, frame, feedback_kind)
     json,
     false
   )
+  if record.area then
+    coach_storage().pending_area[player.index] = nil
+    frame.laya_coach_area_status.caption = area_caption(nil)
+  end
   return record
 end
+
 
 local function set_status(frame, message)
   if frame and frame.valid and frame.laya_coach_status then
     frame.laya_coach_status.caption = message
   end
+end
+
+local function tool_event(event)
+  local player = game.get_player(event.player_index)
+  if not player then return nil end
+  local item = event.item
+  if item == nil and player.cursor_stack and player.cursor_stack.valid_for_read then
+    item = player.cursor_stack.name
+  end
+  if item ~= AREA_TOOL then return nil end
+  return player, event.surface or player.surface
+end
+
+local function on_preselect(event)
+  local player, surface = tool_event(event)
+  if not player then return end
+  local state = coach_storage()
+  local last = state.preview_tick[player.index]
+  if last and game.tick - last < PREVIEW_INTERVAL_TICKS then return end
+  state.preview_tick[player.index] = game.tick
+  local frame = player.gui.screen[FRAME_NAME]
+  if not frame or not event.area then return end
+  local box = bounds(event.area)
+  set_status(frame, "Preview: " .. summary_text(box, area_summary(surface, box, PREVIEW_RESOURCE_LIMIT, false)))
+end
+
+local function on_cancel(event)
+  local player = tool_event(event)
+  if player then set_status(player.gui.screen[FRAME_NAME], "Area selection cancelled") end
+end
+
+local function on_selected(event, fallback_mode)
+  local player, surface = tool_event(event)
+  if not player then return end
+  local area = area_summary(surface, bounds(event.area), COMMIT_RESOURCE_LIMIT, true)
+  local box = bounds(event.area)
+  area.left_top, area.right_bottom = box.left_top, box.right_bottom
+  area.surface = surface.name
+  area.tick = game.tick
+  area.selection_mode = mode_name(event, fallback_mode)
+  coach_storage().pending_area[player.index] = area
+  if not player.gui.screen[FRAME_NAME] then open_window(player) end
+  local frame = player.gui.screen[FRAME_NAME]
+  frame.laya_coach_area_status.caption = area_caption(area)
+  set_status(frame, "Area attached; label it and save.")
 end
 
 local function on_click(event)
@@ -294,6 +422,19 @@ local function on_click(event)
   if element.name == "laya_coach_worlds_leave" and lab_available() then
     local result = remote.call(LAB_INTERFACE, "leave_world", player.index)
     set_status(frame, result.message)
+    return
+  end
+  if element.name == "laya_coach_area" then
+    if player.clear_cursor() and player.cursor_stack.set_stack({ name = AREA_TOOL }) then
+      set_status(frame, "Drag a box over the area; its summary appears below.")
+    else
+      set_status(frame, "Could not put the area tool in the cursor.")
+    end
+    return
+  end
+  if element.name == "laya_coach_area_clear" then
+    coach_storage().pending_area[player.index] = nil
+    if frame and frame.valid then frame.laya_coach_area_status.caption = area_caption(nil) end
     return
   end
   if element.name == "laya_coach_close" then
@@ -330,6 +471,12 @@ script.on_event(defines.events.on_player_joined_game, function(event)
 end)
 
 script.on_event(defines.events.on_gui_click, on_click)
+
+script.on_event(defines.events.on_player_start_selected_area, on_preselect)
+script.on_event(defines.events.on_player_change_selected_area, on_preselect)
+script.on_event(defines.events.on_player_cancel_selected_area, on_cancel)
+script.on_event(defines.events.on_player_selected_area, function(event) on_selected(event, "select") end)
+script.on_event(defines.events.on_player_alt_selected_area, function(event) on_selected(event, "alt_select") end)
 
 script.on_event(defines.events.on_gui_closed, function(event)
   if event.element and event.element.valid and event.element.name == FRAME_NAME then
