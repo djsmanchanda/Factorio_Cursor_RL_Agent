@@ -434,6 +434,41 @@ def test_poles_and_roboports_chained_to_a_far_site_survive_the_stall_detector(tm
     assert stop("unreadable", []) == "stalled"
 
 
+class _LadderSession(FakeSession):
+    """Every operation reports the chemical-ladder rung the tooling waits at next."""
+
+    def __init__(self, rungs):
+        super().__init__()
+        self.rungs = iter(rungs)
+
+    def run(self, operation, **params):
+        self.calls.append((operation, params))
+        return {"ok": False, "operation": operation, "params": params, "code": "chemical_capability_batch",
+                "details": {"target": "plastic-bar", "rung": next(self.rungs, "pipe"), "required_stock": 1}}
+
+
+def test_a_completed_ladder_rung_survives_the_stall_detector_and_a_remade_one_does_not(tmp_path, monkeypatch):
+    # laya-c7 netstall-s78004 stalled in the decision that delivered its pumpjack rung: each rung loan finished
+    # inside one decision, so no batch counter was ever seen rising. pipe <-> chemical-plant is make-then-consume.
+    import training.laya_ops_runner as runner
+    monkeypatch.setattr(runner, "STALL_TICKS", 1500)
+    ladder = ("pipe", "steel-plate", "chemical-plant", "oil-refinery", "offshore-pump", "pumpjack", "plastic-bar",
+              "advanced-circuit", "sulfur", "sulfuric-acid")
+    stop = lambda name, rungs: run(_ClockWorld(), GuidedPolicy(3), journal=tmp_path / f"{name}.jsonl",
+                                   decisions=8, measure_ticks=600, seed=3, run_id=name,
+                                   session=_LadderSession(rungs))["stop"]
+    assert stop("climb", ladder) == "decision_budget"
+    assert stop("cycle", ["pipe", "chemical-plant"] * 10) == "stalled"
+
+
+def test_busy_progress_without_a_new_phase_or_acceptance_stops_on_the_phase_budget(tmp_path, monkeypatch):
+    # laya-c7 netstall-s78045: 1,505 decisions over ~430k ticks at C0, every check finding some "progress".
+    import training.laya_ops_runner as runner
+    monkeypatch.setattr(runner, "PHASE_BUDGET_TICKS", 6000)
+    summary = run(_ClockWorld(), GuidedPolicy(3), journal=tmp_path / "j.jsonl", decisions=40, measure_ticks=600,
+                  seed=3, run_id="t", session=_BatchSession(4))
+    assert summary["stop"] == "phase_budget" and summary["decisions"] < 40
+
 def test_named_prerequisites_are_choices_outside_the_phase_and_shortage_limit():
     # Day control-s76403 handed one chest off to plastic 125 times in C2 without a plastic choice.
     handoff = {"ok": False, "operation": "produce", "params": {"item": "passive-provider-chest"},
