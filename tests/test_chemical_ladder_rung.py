@@ -127,7 +127,8 @@ def test_loan_cell_item_count_reads_one_number():
 
     client = Reply("18\n")
     assert ab.live_base.loan_cell_item_count(client, "nauvis", (42.5, 38.5), (39.5, 38.5), "pipe") == 18
-    assert "assembling_machine_input" in client.sent[0] and "held_stack" in client.sent[0]
+    # Factorio 2.1 names the assembler input inventory crafter_input (cohort 5: 46 nil-index failures).
+    assert "defines.inventory.crafter_input or" in client.sent[0] and "held_stack" in client.sent[0]
     with pytest.raises(RuntimeError):  # a broken query must surface, not read as an empty cell
         ab.live_base.loan_cell_item_count(Reply("Cannot execute command"), "nauvis", (0, 0), (3, 0), "pipe")
 
