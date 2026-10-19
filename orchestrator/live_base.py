@@ -615,8 +615,12 @@ def entity_at(client: RconClient, surface: str, position: Point) -> dict | None:
     decide whether it's safe to auto-clear (see is_safe_to_clear)."""
     lua = (
         "local s=game.surfaces['" + surface + "'];"
-        "local e=s.find_entities_filtered{position={" + str(position[0]) + "," + str(position[1]) + "},"
-        "radius=0.4,limit=1}[1];"
+        # Flying robots can cross a pole while it is surveyed. They do not
+        # occupy its construction tile and must not hide the real entity.
+        "local e=nil;for _,candidate in pairs(s.find_entities_filtered{position={"
+        + str(position[0]) + "," + str(position[1]) + "},radius=0.4}) do "
+        "if candidate.type~='logistic-robot' and candidate.type~='construction-robot' "
+        "and candidate.type~='combat-robot' then e=candidate break end end;"
         "if not e then rcon.print('NONE') return end;"
         "local ghost=(e.type=='entity-ghost' and e.ghost_name or '-');"
         "rcon.print(e.name..' '..e.type..' '..(e.force and e.force.name or 'neutral')..' '..ghost)"

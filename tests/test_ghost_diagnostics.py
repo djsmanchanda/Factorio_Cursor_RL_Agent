@@ -1402,3 +1402,32 @@ def test_stage_power_hooks_stranded_machines_when_the_anchor_already_generates(m
         (-298.0, -78.0), (-298.0, -78.0), [(-330.5, 10.5), (-326.5, 10.5)], [], None, lambda _m: None,
     )
     assert acted and (-330.5, 10.5) in calls and (-326.5, 10.5) not in calls
+
+
+@pytest.mark.parametrize("robot", ["construction-robot", "logistic-robot", "combat-robot"])
+def test_entity_survey_reads_pole_beneath_flying_robot(robot):
+    """C7 s78026: a flying bot must not become a power-route endpoint."""
+    import shutil
+    import subprocess
+    from orchestrator import live_base
+
+    lua = shutil.which("lua")
+    if lua is None:
+        pytest.skip("Lua interpreter unavailable")
+
+    class Client:
+        def command(self, command):
+            fixture = (
+                "game={surfaces={nauvis={find_entities_filtered=function(o) "
+                "local entities={{name='" + robot + "',type='" + robot + "'},"
+                "{name='medium-electric-pole',type='electric-pole',force={name='player'}}};"
+                "if o.limit then return {entities[1]} end;return entities end}}};"
+                "rcon={print=print};"
+            )
+            result = subprocess.run([lua, "-"], input=fixture + command.removeprefix("/sc "),
+                                    text=True, capture_output=True, check=True)
+            return result.stdout.strip()
+
+    assert live_base.entity_at(Client(), "nauvis", (84.0, -45.0)) == {
+        "name": "medium-electric-pole", "type": "electric-pole", "force": "player",
+    }
