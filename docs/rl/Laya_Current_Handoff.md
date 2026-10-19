@@ -209,7 +209,8 @@ starters only until their foundations exist?) before more C1 work. Starship offl
 - Arms: base `e18d8d0` (cohort-6 facts arm + 2.1.22 runtime) vs netstall `d633957` (built poles and
   roboports count as stall-detector progress, `9668c39`; the harness flip-flop settling is scheduling only).
 - miniship: seeds 78000-78047 (96 jobs), slots 12 (6-25), unit `laya-c7-miniship-20261019`.
-  Starship: seeds 78100-78249 (300 jobs), slots 20 (6-50), unit `laya-c7-starship-20261019`, same path.
+  Starship part stopped at ~17:10 IST by user instruction (no Starship testing unless asked); excluded.
+  Its seeds 78100-78249 (300 jobs) run on miniship as part b (`laya-c7-miniship-b-20261019`) after part a.
 - Window until 2026-10-20 08:00 IST, 540k ticks, 6000 s per trial. Not comparable with 2.1.21 cohorts.
 - Next candidates: terminal-code fact for `district_expansion_unbuildable`; ladder not lending the
   circuit cell for a circuit-consuming rung; known gap: `training/laya_ops.py` imports
