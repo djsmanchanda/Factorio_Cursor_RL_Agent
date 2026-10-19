@@ -343,10 +343,23 @@ class DeterministicSession:
                 ledger = ab._MATERIAL_RESERVATION_LEDGER
                 oil = store.material_facts(self.client, None if ledger is None else copy.deepcopy(ledger))
                 if oil is not None:
+                    oil["packets_pending"] = self._packets_pending(store)
                     transactions["opening_oil"] = oil
             except Exception as error:  # An unreadable bill is unknown, never paid or permission to re-site.
                 transactions["opening_oil"] = {"error": f"{type(error).__name__}: {error}"[:200]}
         return transactions
+
+    def _packets_pending(self, store) -> list[str] | None:
+        """Selected oil packets not yet released (a placement neither ghosted nor built), or None if unreadable."""
+        from orchestrator import live_base
+        try:
+            transaction = store.load()
+            if transaction["complete"]:
+                return []
+            return [name for name, packet in transaction["intent"]["packets"]
+                    if live_base.plan_construction_status(self.client, SURFACE, FORCE, packet)["unplaced"]]
+        except Exception:  # noqa: BLE001 -- an unreadable survey is no evidence
+            return None
 
     def acceptance(self) -> dict:
         """The deterministic runtime's own milestone predicates (orchestrator/checkpoint_milestones.py) on the
