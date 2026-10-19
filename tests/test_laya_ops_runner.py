@@ -627,3 +627,24 @@ def test_the_brief_counts_unreleased_chemical_packets():
     assert "packets_pending 2" in brief([], None, None, {}, 0, economics=economics)
     economics["transactions"]["opening_oil"]["packets_pending"] = None
     assert "packets_pending ?" in brief([], None, None, {}, 0, economics=economics)
+
+
+class _RegressingSession(FakeSession):
+    """C2 passes on the first sample, then fails; the latch keeps reporting it as reached."""
+
+    def __init__(self):
+        super().__init__()
+        self.calls = 0
+
+    def acceptance(self):
+        self.calls += 1
+        self.acceptance_fresh = {"C2": "passed" if self.calls == 1 else "failed"}
+        return {"C2": "passed"}
+
+
+def test_summary_final_acceptance_shows_a_regression_the_latch_hides(tmp_path):
+    summary = run(FakeWorld(), GuidedPolicy(3), journal=tmp_path / "j.jsonl", decisions=3, measure_ticks=600,
+                  seed=3, run_id="regress", session=_RegressingSession())
+    assert summary["accepted_ever"] == ["C2"] and summary["accepted_final"] == []
+    rows = [json.loads(line) for line in (tmp_path / "j.jsonl").read_text().splitlines()]
+    assert [r["fresh"]["C2"] for r in rows if r.get("event") == "acceptance"][:2] == ["passed", "failed"]

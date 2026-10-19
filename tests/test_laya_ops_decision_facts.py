@@ -143,3 +143,33 @@ def test_need_no_progress_variant_loads_with_verified_quotes():
     prefer = variant["catalog_patch"]["mission.ops-history-no-repeat"]["prefer"]
     assert [p["weight"] for p in prefer if matches(p["when"], {"need_no_progress": 3})] == [0.2]
     assert not any(matches(p["when"], {"need_no_progress": 1}) for p in prefer)
+
+
+def test_final_acceptance_is_fresh_while_reached_stays_latched(monkeypatch):
+    # Review 2026-10-20: CheckpointEvaluator returns "passed" forever once reached, so a latched final
+    # could not show a regression. Fresh statuses use the stateless predicates on the same sample.
+    import orchestrator.checkpoint_observer as observer
+    from orchestrator import checkpoint_milestones as cm
+    from training.laya_ops import DeterministicSession
+
+    outcomes = iter([cm.PredicateStatus.PASSED, cm.PredicateStatus.FAILED, cm.PredicateStatus.UNKNOWN])
+
+    class Definition:
+        checkpoint_id, predicate_version = "C9", "test-v1"
+
+        def evaluate(self, current, prior, samples):
+            return cm._result(self.checkpoint_id, self.predicate_version, next(outcomes), {})
+
+    class Adapter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def observe(self):
+            return SimpleNamespace(snapshot=cm.FactorySnapshot.from_mapping({"tick": 9, "base_valid": True}))
+
+    monkeypatch.setattr(observer, "LiveCheckpointObservationAdapter", Adapter)
+    session = object.__new__(DeterministicSession)
+    session.client = session.bridge = session.reference_point = None
+    session._evaluator, session._baseline, session._history = cm.CheckpointEvaluator((Definition(),)), None, []
+    seen = [(session.acceptance()["C9"], session.acceptance_fresh["C9"]) for _ in range(3)]
+    assert seen == [("passed", "passed"), ("passed", "failed"), ("passed", "unknown")]

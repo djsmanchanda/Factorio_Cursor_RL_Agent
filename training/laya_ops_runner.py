@@ -857,9 +857,13 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         passed = [c for c, status in statuses.items() if status == "passed"]
         summary["accepted"] = sorted(set(summary.get("accepted", [])) | set(passed))
         summary["accepted_ever"] = list(summary["accepted"])
-        summary["accepted_final"] = None if "error" in statuses else sorted(passed)
+        # Final means passing on the latest sample (stateless predicates), not the latched history; a session
+        # without fresh statuses reports unknown rather than echoing the latch.
+        fresh = getattr(session, "acceptance_fresh", None)
+        summary["accepted_final"] = (None if "error" in statuses or fresh is None
+                                     else sorted(c for c, status in fresh.items() if status == "passed"))
         _append(journal, {"run_id": run_id, "event": "acceptance", "at": event, "statuses": statuses,
-                          "checks": getattr(session, "acceptance_checks", None)})
+                          "fresh": fresh, "checks": getattr(session, "acceptance_checks", None)})
     check_acceptance("start")
     index = -1
     while decisions is None or index + 1 < decisions:
