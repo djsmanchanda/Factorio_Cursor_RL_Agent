@@ -44,6 +44,13 @@ FLUID_STARVED = ("fluid_ingredient_shortage", "no_input_fluid")
 # Receipts that put something into the world (training/laya_ops.receipt); a reservation or a wait does not.
 BUILT = {"producing", "submitted", "prerequisite_advanced"}
 STALL_TICKS = 18000  # five game minutes without measurable progress (loan batches are slow by design)
+# Game time a run may go without a new proxy phase or strict acceptance, however busy it is. Cohort 7 part a
+# (96 runs, 2.1.22): the longest gap that still ended in a new milestone was 206,803 ticks (base-s78010; the C5
+# runs 144,255 and 110,392); four C0 loops went 379k-405k ticks without one. 80 minutes sits between.
+PHASE_BUDGET_TICKS = 288000
+# Outcomes of the deterministic ladder step: their "rung" is the first missing predecessor, so its ladder
+# index is the number of rungs already established.
+LADDER_WAIT_CODES = {"chemical_capability_batch", "chemical_capability_wait", "chemical_ladder_borrow_deferred"}
 WAIT_EXPIRY = 1800  # ticks after which a "waiting" operation is worth retrying  # the tooling is already making it: wait, and count it as progress
 
 
@@ -128,6 +135,16 @@ def _demand_bills(result: Mapping):
 def batch_advanced(previous: Mapping[tuple, int], current: Mapping[tuple, int]) -> bool:
     """Whether any batch seen last check has crafted since (a first sighting is not progress)."""
     return any(count > previous[key] for key, count in current.items() if key in previous)
+
+
+def ladder_rungs(result: Mapping) -> int | None:
+    """Chemical-ladder rungs established when this outcome waits at a rung, else None."""
+    from orchestrator.baseline_production import CHEMICAL_BOOTSTRAP_LADDER
+    details = result.get("details") or {}
+    rung = details.get("rung") or details.get("predecessor")
+    if result.get("code") not in LADDER_WAIT_CODES or rung not in CHEMICAL_BOOTSTRAP_LADDER:
+        return None
+    return CHEMICAL_BOOTSTRAP_LADDER.index(rung)
 
 
 def shortages(results: list[dict], sources: dict | None = None) -> dict[str, int]:
@@ -823,7 +840,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     measurement = None
     summary: dict = {"decisions": 0, "failures": 0, "phases_reached": reached, "stop": "decision_budget"}
     stall = {"since": 0, "best_gap": math.inf, "tick": None, "machines": 0, "missing": math.inf, "made": {},
-             "batches": {}, "installed": {}, "network": None}
+             "batches": {}, "installed": {}, "network": None, "rungs": None, "mark": None, "mark_tick": None}
     accept = getattr(session, "acceptance", None)
 
     def check_acceptance(event: str) -> None:
@@ -983,8 +1000,14 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         extended = network is not None and stall["network"] is not None and network > stall["network"]
         if network is not None:
             stall["network"] = max(stall["network"] or 0, network)
+        # A rung loan that finishes inside one decision never shows as an advancing batch; the next rung the
+        # ladder waits at does. A high-water mark keeps a consumed, re-made rung from counting again.
+        rungs = ladder_rungs(result)
+        climbed = rungs is not None and stall["rungs"] is not None and rungs > stall["rungs"]
+        if rungs is not None:
+            stall["rungs"] = max(stall["rungs"] if stall["rungs"] is not None else rungs, rungs)
         progressed = (machines > stall["machines"] or missing < stall["missing"] or crafted or advancing or delivered
-                      or extended or gap < stall["best_gap"] * 0.95)
+                      or extended or climbed or gap < stall["best_gap"] * 0.95)
         stall["machines"], stall["missing"] = max(stall["machines"], machines), min(stall["missing"], missing)
         stall["best_gap"] = min(stall["best_gap"], gap)
         if progressed or stall["tick"] is None:
@@ -993,6 +1016,15 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         if after["tick"] - stall["tick"] >= STALL_TICKS:
             summary["stop"] = "stalled"
             emit(f"STALLED: {STALL_TICKS} ticks without a built operation, work in progress or goal progress")
+            break
+        # Busy is not progress either: the mission must reach a new phase or acceptance within the budget.
+        mark = (len(reached), len(summary.get("accepted", [])))
+        if mark != stall["mark"]:
+            stall["mark_tick"] = samples[0][0] if stall["mark"] is None else after["tick"]
+            stall["mark"] = mark
+        if after["tick"] - stall["mark_tick"] >= PHASE_BUDGET_TICKS:
+            summary["stop"] = "phase_budget"
+            emit(f"PHASE BUDGET: {PHASE_BUDGET_TICKS} ticks without a new proxy phase or strict acceptance")
             break
         if summary["failures"] >= 3 and all(r.get("code") == "tool_error" for r in results[-3:]):
             summary["stop"] = "safe_stop_after_repeated_failures"
