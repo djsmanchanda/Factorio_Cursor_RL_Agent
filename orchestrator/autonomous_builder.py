@@ -2901,7 +2901,10 @@ def build_mining_stage(
                 )
             )
         bootstrap = _bootstrap_state(recipe)
-        if not excluded_drill_positions and not expand:
+        # Starter/pioneer drills on the same ore are not part of the district in expand mode either: counted,
+        # 8 drills asked the 12-drill phase for 4, which the six-drill prefix cut to 0 (cohort 7: 3,029
+        # iron/stone extends returned district_expansion_unbuildable; both successes counted exactly 6).
+        if not excluded_drill_positions:
             starter_drills: set[Point] = set()
             pioneer_actions = (
                 getattr(bootstrap, "pioneer_actions", ())
