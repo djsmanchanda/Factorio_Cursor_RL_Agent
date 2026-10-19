@@ -24,8 +24,35 @@ def _batch(tmp_path, seeds=(1, 2)):
     return Batch(path)
 
 
-def test_jobs_are_seed_major_so_a_deadline_cut_keeps_arms_matched(tmp_path):
-    assert [j["id"] for j in _batch(tmp_path).jobs] == ["control-s1", "fix-s1", "control-s2", "fix-s2"]
+def test_jobs_are_seed_major_with_the_arm_order_rotated_per_seed(tmp_path):
+    assert [j["id"] for j in _batch(tmp_path).jobs] == ["control-s1", "fix-s1", "fix-s2", "control-s2"]
+
+
+def test_the_deadline_admits_whole_seed_blocks(tmp_path, monkeypatch):
+    # Review 2026-10-20: a per-job deadline check could start a seed's first arm and censor the rest.
+    import tools.run_laya_batch as harness
+    monkeypatch.setattr(harness.time, "sleep", lambda _s: None)
+    batch = _batch(tmp_path, seeds=(1, 2, 3))
+    clock = [batch.until - 100]
+    monkeypatch.setattr(harness.time, "time", lambda: clock[0])
+
+    class Controller:
+        maximum, slots, last = 4, 1, {}
+
+        def update(self, running, queued, now=None):
+            return None
+
+    def job(item, slot):
+        clock[0] += 50  # past the last start time while seed 1's first arm runs (a per-job check would censor its second)
+        item["status"] = "completed"
+
+    batch.controller = Controller()
+    monkeypatch.setattr(batch, "run_job", job)
+    monkeypatch.setattr(batch, "report", lambda: None)
+    batch.run()
+    status = {j["id"]: j["status"] for j in batch.jobs}
+    assert status["control-s1"] == status["fix-s1"] == "completed"  # seed 1 was admitted: its block completes
+    assert {status[f"{a}-s{s}"] for a in ("control", "fix") for s in (2, 3)} == {"not_started_deadline"}
 
 
 def test_outcome_and_phase_times_come_from_the_runner_log(tmp_path):

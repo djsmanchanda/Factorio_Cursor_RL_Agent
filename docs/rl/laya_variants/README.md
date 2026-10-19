@@ -32,7 +32,11 @@ any unhealthy window; running trials are never stopped. After an up/down/up
 (or down/up/down) flip-flop it stops growing for `settle_windows` (default 6). Ports are reserved for
 `max_concurrency` (default `concurrency + 4`); `"adaptive": false` pins slots.
 Decisions go to `controller.jsonl`, and each job records `slots_at_start`.
-Seed-major order starts both arms of a seed under the same load.
+Seed-major order, with the arm order rotated per seed, starts a seed's arms under the same
+load. The deadline admits whole seed blocks: a new seed starts only if a trial can finish its wall
+window by `until`, and every arm of an admitted seed then runs with the full window, so the unit's
+runtime cap must allow `until` plus `trial_wall_seconds`. Final acceptance is the fresh predicates
+on the last sample; ever-passed is the monotonic history. Matching them is not non-regression.
 
 Before comparing, inspect effective option weights: every matching preference
 multiplies, including overlapping entries in one rule. Change only the intended
