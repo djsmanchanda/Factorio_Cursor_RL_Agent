@@ -50,9 +50,11 @@ python -m pytest
 
 The fast gate is intentionally curated rather than defined as “everything not
 currently slow.” This prevents a new expensive test from silently bloating every
-change. Scheduled and manually dispatched CI install `lupa` and Lua 5.4 and run
-the complete suite. Loopback tests need permission to bind `127.0.0.1`; Lua
-tests need `lua`/`luac` or their explicit `lupa` fallback.
+change. The fast scaffolding contract uses a small real managed backbone; the
+complete electronics bundle is still checked by the slow composition cases
+using the same payload assertions. Scheduled and manually dispatched CI install
+`lupa` and Lua 5.4 and run the complete suite. Loopback tests need permission to
+bind `127.0.0.1`; Lua tests need `lua`/`luac` or their explicit `lupa` fallback.
 
 All filesystem-writing tests use `tmp_path` or `tmp_path_factory`. Test files
 rely on the repository `pythonpath` configured by `pytest.ini`; they must not

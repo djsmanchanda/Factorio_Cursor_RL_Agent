@@ -401,3 +401,8 @@ only. Lifecycle: fresh frozen Python for the next runner; nothing deployed.
 - What: Factorio T3 audit found long supervision sleeps, repeated test gates and self-matching process polls. Added guidance for scheduled wakes, process/session completion, test exit status and result reuse; existing pytest testpaths=tests is retained.
 - Evidence: Read-only extraction of 1,730 stored Miniship tool calls; pytest configuration parsed and documentation diff checked. No tests or campaigns launched on this host.
 - Lifecycle: Future agent/test invocations only; active frozen campaigns unchanged.
+
+## [2026-10-21 02:38 IST] Smaller fast scaffolding test with retained full composition coverage
+- What: Fast payload check uses a real four-roboport backbone; all original assertions still run against the complete electronics bundle in the slow composition family. Production code unchanged.
+- Evidence: 24 infrastructure/taxonomy tests pass, including complete bundle checks. Fast gate 38.69 s; exit 1; failures: test_current_repository_obeys_import_firewall. Starship measured the isolated check at 7.84 s -> 0.30 s and retained exactly the same 959 fast test IDs.
+- Lifecycle: Future test invocations only; active frozen campaigns unchanged.
