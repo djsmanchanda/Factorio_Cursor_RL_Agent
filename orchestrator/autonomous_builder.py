@@ -1900,9 +1900,15 @@ def _bring_modular_refinery_up(
         client, bridge, surface, force, interface.power_anchor,
         f"modular refinery for {recipe}", emit, reserved_tiles=reserved,
     )
+    def stocked_output() -> bool:
+        return (
+            live_base.chest_contents(client, surface, interface.provider).get(recipe, 0) > 0
+            and live_base.logistic_network_ids(client, surface, [interface.provider]).get(interface.provider) is not None
+        )
+
     stuck = _diagnose_machines(
         client, surface, machines, emit, grace_seconds=feed_grace_seconds,
-        bridge=bridge, force=force,
+        bridge=bridge, force=force, stocked_output=stocked_output,
     )
     if stuck:
         raise StuckError(f"modular refinery for {recipe} built but not healthy: {stuck}")

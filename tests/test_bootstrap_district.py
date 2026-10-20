@@ -643,3 +643,31 @@ def test_seed_drill_shortfall_queues_a_mall_drill_demand(
 
     assert spent is True
     assert mall_targets.get("electric-mining-drill", 0) >= 1
+
+
+@pytest.mark.parametrize("provider_stock,network,ready", [(20, 7, True), (0, 7, False), (20, None, False)])
+def test_modular_refinery_checks_its_own_stocked_provider_before_idle_success(monkeypatch, provider_stock, network, ready):
+    from planners.smelter_block import generate_managed_refinery_plan, refinery_interfaces
+    from orchestrator import stage_services
+    origin = (20.0, 30.0)
+    interface = refinery_interfaces(6, origin_x=20, origin_y=30, variant="basic")
+    plan = generate_managed_refinery_plan("stone-brick", 6, origin_x=20, origin_y=30, variant="basic")
+    positions = builder._modular_machine_positions(plan, "stone-brick")
+    monkeypatch.setattr(builder.live_base, "entity_status_name", lambda *_a: "working")
+    monkeypatch.setattr(builder, "bring_stage_up", lambda *_a, **_k: None)
+    monkeypatch.setattr(builder, "_ensure_power_anchor_on_generated_network", lambda *_a, **_k: None)
+    monkeypatch.setattr(builder, "_diagnose_machines", stage_services._diagnose_machines)
+    monkeypatch.setattr(builder.live_base, "progress_counters", lambda *_a: {p: 1000 for p in positions})
+    monkeypatch.setattr(builder.live_base, "machine_health", lambda *_a: ({p: "full_output" for p in positions}, {p: 1000 for p in positions}))
+    observed = []
+    def contents(_client, _surface, point):
+        observed.append(point)
+        return {"stone-brick": provider_stock}
+    monkeypatch.setattr(builder.live_base, "chest_contents", contents)
+    monkeypatch.setattr(builder.live_base, "logistic_network_ids", lambda *_a: {interface.provider: network})
+    if ready:
+        builder._bring_modular_refinery_up(object(), object(), "nauvis", "player", "stone-brick", plan, 6, origin, print, variant="basic")
+    else:
+        with pytest.raises(builder.StuckError, match="built but not healthy"):
+            builder._bring_modular_refinery_up(object(), object(), "nauvis", "player", "stone-brick", plan, 6, origin, print, variant="basic")
+    assert observed == [interface.provider]
