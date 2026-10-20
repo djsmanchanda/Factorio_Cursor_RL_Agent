@@ -250,3 +250,11 @@ The 06:15 IST T3 one-shot sends completed changes and “Continue from here” t
   ae7068c (+374e68e), same seeds, 144 jobs, admission until 2026-10-21 05:00, cap 07:00.
 - Starship: user stopped all testing; its two persistent 2.1.21 services were stopped and disabled
   on 2026-10-20 ~13:15 at the user's request.
+
+## Cohort 10 complete; C11 running (2026-10-20, 19:05 IST)
+
+- C10 144/144: full replicates C9's C5 rate on new seeds (14/48); copper arms invalid (link crash,
+  fixed in 030f8de). `docs/rl/Laya_C10_Result_2026-10-20.md`.
+- C11 `laya-c11-miniship-20261020` started ~18:50: copper 8bd4149 vs ready 2ffefee (+a12e7e5) vs
+  reconcile 071c0aa (+374e68e), all with 030f8de, seeds 79400-79447, 144 jobs, admission until
+  2026-10-21 05:00. Adjacent contrasts only; no original-full arm (cross-campaign comparisons exploratory).
