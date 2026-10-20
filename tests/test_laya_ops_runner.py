@@ -559,3 +559,87 @@ def test_named_prerequisites_and_their_bill_items_inherit_the_consumers_goal():
                                                          transactions={"oil": tx})["options"]}
     assert options["op.produce.plastic-bar"]["features"]["goal_need"]
     assert options["op.produce.pipe"]["features"]["goal_need"]
+
+
+def test_a_fluid_starved_or_unreleased_goal_item_keeps_its_capability_choice():
+    # Cohort 7: plastic machines stood, flipped to input_starved on petroleum, and the menu went wait-only.
+    def board(statuses):
+        return {"needs": [{"item": "plastic-bar", "condition": "input_starved", "goal_required_per_s": .5,
+                           "status_counts": statuses}]}
+    fluid, solid = board({"fluid_ingredient_shortage": 2}), board({"item_ingredient_shortage": 2})
+    oil = {"target_item": "plastic-bar", "complete": False, "missing": {},
+           "packets_pending": ["chemical_crude_pipeline", "chemical_plastic_petroleum_pipeline"]}
+    def menu(board, results=(), tx=None):
+        return {o["option_id"]: o for o in compile_options(board, list(results), enabled_recipes={"plastic-bar": True},
+                                                           transactions=tx)["options"]}
+    plastic = menu(fluid, tx={"opening_oil": oil})["op.produce.plastic-bar"]
+    assert plastic["params"]["finite"] is False and plastic["features"]["packets_pending"] == 2
+    assert "packets_pending" not in menu(fluid)["op.produce.plastic-bar"]["features"]
+    # Solid starvation is unchanged, unless the item's own packets are still unreleased.
+    assert "op.produce.plastic-bar" not in menu(solid)
+    assert "op.produce.plastic-bar" not in menu(solid, tx={"opening_oil": dict(oil, packets_pending=[])})
+    assert "op.produce.plastic-bar" in menu(solid, tx={"opening_oil": oil})
+    # A re-pick that changes nothing is visible as no progress.
+    stalled = {"ok": False, "operation": "produce", "params": {"item": "plastic-bar"}, "code": "stuck",
+               "message": "petroleum-gas route blocked"}
+    again = menu(fluid, [stalled, stalled])["op.produce.plastic-bar"]["features"]
+    assert again["no_progress"] == 2 and again["last_code"] == "stuck"
+
+
+def test_the_brief_counts_unreleased_chemical_packets():
+    from training.laya_ops_runner import brief
+    economics = {"transactions": {"opening_oil": {"remaining": {}, "missing": {}, "packets_pending": ["a", "b"]}}}
+    assert "packets_pending 2" in brief([], None, None, {}, 0, economics=economics)
+    economics["transactions"]["opening_oil"]["packets_pending"] = None
+    assert "packets_pending ?" in brief([], None, None, {}, 0, economics=economics)
+
+
+class _RegressingSession(FakeSession):
+    """C2 passes on the first sample, then fails; the latch keeps reporting it as reached."""
+
+    def __init__(self):
+        super().__init__()
+        self.calls = 0
+
+    def acceptance(self):
+        self.calls += 1
+        self.acceptance_fresh = {"C2": "passed" if self.calls == 1 else "failed"}
+        return {"C2": "passed"}
+
+
+def test_summary_final_acceptance_shows_a_regression_the_latch_hides(tmp_path):
+    summary = run(FakeWorld(), GuidedPolicy(3), journal=tmp_path / "j.jsonl", decisions=3, measure_ticks=600,
+                  seed=3, run_id="regress", session=_RegressingSession())
+    assert summary["accepted_ever"] == ["C2"] and summary["accepted_final"] == []
+    rows = [json.loads(line) for line in (tmp_path / "j.jsonl").read_text().splitlines()]
+    assert [r["fresh"]["C2"] for r in rows if r.get("event") == "acceptance"][:2] == ["passed", "failed"]
+
+
+def test_deferred_starter_keeps_reconciliation_after_its_rate_is_satisfied():
+    board = {"needs": [{"item": "copper-plate", "condition": "satisfied", "goal_required_per_s": 0.5}]}
+    results = [
+        {"ok": True, "operation": "reserve_steel_seed", "params": {}},
+        {"ok": True, "operation": "starter", "params": {"recipe": "iron-plate"}},
+        {"ok": False, "operation": "starter", "params": {"recipe": "copper-plate"},
+         "code": "roboport_coverage_construction_wait"},
+    ]
+    recipes = {"copper-cable": {"enabled": True, "ingredients": [{"name": "copper-plate", "amount": 1}]},
+               "copper-plate": {"enabled": True, "ingredients": [{"name": "copper-ore", "amount": 1}]}}
+    menu = compile_options(board, results, recipes=recipes, stock={"copper-plate": 148})
+    options = {option["option_id"]: option for option in menu["options"]}
+    assert options["op.starter.copper-plate"]["features"]["reconcile_pending"]
+    assert "op.mall_slot.copper-cable" not in options
+    assert "op.foundation.iron-plate" not in options
+    # Only the deterministic operation's successful receipt advances the stage.
+    reconciled = results + [{"ok": True, "operation": "starter", "params": {"recipe": "copper-plate"}}]
+    after = {o["option_id"] for o in compile_options(board, reconciled, recipes=recipes, stock={"copper-plate": 148})["options"]}
+    assert "op.starter.copper-plate" not in after
+    assert "op.mall_slot.copper-cable" in after
+
+
+def test_network_stock_without_a_starter_attempt_does_not_create_lifecycle_credit():
+    board = {"needs": [{"item": "copper-plate", "condition": "satisfied", "goal_required_per_s": 0.5}]}
+    results = [{"ok": True, "operation": "starter", "params": {"recipe": "iron-plate"}}]
+    options = {o["option_id"] for o in compile_options(board, results, stock={"copper-plate": 148})["options"]}
+    assert "op.starter.copper-plate" not in options
+    assert plate_stages(results) == {"iron-plate": "starter"}
