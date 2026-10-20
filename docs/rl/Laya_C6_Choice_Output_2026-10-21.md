@@ -11,4 +11,4 @@ Evidence is retained separately in `summary.laya_acceptance.C6`, latest status a
 
 Historical C6 counts are not comparable to this endpoint and must not be relabelled. The electric-furnace consumer option in `d491d6c` is excluded from the takeover branch: it targeted the previous consumer requirement. Furnace-stock legality and transitive seed sizing remain independent runtime fixes, to be evaluated in matched arms.
 
-Validation: focused choice/output and runner tests, plus direct normalization of the recorded C11 `copper-s79405` initial observation (662 recipes, 41 alternate recycling recipes, no compatible recycler). These are offline evidence; a fresh frozen episode is required for live evidence. No installed Lua mod changes are needed.
+Validation: focused choice/output and runner tests, plus direct normalization of the recorded C11 `copper-s79405` initial observation (662 recipes, 39 alternate recycling recipes, no compatible recycler). These are offline evidence; a fresh frozen episode is required for live evidence. No installed Lua mod changes are needed.

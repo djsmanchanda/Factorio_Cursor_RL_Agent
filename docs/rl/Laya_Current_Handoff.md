@@ -2,7 +2,7 @@
 
 # Laya current evidence index
 
-Updated October 17, 2026. Start with [the runner contract](Laya_Clean_Runner.md)
+Updated October 21, 2026. The current owner/engine section at the end supersedes older lifecycle snapshots. Start with [the runner contract](Laya_Clean_Runner.md)
 and [strategy rules](Laya_Strategy_Guidelines.md); read the relevant dated record
 below for evidence. Architecture/ownership remain in [architecture](../architecture.md).
 
@@ -258,3 +258,13 @@ The 06:15 IST T3 one-shot sends completed changes and “Continue from here” t
 - C11 `laya-c11-miniship-20261020` started ~18:50: copper 8bd4149 vs ready 2ffefee (+a12e7e5) vs
   reconcile 071c0aa (+374e68e), all with 030f8de, seeds 79400-79447, 144 jobs, admission until
   2026-10-21 05:00. Adjacent contrasts only; no original-full arm (cross-campaign comparisons exploratory).
+
+## Current owner and engine transition (2026-10-21 00:53 IST)
+
+The inherited Opus monitor is disabled; takeover branch `work/miniship/laya-takeover-20261021` holds verified menu, Laya C6 output, loan lifecycle and Factorio 2.1.23 manager changes. Read [the complete cohort ledger](Laya_Cohort_Ledger_2026-10-21.md) and [C11 final result](Laya_C11_Result_2026-10-21.md). C11 completed 144/144 with no adoption. Laya C6 now means explicit mall advanced-circuit choice followed by measured attributable output; deterministic checkpoint C6 is unchanged. Historical endpoint counts remain separate.
+
+Both current units are on **miniship**: `laya-c12-2123-miniship-20261021` (192 jobs; deadline 14:45 IST, initial12/min6/max18) and `laya-c13-2123-miniship-20261021` (144 jobs; deadline 18:45 IST, initial6/min3/max8). They pin Factorio 2.1.23 build87750. Old2.1.22 attempts were stopped for the user's fleet upgrade, with every job status preserved; do not resume or pool them. Frozen arm hashes/diffs and fresh-job evidence live in same-named `data/laya-experiments/` roots.
+
+**Starship must have no game runs after 02:30 IST; it is already idle and may sleep.** All source/evidence needed is copied to miniship. Do not launch a new starship campaign or depend on SSH after that cutoff. The new Opus 5.5 high owner is scheduled at 03:32 IST in the takeover miniship worktree and must create its own 55-minute check-in schedule. Full local brief: `docs/handoffs/Laya_Takeover_2026-10-21.md`; startup message: `docs/handoffs/Opus_Startup_Message_2026-10-21.md`. The interim scheduler stops at handoff.
+
+Both private headless engines and stopped fleet configuration defaults are 2.1.23. Starship system GUI package is 2.1.23. Miniship's updated GUI is the user-owned `/home/miniship/.local/bin/factorio` wrapper and explicit desktop launcher; the older system package remains for rollback, and shell PATH may still select it. No real save was opened. Restart only the selected fresh disposable runner for future Python changes; no project Lua changes or mod redeployment were needed. Coverage preview and steel placement remain explicit follow-ups.

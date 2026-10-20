@@ -1,0 +1,50 @@
+<!-- Path: docs/rl/Laya_Cohort_Ledger_2026-10-21.md | Purpose: Preserve the inherited thread's cohort accounting and decision limits for the next owner. -->
+# Cohort ledger at takeover
+
+Recorded 2026-10-21, 00:50 IST. Owner history: `import:claudeAgent:14dfe1ab-afe7-4f55-bd4a-27eabe7cf3ea` (Advance Laya Cohort Experiments). Thread `cbfa7040-7f1b-4218-90a2-d8caf8bc5818` diagnosed failure drop points and received the user's revised C6 intent, then stopped at its session limit before delegation. The present takeover thread is `8ad17b32-a2dc-4339-9b53-6b08573e6e63`.
+
+These are disposable guided-policy experiments on copies of one save. Matching policy seeds is not unseen-terrain evaluation. Old C6 is the deterministic consumer predicate with defective recipe/lifetime-counter attribution; it must not be relabelled as the new Laya choice/output endpoint. No listed cohort authorizes adoption or real-base action.
+
+| Cohort | Planned and observed accounting | Main finding and decision |
+| --- | --- | --- |
+| C3, miniship, 2026-10-18 | Attempt 1: 96 planned, 8 interrupted by host reset, 88 unstarted. Replacement: 96 planned, 79 completed, 8 interrupted, 9 unstarted; 39 complete matched pairs. | `09c093a` versus `421e3de`: matched strict C2 18/17, C3 7/3; no C4/C5. No adoption; preserve both attempts. |
+| C4, starship, 2026-10-18 | 96/96 completed, 48 seeds 77400–77447. `421e3de` review versus `5271f7f` bounded loan-cell pipe credit. | Historical strict C2 14/21, C3 3/7, C5 0/1. A stale loan-tag release loop was observed and fixed later in `37dc304`; no adoption. |
+| C5, miniship, 2026-10-18/19 | Parts a/c/d/e: 288 planned records, 193 completed, 8 interrupted, 2 runner errors, 11 explicitly unstarted, 74 stale queued records from abandoned part c. Part b separately prepared 72 jobs but has no job-status or execution evidence; it was superseded. 95 complete matched pairs in the analysis. | `421e3de` versus `37dc304`: strict C2 41/41, C3 12/12, C5 1/0 in matched pairs. The new loan-cell query failed live 104 times because the inventory enum changed; fixed in `fba641b`. Review arm had 56 stale-tag release failures. No adoption; do not omit errors or abandoned jobs from the ledger. |
+| C6, miniship, 2026-10-19 | 96/96 completed; 48 matched seeds, `37dc304` versus `5d1d866`. | Pipe reopenings 41→24; strict C2 17→21 (+10/−6), C3 4→2, no C4. Fixed query works, but no long-window adoption. |
+| C7, miniship, 2026-10-19/20 | 396/396 completed: part a 96, part b 300, 198 complete pairs. A separately stopped starship attempt was excluded and its policy seeds rerun on miniship; its original per-job accounting is not recovered here. | `e18d8d0` versus `d633957`: C2 80/78, C3 20/37, C5 1/4, C6 0/0. Final acceptance was latched, so final service is unknown. Collision events rose 13→26; one robot survey race was fixed in `4a5c057`. No adoption. |
+| C8, miniship, 2026-10-20 | Initial design 800 jobs, extended to 1,000 planned jobs, superseded before any start. Preserve its manifest; no completed-cohort claim. | Independent review replaced isolated designs with the cumulative C9 campaign. |
+| C9, miniship, 2026-10-20 | 240/240 completed; 48 seeds 79300–79347 × five cumulative arms. Separate wiring smoke: 2/2 completed, not part of the cohort denominator. | C5 ever/final: ref 8/7, plastic 12/12, rung 14/13, extend 10/10, batch 15/11. Legacy C6 zero in all arms. No significant endpoint contrast; no adoption. |
+| C10, miniship, 2026-10-20 | 144/144 completed; 48 seeds 79400–79447 × full/copper/norung. | Full C5 14/48 ever, 11/48 final. Copper/norung were invalidated by 91/61 link-identity tool errors and 14/11 safety stops. `030f8de` fixes that crash. No adoption. |
+| C11, miniship, 2026-10-20/21 | **144/144 completed**, 48 per arm; seeds 79400–79447. Finished before C12 began on 2026-10-21. | C2 copper/ready/reconcile 17/18/18; C3 ever/final 14/14, 12/12, 12/11; C5 ever/final 16/14, 17/15, 16/15. Legacy C6 0/1/0 remains exploratory. Adjacent C5 discordances ready-vs-copper +10/−9 and reconcile-vs-ready +9/−10: no measurable effect, no adoption. [Final result](Laya_C11_Result_2026-10-21.md). |
+
+C3–C6 used the older 2.1.21 campaign environment; C7 onward pin Factorio 2.1.22 build 87719. Do not merge the engine windows as matched evidence. Historical C1/C2 campaigns predate the inherited owner's C3 work; their summaries are in the original thread and are not new takeover runs.
+
+Sources (relative to the repository unless marked starship):
+
+- `data/laya-orchestration/next-20261018/state.json` and the existing dated sections of `docs/rl/Laya_Current_Handoff.md`.
+- `data/laya-experiments/laya-c3-20261018/{job-status.attempt1.json,job-status.json,analysis.txt}`.
+- starship: `data/laya-experiments/laya-c4-starship-20261018/{freeze.json,job-status.json}`.
+- `data/laya-experiments/laya-c5-20261018/{a,c,d,e}/job-status.json`, `b/batch.json`, `analysis-all.txt`.
+- `data/laya-experiments/laya-c6-20261019/{a/job-status.json,analysis.txt}`.
+- [C7 result](Laya_C7_Result_2026-10-20.md), `data/laya-experiments/laya-c8-20261020/freeze.json`, [C9 result](Laya_C9_Result_2026-10-20.md), [C10 result](Laya_C10_Result_2026-10-20.md).
+- `data/laya-experiments/laya-c11-20261020/{freeze.json,miniship/job-status.json}`; status and mechanism scripts at `data/laya-orchestration/next-20261018/c9-analysis/{status.py,c11_extras.py}`.
+
+## Takeover experiments and fleet update
+
+The original 2.1.22 C12/C13 attempts were stopped at the user's explicit fleet-upgrade request; preserve them as separate attempts. C12: 192 planned, 1 completed, 10 runner errors during shutdown, 7 interrupted, 174 unstarted. C13 on starship: 144 planned, 2 runner errors during shutdown, 4 interrupted, 138 unstarted. These are raw harness statuses, not measurements of new-policy safety. C13's first supervisor also failed before any job because PYTHONPATH was omitted; `run.attempt1.out` preserves it. No arm code was edited under an active campaign. Nothing from these shortened attempts enters the new matched denominators.
+
+The user's newer instruction is authoritative: **no starship game runs after 2026-10-21 02:30 IST**, because it may sleep then. All starship game processes were stopped well before 01:00; no new starship runs are scheduled. Its C4 metadata, C13 evidence and menu handoff are copied into miniship `data/laya-orchestration/takeover-20261021/starship-evidence/`. All new campaigns and the Opus successor run on miniship.
+
+Fresh C12: `data/laya-experiments/laya-c12-2123-miniship-20261021`, same-named user unit, 192 jobs. Four cumulative arms isolate raw-ore satisfaction, stocked-furnace legality and transitive circuit-seed sizing; all share the new C6 measurement and engine manager patch. Adaptive slots start 12, min 6, max 18. Deadline 2026-10-21 14:45 IST, hard service cap 16 hours.
+
+Fresh C13: `data/laya-experiments/laya-c13-2123-miniship-20261021`, same-named user unit, 144 jobs. Ref → full shortage menu → loan prerequisite lifecycle. Adaptive slots start 6, min 3, max 8. Deadline 18:45 IST, hard service cap 20 hours. Combined initial concurrency is 18; maximum is 26 subject to UPS/memory guards. Comparisons are adjacent within each cohort, not cross-cohort promotion claims.
+
+Both cohorts pin **Factorio 2.1.23 build 87750**, the same source save, same staged project mods and policy seeds 79400–79447. Full uncommitted common measurement/engine patches and the split seed diff are in each arm's freeze. Historical 2.1.22 runs are not pooled with these. A fresh miniship 2.1.23 three-decision smoke completed with zero runner failures and verified C6 observation compatibility, but did not prove C6 output.
+
+New code: menu `3e29384` (integrated `8ccdbfb`), C6 `830c022` (integrated `42da7aa`), loan `bd9a082` (integrated `54df1d2`), engine defaults `054dd3f`. 433 integrated focused tests and 49 engine-management tests pass. Fast gate: 1,179 passed, one skipped, the preexisting `training/laya_ops.py → autonomous_builder` firewall failure. `d491d6c` consumer option is excluded because the user changed C6's meaning.
+
+Both machines have private 2.1.23 headless runtimes, with older runtimes retained. The starship system GUI package is 2.1.23; miniship has a user-owned 2.1.23 GUI and an explicit desktop launcher, while `/usr/bin/factorio` and the package database retain 2.1.21 for rollback (local sudo requested a password and was cancelled). Use `/home/miniship/.local/bin/factorio` for the new GUI; shell PATH may still resolve the old system binary. Stopped fleet configurations and manager/dashboard defaults point to 2.1.23. No real save was loaded or changed.
+
+Opening-order/coverage remains a research task. Gear-first recovery exists in C11 `ready-s79434` and `reconcile-s79433`; no copper-first legality rule is justified. The needed shared API previews the exact selected mall plan and construction/logistic coverage without declaring ledger bills, claiming slots, changing reservations or submitting work. Steel-seed placement remains unimplemented.
+
+The new Opus 5.5 high owner is scheduled for **2026-10-21 03:32 IST** on miniship, with 55-minute check-ins and authority to continue bounded disposable experiments and verified fixes. Read the local takeover handoff for exact launch/scheduler records. No real-base authority is granted.
