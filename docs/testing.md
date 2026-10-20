@@ -24,6 +24,10 @@ Orthogonal markers are `fast`, `slow`, `exhaustive`, `lua`, `loopback`,
 only that an implementation shape remains present. They are never evidence that
 a lifecycle completed or that deployed/live behavior succeeded.
 
+Default discovery is restricted to `tests/`. Frozen experiments and nested
+worktrees under `data/` are evidence copies and must not be collected as the
+current suite. Explicit paths still work for deliberate replay verification.
+
 Use compact commands:
 
 ```bash
@@ -54,3 +58,19 @@ All filesystem-writing tests use `tmp_path` or `tmp_path_factory`. Test files
 rely on the repository `pythonpath` configured by `pytest.ini`; they must not
 mutate `sys.path`. Shared fake clients and scenario builders belong under
 `tests/support/` as they are introduced or consolidated.
+
+## Tool-call efficiency
+
+Run the narrow regression while iterating, then the fast gate once per verified
+change. Run the complete suite when breadth is required; reuse its recorded
+result for the same unchanged code and environment. Add `--durations=15` to a
+slow run before changing test coverage or timeout behavior. Preserve pytest's
+exit status when redirecting output: run it as its own command, or capture its
+status before printing the log tail. A successful `tail` does not prove tests passed.
+
+For a background suite, use the harness's completion notification or its returned
+process/session identifier. Avoid `pgrep -f` against a command pattern embedded
+in the polling shell itself: the poller can match itself and wait indefinitely.
+Long campaign supervision belongs in T3's scheduler, with a bounded status read
+on each wake, rather than a shell held open with `sleep` for hours. This frees the
+agent between checks; it does not shorten the campaign itself.

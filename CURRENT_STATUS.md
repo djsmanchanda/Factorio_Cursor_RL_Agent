@@ -396,3 +396,8 @@ one-pole plan bill is never dropped (Opus review P2, reproduced and fixed).
 Evidence: 46 focused tests; exact staged-source export fast gate 1,121 passed,
 3 skipped, 1 known firewall failure (same two laya_ops imports). Unit level
 only. Lifecycle: fresh frozen Python for the next runner; nothing deployed.
+
+## [2026-10-21 01:30 IST] T3 tool-call audit workflow guidance
+- What: Factorio T3 audit found long supervision sleeps, repeated test gates and self-matching process polls. Added guidance for scheduled wakes, process/session completion, test exit status and result reuse; existing pytest testpaths=tests is retained.
+- Evidence: Read-only extraction of 1,730 stored Miniship tool calls; pytest configuration parsed and documentation diff checked. No tests or campaigns launched on this host.
+- Lifecycle: Future agent/test invocations only; active frozen campaigns unchanged.

@@ -72,6 +72,7 @@ Inherit T3's model/provider defaults; omit explicit model and reasoning-effort o
 
 - Keep things simple; YAGNI unless told otherwise. Propose bold ideas when they materially help.
 - Prefer focused tests that protect behavior; avoid test slop. Use quiet output and short tracebacks; redirect verbose output to a temporary file.
+- Run the narrow regression while iterating, then the fast gate once per verified change; retain the test exit status when showing a log tail. Reuse results for unchanged code/environment. For long T3 supervision, use scheduled wakes and bounded status reads; for background commands, use their returned session ID or completion notification instead of shell sleep loops or self-matching `pgrep -f`.
 - Comment intent, not every line. Start human-authored files with a `Path: … | Purpose: …` comment.
 - Archive, don't delete: this repository is open source. Move superseded code to an old-workflow folder with a README.
 - Preserve unrecognized worktree changes; assume they belong to the user or another agent.
