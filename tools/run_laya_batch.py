@@ -29,8 +29,9 @@ batch.json:
 
 With host_budget the slot count is a host-wide total shared with every other cohort supervisor whose
 job-status.json is fresh under the registry; older cohorts have first claim, and UPS is measured on all worlds.
-A shared batch starts one trial per admission interval and only while memory stays above its own floor plus a
-world's headroom, so older cohorts never reach their memory floor because of it.
+A shared batch starts at most one trial per admission interval (default one controller window), only after its
+latest host-wide window was healthy, and only while memory stays above its own floor plus a world's headroom: it
+stops adding load before older cohorts' own UPS or memory floors make them shed slots.
 """
 
 from __future__ import annotations
@@ -190,13 +191,16 @@ class HostBudget:
         self.root = root.resolve()
         self.registry = Path(options["registry"]).resolve()
         self.stale_s = float(options.get("stale_seconds", 900))
-        self.admit_interval_s = float(options.get("admit_interval_seconds", 60))
+        self.admit_interval_s = float(options.get("admit_interval_seconds", 300))
         self.admit_min_gb = float(options.get("admit_min_available_gb", 4.5))
         self.next_admit = 0.0
 
-    def may_admit(self, now: float) -> bool:
+    def may_admit(self, now: float, decision: str | None) -> bool:
+        """Whether one more trial may start: paced, after a measured window that did not shrink the host total."""
+        if now < self.next_admit or not decision or decision == "start" or decision.startswith("decrease"):
+            return False
         memory = _available_gb()
-        return now >= self.next_admit and (memory is None or memory >= self.admit_min_gb)
+        return memory is None or memory >= self.admit_min_gb
 
     @staticmethod
     def _age(jobs: list[dict]) -> float:
@@ -360,7 +364,7 @@ class Batch:
                 # wall window before the deadline, and every arm of an admitted seed then runs (complete blocks).
                 # Seeds never admitted are censored and listed.
                 while (queue and slots and len(active) + occupied < controller.slots
-                       and not self.stopping.is_set() and (not self.host or self.host.may_admit(time.time()))):
+                       and not self.stopping.is_set() and (not self.host or self.host.may_admit(time.time(), controller.last.get("decision")))):
                     if queue[0]["seed"] not in admitted and time.time() + self.cfg["trial_wall_seconds"] > self.until:
                         for job in queue:
                             if job["seed"] not in admitted:

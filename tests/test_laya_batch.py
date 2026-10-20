@@ -205,7 +205,7 @@ def test_a_shared_batch_admits_only_into_the_host_total(tmp_path, monkeypatch):
     batch = _batch(tmp_path, seeds=(1, 2, 3))
     snapshots = iter([{"running": [{}] * 3, "reserved": 1}] * 2 + [{"running": [], "reserved": 0}] * 100)
     batch.host = type("Host", (), {"snapshot": lambda self, jobs, now: next(snapshots), "next_admit": 0.0,
-                                   "admit_interval_s": 0.0, "may_admit": lambda self, now: True})()
+                                   "admit_interval_s": 0.0, "may_admit": lambda self, now, decision: True})()
     starts = []
 
     class Controller:
@@ -229,8 +229,11 @@ def test_a_shared_batch_admits_one_trial_per_interval_and_only_with_memory_headr
     from tools.run_laya_batch import HostBudget
     host = HostBudget(tmp_path, {"registry": str(tmp_path), "admit_interval_seconds": 60, "admit_min_available_gb": 4.5})
     monkeypatch.setattr(harness, "_available_gb", lambda: 6.0)
-    assert host.may_admit(100.0)
+    assert host.may_admit(100.0, "hold_safe_ups") and host.may_admit(100.0, "no_ups_window")
+    # Live C14 2026-10-21: it kept admitting while the host total shrank and older cohorts shed slots.
+    assert not host.may_admit(100.0, "start") and not host.may_admit(100.0, "decrease_safe_ups")
+    assert not host.may_admit(100.0, "decrease_safe_ups+settle")
     host.next_admit = 160.0
-    assert not host.may_admit(120.0) and host.may_admit(160.0)
+    assert not host.may_admit(120.0, "hold_safe_ups") and host.may_admit(160.0, "hold_safe_ups")
     monkeypatch.setattr(harness, "_available_gb", lambda: 4.0)  # below the older cohorts' floor plus one world
-    assert not host.may_admit(200.0)
+    assert not host.may_admit(200.0, "increase_safe_ups")
