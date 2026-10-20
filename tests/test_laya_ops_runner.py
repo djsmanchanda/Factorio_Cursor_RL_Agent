@@ -649,3 +649,30 @@ def test_summary_final_acceptance_shows_a_regression_the_latch_hides(tmp_path):
     assert summary["accepted_ever"] == ["C2"] and summary["accepted_final"] == []
     rows = [json.loads(line) for line in (tmp_path / "j.jsonl").read_text().splitlines()]
     assert [r["fresh"]["C2"] for r in rows if r.get("event") == "acceptance"][:2] == ["passed", "failed"]
+
+
+def test_an_unchanged_steel_bill_is_not_blindly_retried_and_its_items_serve_the_goal():
+    # Live C12 furnace-s79400: 21 steel-seed attempts on an unchanged "inserter: need 14, short 14" while
+    # produce inserter carried no goal fact (the parameterless steel operation owned no bill).
+    from orchestrator.laya_knowledge import load_guideline_context
+    from training.laya_clean_runner import ROOT
+    from training.laya_mission import PHASES
+    from training.laya_ops_runner import OPS_CATALOG
+    base = [{"ok": True, "operation": "reserve_steel_seed", "params": {}},
+            {"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}}]
+    base += [{"ok": True, "operation": op, "params": {"recipe": "iron-plate"}} for op in ("starter", "foundation")]
+    base.append({"ok": True, "operation": "starter", "params": {"recipe": "copper-plate"}})
+    steel = {"ok": False, "operation": "steel", "params": {}, "code": "material_shortage",
+             "details": {"required": {"inserter": 14}, "available": {}, "stage": "conversion_steel-plate"},
+             "stock_at": {"inserter": 0}}
+    menu = compile_options(BOARD, base + [steel], stock={"inserter": 0})
+    options = {o["option_id"]: o for o in menu["options"]}
+    assert options["op.steel"]["features"]["unchanged_failure"]
+    assert options["op.produce.inserter"]["features"]["goal_need"]
+    state = {"observation_digest": {"factory_status": {"needs": [{"item": "iron-plate", "required": 0.5}]}},
+             "guidelines": load_guideline_context(ROOT, PHASES[0]["scopes"], catalog=OPS_CATALOG, max_rules=32)["guidelines"]}
+    rows = {r["option_id"]: r["probability"] for r in GuidedPolicy(1).distribution(state, menu)}
+    assert rows["op.produce.inserter"] > rows["op.steel"]
+    # Inserters were made since: the retry is the next step again, no longer a blind one.
+    moved = compile_options(BOARD, base + [steel], stock={"inserter": 6})
+    assert not next(o for o in moved["options"] if o["option_id"] == "op.steel")["features"]["unchanged_failure"]

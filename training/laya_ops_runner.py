@@ -172,9 +172,18 @@ def shortages(results: list[dict], sources: dict | None = None) -> dict[str, int
                 if missing > 0:
                     short[item] = max(short[item], missing)
                     if sources is not None:
-                        params = r.get("params") or {}
-                        sources.setdefault(item, set()).add(params.get("recipe") or params.get("item"))
+                        sources.setdefault(item, set()).add(_bill_owner(r))
     return dict(short)
+
+
+# Parameterless operations still serve a product; their bills are owned by it.
+OPERATION_PRODUCTS = {"steel": "steel-plate", "reserve_steel_seed": "steel-plate"}
+
+
+def _bill_owner(r: Mapping) -> str | None:
+    """The product whose operation reported a bill (live C12: the steel seed's drill and inserter bills had none)."""
+    params = r.get("params") or {}
+    return params.get("recipe") or params.get("item") or OPERATION_PRODUCTS.get(r["operation"])
 
 
 def shortage_levels(results: list[dict]) -> dict[str, int]:
@@ -686,12 +695,16 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
         options.append({"option_id": "op.steel", "family": "steel", "product": "steel-plate",
                         "need_id": "stock:steel-plate", "summary": "build the compact steel seed", "params": {},
                         "features": {"goal_need": True, "last_code": codes.get(("steel", None), "new"),
-                                     "waiting": in_progress(codes.get(("steel", None)))}})
+                                     "waiting": in_progress(codes.get(("steel", None))),
+                                     "unchanged_failure": ("steel", None) in stuck}})
+    # Bills of an operation that serves a goal serve that goal too (the steel seed's goal is its poles, not a board
+    # rate): dependency evidence for the existing rules, as for named prerequisites above.
+    goal_sources = goal | {o["product"] for o in options if o["features"].get("goal_need")}
     # Standing bootstrap-mall slots (gear, cable, circuit, belt): which first is Laya's choice. Legal once the
     # starters for every plate in the item's chain exist; while a goal plate is short of materials they serve it.
     from orchestrator.baseline_production import baseline_build_order
     started = {plate for plate, stage in stages.items() if stage != "none"}
-    goal_blocked = any(src & goal for src in sources.values())
+    goal_blocked = any(src & goal_sources for src in sources.values())
     for item in baseline_build_order():
         chain = plates_in(item, recipes or {})
         if codes.get(("mall_slot", item)) != "ok" and chain and chain <= started and (
@@ -705,7 +718,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                              "shortage": short.get(item, 0),
                              "borrows": next((r.get("code") for r in reversed(results)
                                               if _key(r) == ("mall_slot", item)), None) in BORROW_CODES,
-                             "goal_need": goal_blocked or bool(sources.get(item, set()) & goal)}})
+                             "goal_need": goal_blocked or bool(sources.get(item, set()) & goal_sources)}})
     # Borrowing a slot to batch an item needs standing slots to borrow from.
     slots = any(code == "ok" for (operation, _), code in codes.items() if operation == "mall_slot")
     # Producing an item whose chain needs an unstarted plate would make the tooling open that plate's
@@ -778,7 +791,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                          "transactions": sorted(demand.get("transactions", [])),
                          "waiting": in_progress(codes.get(("produce", item))),
                          "unchanged_failure": ("produce", item) in stuck, "batch_active": batch_active,
-                         "goal_need": item in goal or bool(sources.get(item, set()) & goal),
+                         "goal_need": item in goal or bool(sources.get(item, set()) & goal_sources),
                          **({"packets_pending": packets_pending[item]} if item in packets_pending else {})}})
     # A feedstock producer at its limit (live 2026-10-15: one gear AM1 behind every belt, inserter and drill).
     for item, fact in saturated_feedstock(machines or [], recipes or {}, stock or {}, growable).items():
@@ -791,7 +804,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
             "params": {"item": item, "machines": fact["machines"]},
             "features": {"last_code": codes.get(("grow", item), "new"), "saturated": True,
                          "starved_consumers": fact["starved_consumers"], "batch_active": batch_active,
-                         "goal_need": bool(sources.get(item, set()) & goal)}})
+                         "goal_need": bool(sources.get(item, set()) & goal_sources)}})
     for option in options:  # Laya's own recent decisions, per option and per need
         params = option["params"]
         key = (option["family"], params.get("recipe") or params.get("item"))
