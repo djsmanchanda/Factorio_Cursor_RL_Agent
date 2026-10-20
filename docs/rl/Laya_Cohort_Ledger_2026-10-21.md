@@ -50,3 +50,5 @@ Opening-order/coverage remains a research task. Gear-first recovery exists in C1
 The new Opus 5.5 high owner is scheduled for **2026-10-21 03:32 IST** on miniship, with 55-minute check-ins and authority to continue bounded disposable experiments and verified fixes. Read the local takeover handoff for exact launch/scheduler records. No real-base authority is granted.
 
 C14 (launched 2026-10-21 05:05 IST, miniship): 150 planned jobs, 75 seeds 79400–79474 × ref `c1b8680` / steelbill `934f9cb`, Factorio 2.1.23 build 87750, same copied save. It shares one host slot budget with C12/C13 (start 20 total, max 30, older first), using the harness at `57feb31`. Results are pending.
+
+C14 attempt 1 was stopped at 05:18 IST: 150 planned = 1 completed, 4 interrupted, 1 shutdown runner_error, 144 not started. Shared admission ignored host health (fixed in `28a2bb8`). The rerun `laya-c14b-2123-miniship-20261021` (150 jobs, same arms/seeds) is the C14 denominator; attempt 1 is not pooled.
