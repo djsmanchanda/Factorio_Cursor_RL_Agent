@@ -237,3 +237,22 @@ def test_unbuildable_cause_is_an_extend_option_fact() -> None:
     options = compile_options(board, base + [failed, succeeded], tick=5)["options"]
     extend = next(o for o in options if o["option_id"] == "op.extend.copper-plate")
     assert "unbuildable_cause" not in extend["features"]
+
+
+def test_live_link_claims_pass_the_real_occupancy_survey_and_stay_blocked(monkeypatch) -> None:
+    # C10: the link's reserved tiles were claimed without a planner identity, and the real survey
+    # raised TelemetryError on every second-collector attempt (stubbed surveys hid it).
+    from orchestrator import extraction_route, live_base
+
+    class Client:
+        def command(self, _command):
+            return ""  # an empty area: only the supplied claims occupy it
+
+    monkeypatch.setattr(live_base, "belt_underground_reach", lambda *_a: 5)
+    link = extraction_route.live_collector_link(Client(), "nauvis", "player", belt_type="transport-belt")
+    # A wall of reserved tiles across the direct row (gap to the north) must be routed around, not crossed.
+    wall = {(10, y) for y in range(-6, 6)}
+    route = link((0.5, 0.5), (20.5, 0.5), wall)
+    assert isinstance(route, tuple) and route
+    used = {(math.floor(a["position"]["x"]), math.floor(a["position"]["y"])) for a in route}
+    assert not used & wall

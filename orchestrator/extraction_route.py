@@ -9,7 +9,7 @@ from orchestrator.stage_extraction import (
     route_assessment_from_actions, route_budget_failure,
 )
 from planners.belt_bridge import plan_belt_route, RouteFailure
-from planners.transport_occupancy import Occupant
+from planners.transport_occupancy import Occupant, OccupantIdentity
 
 
 def live_route_preflight(client, surface: str, force: str, *, belt_type: str):
@@ -91,7 +91,12 @@ def live_collector_link(
         )
         snapshot = live_base.transport_occupancy_snapshot(
             client, surface, low, high,
-            pending_claims=(Occupant("pending_plan", claimed),) if claimed else (),
+            # The survey requires planner ownership on every claim; a district id distinct from the
+            # route's own keeps these reserved tiles blocked (C10: an identity-less claim raised
+            # TelemetryError on every second-collector attempt).
+            pending_claims=(Occupant("pending_plan", claimed, identity=OccupantIdentity(
+                district_id=f"second-collector-reserved:{surface}", entity_id="corridor-and-reservations",
+            )),) if claimed else (),
         )
         route = plan_belt_route(
             start, destination, belt_type=belt_type, occupancy=snapshot.occupancy,
