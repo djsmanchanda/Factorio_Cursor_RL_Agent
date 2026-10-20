@@ -58,6 +58,19 @@ WAIT_EXPIRY = 1800  # ticks after which a "waiting" operation is worth retrying 
 
 # The tooling made the item by lending another mall cell, not by standing a slot (the lent cell stops its own item).
 BORROW_CODES = {"temporary_mall_batch", "rationed_mall_borrow_deferred"}
+# C6 needs an owned recipe that consumes advanced circuits. The tooling's own consumer is the electric-furnace
+# producer its plate-growth cap names (autonomous_builder._queue_electric_furnace_unlock); the mall builds its cell.
+ADVANCED_CIRCUIT_CONSUMER = "electric-furnace"
+
+
+def consumer_missing(machines: list[Mapping] | None, recipes: Mapping | None) -> bool:
+    """Advanced circuits are made, but no machine runs a recipe that consumes them (C6's missing consumer)."""
+    recipes = recipes or {}
+    made = {m.get("recipe") for m in machines or () if m.get("recipe")}
+    if "advanced-circuit" not in made:
+        return False
+    return not any(any(i.get("name") == "advanced-circuit" for i in (recipes.get(r) or {}).get("ingredients", ()))
+                   for r in made)
 
 
 def in_progress(code: str | None) -> bool:
@@ -227,6 +240,7 @@ def named_prerequisites(results: list[dict]) -> dict[str, dict]:
 def recipe_demand(results: list[dict], economics: Mapping | None = None) -> tuple[str, ...]:
     """Prototype queries follow mission data and outstanding work; no phase-specific recipe whitelist."""
     items = {item for phase in PHASES for item in phase["targets"]}
+    items.add(ADVANCED_CIRCUIT_CONSUMER)  # its real bill decides whether it is C6's consumer
     items.update(shortages(results))
     items.update(named_prerequisites(results))
     for project in ((economics or {}).get("projects") or {}).values():
@@ -359,7 +373,7 @@ def no_progress(attempts: list[dict]) -> int:
 
 def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, phase_ticks: Mapping[str, int],
           start_tick: int, rules: set[str] = frozenset(), limit: int = BRIEF_CHARS,
-          economics: Mapping | None = None) -> str:
+          economics: Mapping | None = None, missing_consumer: bool = False) -> str:
     """Laya's own run, layered and compact: goal, now, next, major changes, recent moves, older attempts.
 
     Older decisions survive only in TRIED (attempts and last outcome per operation). Each line is tagged with
@@ -379,6 +393,8 @@ def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, pha
             step = PHASES[later]
             sections["NEXT"] = [f"{step['phase_id']} {step['name']}: "
                                 + ", ".join(f"{i} {r}/s" for i, r in step["targets"].items())]
+    if missing_consumer:
+        sections["CONSUMER"] = ["consumer_missing: advanced circuits are made but no owned recipe consumes them"]
     minutes = lambda tick: f"+{(tick - start_tick) / 3600:.1f}min"
     major = [(start_tick + t, f"{pid} reached") for pid, t in phase_ticks.items()]
     major += [(r.get("tick", start_tick), f"{r['operation']} {(r.get('params') or {}).get('recipe') or ''}".strip()
@@ -620,7 +636,7 @@ def saturated_feedstock(machines: list[Mapping], recipes: Mapping, stock: Mappin
 def compile_options(board: Mapping, results: list[dict], tick: int | None = None, recipes: Mapping | None = None,
                     stock: Mapping[str, int] | None = None, machines: list[Mapping] | None = None,
                     growable: tuple[str, ...] = (), enabled_recipes: Mapping | None = None,
-                    transactions: Mapping | None = None) -> dict:
+                    transactions: Mapping | None = None, phase_id: str | None = None) -> dict:
     """Operations worth offering now, each tagged with the need it serves and the facts rules weigh."""
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
     goal = {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
@@ -760,6 +776,17 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                 and plates_in(item, recipes or {}) <= started):
             demand = demands.setdefault(item, {"target": 1, "missing": 0, "parents": []})
             demand["capability"] = True
+    # C6: circuits are made but nothing owned consumes them. Offer the tooling's consumer while its real recipe
+    # takes advanced circuits; one more than the network holds is new consumer output, not stock.
+    consumer = ADVANCED_CIRCUIT_CONSUMER
+    consumer_spec = (recipes or {}).get(consumer) or {}
+    if (phase_id == "C6" and consumer_missing(machines, recipes)
+            and any(i.get("name") == "advanced-circuit" for i in consumer_spec.get("ingredients", ()))
+            and (enabled_recipes is None or enabled_recipes.get(consumer))
+            and plates_in(consumer, recipes or {}) <= started):
+        demand = demands.setdefault(consumer, {"target": 1, "missing": 0, "parents": []})
+        demand.update(target=max(demand["target"], int((stock or {}).get(consumer, 0)) + 1), capability=True,
+                      consumer_missing=True)
     for item, demand in demands.items():
         # The tooling's stock_target is a network level (the mall's stock gate), not a delta: asking for the
         # bare shortage gated a drill cell at 4 while the network held 6 and the starter needed 8.
@@ -778,6 +805,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                          "waiting": in_progress(codes.get(("produce", item))),
                          "unchanged_failure": ("produce", item) in stuck, "batch_active": batch_active,
                          "goal_need": item in goal or bool(sources.get(item, set()) & goal),
+                         **({"consumer_missing": True} if demand.get("consumer_missing") else {}),
                          **({"packets_pending": packets_pending[item]} if item in packets_pending else {})}})
     # A feedstock producer at its limit (live 2026-10-15: one gear AM1 behind every belt, inserter and drill).
     for item, fact in saturated_feedstock(machines or [], recipes or {}, stock or {}, growable).items():
@@ -920,7 +948,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         menu = with_economics(compile_options(board, results, facts["tick"], facts.get("recipes"), stock,
                                               facts.get("machines"), getattr(session, "growable", ()),
                                               enabled_recipes=facts.get("enabled_recipes"),
-                                              transactions=(economics or {}).get("transactions")),
+                                              transactions=(economics or {}).get("transactions"),
+                                              phase_id=phase["phase_id"]),
                               results, economics)
         reserved: Counter = Counter()
         for project in ((economics or {}).get("projects") or {}).values():
@@ -930,12 +959,13 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         guidance = load_guideline_context(ROOT, phase["scopes"], catalog=catalog, max_rules=32)
         # The brief comes first and has its room reserved; the doc rules fill what is left.
         shown = {g["rule_id"] for g in guidance["guidelines"]}
+        missing_consumer = phase["phase_id"] == "C6" and consumer_missing(facts.get("machines"), facts.get("recipes"))
         told = brief(results, board, phase, summary.get("phase_ticks", {}), samples[0][0], shown,
-                     economics=economics)
+                     economics=economics, missing_consumer=missing_consumer)
         rules = fit_rules(guidance["guidelines"], told)
         if len(rules) < len(shown):  # Tag only the rules that made it in.
             told = brief(results, board, phase, summary.get("phase_ticks", {}), samples[0][0],
-                         {g["rule_id"] for g in rules}, economics=economics)
+                         {g["rule_id"] for g in rules}, economics=economics, missing_consumer=missing_consumer)
         state = {"brief": told,
                  "observation_digest": {"factory_status": compact, "mission_phase": phase["phase_id"],
                                         "mall_economics": economics,

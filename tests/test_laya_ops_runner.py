@@ -648,3 +648,35 @@ def test_summary_final_acceptance_shows_a_regression_the_latch_hides(tmp_path):
     assert summary["accepted_ever"] == ["C2"] and summary["accepted_final"] == []
     rows = [json.loads(line) for line in (tmp_path / "j.jsonl").read_text().splitlines()]
     assert [r["fresh"]["C2"] for r in rows if r.get("event") == "acceptance"][:2] == ["passed", "failed"]
+
+
+def _c11_cluster_a():
+    """copper-s79405 (cohort 11 cluster A): circuits made, nothing owned consumes them."""
+    from pathlib import Path
+    facts = json.loads((Path(__file__).parent / "fixtures" / "c11" / "copper-s79405-facts.json").read_text())
+    board = {"needs": [{"item": "advanced-circuit", "condition": "output_blocked", "goal_required_per_s": 0.25}]}
+    results = [{"ok": True, "operation": "starter", "params": {"recipe": p}} for p in ("iron-plate", "copper-plate", "stone-brick")]
+    return facts, board, results
+
+
+def test_c6_offers_the_tooling_consumer_only_while_the_consumer_is_missing():
+    from training.laya_ops_runner import ADVANCED_CIRCUIT_CONSUMER, brief, consumer_missing
+    facts, board, results = _c11_cluster_a()
+    menu = lambda machines, phase_id="C6": {o["option_id"]: o for o in compile_options(
+        board, results, recipes=facts["recipes"], stock=facts["stock"], machines=machines,
+        enabled_recipes=facts["enabled_recipes"], phase_id=phase_id)["options"]}
+    assert consumer_missing(facts["machines"], facts["recipes"])
+    option = menu(facts["machines"])[f"op.produce.{ADVANCED_CIRCUIT_CONSUMER}"]
+    # New consumer output: one more furnace than the 30 the network holds, from a standing cell.
+    assert option["params"] == {"item": "electric-furnace", "stock_target": 31, "finite": False}
+    assert option["features"]["consumer_missing"] is True
+    assert "op.produce.electric-furnace" not in menu(facts["machines"], phase_id="C5")
+    consuming = facts["machines"] + [{"name": "assembling-machine-2", "recipe": "electric-furnace", "status": "working"}]
+    assert not consumer_missing(consuming, facts["recipes"])
+    assert "op.produce.electric-furnace" not in menu(consuming)
+    no_circuits = [m for m in facts["machines"] if m["recipe"] != "advanced-circuit"]
+    assert not consumer_missing(no_circuits, facts["recipes"])
+    assert "op.produce.electric-furnace" not in menu(no_circuits)
+    told = brief(results, board, None, {}, 0, missing_consumer=True)
+    assert "consumer_missing" in told
+    assert "consumer_missing" not in brief(results, board, None, {}, 0)
