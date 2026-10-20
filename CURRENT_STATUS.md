@@ -332,3 +332,8 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - What: Read-only audit of 5,849 stored Factorio tool calls on Starship and Miniship. Starship pytest now defaults to `tests/`, avoiding frozen experiment copies; both hosts document bounded supervision, retained test exit codes, and result reuse.
 - Evidence: Default fast collection 4.46 s, identical 959 selected cases to explicit `tests/`; fast gate reports the same pre-existing import-firewall failure before and after. Historical five longest supervision waits total 7.78 h; this is occupied tool time, not campaign compute saved.
 - Lifecycle: Effective for future test commands and agent reads; no campaign, server, scheduler or frozen code changed.
+
+## [2026-10-21 02:37 IST] Faster scaffolding contract without reducing full-bundle coverage
+- What: Fast scaffolding test uses the real composer with a four-roboport backbone; the same payload assertions still run against the complete electronics bundle in the slow composition family. Production code and the 959 selected fast test IDs are unchanged.
+- Evidence: Isolated check 7.84 s -> 0.30 s (setup 7.54 s -> 0.02 s); 24 infrastructure/taxonomy cases pass including full composition. Fast gate 15.38 s with only the previously established import-firewall failure.
+- Lifecycle: Future test runs only; no deployment, server restart or active campaign changes.
