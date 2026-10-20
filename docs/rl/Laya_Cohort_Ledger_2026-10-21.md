@@ -48,3 +48,5 @@ Both machines have private 2.1.23 headless runtimes, with older runtimes retaine
 Opening-order/coverage remains a research task. Gear-first recovery exists in C11 `ready-s79434` and `reconcile-s79433`; no copper-first legality rule is justified. The needed shared API previews the exact selected mall plan and construction/logistic coverage without declaring ledger bills, claiming slots, changing reservations or submitting work. Steel-seed placement remains unimplemented.
 
 The new Opus 5.5 high owner is scheduled for **2026-10-21 03:32 IST** on miniship, with 55-minute check-ins and authority to continue bounded disposable experiments and verified fixes. Read the local takeover handoff for exact launch/scheduler records. No real-base authority is granted.
+
+C14 (launched 2026-10-21 05:05 IST, miniship): 150 planned jobs, 75 seeds 79400–79474 × ref `c1b8680` / steelbill `934f9cb`, Factorio 2.1.23 build 87750, same copied save. It shares one host slot budget with C12/C13 (start 20 total, max 30, older first), using the harness at `57feb31`. Results are pending.
