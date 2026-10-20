@@ -648,3 +648,33 @@ def test_summary_final_acceptance_shows_a_regression_the_latch_hides(tmp_path):
     assert summary["accepted_ever"] == ["C2"] and summary["accepted_final"] == []
     rows = [json.loads(line) for line in (tmp_path / "j.jsonl").read_text().splitlines()]
     assert [r["fresh"]["C2"] for r in rows if r.get("event") == "acceptance"][:2] == ["passed", "failed"]
+
+
+def test_deferred_starter_keeps_reconciliation_after_its_rate_is_satisfied():
+    board = {"needs": [{"item": "copper-plate", "condition": "satisfied", "goal_required_per_s": 0.5}]}
+    results = [
+        {"ok": True, "operation": "reserve_steel_seed", "params": {}},
+        {"ok": True, "operation": "starter", "params": {"recipe": "iron-plate"}},
+        {"ok": False, "operation": "starter", "params": {"recipe": "copper-plate"},
+         "code": "roboport_coverage_construction_wait"},
+    ]
+    recipes = {"copper-cable": {"enabled": True, "ingredients": [{"name": "copper-plate", "amount": 1}]},
+               "copper-plate": {"enabled": True, "ingredients": [{"name": "copper-ore", "amount": 1}]}}
+    menu = compile_options(board, results, recipes=recipes, stock={"copper-plate": 148})
+    options = {option["option_id"]: option for option in menu["options"]}
+    assert options["op.starter.copper-plate"]["features"]["reconcile_pending"]
+    assert "op.mall_slot.copper-cable" not in options
+    assert "op.foundation.iron-plate" not in options
+    # Only the deterministic operation's successful receipt advances the stage.
+    reconciled = results + [{"ok": True, "operation": "starter", "params": {"recipe": "copper-plate"}}]
+    after = {o["option_id"] for o in compile_options(board, reconciled, recipes=recipes, stock={"copper-plate": 148})["options"]}
+    assert "op.starter.copper-plate" not in after
+    assert "op.mall_slot.copper-cable" in after
+
+
+def test_network_stock_without_a_starter_attempt_does_not_create_lifecycle_credit():
+    board = {"needs": [{"item": "copper-plate", "condition": "satisfied", "goal_required_per_s": 0.5}]}
+    results = [{"ok": True, "operation": "starter", "params": {"recipe": "iron-plate"}}]
+    options = {o["option_id"] for o in compile_options(board, results, stock={"copper-plate": 148})["options"]}
+    assert "op.starter.copper-plate" not in options
+    assert plate_stages(results) == {"iron-plate": "starter"}

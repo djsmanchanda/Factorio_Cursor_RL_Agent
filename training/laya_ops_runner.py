@@ -652,6 +652,14 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     # foundations wait until the iron and copper starters stand (docs/deterministic/planning.md: startup builds
     # the starters before any mine-to-refinery foundation).
     starters_done = {"iron-plate", "copper-plate"} <= {p for p, s in stages.items() if s != "none"}
+    # Bots may finish a deferred starter after its operation returned. A
+    # satisfied rate does not supply the missing lifecycle receipt: retain
+    # the same owned operation so it can reconcile, without inferring a
+    # starter from network stock or advancing foundation admission early.
+    unresolved_starters = {
+        (r.get("params") or {}).get("recipe") for r in results
+        if r.get("operation") == "starter" and not r.get("ok")
+    }
     for plate in PLATES:
         # Hard lifecycle order of the tooling (its ledgers break otherwise): starter -> foundation -> extend,
         # and retiring the starter once the foundation stands.
@@ -660,13 +668,16 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
         if plate not in unmet and PLATES[plate] not in unmet:
             # Retiring a starter is lifecycle cleanup, not production, so it outlives the plate's goal (live
             # 2026-10-15: once C4's board held only plastic, the iron starter was never retired).
-            legal = tuple(operation for operation in legal if operation == "retire_starter")
+            legal = tuple(operation for operation in legal if operation == "retire_starter"
+                          or (operation == "starter" and plate in unresolved_starters))
         for operation in legal:
             features = {"plate_stage": stages.get(plate, "none"), "last_code": codes.get((operation, plate), "new"),
                         "goal_need": plate in goal,
                         # The tooling said it waits on bots or coverage: retry after a wait, not at once.
                         "waiting": in_progress(codes.get((operation, plate))),
                         "unchanged_failure": (operation, plate) in stuck}
+            if operation == "starter" and plate in unresolved_starters:
+                features["reconcile_pending"] = True
             cause = unbuildable_cause(results, operation, plate)
             if cause is not None:
                 # Typed and terminal for this district: re-picking it cannot change the outcome.

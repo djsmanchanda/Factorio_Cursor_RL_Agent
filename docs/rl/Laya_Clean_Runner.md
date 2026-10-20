@@ -211,3 +211,12 @@ missing furnaces, no-power or input-starved machines do not receive this
 readiness proof. This avoids repeated grace-window waits and false unhealthy
 results when demand has already been satisfied. It does not count a new craft,
 raise measured rates, reset the stall detector, or change strict C0–C6 tests.
+
+## Deferred starter reconciliation (2026-10-20)
+
+A prior unsuccessful starter receipt keeps that same deterministic operation
+available after its plate rate becomes satisfied. Bots can finish construction
+between decisions; the operation must reconcile its owned state and return a
+successful receipt before later lifecycle stages unlock. Network stock alone
+creates neither a starter receipt nor a reconciliation option. This adds an
+operation fact, not geometry, a preference weight, or milestone credit.
