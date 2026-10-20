@@ -1431,3 +1431,33 @@ def test_entity_survey_reads_pole_beneath_flying_robot(robot):
     assert live_base.entity_at(Client(), "nauvis", (84.0, -45.0)) == {
         "name": "medium-electric-pole", "type": "electric-pole", "force": "player",
     }
+
+
+@pytest.mark.parametrize("statuses,crafts,delivered,expected_ready", [
+    (("full_output", "full_output"), (1000, 2000), True, True),
+    (("full_output", "full_output"), (1000, 2000), False, False),
+    (("full_output", "no_power"), (1000, 2000), True, False),
+    (("full_output", "no_ingredients"), (1000, 2000), True, False),
+    (("full_output", "missing"), (1000, 2000), True, False),
+    (("full_output", "full_output"), (1000, 0), True, False),
+])
+def test_stocked_stage_requires_full_machine_and_delivery_evidence(monkeypatch, statuses, crafts, delivered, expected_ready):
+    from orchestrator import stage_services as services
+    positions = [(1.5, 2.5), (4.5, 2.5)]
+    counters = dict(zip(positions, crafts))
+    monkeypatch.setattr(services.live_base, "progress_counters", lambda *_a: counters)
+    monkeypatch.setattr(services.live_base, "machine_health", lambda *_a: (dict(zip(positions, statuses)), counters))
+    messages = []
+    stuck = services._diagnose_machines(object(), "nauvis", positions, messages.append,
+                                        grace_seconds=120 if expected_ready else 0,
+                                        stocked_output=lambda: delivered)
+    assert (stuck == []) is expected_ready
+    assert any("STOCKED OUTPUT" in message for message in messages) is expected_ready
+
+
+def test_full_output_without_a_delivery_validator_remains_unproven(monkeypatch):
+    from orchestrator import stage_services as services
+    position = (1.5, 2.5)
+    monkeypatch.setattr(services.live_base, "progress_counters", lambda *_a: {position: 1000})
+    monkeypatch.setattr(services.live_base, "machine_health", lambda *_a: ({position: "full_output"}, {position: 1000}))
+    assert services._diagnose_machines(object(), "nauvis", [position], print, grace_seconds=0) == [(position, "full_output")]

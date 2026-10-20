@@ -195,6 +195,7 @@ def _diagnose_machines(
     client: RconClient, surface: str, positions: list[Point], emit: Callable[[str], None],
     *, grace_seconds: float = _STUCK_GRACE_SECONDS, poll_seconds: float = 2.0,
     bridge: GameBridge | None = None, force: str = "player",
+    stocked_output: Callable[[], bool] | None = None,
 ) -> list[tuple[Point, str]]:
     """Poll each machine until every one is demonstrably alive or `grace_seconds`
     elapses. Returns the ones still stuck, each with its actual reason.
@@ -209,8 +210,11 @@ def _diagnose_machines(
     approximate it at all once inserter swings, craft time and multi-ingredient
     recipes stacked up behind the belt. Observed progress answers it directly.
 
-    There is exactly ONE failure condition: the line produces nothing. Anything
-    less than that is a rate observation, not a fault.
+    Without destination evidence, a line producing nothing remains unproven.
+    A caller may supply ``stocked_output`` for completed, output-blocked stages:
+    every planned machine must have crafted and the callback must verify the
+    product in the stage's serviced output. That proves stocked readiness,
+    never a current production rate or a downstream consumer craft.
 
     A line is routinely built with more machines than its upstream can saturate
     -- three furnaces on two drills runs at ~70% -- so some machine is idle at
@@ -256,6 +260,18 @@ def _diagnose_machines(
             if statuses.get(tuple(position)) not in _HEALTHY_STATUSES
             and tuple(position) not in progressed
         ]
+        if (
+            not producing and positions and stocked_output is not None
+            and all(statuses.get(tuple(position)) == "full_output" for position in positions)
+            and all(counters.get(tuple(position), 0) >= 1000 for position in positions)
+            and stocked_output()
+        ):
+            # Completed crafts plus delivered, serviced output prove a stocked
+            # stage. Waiting for another craft while every output is full only
+            # burns the grace window; it does not prove additional readiness.
+            emit("  STOCKED OUTPUT: every machine has crafted and is output-blocked; "
+                 "delivered output is available on a logistic network")
+            return []
         if producing or not stuck or time.monotonic() >= deadline:
             break
         time.sleep(poll_seconds)

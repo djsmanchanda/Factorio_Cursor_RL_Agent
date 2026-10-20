@@ -200,3 +200,14 @@ cycle without claiming a standing circuit producer.
 This remains behind the documented shared-wrapper migration boundary. It adds
 no Laya-specific layout or preference, and does not establish C6 acceptance: the
 real downstream consumer must still craft.
+
+## Stocked refinery readiness (2026-10-20)
+
+The shared refinery bring-up can finish when all planned furnaces report
+`full_output`, every furnace has a completed-craft counter, and the refinery's
+own provider holds its product on a logistic network. Coverage, construction
+and generated power checks still run first. Empty/disconnected providers,
+missing furnaces, no-power or input-starved machines do not receive this
+readiness proof. This avoids repeated grace-window waits and false unhealthy
+results when demand has already been satisfied. It does not count a new craft,
+raise measured rates, reset the stall detector, or change strict C0–C6 tests.
