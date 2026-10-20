@@ -327,3 +327,8 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - What: AGENTS.md names T3 MCP delegate_task/task_status, requires discovering both before delegation, prohibits native collaboration tools in T3 and falls back to direct reading when tools are missing.
 - Evidence: reviewed documentation diff and whitespace checks pass. Isolated managed Codex 0.162.0 requests confirmed the upstream two flags retain native tools while adding agents.enabled=false removes them; normal inference completed in both arms. Required fast gate again stopped with 285 collection errors, including saved-run import collisions under data/; log: /tmp/factorio-t3-explicit-tools-fast-20261015.log. T3-owned delegation remains untested because its tools are unavailable here.
 - Lifecycle: instructions only; new sessions load the charter. No T3 runtime patch, runner restart, mod deployment or Factorio restart performed or required for this documentation change.
+
+## [2026-10-21 01:29 IST] T3 tool-call audit and scoped test discovery
+- What: Read-only audit of 5,849 stored Factorio tool calls on Starship and Miniship. Starship pytest now defaults to `tests/`, avoiding frozen experiment copies; both hosts document bounded supervision, retained test exit codes, and result reuse.
+- Evidence: Default fast collection 4.46 s, identical 959 selected cases to explicit `tests/`; fast gate reports the same pre-existing import-firewall failure before and after. Historical five longest supervision waits total 7.78 h; this is occupied tool time, not campaign compute saved.
+- Lifecycle: Effective for future test commands and agent reads; no campaign, server, scheduler or frozen code changed.
