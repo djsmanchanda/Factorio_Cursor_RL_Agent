@@ -159,3 +159,17 @@ def test_a_cell_held_off_by_its_own_gate_reads_as_stocked_not_idle():
     board = compile_status(world(gated, items={"iron-gear-wheel": 400}), {"iron-gear-wheel": 0.25},
                            flows(iron_gear_wheel=0.0))
     assert board["needs"][0]["condition"] == "satisfied"
+
+
+def test_raw_ore_is_not_short_when_every_consumer_is_satisfied_from_stock():
+    # C11: copper plates stood at ~4800 in a full mall (0/s), yet copper-ore read "short" whenever it
+    # was measured, so "extend copper-plate" stayed on the menu for 75 game minutes.
+    furnaces = [machine("electric-furnace", "copper-plate", "full_output", x) for x in range(6)]
+    full = world(furnaces, items={"copper-plate": 4800})
+    board = compile_status(full, {"copper-plate": 1.25}, flows(copper_plate=0.0, copper_ore=0.0))
+    ore = next(n for n in board["needs"] if n["item"] == "copper-ore")
+    assert ore["condition"] == "satisfied" and ore["satisfied_by"] == "consumers_satisfied"
+    # With the plate genuinely short, the ore stays short.
+    empty = world([machine("electric-furnace", "copper-plate", "working")], items={"copper-plate": 0})
+    board = compile_status(empty, {"copper-plate": 1.25}, flows(copper_plate=0.1, copper_ore=0.0))
+    assert next(n for n in board["needs"] if n["item"] == "copper-ore")["condition"] == "short"

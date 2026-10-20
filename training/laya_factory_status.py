@@ -290,6 +290,13 @@ def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Ma
             "condition": condition,
         })
     conditions = {n["item"]: n["condition"] for n in needs}
+    # A raw ore whose every consumer is satisfied (often from full stock, which measures 0/s) is not
+    # short: C11 offered "extend copper-plate" for 75 game minutes with ~4800 copper plates in stock.
+    for need in needs:
+        if (need["item"] in RAW_ITEMS and need["condition"] == "short" and need["consumers"]
+                and all(conditions.get(c) == "satisfied" for c in need["consumers"])):
+            need["condition"] = conditions[need["item"]] = "satisfied"
+            need["satisfied_by"] = "consumers_satisfied"
     for need in needs:
         recipe = recipes.get(need["item"]) if need["item"] not in RAW_ITEMS else None
         need["short_inputs"] = sorted(part["name"] for part in (recipe or {}).get("ingredients", ())
