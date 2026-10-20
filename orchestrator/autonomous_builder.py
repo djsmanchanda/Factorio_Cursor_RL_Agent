@@ -9163,13 +9163,15 @@ def _bootstrap_reserve_machine_target(
 
 def _missing_rotating_input(
     client: RconClient, surface: str, force: str, item: str,
-    target: int,
+    target: int, *, loan: MallBootstrapLoan | None = None,
 ) -> tuple[str, int] | None:
     """Find a missing direct ingredient that another rotating batch can make."""
     spec = LINE_RECIPES.get(item)
     if spec is None:
         return None
     actual, usable = _bootstrap_loan_stock(client, surface, force, item)
+    if loan is not None:
+        actual, usable = _bootstrap_loan_credited_stock(loan, actual, usable)
     missing = max(0, target - int(actual.get(item, 0)))
     if missing <= 0:
         return None
@@ -9237,9 +9239,12 @@ def _rationed_mall_batch(
         )
     active = active_bootstrap_loans(client, surface, force)
     own_loan = next((loan for loan in active if loan.target_item == item), None)
-    if own_loan is not None:
+    # The loan executor owns persisted prerequisite steps and their completion
+    # credits. Reconsider the parent's inputs only once its own recipe is live;
+    # restoring here would discard an unfinished step before it can be serviced.
+    if own_loan is not None and (own_loan.step_recipe or own_loan.current_recipe) == item:
         missing_input = _missing_rotating_input(
-            client, surface, force, item, target,
+            client, surface, force, item, target, loan=own_loan,
         )
         if missing_input is not None:
             prerequisite, required = missing_input

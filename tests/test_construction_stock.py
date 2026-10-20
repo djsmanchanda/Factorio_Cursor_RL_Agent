@@ -4526,3 +4526,117 @@ def test_finite_consumer_can_spend_the_complete_delivered_seed_bill(monkeypatch,
     monkeypatch.setattr(builder, "_chemical_capability_started", lambda _c, _s, _f, item: item != "advanced-circuit")
     monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: {"advanced-circuit": circuits, "passive-provider-chest": 2})
     assert builder._unfunded_ladder_ingredient(object(), "nauvis", "player", "passive-provider-chest", 4) == blocked
+
+
+@pytest.mark.parametrize("item,prerequisite,amount", [
+    ("medium-electric-pole", "iron-stick", 4),
+    ("fast-inserter", "inserter", 1),
+    ("splitter", "transport-belt", 4),
+])
+@pytest.mark.parametrize("completion", ["stock", "crafts"])
+def test_rationed_parent_finishes_its_durable_prerequisite_before_reclaiming(
+    monkeypatch, item, prerequisite, amount, completion,
+) -> None:
+    from dataclasses import replace
+    from orchestrator.mall_bootstrap import parse_bootstrap_loan_group
+
+    # Use the reported recipe pairs; other inputs are already funded so the
+    # only decision is whether to finish this cell's rotating prerequisite.
+    monkeypatch.setitem(builder.LINE_RECIPES, item, {
+        "machine": "assembling-machine-2", "ingredients": [prerequisite],
+        "amounts": [amount], "product_amount": 1, "craft_time": 0.5,
+    })
+    target = 2
+    required = target * amount
+    product_amount = int(builder.LINE_RECIPES[prerequisite]["product_amount"])
+    crafts = required // product_amount
+    stock = {
+        name: 100 for name in builder.LINE_RECIPES[prerequisite]["ingredients"]
+    }
+    stock[prerequisite] = 0
+    client = SimpleNamespace(command=lambda *_a: pytest.fail("unexpected RCON"))
+    finished = [101]
+    loans = [builder.MallBootstrapLoan(
+        original_recipe="underground-belt", target_item=item,
+        target_count=target, spare_target_count=target, side="left",
+        requester_position=(39.5, 32.5), current_recipe=prerequisite,
+        step_recipe=prerequisite, step_target_count=required,
+        step_baseline_finished=100, step_required_crafts=crafts,
+        step_minimum_crafts=crafts,
+    )]
+    monkeypatch.setattr(builder, "_BLOCKING_MALL_ITEMS", set())
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: tuple(loans))
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(builder, "_unfunded_ladder_ingredient", lambda *_a: None)
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: dict(stock))
+    monkeypatch.setattr(builder, "_bootstrap_loan_stock", lambda *_a: (dict(stock), dict(stock)))
+    monkeypatch.setattr(builder.live_base, "transferable_items", lambda *_a: dict(stock))
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
+    # A freshly configured or idle batch need not have standing-production
+    # evidence; this must not let its parent restore it before its first bill.
+    monkeypatch.setattr(builder, "_production_started", lambda *a: a[3] != prerequisite)
+    monkeypatch.setattr(builder, "_bootstrap_loan_products_finished", lambda *_a: finished[0])
+    monkeypatch.setattr(builder, "_rationed_mall_completion_target", lambda *a: a[4])
+    monkeypatch.setattr(builder, "_rationed_mall_spare_target", lambda *a: a[4])
+    monkeypatch.setattr(builder, "_missing_chemical_ladder_predecessor", lambda *_a: None)
+    monkeypatch.setattr(builder, "_deliver_cell_ingredients", lambda *_a: None)
+    monkeypatch.setattr(builder, "_emit_loan_cell_telemetry", lambda *_a, **_k: None)
+    monkeypatch.setattr(builder, "consume_wait", lambda *_a: None)
+    monkeypatch.setattr(builder.time, "sleep", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "entity_status_name", lambda *_a: "working")
+    restored = []
+    def restore(*args, **_kwargs):
+        assert stock.get(item, 0) >= target, "parent restored its unfinished loan"
+        restored.append(args[4])
+
+    monkeypatch.setattr(builder, "_restore_bootstrap_loan", restore)
+    submitted = []
+
+    def submit(_c, _b, _s, plan, _name, _emit):
+        submitted.append(plan)
+        actions = plan["phases"][0]["actions"]
+        requester = next(a for a in actions if a["entity"] == "requester-chest")
+        parsed = parse_bootstrap_loan_group(requester["logistic_sections"][0]["group"])
+        assert parsed is not None
+        loans[0] = replace(
+            loans[0].starting_step(*parsed[5:10]),
+            completed_step_targets=parsed[10],
+        )
+
+    monkeypatch.setattr(builder, "_submit", submit)
+
+    def parent_pass():
+        return builder._rationed_mall_batch(
+            client, object(), "nauvis", "player", item, target,
+            (0.0, 0.0), lambda _message: None,
+        )
+
+    # Even repeated parent requests retain the finite, unfinished step.
+    for _ in range(2):
+        assert parent_pass()
+        assert restored == []
+        assert submitted == []
+        assert loans[0].step_recipe == prerequisite
+
+    if completion == "stock":
+        stock[prerequisite] = required
+    else:
+        finished[0] = 100 + crafts
+    assert parent_pass()
+    assert loans[0].step_recipe == item
+    assert dict(loans[0].completed_step_targets)[prerequisite] == required
+    assert len(submitted) == 1
+    assert restored == []
+
+    # Bots may spend all prerequisite output after the switch. The durable
+    # credit must survive the wrapper as well as the underlying loan executor.
+    stock[prerequisite] = 0
+    assert parent_pass()
+    assert len(submitted) == 1
+    assert restored == []
+
+    stock[item] = target
+    builder._release_completed_construction_loans(
+        client, object(), "nauvis", "player", (0.0, 0.0), lambda _m: None,
+    )
+    assert restored == [loans[0]]
