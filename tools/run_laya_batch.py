@@ -23,7 +23,14 @@ batch.json:
    "adaptive": optional false | {"min", "window_seconds", "min_ups_p95", "min_ups_p98",
                "grow_after", "min_available_gb", "max_decision_gap_s", "target_ups"},
    "arms": [{"id": str, "code": frozen worktree, "mods": staged mods dir, "revision": sha,
-             "change": str, "variant": optional path, "extra_args": optional [str]}]}
+             "change": str, "variant": optional path, "extra_args": optional [str]}],
+   "host_budget": optional {"registry": dir of cohort roots, "stale_seconds", "admit_interval_seconds",
+                            "admit_min_available_gb": optional}}
+
+With host_budget the slot count is a host-wide total shared with every other cohort supervisor whose
+job-status.json is fresh under the registry; older cohorts have first claim, and UPS is measured on all worlds.
+A shared batch starts one trial per admission interval and only while memory stays above its own floor plus a
+world's headroom, so older cohorts never reach their memory floor because of it.
 """
 
 from __future__ import annotations
@@ -170,6 +177,56 @@ class SlotController:
         return decision
 
 
+class HostBudget:
+    """Other cohorts on this host, read from their job-status.json (they need no protocol of their own).
+
+    Their running jobs occupy the shared total. An older cohort with waiting work also reserves the free slots of
+    its own controller, so a newer cohort never takes room the older one would fill next.
+    """
+
+    OCCUPYING = ("preparing", "running")
+
+    def __init__(self, root: Path, options: dict) -> None:
+        self.root = root.resolve()
+        self.registry = Path(options["registry"]).resolve()
+        self.stale_s = float(options.get("stale_seconds", 900))
+        self.admit_interval_s = float(options.get("admit_interval_seconds", 60))
+        self.admit_min_gb = float(options.get("admit_min_available_gb", 4.5))
+        self.next_admit = 0.0
+
+    def may_admit(self, now: float) -> bool:
+        memory = _available_gb()
+        return now >= self.next_admit and (memory is None or memory >= self.admit_min_gb)
+
+    @staticmethod
+    def _age(jobs: list[dict]) -> float:
+        started = [j["started"] for j in jobs if j.get("started") is not None]
+        return min(started) if started else float("inf")
+
+    def snapshot(self, own_jobs: list[dict], now: float) -> dict:
+        own_age = min(self._age(own_jobs), now)  # not yet started: younger than every cohort already running
+        running, reserved, cohorts = [], 0, []
+        for path in sorted(self.registry.glob("*/job-status.json")):
+            if path.parent.resolve() == self.root:
+                continue
+            try:
+                data = json.loads(path.read_text())
+            except (OSError, ValueError):
+                continue
+            if not isinstance(data, dict) or now - float(data.get("updated") or 0) > self.stale_s:
+                continue
+            jobs = data.get("jobs") or []
+            busy = [j for j in jobs if j.get("status") in self.OCCUPYING]
+            queued = sum(j.get("status") == "queued" for j in jobs)
+            want = 0
+            if self._age(jobs) < own_age and queued:
+                want = max(0, int((data.get("controller") or {}).get("slots", len(busy))) - len(busy))
+            running += busy
+            reserved += want
+            cohorts.append({"name": data.get("name", path.parent.name), "running": len(busy), "reserved": want})
+        return {"running": running, "reserved": reserved, "cohorts": cohorts}
+
+
 def _atomic(path: Path, data: object) -> None:
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=1))
@@ -217,6 +274,7 @@ class Batch:
                      for arm in arms[index % len(arms):] + arms[:index % len(arms)]]
         self.arms = {arm["id"]: arm for arm in self.cfg["arms"]}
         self.controller = SlotController(self.cfg, self.root / "controller.jsonl")
+        self.host = HostBudget(self.root, self.cfg["host_budget"]) if self.cfg.get("host_budget") else None
 
     def save(self) -> None:
         controller = getattr(self, "controller", None)
@@ -293,12 +351,16 @@ class Batch:
                     slots.append(active.pop(future))
                     running.pop(future, None)
                     slots.sort()
-                if controller.update(list(running.values()), len(queue)) is not None:
+                host = self.host.snapshot(self.jobs, time.time()) if self.host else {"running": [], "reserved": 0}
+                if controller.update(list(running.values()) + host["running"], len(queue)) is not None:
                     self.save()
+                # Slots are a host total when shared: other cohorts' jobs and older cohorts' reserved room count.
+                occupied = len(host["running"]) + host["reserved"]
                 # The deadline admits seed blocks, not jobs: a new seed starts only if its trials can finish their
                 # wall window before the deadline, and every arm of an admitted seed then runs (complete blocks).
                 # Seeds never admitted are censored and listed.
-                while queue and slots and len(active) < controller.slots and not self.stopping.is_set():
+                while (queue and slots and len(active) + occupied < controller.slots
+                       and not self.stopping.is_set() and (not self.host or self.host.may_admit(time.time()))):
                     if queue[0]["seed"] not in admitted and time.time() + self.cfg["trial_wall_seconds"] > self.until:
                         for job in queue:
                             if job["seed"] not in admitted:
@@ -307,7 +369,10 @@ class Batch:
                         continue
                     job, slot = queue.pop(0), slots.pop(0)
                     admitted.add(job["seed"])
-                    job.update(slots_at_start=controller.slots, active_at_start=len(active) + 1)
+                    job.update(slots_at_start=controller.slots, active_at_start=len(active) + 1,
+                               **({"host_occupied_at_start": occupied} if self.host else {}))
+                    if self.host:
+                        self.host.next_admit = time.time() + self.host.admit_interval_s
                     future = pool.submit(self.run_job, job, slot)
                     active[future], running[future] = slot, job
                 if self.stopping.is_set():

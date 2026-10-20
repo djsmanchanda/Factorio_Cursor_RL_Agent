@@ -173,3 +173,64 @@ def test_the_batch_starts_jobs_only_up_to_the_controllers_current_slots(tmp_path
     batch.run()
     assert all(j["status"] == "completed" for j in batch.jobs)
     assert [j["slots_at_start"] for j in batch.jobs][:2] == [1, 1] and batch.jobs[-1]["slots_at_start"] == 3
+
+
+def _cohort(registry, name, jobs, slots, updated):
+    root = registry / name
+    root.mkdir(parents=True)
+    (root / "job-status.json").write_text(json.dumps({"name": name, "updated": updated, "jobs": jobs,
+                                                      "controller": {"slots": slots}}))
+
+
+def test_a_host_budget_counts_other_cohorts_and_reserves_older_ones_free_room(tmp_path):
+    from tools.run_laya_batch import HostBudget
+    registry, now = tmp_path / "cohorts", 10_000.0
+    running = {"status": "running", "started": 100.0, "world": "w"}
+    # Older and waiting: 3 running of its 5 slots reserves 2. Newer: its running jobs count, its room does not.
+    _cohort(registry, "older", [running] * 3 + [{"status": "queued"}], 5, now - 10)
+    _cohort(registry, "newer", [dict(running, started=now + 1)] * 2 + [{"status": "queued"}], 9, now - 10)
+    _cohort(registry, "dead", [running] * 7, 7, now - 5000)  # a stale supervisor no longer occupies the host
+    _cohort(registry, "done", [{"status": "completed", "started": 1.0}], 4, now - 10)
+    (registry / "legacy").mkdir()
+    (registry / "legacy/job-status.json").write_text("[]")  # older harnesses wrote a bare list
+    own = registry / "own"
+    own.mkdir()
+    host = HostBudget(own, {"registry": str(registry)}).snapshot([{"status": "queued"}], now)
+    assert len(host["running"]) == 5 and host["reserved"] == 2
+
+
+def test_a_shared_batch_admits_only_into_the_host_total(tmp_path, monkeypatch):
+    import tools.run_laya_batch as harness
+    monkeypatch.setattr(harness.time, "sleep", lambda _s: None)
+    batch = _batch(tmp_path, seeds=(1, 2, 3))
+    snapshots = iter([{"running": [{}] * 3, "reserved": 1}] * 2 + [{"running": [], "reserved": 0}] * 100)
+    batch.host = type("Host", (), {"snapshot": lambda self, jobs, now: next(snapshots), "next_admit": 0.0,
+                                   "admit_interval_s": 0.0, "may_admit": lambda self, now: True})()
+    starts = []
+
+    class Controller:
+        maximum, slots, last = 6, 5, {}
+
+        def update(self, running, queued, now=None):
+            return None
+
+    def job(item, slot):
+        item["status"] = "completed"
+
+    batch.controller = Controller()
+    monkeypatch.setattr(batch, "run_job", lambda item, slot: (starts.append(item["host_occupied_at_start"]), job(item, slot)))
+    monkeypatch.setattr(batch, "report", lambda: None)
+    batch.run()
+    assert starts[0] == 4 and {j["status"] for j in batch.jobs} == {"completed"}  # 4 occupied of 5: one starts first
+
+
+def test_a_shared_batch_admits_one_trial_per_interval_and_only_with_memory_headroom(tmp_path, monkeypatch):
+    import tools.run_laya_batch as harness
+    from tools.run_laya_batch import HostBudget
+    host = HostBudget(tmp_path, {"registry": str(tmp_path), "admit_interval_seconds": 60, "admit_min_available_gb": 4.5})
+    monkeypatch.setattr(harness, "_available_gb", lambda: 6.0)
+    assert host.may_admit(100.0)
+    host.next_admit = 160.0
+    assert not host.may_admit(120.0) and host.may_admit(160.0)
+    monkeypatch.setattr(harness, "_available_gb", lambda: 4.0)  # below the older cohorts' floor plus one world
+    assert not host.may_admit(200.0)
