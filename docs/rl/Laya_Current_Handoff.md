@@ -239,3 +239,14 @@ All arms share one plastic output chest, robot-survey fix, stateless final accep
 Primary endpoints C5-v1 and C6-v1, historical and fresh final; C2/C3 guards and all typed safety/tool failures. No adoption on smoke, C3-only gains, or incomplete accounting. Guided-policy decision-volume evaluation, no learned checkpoint fitting or unseen-terrain claim. Source docs/rl/Laya_C7_Result_2026-10-20.md records the complete previous cohort and no-adoption decision. Campaign manifest: data/laya-experiments/laya-c9-20261020/freeze.json in the main repository.
 
 The 06:15 IST T3 one-shot sends completed changes and “Continue from here” to Claude thread import:claudeAgent:14dfe1ab-afe7-4f55-bd4a-27eabe7cf3ea and re-enables its updated 55-minute C9 check-in. Previous 06:16 task is disabled. Root handoff: docs/handoffs/Laya_Usage_Cover_2026-10-20.md. Lifecycle: only disposable worlds were started/stopped; no installed mod, GUI, real save or Starship action. Do not modify or restart frozen active arms.
+
+## Cohort 9 complete; C10 running, C11 queued (2026-10-20, 13:35 IST)
+
+- C9 240/240 jobs; no adoption; C5 per arm 17-31%, C6 zero; copper growth is the next wall
+  (`docs/rl/Laya_C9_Result_2026-10-20.md`).
+- C10 `laya-c10-miniship-20261020` (started ~13:20): full 62d2c47 vs copper 7a498ba (+05952ad) vs norung
+  eb4467a (copper without rung progress), seeds 79400-79447, 144 jobs, admission until 22:00.
+- C11 `laya-c11-miniship-20261020` (queued): copper 7a498ba vs ready 45c9725 (+a12e7e5) vs reconcile
+  ae7068c (+374e68e), same seeds, 144 jobs, admission until 2026-10-21 05:00, cap 07:00.
+- Starship: user stopped all testing; its two persistent 2.1.21 services were stopped and disabled
+  on 2026-10-20 ~13:15 at the user's request.
