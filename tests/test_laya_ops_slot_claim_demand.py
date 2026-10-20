@@ -118,3 +118,41 @@ def test_unchanged_claim_deferral_uses_its_blocker_snapshot(monkeypatch, tmp_pat
     handoff = dict(result, code="rotating_mall_prerequisite_handoff", details={"required": 2})
     assert unchanged_failures([handoff], {}) == set()
     assert unchanged_failures([result, dict(result, ok=True)], {}) == set()
+
+
+@pytest.mark.parametrize("shortfall", [1, 2])
+def test_small_slot_construction_bill_survives_larger_shortages(shortfall):
+    from training.laya_guided_policy import GuidedPolicy
+
+    larger = {"transport-belt": 100, "inserter": 30, "electric-mining-drill": 8,
+              "medium-electric-pole": 6}
+    claim = {"ok": False, "operation": "produce", "params": {"item": "transport-belt"},
+             "code": "rationed_mall_borrow_deferred", "details": {"slot_claim": {
+                 "owner": "paired_mall_transport-belt", "required": {"assembling-machine-2": 2},
+                 "available": {"assembling-machine-2": 2 - shortfall},
+                 "stock_at": {"assembling-machine-2": 10}}}}
+    blocked = {"ok": False, "operation": "foundation", "params": {"recipe": "iron-plate"},
+               "code": "material_shortage", "details": {"required": larger, "available": {}},
+               "stock_at": {}}
+    started = {"ok": True, "operation": "starter", "params": {"recipe": "iron-plate"}}
+    recipes = {item: {"ingredients": [{"name": "iron-plate", "amount": 1}]}
+               for item in (*larger, "assembling-machine-2")}
+    recipes["iron-plate"] = {"ingredients": [{"name": "iron-ore", "amount": 1}]}
+    results = [started, SLOT, blocked, claim]
+    menu = compile_options(BOARD, results, recipes=recipes, stock={"assembling-machine-2": 10})
+    produce = {o["product"]: o for o in menu["options"] if o["family"] == "produce"}
+    assert set(produce) == set(larger) | {"assembling-machine-2"}
+    assert produce["assembling-machine-2"]["params"]["stock_target"] == 10 + shortfall
+    probabilities = {r["option_id"]: r["probability"] for r in GuidedPolicy(1).distribution({}, menu)}
+    assert all(probabilities[o["option_id"]] > 0 for o in produce.values())
+    # More choices do not bypass missing plate supply or an unmakeable recipe.
+    no_starter = compile_options(BOARD, results[1:], recipes=recipes)
+    assert not any(o["family"] == "produce" for o in no_starter["options"])
+    del recipes["assembling-machine-2"]
+    unknown = compile_options(BOARD, results, recipes=recipes)
+    assert "op.produce.assembling-machine-2" not in {o["option_id"] for o in unknown["options"]}
+    # A fixed target is retired once stock arrives; no new moving demand is invented.
+    funded = compile_options(BOARD, results, recipes={**recipes, "assembling-machine-2": {
+        "ingredients": [{"name": "iron-plate", "amount": 1}]}},
+        stock={"assembling-machine-2": 10 + shortfall})
+    assert "op.produce.assembling-machine-2" not in {o["option_id"] for o in funded["options"]}

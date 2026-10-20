@@ -469,7 +469,7 @@ def test_busy_progress_without_a_new_phase_or_acceptance_stops_on_the_phase_budg
                   seed=3, run_id="t", session=_BatchSession(4))
     assert summary["stop"] == "phase_budget" and summary["decisions"] < 40
 
-def test_named_prerequisites_are_choices_outside_the_phase_and_shortage_limit():
+def test_named_prerequisites_are_choices_outside_the_phase_alongside_all_shortages():
     # Day control-s76403 handed one chest off to plastic 125 times in C2 without a plastic choice.
     handoff = {"ok": False, "operation": "produce", "params": {"item": "passive-provider-chest"},
                "code": "chemical_capability_handoff", "details": {"rung": "plastic-bar"}}
@@ -479,7 +479,8 @@ def test_named_prerequisites_are_choices_outside_the_phase_and_shortage_limit():
     plastic = options["op.produce.plastic-bar"]
     assert plastic["params"] == {"item": "plastic-bar", "stock_target": 1, "finite": False}
     assert plastic["features"]["prerequisite_for"] == ["produce:passive-provider-chest"]
-    assert len([o for o in options.values() if o["family"] == "produce"]) == 5
+    assert {o["product"] for o in options.values() if o["family"] == "produce"} == {
+        "plastic-bar", *(f"part-{n}" for n in range(5))}
     # The parent's new result supersedes its handoff, so old prerequisites cannot accumulate forever.
     results.append(dict(handoff, ok=True, code="producing", details=None))
     assert "op.produce.plastic-bar" not in {o["option_id"] for o in compile_options(BOARD, results)["options"]}

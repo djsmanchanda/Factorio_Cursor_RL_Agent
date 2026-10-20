@@ -91,7 +91,9 @@ The target compact projection keeps facts needed to discriminate available choic
 Unknown evidence stays unknown. Ops carries reported shortage bills and, on the
 reset branch, the selected opening-oil manifest's remaining bill, exact installation
 credits, foreign claims and missing items. Named prerequisites and selected bill
-items remain choices outside the displayed phase and ordinary shortage limit.
+items remain choices outside the displayed phase. Every legal reported shortage,
+including a small mall-cell construction blocker, remains selectable beside larger
+unrelated bills; shortage counts do not truncate the menu.
 Recipe/counter queries follow mission and observed demand. Requester draws,
 complete lender consequences and source-network-aware allocation remain incomplete;
 surface-wide transferable stock does not prove logistic reachability.

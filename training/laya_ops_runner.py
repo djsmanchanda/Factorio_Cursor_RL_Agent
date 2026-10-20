@@ -66,7 +66,6 @@ WAIT_TICKS = (300, 1800)
 # Rules for operations: the general mission rules plus mission.ops-*, quoting the same strategy doc
 # (the full catalog's geometry rules -- power variants, line sites, quad slots -- do not apply here).
 OPS_CATALOG = "docs/rl/laya_ops_guidelines.json"
-MAX_PRODUCE = 4  # produce options per decision (largest shortages first)
 SATURATED_STOCK = 10  # a flat-out producer with fewer than this in the network is the limit, not a full mall
 
 
@@ -715,10 +714,11 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     producible = {i: m for i, m in short.items() if plates_in(i, recipes or {}) <= started
                   and obtainable(recipes, i, stock or {})} if recipes else short
     levels = shortage_levels(current_materials)
+    # A small construction blocker is still a legal choice beside larger unrelated bills.
     demands = {item: {"target": levels.get(item, int((stock or {}).get(item, 0)) + missing),
                       "missing": missing, "capability": False, "parents": []}
-               for item, missing in (sorted(producible.items(), key=lambda kv: -kv[1])[:MAX_PRODUCE] if slots else ())}
-    # Typed prerequisites must remain selectable even when four larger construction shortages exist.
+               for item, missing in (sorted(producible.items(), key=lambda kv: -kv[1]) if slots else ())}
+    # Typed prerequisites remain selectable alongside construction shortages.
     # They can establish upstream capability that obtainable() cannot yet prove (e.g. plastic before oil).
     for item, demand in prerequisites.items():
         if item in PLATES or not plates_in(item, recipes or {}) <= started:
