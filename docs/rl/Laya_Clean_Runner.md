@@ -202,3 +202,7 @@ cycle without claiming a standing circuit producer.
 This remains behind the documented shared-wrapper migration boundary. It adds
 no Laya-specific layout or preference, and does not establish C6 acceptance: the
 real downstream consumer must still craft.
+
+## Laya C6 output achievement (2026-10-21)
+
+Ops C6 uses [explicit mall choice followed by measured circuit output](Laya_C6_Choice_Output_2026-10-21.md), version `laya-c6-choice-output-v2`. It requires no consumer or sustained rate. Its journal/status receipt is separate from unchanged deterministic C6 acceptance; legacy cohort counts are not comparable. Fresh frozen runners pick up this Python-only change.

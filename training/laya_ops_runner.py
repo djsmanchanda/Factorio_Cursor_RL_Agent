@@ -31,7 +31,8 @@ from training.laya_clean_runner import (ROOT, Settings, _append, _goal_gap, _sta
                                         _write_status, rolling_measurement)
 from training.laya_factory_status import STATUS_BUCKETS, compact_status, compile_status
 from training.laya_mall_slots import obtainable
-from training.laya_mission import PHASES, current_phase, phase_reached
+from training.laya_mission import PHASES, current_phase
+from training.laya_phase_acceptance import LayaC6Acceptance, ops_phase_reached
 
 PLATES = {"iron-plate": "iron-ore", "copper-plate": "copper-ore", "stone-brick": "stone"}
 # The tooling is already making it (a mall batch or loan in progress, a borrow queued): wait, and it is progress.
@@ -856,6 +857,15 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     summary: dict = {"decisions": 0, "failures": 0, "phases_reached": reached, "stop": "decision_budget"}
     stall = {"since": 0, "best_gap": math.inf, "tick": None, "machines": 0, "missing": math.inf, "made": {},
              "batches": {}, "installed": {}, "network": None, "rungs": None, "mark": None, "mark_tick": None}
+    c6 = LayaC6Acceptance(run_id)
+    summary["laya_acceptance"] = {"C6": c6.snapshot()}
+
+    def record_c6() -> None:
+        evidence = c6.snapshot()
+        if evidence != summary["laya_acceptance"]["C6"]:
+            summary["laya_acceptance"]["C6"] = evidence
+            _append(journal, {"run_id": run_id, "event": "laya_acceptance", "phase": "C6", **evidence})
+
     accept = getattr(session, "acceptance", None)
 
     def check_acceptance(event: str) -> None:
@@ -878,6 +888,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         _append(journal, {"run_id": run_id, "event": "acceptance", "at": event, "statuses": statuses,
                           "fresh": fresh, "checks": getattr(session, "acceptance_checks", None)})
     check_acceptance("start")
+    _append(journal, {"run_id": run_id, "event": "laya_acceptance", "phase": "C6", **c6.snapshot()})
     index = -1
     while decisions is None or index + 1 < decisions:
         index += 1
@@ -887,6 +898,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         economics = session.economics() if hasattr(session, "economics") else None
         adapter.extra_recipes = recipe_demand(results, economics)
         facts = adapter.query()
+        c6.observe(facts)
+        record_c6()
         samples.append((facts["tick"], dict(facts["production"]), dict(facts["consumption"])))
         measurement = rolling_measurement(samples, settings.rate_window_ticks) or measurement
         if settings.max_game_ticks and facts["tick"] - samples[0][0] >= settings.max_game_ticks:
@@ -894,11 +907,12 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             break
         phase = current_phase(reached)
         board = compile_status(facts, phase["targets"], measurement) if phase else None
-        while phase and phase_reached(board):
+        while phase and ops_phase_reached(phase, board, c6.snapshot()):
             reached.append(phase["phase_id"])
             summary.setdefault("phase_ticks", {})[phase["phase_id"]] = facts["tick"] - samples[0][0]
-            _append(journal, {"run_id": run_id, "event": "phase_reached", "phase": phase["phase_id"], "tick": facts["tick"]})
-            emit(f"PHASE REACHED: {phase['phase_id']} {phase['name']} at tick {facts['tick']} (rate proxy)")
+            _append(journal, {"run_id": run_id, "event": "phase_reached", "phase": phase["phase_id"], "tick": facts["tick"],
+                              **({"acceptance_version": c6.snapshot()["version"]} if phase["phase_id"] == "C6" else {})})
+            emit(f"PHASE REACHED: {phase['phase_id']} {phase['name']} at tick {facts['tick']} ({'Laya choice/output' if phase['phase_id'] == 'C6' else 'rate proxy'})")
             check_acceptance(f"proxy {phase['phase_id']}")
             emit(f"ACCEPTANCE: {summary.get('acceptance')}")
             stall.update(since=0, best_gap=math.inf)
@@ -954,6 +968,13 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                   "phase": phase["phase_id"], "choice": {k: choice[k] for k in ("option_id", "need_id", "probability")},
                   "summary": chosen["summary"]}
         _append(journal, record)
+        # Fresh baseline after selection, immediately before execution; never reuse a rate-window baseline.
+        try:
+            choice_facts = adapter.query() if c6.explicit_choice(chosen) else facts
+        except Exception:  # Extra instrumentation failure must not prevent the selected operation.
+            choice_facts = {}
+        c6.choose(chosen, choice_facts, index=index)
+        record_c6()
         if chosen["family"] == "wait":
             adapter.advance(chosen["wait_ticks"])
             result = {"ok": True, "operation": "wait", "params": {"ticks": chosen["wait_ticks"]}}
@@ -970,6 +991,10 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             result["stock_at"] = {item: stock.get(item, 0) for item in ((result.get("details") or {}).get("required") or {})}
         results.append(result)
         after = adapter.query()
+        if c6.explicit_choice(chosen):
+            c6.outcome(result)
+        c6.observe(after)
+        record_c6()
         after_transactions = session.material_transactions() if hasattr(session, "material_transactions") else {}
         emit(f"  OUTCOME: {'ok' if result.get('ok') else result.get('code')}"
              + (f" -- {result.get('message', '')[:200]}" if not result.get("ok") else ""))
@@ -985,7 +1010,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                      if chosen['family'] == 'raise_stock_gate' else {}),
                                   "ticks": after["tick"] - facts["tick"], "material_transactions": after_transactions})
         _write_status(status_path, {"run_id": run_id, "index": index, "tick": facts["tick"], "phase": phase,
-                                    "reached": reached, "board": compact, "brief": state["brief"], "choice": {**choice, "summary": chosen["summary"]},
+                                    "reached": reached, "laya_acceptance": summary["laya_acceptance"], "board": compact, "brief": state["brief"], "choice": {**choice, "summary": chosen["summary"]},
                                     "menu": {o["option_id"]: o["summary"] for o in menu["options"]},
                                     "decisions": index + 1, "failures": summary["failures"],
                                     "authority": policy.authority})
