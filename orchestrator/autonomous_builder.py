@@ -103,9 +103,9 @@ from orchestrator.intermediate_scaling import (
 from orchestrator.transport_energy import (
     TransportEnergy, observe_transport_energy, prefer_direct_transport,
 )
-from orchestrator.extraction_route import live_route_preflight
+from orchestrator.extraction_route import live_collector_link, live_route_preflight
 from orchestrator.priority_list import PriorityList
-from orchestrator.power_district import ensure_power_capacity
+from orchestrator.power_district import ensure_power_capacity, load_reserved_tiles
 from orchestrator.recoverable_retirement import (
     RecoverableRetirementError, retire_entities_via_bots,
 )
@@ -1354,11 +1354,20 @@ def _place_new_mine(
                 if action.get("entity", "").endswith("transport-belt"):
                     position = action["position"]
                     belt_rows.setdefault(position["y"], []).append(position["x"])
+        # Relocate along contiguous runs only: a second collector's link can
+        # cross a row twice, and spanning the gap would move unrelated poles.
         for belt_y, belt_xs in sorted(belt_rows.items()):
-            relocate_blocking_poles(
-                client, bridge, surface, force,
-                (min(belt_xs), belt_y), (max(belt_xs), belt_y), emit,
-            )
+            runs: list[list[float]] = []
+            for x in sorted(belt_xs):
+                if runs and x - runs[-1][-1] <= 1:
+                    runs[-1].append(x)
+                else:
+                    runs.append([x])
+            for run in runs:
+                relocate_blocking_poles(
+                    client, bridge, surface, force,
+                    (run[0], belt_y), (run[-1], belt_y), emit,
+                )
     machine_positions = [
         (action["position"]["x"], action["position"]["y"])
         for phase in plan["phases"] for action in phase["actions"]
@@ -2970,6 +2979,15 @@ def build_mining_stage(
                 in _REFINERY_SITE_RESERVATIONS.items()
                 if (reserved_surface, reserved_force) == (surface, force)
                 and reserved_recipe != recipe
+            ),
+            # Only an expansion can open a second collector on the owned patch.
+            reserved_tiles=(
+                frozenset(load_reserved_tiles(bridge.script_output))
+                if expand and getattr(bridge, "script_output", None) else frozenset()
+            ),
+            link_route=(
+                live_collector_link(client, surface, force, belt_type=belt_type)
+                if expand and hasattr(client, "command") else None
             ),
         )
     except (

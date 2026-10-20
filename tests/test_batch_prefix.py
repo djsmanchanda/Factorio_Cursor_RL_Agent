@@ -158,7 +158,7 @@ def test_conflicts_are_surveyed_in_one_call(survey, monkeypatch) -> None:
 
 
 def test_an_exhausted_corridor_never_opens_an_independent_mine(monkeypatch) -> None:
-    """A blocked tail is not proof that the owned district is exhausted."""
+    """A legacy collector cannot take a tail link, so no independent mine opens."""
     mine = ResourceMine(
         output=(0.5, 0.5), drill_count=3, row_capacity=10,
         expansion_step=1, belt_y=0.5,
@@ -181,7 +181,10 @@ def test_an_exhausted_corridor_never_opens_an_independent_mine(monkeypatch) -> N
             (1.0, 1.0), (-20.0, -20.0), (80.0, 80.0), 500_000,
         ),
     )
-    monkeypatch.setattr(stage_extraction, "buildable_batch_prefix", lambda *_a: ())
+    monkeypatch.setattr(
+        stage_extraction, "buildable_batch_prefix_with_cause",
+        lambda *_a: ((), "off_patch"),
+    )
     monkeypatch.setattr(
         stage_extraction, "_new_direct_mine",
         lambda *_a, **_k: pytest.fail("an existing district cannot spawn a new mine"),
@@ -196,6 +199,10 @@ def test_an_exhausted_corridor_never_opens_an_independent_mine(monkeypatch) -> N
     # Nothing is under construction, so this must not read as a wait.
     assert raised.value.code == "district_expansion_unbuildable"
     assert raised.value.state == "failed"
+    assert raised.value.details["cause"] == "no_second_site"
+    assert raised.value.details["causes"] == {
+        "straight": "off_patch", "parallel": "merge_reach", "second": "no_second_site",
+    }
 
 
 def test_the_batch_is_no_longer_all_or_nothing() -> None:

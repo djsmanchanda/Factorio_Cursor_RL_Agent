@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from orchestrator.extraction_state import ResourceMine
+from planners.belt_bridge import UNDERGROUND_REACH
 
 # Early plate demand is iron-heavy; complete paired checkpoints make the
 # first expansions useful while preserving complete six-drill doubling sets.
@@ -77,6 +78,18 @@ def phase_batch_positions(
             x = mine.output[0] + mine.expansion_step * (4 + 3 * index)
         positions.extend(((x, mine.shared_belt_y - 2), (x, mine.shared_belt_y + 2)))
     return tuple(positions)
+
+
+def parallel_band_merge_reachable(
+    belt_type: str, band_pitch: float = PARALLEL_BAND_PITCH,
+) -> bool:
+    """Whether this belt tier's underground can cross into the band's splitter.
+
+    The crossover tunnels ``pitch - 1`` tiles from the band to the source
+    splitter lane; yellow belt (reach 5) never spans the 7 tiles of pitch 8, so
+    surveying that band only spent time before an inevitable merge failure.
+    """
+    return UNDERGROUND_REACH.get(belt_type, 0) >= band_pitch - 1
 
 
 def parallel_phase_batch_positions(
