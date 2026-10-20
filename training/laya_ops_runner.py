@@ -122,6 +122,14 @@ def last_codes(results: list[dict], tick: int | None = None) -> dict[tuple, str]
     return codes
 
 
+def unbuildable_cause(results: list[dict], operation: str, plate: str) -> str | None:
+    """The typed cause of this operation's latest outcome when it was an unbuildable district."""
+    last = next((r for r in reversed(results) if _key(r) == (operation, plate)), None)
+    if last is None or last.get("ok") or last.get("code") != "district_expansion_unbuildable":
+        return None
+    return (last.get("details") or {}).get("cause") or "untyped"
+
+
 def _demand_bills(result: Mapping):
     """Material bills reported by a failed operation, including a rejected mall claim."""
     if result.get("ok"):
@@ -654,14 +662,19 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
             # 2026-10-15: once C4's board held only plastic, the iron starter was never retired).
             legal = tuple(operation for operation in legal if operation == "retire_starter")
         for operation in legal:
+            features = {"plate_stage": stages.get(plate, "none"), "last_code": codes.get((operation, plate), "new"),
+                        "goal_need": plate in goal,
+                        # The tooling said it waits on bots or coverage: retry after a wait, not at once.
+                        "waiting": in_progress(codes.get((operation, plate))),
+                        "unchanged_failure": (operation, plate) in stuck}
+            cause = unbuildable_cause(results, operation, plate)
+            if cause is not None:
+                # Typed and terminal for this district: re-picking it cannot change the outcome.
+                features["unbuildable_cause"] = cause
             options.append({
                 "option_id": f"op.{operation}.{plate}", "family": operation, "product": plate,
                 "need_id": f"item:{plate}", "summary": f"{operation} {plate}", "params": {"recipe": plate},
-                "features": {"plate_stage": stages.get(plate, "none"), "last_code": codes.get((operation, plate), "new"),
-                             "goal_need": plate in goal,
-                             # The tooling said it waits on bots or coverage: retry after a wait, not at once.
-                             "waiting": in_progress(codes.get((operation, plate))),
-                             "unchanged_failure": (operation, plate) in stuck}})
+                "features": features})
     # Steel: the poles every foundation and power bridge needs are made from it. Fence the seed's poles first,
     # then build the seed once the iron foundation stands (the tooling's own order).
     steel_made = any(r.get("ok") and r["operation"] == "steel" for r in results)

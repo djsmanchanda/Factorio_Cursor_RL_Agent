@@ -314,11 +314,14 @@ def generate_direct_mining_to_chest(
         ] if output_pole is not None else [])},
         {"name": "direct_mine_output", "actions": mine_actions},
     ]}
-    if output_side == "east" and continuation_tiles:
+    if output_side == "east":
         future_first_x = first_x - 3 * reserved_pair_columns
         # Keep future drill bodies, their shared belt, and local pole clearance
         # unavailable to unrelated power/coverage work.  This is metadata, not
         # a ghost: the mine grows only when its next six-drill module is needed.
+        # It is reserved with or without a paved continuation; the default
+        # continuation is zero, which once left the verified corridor open to
+        # a later power bridge (cohort 7 copper: pole inside the corridor).
         plan["reserved_tiles"] = [
             [tile_x, tile_y]
             for tile_x in range(
