@@ -1,0 +1,798 @@
+{
+  "bootstrap_supply": {},
+  "episode_id": "laya-ready-s79402",
+  "force": "player",
+  "projects": [
+    {
+      "eta_seconds": {},
+      "expected_rates": {
+        "chemical-plant": null,
+        "fast-inserter": null,
+        "offshore-pump": null,
+        "oil-refinery": null,
+        "passive-provider-chest": null,
+        "pipe": null,
+        "pipe-to-ground": null,
+        "pumpjack": null,
+        "transport-belt": null
+      },
+      "hold_until_producing": false,
+      "priority": 100,
+      "project_id": "chemical_refinery_and_plastic_machines",
+      "required": {
+        "chemical-plant": 2,
+        "fast-inserter": 5,
+        "offshore-pump": 1,
+        "oil-refinery": 4,
+        "passive-provider-chest": 1,
+        "pipe": 50,
+        "pipe-to-ground": 20,
+        "pumpjack": 3,
+        "transport-belt": 14
+      },
+      "reserved": {},
+      "revision": 5,
+      "sequence": 1,
+      "source_producers": {
+        "chemical-plant": "stock",
+        "fast-inserter": "stock",
+        "offshore-pump": "stock",
+        "oil-refinery": "stock",
+        "passive-provider-chest": "stock",
+        "pipe": "stock",
+        "pipe-to-ground": "stock",
+        "pumpjack": "stock",
+        "transport-belt": "stock"
+      },
+      "state": "constructing",
+      "target_item": "plastic-bar"
+    },
+    {
+      "eta_seconds": {},
+      "expected_rates": {
+        "electric-furnace": null,
+        "electric-mining-drill": null,
+        "inserter": null,
+        "medium-electric-pole": null,
+        "passive-provider-chest": null
+      },
+      "hold_until_producing": false,
+      "priority": 50,
+      "project_id": "direct_iron-plate_starter",
+      "required": {
+        "electric-furnace": 2,
+        "electric-mining-drill": 2,
+        "inserter": 2,
+        "medium-electric-pole": 2,
+        "passive-provider-chest": 1
+      },
+      "reserved": {},
+      "revision": 2,
+      "sequence": 2,
+      "source_producers": {
+        "electric-furnace": "stock",
+        "electric-mining-drill": "stock",
+        "inserter": "stock",
+        "medium-electric-pole": "stock",
+        "passive-provider-chest": "stock"
+      },
+      "state": "constructing",
+      "target_item": null
+    },
+    {
+      "eta_seconds": {},
+      "expected_rates": {
+        "medium-electric-pole": null
+      },
+      "hold_until_producing": false,
+      "priority": 50,
+      "project_id": "power_bridge",
+      "required": {
+        "medium-electric-pole": 3
+      },
+      "reserved": {},
+      "revision": 60,
+      "sequence": 3,
+      "source_producers": {
+        "medium-electric-pole": "stock"
+      },
+      "state": "constructing",
+      "target_item": null
+    },
+    {
+      "eta_seconds": {},
+      "expected_rates": {
+        "electric-furnace": null,
+        "electric-mining-drill": null,
+        "inserter": null,
+        "medium-electric-pole": null,
+        "passive-provider-chest": null
+      },
+      "hold_until_producing": false,
+      "priority": 50,
+      "project_id": "direct_copper-plate_starter",
+      "required": {
+        "electric-furnace": 1,
+        "electric-mining-drill": 1,
+        "inserter": 1,
+        "medium-electric-pole": 1,
+        "passive-provider-chest": 1
+      },
+      "reserved": {},
+      "revision": 2,
+      "sequence": 4,
+      "source_producers": {
+        "electric-furnace": "stock",
+        "electric-mining-drill": "stock",
+        "inserter": "stock",
+        "medium-electric-pole": "stock",
+        "passive-provider-chest": "stock"
+      },
+      "state": "constructing",
+      "target_item": null
+    },
+    {
+      "eta_seconds": {},
+      "expected_rates": {
+        "roboport": null
+      },
+      "hold_until_producing": false,
+      "priority": 50,
+      "project_id": "roboport_bridge",
+      "required": {
+        "roboport": 1
+      },
+      "reserved": {},
+      "revision": 30,
+      "sequence": 5,
+      "source_producers": {
+        "roboport": "stock"
+      },
+      "state": "constructing",
+      "target_item": null
+    },
+    {
+      "eta_seconds": {},
+      "expected_rates": {
+        "electric-furnace": null,
+        "electric-mining-drill": null,
+        "inserter": null,
+        "medium-electric-pole": null,
+        "passive-provider-chest": null
+      },
+      "hold_until_producing": false,
+      "priority": 100,
+      "project_id": "conversion_steel-plate",
+      "required": {
+        "electric-furnace": 2,
+        "electric-mining-drill": 1,
+        "inserter": 2,
+        "medium-electric-pole": 2,
+        "passive-provider-chest": 1
+      },
+      "reserved": {},
+      "revision": 3,
+      "sequence": 6,
+      "source_producers": {
+        "electric-furnace": "stock",
+        "electric-mining-drill": "producer:electric-mining-drill",
+        "inserter": null,
+        "medium-electric-pole": "stock",
+        "passive-provider-chest": "stock"
+      },
+      "state": "constructing",
+      "target_item": "steel-plate"
+    },
+    {
+      "eta_seconds": {},
+      "expected_rates": {
+        "assembling-machine-1": null,
+        "inserter": null,
+        "passive-provider-chest": null,
+        "requester-chest": null,
+        "substation": null
+      },
+      "hold_until_producing": true,
+      "priority": 100,
+      "project_id": "paired_mall_iron-gear-wheel",
+      "required": {
+        "assembling-machine-1": 1,
+        "inserter": 2,
+        "passive-provider-chest": 1,
+        "requester-chest": 1,
+        "substation": 1
+      },
+      "reserved": {},
+      "revision": 4,
+      "sequence": 7,
+      "source_producers": {
+        "assembling-machine-1": "stock",
+        "inserter": "stock",
+        "passive-provider-chest": "stock",
+        "requester-chest": "stock",
+        "substation": "stock"
+      },
+      "state": "completed",
+      "target_item": "iron-gear-wheel"
+    },
+    {
+      "eta_seconds": {},
+      "expected_rates": {
+        "assembling-machine-1": null,
+        "inserter": null,
+        "passive-provider-chest": null,
+        "requester-chest": null,
+        "substation": null
+      },
+      "hold_until_producing": true,
+      "priority": 100,
+      "project_id": "paired_mall_copper-cable",
+      "required": {
+        "assembling-machine-1": 1,
+        "inserter": 2,
+        "passive-provider-chest": 1,
+        "requester-chest": 1,
+        "substation": 1
+      },
+      "reserved": {},
+      "revision": 8,
+      "sequence": 8,
+      "source_producers": {
+        "assembling-machine-1": "stock",
+        "inserter": "stock",
+        "passive-provider-chest": "stock",
+        "requester-chest": "stock",
+        "substation": "stock"
+      },
+      "state": "completed",
+      "target_item": "copper-cable"
+    },
+    {
+      "eta_seconds": {},
+      "expected_rates": {
+        "assembling-machine-1": null,
+        "inserter": null,
+        "passive-provider-chest": null
+      },
+      "hold_until_producing": true,
+      "priority": 100,
+      "project_id": "paired_mall_electronic-circuit",
+      "required": {
+        "assembling-machine-1": 1,
+        "inserter": 2,
+        "passive-provider-chest": 1
+      },
+      "reserved": {},
+      "revision": 4,
+      "sequence": 9,
+      "source_producers": {
+        "assembling-machine-1": "stock",
+        "inserter": "stock",
+        "passive-provider-chest": "stock"
+      },
+      "state": "completed",
+      "target_item": "electronic-circuit"
+    },
+    {
+      "eta_seconds": {},
+      "expected_rates": {
+        "electric-furnace": null,
+        "electric-mining-drill": null,
+        "inserter": null,
+        "medium-electric-pole": null,
+        "passive-provider-chest": null
+      },
+      "hold_until_producing": false,
+      "priority": 50,
+      "project_id": "direct_stone-brick_starter",
+      "required": {
+        "electric-furnace": 1,
+        "electric-mining-drill": 2,
+        "inserter": 1,
+        "medium-electric-pole": 2,
+        "passive-provider-chest": 1
+      },
+      "reserved": {},
+      "revision": 2,
+      "sequence": 10,
+      "source_producers": {
+        "electric-furnace": "stock",
+        "electric-mining-drill": "stock",
+        "inserter": "stock",
+        "medium-electric-pole": "stock",
+        "passive-provider-chest": "stock"
+      },
+      "state": "constructing",
+      "target_item": null
+    },
+    {
+      "eta_seconds": {},
+      "expected_rates": {
+        "assembling-machine-1": null,
+        "inserter": null,
+        "passive-provider-chest": null
+      },
+      "hold_until_producing": true,
+      "priority": 100,
+      "project_id": "paired_mall_transport-belt",
+      "required": {
+        "assembling-machine-1": 1,
+        "inserter": 2,
+        "passive-provider-chest": 1
+      },
+      "reserved": {},
+      "revision": 4,
+      "sequence": 11,
+      "source_producers": {
+        "assembling-machine-1": "stock",
+        "inserter": "stock",
+        "passive-provider-chest": "stock"
+      },
+      "state": "completed",
+      "target_item": "transport-belt"
+    },
+    {
+      "eta_seconds": {},
+      "expected_rates": {
+        "electric-mining-drill": null,
+        "substation": null,
+        "transport-belt": null
+      },
+      "hold_until_producing": false,
+      "priority": 50,
+      "project_id": "mining_copper-ore",
+      "required": {
+        "electric-mining-drill": 6,
+        "substation": 1,
+        "transport-belt": 13
+      },
+      "reserved": {},
+      "revision": 2,
+      "sequence": 12,
+      "source_producers": {
+        "electric-mining-drill": null,
+        "substation": "stock",
+        "transport-belt": "producer:transport-belt"
+      },
+      "state": "constructing",
+      "target_item": null
+    },
+    {
+      "eta_seconds": {},
+      "expected_rates": {
+        "electric-furnace": null,
+        "fast-inserter": null,
+        "inserter": null,
+        "medium-electric-pole": null,
+        "passive-provider-chest": null,
+        "splitter": null,
+        "transport-belt": null
+      },
+      "hold_until_producing": false,
+      "priority": 50,
+      "project_id": "modular_copper-plate_refinery",
+      "required": {
+        "electric-furnace": 6,
+        "fast-inserter": 1,
+        "inserter": 12,
+        "medium-electric-pole": 4,
+        "passive-provider-chest": 1,
+        "splitter": 3,
+        "transport-belt": 119
+      },
+      "reserved": {},
+      "revision": 2,
+      "sequence": 13,
+      "source_producers": {
+        "electric-furnace": "stock",
+        "fast-inserter": null,
+        "inserter": "stock",
+        "medium-electric-pole": "stock",
+        "passive-provider-chest": "stock",
+        "splitter": null,
+        "transport-belt": "producer:transport-belt"
+      },
+      "state": "constructing",
+      "target_item": null
+    },
+    {
+      "eta_seconds": {},
+      "expected_rates": {
+        "electric-mining-drill": null,
+        "substation": null,
+        "transport-belt": null
+      },
+      "hold_until_producing": false,
+      "priority": 50,
+      "project_id": "mining_iron-ore",
+      "required": {
+        "electric-mining-drill": 6,
+        "substation": 1,
+        "transport-belt": 13
+      },
+      "reserved": {},
+      "revision": 2,
+      "sequence": 14,
+      "source_producers": {
+        "electric-mining-drill": null,
+        "substation": "stock",
+        "transport-belt": "producer:transport-belt"
+      },
+      "state": "constructing",
+      "target_item": null
+    },
+    {
+      "eta_seconds": {},
+      "expected_rates": {
+        "electric-furnace": null,
+        "fast-inserter": null,
+        "inserter": null,
+        "medium-electric-pole": null,
+        "passive-provider-chest": null,
+        "splitter": null,
+        "transport-belt": null
+      },
+      "hold_until_producing": false,
+      "priority": 50,
+      "project_id": "modular_iron-plate_refinery",
+      "required": {
+        "electric-furnace": 6,
+        "fast-inserter": 1,
+        "inserter": 12,
+        "medium-electric-pole": 4,
+        "passive-provider-chest": 1,
+        "splitter": 3,
+        "transport-belt": 192
+      },
+      "reserved": {},
+      "revision": 2,
+      "sequence": 15,
+      "source_producers": {
+        "electric-furnace": "stock",
+        "fast-inserter": null,
+        "inserter": null,
+        "medium-electric-pole": "stock",
+        "passive-provider-chest": "stock",
+        "splitter": null,
+        "transport-belt": "producer:transport-belt"
+      },
+      "state": "constructing",
+      "target_item": null
+    },
+    {
+      "eta_seconds": {},
+      "expected_rates": {
+        "electric-mining-drill": null,
+        "substation": null,
+        "transport-belt": null
+      },
+      "hold_until_producing": false,
+      "priority": 50,
+      "project_id": "mining_stone",
+      "required": {
+        "electric-mining-drill": 6,
+        "substation": 1,
+        "transport-belt": 13
+      },
+      "reserved": {},
+      "revision": 2,
+      "sequence": 16,
+      "source_producers": {
+        "electric-mining-drill": null,
+        "substation": "stock",
+        "transport-belt": "stock"
+      },
+      "state": "constructing",
+      "target_item": null
+    },
+    {
+      "eta_seconds": {},
+      "expected_rates": {
+        "electric-furnace": null,
+        "fast-inserter": null,
+        "inserter": null,
+        "medium-electric-pole": null,
+        "passive-provider-chest": null,
+        "splitter": null,
+        "transport-belt": null
+      },
+      "hold_until_producing": false,
+      "priority": 50,
+      "project_id": "modular_stone-brick_refinery",
+      "required": {
+        "electric-furnace": 6,
+        "fast-inserter": 1,
+        "inserter": 12,
+        "medium-electric-pole": 4,
+        "passive-provider-chest": 1,
+        "splitter": 3,
+        "transport-belt": 70
+      },
+      "reserved": {},
+      "revision": 2,
+      "sequence": 17,
+      "source_producers": {
+        "electric-furnace": "stock",
+        "fast-inserter": "stock",
+        "inserter": null,
+        "medium-electric-pole": "stock",
+        "passive-provider-chest": "stock",
+        "splitter": null,
+        "transport-belt": "producer:transport-belt"
+      },
+      "state": "constructing",
+      "target_item": null
+    },
+    {
+      "eta_seconds": {
+        "assembling-machine-1": 0.0,
+        "inserter": 0.0,
+        "passive-provider-chest": 0.0,
+        "requester-chest": 0.0,
+        "substation": 0.0
+      },
+      "expected_rates": {
+        "assembling-machine-1": null,
+        "inserter": null,
+        "passive-provider-chest": null,
+        "requester-chest": null,
+        "substation": null
+      },
+      "hold_until_producing": true,
+      "priority": 100,
+      "project_id": "paired_mall_inserter",
+      "required": {
+        "assembling-machine-1": 1,
+        "inserter": 2,
+        "passive-provider-chest": 1,
+        "requester-chest": 1,
+        "substation": 1
+      },
+      "reserved": {
+        "assembling-machine-1": 1,
+        "inserter": 2,
+        "passive-provider-chest": 1,
+        "requester-chest": 1,
+        "substation": 1
+      },
+      "revision": 9,
+      "sequence": 18,
+      "source_producers": {
+        "assembling-machine-1": "stock",
+        "inserter": "stock",
+        "passive-provider-chest": "stock",
+        "requester-chest": "stock",
+        "substation": "stock"
+      },
+      "state": "constructing",
+      "target_item": "inserter"
+    },
+    {
+      "eta_seconds": {},
+      "expected_rates": {
+        "electric-mining-drill": null,
+        "substation": null,
+        "transport-belt": null
+      },
+      "hold_until_producing": false,
+      "priority": 50,
+      "project_id": "mining_coal",
+      "required": {
+        "electric-mining-drill": 4,
+        "substation": 1,
+        "transport-belt": 10
+      },
+      "reserved": {},
+      "revision": 2,
+      "sequence": 19,
+      "source_producers": {
+        "electric-mining-drill": null,
+        "substation": "stock",
+        "transport-belt": "stock"
+      },
+      "state": "constructing",
+      "target_item": null
+    },
+    {
+      "eta_seconds": {},
+      "expected_rates": {
+        "transport-belt": null
+      },
+      "hold_until_producing": false,
+      "priority": 50,
+      "project_id": "chemical_coal_belt",
+      "required": {
+        "transport-belt": 36
+      },
+      "reserved": {},
+      "revision": 22,
+      "sequence": 20,
+      "source_producers": {
+        "transport-belt": "stock"
+      },
+      "state": "constructing",
+      "target_item": null
+    },
+    {
+      "eta_seconds": {},
+      "expected_rates": {
+        "medium-electric-pole": null,
+        "substation": null
+      },
+      "hold_until_producing": false,
+      "priority": 50,
+      "project_id": "chemical_power_backbone",
+      "required": {
+        "medium-electric-pole": 12,
+        "substation": 3
+      },
+      "reserved": {},
+      "revision": 14,
+      "sequence": 21,
+      "source_producers": {
+        "medium-electric-pole": "stock",
+        "substation": "stock"
+      },
+      "state": "constructing",
+      "target_item": null
+    },
+    {
+      "eta_seconds": {},
+      "expected_rates": {
+        "pipe": null
+      },
+      "hold_until_producing": false,
+      "priority": 50,
+      "project_id": "chemical_crude_pipeline",
+      "required": {
+        "pipe": 56
+      },
+      "reserved": {},
+      "revision": 2,
+      "sequence": 22,
+      "source_producers": {
+        "pipe": "stock"
+      },
+      "state": "constructing",
+      "target_item": null
+    },
+    {
+      "eta_seconds": {},
+      "expected_rates": {
+        "pipe": null
+      },
+      "hold_until_producing": false,
+      "priority": 50,
+      "project_id": "chemical_crude_pipeline_2",
+      "required": {
+        "pipe": 14
+      },
+      "reserved": {},
+      "revision": 2,
+      "sequence": 23,
+      "source_producers": {
+        "pipe": "stock"
+      },
+      "state": "constructing",
+      "target_item": null
+    },
+    {
+      "eta_seconds": {},
+      "expected_rates": {
+        "pipe": null
+      },
+      "hold_until_producing": false,
+      "priority": 50,
+      "project_id": "chemical_crude_pipeline_3",
+      "required": {
+        "pipe": 7
+      },
+      "reserved": {},
+      "revision": 2,
+      "sequence": 24,
+      "source_producers": {
+        "pipe": "stock"
+      },
+      "state": "constructing",
+      "target_item": null
+    },
+    {
+      "eta_seconds": {},
+      "expected_rates": {
+        "pipe": null
+      },
+      "hold_until_producing": false,
+      "priority": 50,
+      "project_id": "chemical_plastic_petroleum_pipeline",
+      "required": {
+        "pipe": 40
+      },
+      "reserved": {},
+      "revision": 2,
+      "sequence": 25,
+      "source_producers": {
+        "pipe": "stock"
+      },
+      "state": "constructing",
+      "target_item": null
+    },
+    {
+      "eta_seconds": {
+        "assembling-machine-1": 0.0,
+        "inserter": 0.0,
+        "long-handed-inserter": null,
+        "passive-provider-chest": null
+      },
+      "expected_rates": {
+        "assembling-machine-1": null,
+        "inserter": null,
+        "long-handed-inserter": null,
+        "passive-provider-chest": null
+      },
+      "hold_until_producing": true,
+      "priority": 100,
+      "project_id": "quad_mall_advanced-circuit_top",
+      "required": {
+        "assembling-machine-1": 2,
+        "inserter": 2,
+        "long-handed-inserter": 2,
+        "passive-provider-chest": 1
+      },
+      "reserved": {
+        "assembling-machine-1": 2,
+        "inserter": 2
+      },
+      "revision": 16,
+      "sequence": 26,
+      "source_producers": {
+        "assembling-machine-1": "stock",
+        "inserter": "stock",
+        "long-handed-inserter": null,
+        "passive-provider-chest": "stock"
+      },
+      "state": "supply_wait",
+      "target_item": "advanced-circuit"
+    },
+    {
+      "eta_seconds": {
+        "assembling-machine-1": 0.0,
+        "inserter": 0.0,
+        "passive-provider-chest": null,
+        "requester-chest": 0.0
+      },
+      "expected_rates": {
+        "assembling-machine-1": null,
+        "inserter": null,
+        "passive-provider-chest": null,
+        "requester-chest": null
+      },
+      "hold_until_producing": true,
+      "priority": 100,
+      "project_id": "paired_mall_long-handed-inserter",
+      "required": {
+        "assembling-machine-1": 1,
+        "inserter": 2,
+        "passive-provider-chest": 1,
+        "requester-chest": 1
+      },
+      "reserved": {
+        "assembling-machine-1": 1,
+        "inserter": 2,
+        "requester-chest": 1
+      },
+      "revision": 18,
+      "sequence": 27,
+      "source_producers": {
+        "assembling-machine-1": "stock",
+        "inserter": "stock",
+        "passive-provider-chest": "stock",
+        "requester-chest": "stock"
+      },
+      "state": "supply_wait",
+      "target_item": "long-handed-inserter"
+    }
+  ],
+  "revision": 225,
+  "surface": "nauvis",
+  "version": 1
+}

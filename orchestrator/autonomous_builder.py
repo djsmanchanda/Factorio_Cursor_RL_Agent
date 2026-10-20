@@ -3150,6 +3150,10 @@ def build_mining_stage(
             recipe == "iron-plate"
             and _independent_mall_ready(client, surface, force)
         )
+        and not _stocked_furnaces_cover_growth(
+            client, surface, force, recipe, planned_furnaces,
+            existing_smelter.furnace_count if existing_smelter is not None else 0,
+        )
     ):
         emit(
             f"BOOTSTRAP FURNACE CAP: deferring {recipe} expansion at "
@@ -8425,6 +8429,35 @@ def _ensure_chemical_ladder_predecessor(
         )
 
 
+#: Ceiling on one advanced-circuit seed: a bounded loan, not standing production.
+ADVANCED_CIRCUIT_SEED_MAX = 12
+
+
+def _advanced_circuit_seed_target(stock: Mapping[str, int], requested: int) -> int:
+    """Seed level that funds the open bills blocked on advanced circuits.
+
+    The circuit cell's own bill (and its long-handed-inserter cell's) needs
+    passive-provider chests, whose recipe needs advanced circuits. A one-circuit
+    seed paid for one chest, so the chest batch parked on its unfunded rung
+    (cohort 11: 18 runs, up to 225 handoffs each). The level is the circuits
+    in active owned bills plus the circuits for every circuit-made item those
+    bills are short of, from the real recipes, bounded.
+    """
+    ledger = _MATERIAL_RESERVATION_LEDGER
+    if ledger is None:
+        return requested
+    needed = ledger.required_stock("advanced-circuit")
+    for item, spec in LINE_RECIPES.items():
+        amounts = dict(zip(spec.get("ingredients", ()), spec.get("amounts", ()), strict=True))
+        if "advanced-circuit" not in amounts or item == "advanced-circuit":
+            continue
+        short = ledger.required_stock(item) - int(stock.get(item, 0))
+        if short > 0:
+            crafts = math.ceil(short / max(1, spec.get("product_amount", 1)))
+            needed += crafts * int(amounts["advanced-circuit"])
+    return max(requested, min(ADVANCED_CIRCUIT_SEED_MAX, needed))
+
+
 def _bootstrap_advanced_circuit_batch(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     target: int, reference_point: Point, emit: Callable[[str], None],
@@ -8442,6 +8475,7 @@ def _bootstrap_advanced_circuit_batch(
     if own is None and _production_started(client, surface, force, "advanced-circuit"):
         return
     stock = _transferable_or_available_stock(client, surface, force)
+    target = _advanced_circuit_seed_target(stock, target)
     if stock.get("advanced-circuit", 0) >= target:
         if own is not None:
             _restore_bootstrap_loan(client, bridge, surface, force, own, emit,
@@ -10944,6 +10978,31 @@ def _electric_furnace_producer_started(
     )
 
 
+def _stocked_furnaces_cover_growth(
+    client: RconClient, surface: str, force: str, recipe: str,
+    planned: int, existing: int,
+) -> bool:
+    """Whether unreserved furnaces already in the network fund this growth.
+
+    The bootstrap cap stops plate growth from draining furnaces nothing can
+    replace. Furnaces in stock and not reserved by another owner are supply,
+    not a promise of production (cohort 11: 29-35 kit electric furnaces sat
+    unused while copper waited 541 times for a producer). Stock short of the
+    growth keeps the cap: neither stocked nor producible still means wait.
+    """
+    if not hasattr(client, "command"):
+        return False
+    growth = planned - existing
+    if growth <= 0:
+        return True
+    stock = _transferable_or_available_stock(client, surface, force)
+    if _MATERIAL_RESERVATION_LEDGER is not None:
+        stock = _MATERIAL_RESERVATION_LEDGER.allocatable_stock(
+            stock, claimant=f"expand_{recipe}_system",
+        )
+    return stock.get(LINE_RECIPES[recipe]["machine"], 0) >= growth
+
+
 def _prep_plate_extraction(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     short_plate: str, prepped: set[str], deferred_targets: dict[str, int],
@@ -11025,6 +11084,10 @@ def _prep_plate_extraction(
         and not (
             short_plate == "iron-plate"
             and _independent_mall_ready(client, surface, force)
+        )
+        and not _stocked_furnaces_cover_growth(
+            client, surface, force, short_plate, wanted_furnaces,
+            plate_line.machine_count if plate_line is not None else 0,
         )
     ):
         cap = BOOTSTRAP_FURNACE_CAPS[short_plate]

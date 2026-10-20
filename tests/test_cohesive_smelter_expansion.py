@@ -832,6 +832,43 @@ def test_bootstrap_cap_applies_to_the_cohesive_total_not_the_new_batch(
     assert failure.value.details["planned_furnaces"] == 24
 
 
+@pytest.mark.parametrize("stocked,capped", [(30, False), (5, True)])
+def test_stocked_furnaces_lift_the_copper_cap_only_when_they_cover_growth(
+    monkeypatch, stocked, capped,
+) -> None:
+    # Cohort 11 cluster A (copper-s79405): 6 -> 12 copper furnaces, 30 kit electric furnaces in stock.
+    extraction = SimpleNamespace(
+        build_plan={"phases": []}, drill_count=6, furnace_count=6,
+        mining_productivity_bonus=0.0, ore_output=(10.0, 20.0),
+        smelter_flow_direction="east", system_drill_count_before=6,
+        system_drill_target=12, ore="copper-ore", smelter_origin=(30.0, 30.0),
+    )
+    monkeypatch.setattr(builder, "retire_depleted_mines", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(builder, "plan_local_extraction", lambda *_a, **_k: extraction)
+    monkeypatch.setattr(builder, "_cohesive_smelter_target", lambda *_a: (_state("copper-plate", 6), 12))
+    monkeypatch.setattr(builder, "_electric_furnace_producer_started", lambda *_a: False)
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", None)
+    monkeypatch.setattr(builder, "_transferable_or_available_stock",
+                        lambda *_a: {"electric-furnace": stocked})
+
+    class Preflight(Exception):
+        pass
+
+    def preflight(*_a, **_k):
+        raise Preflight
+    monkeypatch.setattr(builder, "_assert_atomic_plate_expansion_affordable", preflight)
+    client = SimpleNamespace(command=lambda *_a: "")
+    expected = builder.ProductionPrerequisiteDeferred if capped else Preflight
+    with pytest.raises(expected) as failure:
+        builder.build_mining_stage(
+            client, object(), "nauvis", "player", "copper-plate",
+            (0.0, 0.0), lambda _message: None, expand=True,
+        )
+    if capped:
+        assert failure.value.code == "electric_furnace_supply_wait"
+
+
 @pytest.mark.parametrize("recipe", ["iron-plate", "stone-brick"])
 def test_mining_expansion_refuses_without_recoverable_refinery(monkeypatch, recipe) -> None:
     extraction = SimpleNamespace(build_plan={"phases": []})

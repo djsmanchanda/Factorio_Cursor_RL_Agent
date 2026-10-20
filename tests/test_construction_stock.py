@@ -4378,6 +4378,76 @@ def test_advanced_seed_borrows_only_the_requested_bill(monkeypatch):
     assert calls == [(("advanced-circuit", 4), {"spare_target_count": 4})]
 
 
+C11_FIXTURES = Path(__file__).parent / "fixtures" / "c11"
+# Real recipe bills (2.x catalog): passive provider = steel chest + 3 green + 1 advanced circuit.
+C11_RECIPES = {
+    "passive-provider-chest": {"machine": "assembling-machine-2", "craft_time": 0.5, "product_amount": 1,
+                               "ingredients": ["steel-chest", "electronic-circuit", "advanced-circuit"],
+                               "amounts": [1, 3, 1]},
+    "electric-furnace": {"machine": "assembling-machine-2", "craft_time": 5.0, "product_amount": 1,
+                         "ingredients": ["steel-plate", "advanced-circuit", "stone-brick"], "amounts": [10, 5, 10]},
+}
+
+
+def _c11_ledger(tmp_path, episode):
+    from orchestrator.material_reservations import MaterialReservationLedger
+    target = tmp_path / "logs" / "deterministic-material-reservations"
+    target.mkdir(parents=True)
+    (target / f"{episode}.json").write_text((C11_FIXTURES / f"{episode}.json").read_text())
+    return MaterialReservationLedger(tmp_path / "script-output", episode_id=episode,
+                                     surface="nauvis", force="player")
+
+
+@pytest.mark.parametrize("episode,stock,expected", [
+    # ready-s79402: circuit cell, long-inserter cell and a held inserter cell need 3 chests, 1 stocked.
+    ("laya-ready-s79402", {"passive-provider-chest": 1, "advanced-circuit": 1, "electric-furnace": 29}, 2),
+    # reconcile-s79411: six open bills need a chest each, 1 stocked ("need 6, short 5"); its stone
+    # refinery's 6 electric furnaces are covered by the 35 in stock.
+    ("laya-reconcile-s79411", {"passive-provider-chest": 1, "advanced-circuit": 1, "electric-furnace": 35}, 5),
+    # Without those furnaces the refinery bill is circuit-blocked too: bounded.
+    ("laya-reconcile-s79411", {"passive-provider-chest": 1}, builder.ADVANCED_CIRCUIT_SEED_MAX),
+    # Chests delivered: nothing is blocked on circuits, the requested seed stands.
+    ("laya-reconcile-s79411", {"passive-provider-chest": 6, "electric-furnace": 35}, 1),
+])
+def test_advanced_seed_is_sized_from_the_blocked_chest_bills(monkeypatch, tmp_path, episode, stock, expected):
+    for item, spec in C11_RECIPES.items():
+        monkeypatch.setitem(builder.LINE_RECIPES, item, spec)
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", _c11_ledger(tmp_path, episode))
+    assert builder._advanced_circuit_seed_target(stock, 1) == expected
+
+
+def test_advanced_seed_borrows_the_sized_bill(monkeypatch, tmp_path):
+    for item, spec in C11_RECIPES.items():
+        monkeypatch.setitem(builder.LINE_RECIPES, item, spec)
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", _c11_ledger(tmp_path, "laya-reconcile-s79411"))
+    client = SimpleNamespace(command=lambda *_a: "")
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: [])
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+    monkeypatch.setattr(builder, "_transferable_or_available_stock",
+                        lambda *_a: {"passive-provider-chest": 1, "advanced-circuit": 1, "electric-furnace": 35})
+    calls = []
+    monkeypatch.setattr(builder, "_start_bootstrap_loan", lambda *a, **k: calls.append((a[4:6], k)) or "batch")
+    with pytest.raises(builder.ProductionPrerequisiteDeferred) as caught:
+        builder._bootstrap_advanced_circuit_batch(client, object(), "nauvis", "player", 1, (0, 0), print)
+    assert caught.value.details["target"] == 5
+    assert calls == [(("advanced-circuit", 5), {"spare_target_count": 5})]
+
+
+@pytest.mark.parametrize("reserved,expected", [(0, True), (25, False)])
+def test_stocked_furnaces_cover_growth_respects_other_owners(monkeypatch, tmp_path, reserved, expected):
+    # copper-s79405 (cluster A): 30 electric furnaces in stock, copper 6 -> 12.
+    ledger = _c11_ledger(tmp_path, "laya-copper-s79405")
+    stock = {"electric-furnace": 30}
+    if reserved:
+        ledger.declare("another_refinery", {"electric-furnace": reserved}, stock, priority=99)
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", ledger)
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: stock)
+    client = SimpleNamespace(command=lambda *_a: "")
+    assert builder._stocked_furnaces_cover_growth(client, "nauvis", "player", "copper-plate", 12, 6) is expected
+    assert builder._stocked_furnaces_cover_growth(client, "nauvis", "player", "copper-plate", 40, 6) is False
+    assert builder._stocked_furnaces_cover_growth(object(), "nauvis", "player", "copper-plate", 12, 6) is False
+
+
 def test_advanced_seed_restores_only_after_delivered_stock(monkeypatch):
     client = SimpleNamespace(command=lambda *_a: "")
     loan = SimpleNamespace(target_item="advanced-circuit")

@@ -1,0 +1,1019 @@
+{
+ "enabled_recipes": {
+  "advanced-circuit": true,
+  "assembling-machine-1": true,
+  "assembling-machine-2": true,
+  "automation-science-pack": true,
+  "basic-oil-processing": true,
+  "big-electric-pole": true,
+  "chemical-plant": true,
+  "chemical-science-pack": true,
+  "copper-cable": true,
+  "copper-plate": true,
+  "electric-furnace": true,
+  "electric-mining-drill": true,
+  "electronic-circuit": true,
+  "engine-unit": true,
+  "fast-inserter": true,
+  "inserter": true,
+  "iron-gear-wheel": true,
+  "iron-plate": true,
+  "iron-stick": true,
+  "logistic-science-pack": true,
+  "long-handed-inserter": true,
+  "medium-electric-pole": true,
+  "oil-refinery": true,
+  "passive-provider-chest": true,
+  "pipe": true,
+  "plastic-bar": true,
+  "production-science-pack": true,
+  "productivity-module": true,
+  "pumpjack": true,
+  "rail": true,
+  "requester-chest": true,
+  "roboport": true,
+  "splitter": true,
+  "steel-chest": true,
+  "steel-plate": true,
+  "stone-brick": true,
+  "sulfur": true,
+  "transport-belt": true,
+  "underground-belt": true
+ },
+ "machines": [
+  {
+   "name": "electric-mining-drill",
+   "recipe": null,
+   "status": "working"
+  },
+  {
+   "name": "electric-mining-drill",
+   "recipe": null,
+   "status": "working"
+  },
+  {
+   "name": "electric-mining-drill",
+   "recipe": null,
+   "status": "waiting_for_space_in_destination"
+  },
+  {
+   "name": "electric-mining-drill",
+   "recipe": null,
+   "status": "working"
+  },
+  {
+   "name": "pumpjack",
+   "recipe": null,
+   "status": "working"
+  },
+  {
+   "name": "oil-refinery",
+   "recipe": "basic-oil-processing",
+   "status": "working"
+  },
+  {
+   "name": "oil-refinery",
+   "recipe": "basic-oil-processing",
+   "status": "working"
+  },
+  {
+   "name": "oil-refinery",
+   "recipe": "basic-oil-processing",
+   "status": "working"
+  },
+  {
+   "name": "oil-refinery",
+   "recipe": "basic-oil-processing",
+   "status": "working"
+  },
+  {
+   "name": "chemical-plant",
+   "recipe": "plastic-bar",
+   "status": "working"
+  },
+  {
+   "name": "chemical-plant",
+   "recipe": "plastic-bar",
+   "status": "working"
+  },
+  {
+   "name": "pumpjack",
+   "recipe": null,
+   "status": "working"
+  },
+  {
+   "name": "pumpjack",
+   "recipe": null,
+   "status": "working"
+  },
+  {
+   "name": "electric-furnace",
+   "recipe": "iron-plate",
+   "status": "full_output"
+  },
+  {
+   "name": "electric-furnace",
+   "recipe": "iron-plate",
+   "status": "full_output"
+  },
+  {
+   "name": "electric-furnace",
+   "recipe": "iron-plate",
+   "status": "full_output"
+  },
+  {
+   "name": "electric-furnace",
+   "recipe": "iron-plate",
+   "status": "full_output"
+  },
+  {
+   "name": "electric-furnace",
+   "recipe": "iron-plate",
+   "status": "full_output"
+  },
+  {
+   "name": "electric-furnace",
+   "recipe": "iron-plate",
+   "status": "full_output"
+  },
+  {
+   "name": "electric-mining-drill",
+   "recipe": null,
+   "status": "working"
+  },
+  {
+   "name": "electric-furnace",
+   "recipe": "iron-plate",
+   "status": "working"
+  },
+  {
+   "name": "electric-furnace",
+   "recipe": "steel-plate",
+   "status": "working"
+  },
+  {
+   "name": "electric-mining-drill",
+   "recipe": null,
+   "status": "working"
+  },
+  {
+   "name": "electric-mining-drill",
+   "recipe": null,
+   "status": "working"
+  },
+  {
+   "name": "electric-mining-drill",
+   "recipe": null,
+   "status": "waiting_for_space_in_destination"
+  },
+  {
+   "name": "electric-mining-drill",
+   "recipe": null,
+   "status": "waiting_for_space_in_destination"
+  },
+  {
+   "name": "electric-mining-drill",
+   "recipe": null,
+   "status": "waiting_for_space_in_destination"
+  },
+  {
+   "name": "electric-mining-drill",
+   "recipe": null,
+   "status": "waiting_for_space_in_destination"
+  },
+  {
+   "name": "electric-mining-drill",
+   "recipe": null,
+   "status": "waiting_for_space_in_destination"
+  },
+  {
+   "name": "electric-mining-drill",
+   "recipe": null,
+   "status": "waiting_for_space_in_destination"
+  },
+  {
+   "name": "assembling-machine-1",
+   "recipe": "advanced-circuit",
+   "status": "disabled_by_control_behavior"
+  },
+  {
+   "name": "assembling-machine-1",
+   "recipe": "advanced-circuit",
+   "status": "disabled_by_control_behavior"
+  },
+  {
+   "name": "assembling-machine-1",
+   "recipe": "electronic-circuit",
+   "status": "disabled_by_control_behavior"
+  },
+  {
+   "name": "assembling-machine-1",
+   "recipe": "transport-belt",
+   "status": "disabled_by_control_behavior"
+  },
+  {
+   "name": "assembling-machine-1",
+   "recipe": "copper-cable",
+   "status": "disabled_by_control_behavior"
+  },
+  {
+   "name": "assembling-machine-1",
+   "recipe": "copper-cable",
+   "status": "disabled_by_control_behavior"
+  },
+  {
+   "name": "assembling-machine-1",
+   "recipe": "long-handed-inserter",
+   "status": "disabled_by_control_behavior"
+  },
+  {
+   "name": "assembling-machine-1",
+   "recipe": "inserter",
+   "status": "disabled_by_control_behavior"
+  },
+  {
+   "name": "electric-mining-drill",
+   "recipe": null,
+   "status": "working"
+  },
+  {
+   "name": "electric-mining-drill",
+   "recipe": null,
+   "status": "working"
+  },
+  {
+   "name": "electric-mining-drill",
+   "recipe": null,
+   "status": "working"
+  },
+  {
+   "name": "electric-mining-drill",
+   "recipe": null,
+   "status": "working"
+  },
+  {
+   "name": "electric-furnace",
+   "recipe": "stone-brick",
+   "status": "working"
+  },
+  {
+   "name": "electric-furnace",
+   "recipe": "stone-brick",
+   "status": "no_ingredients"
+  },
+  {
+   "name": "electric-furnace",
+   "recipe": "stone-brick",
+   "status": "no_ingredients"
+  },
+  {
+   "name": "electric-furnace",
+   "recipe": "stone-brick",
+   "status": "working"
+  },
+  {
+   "name": "electric-furnace",
+   "recipe": "stone-brick",
+   "status": "working"
+  },
+  {
+   "name": "electric-furnace",
+   "recipe": "stone-brick",
+   "status": "working"
+  },
+  {
+   "name": "electric-mining-drill",
+   "recipe": null,
+   "status": "waiting_for_space_in_destination"
+  },
+  {
+   "name": "electric-mining-drill",
+   "recipe": null,
+   "status": "waiting_for_space_in_destination"
+  },
+  {
+   "name": "electric-mining-drill",
+   "recipe": null,
+   "status": "waiting_for_space_in_destination"
+  },
+  {
+   "name": "electric-mining-drill",
+   "recipe": null,
+   "status": "waiting_for_space_in_destination"
+  },
+  {
+   "name": "electric-mining-drill",
+   "recipe": null,
+   "status": "waiting_for_space_in_destination"
+  },
+  {
+   "name": "electric-mining-drill",
+   "recipe": null,
+   "status": "waiting_for_space_in_destination"
+  },
+  {
+   "name": "electric-furnace",
+   "recipe": "copper-plate",
+   "status": "full_output"
+  },
+  {
+   "name": "electric-furnace",
+   "recipe": "copper-plate",
+   "status": "full_output"
+  },
+  {
+   "name": "electric-furnace",
+   "recipe": "copper-plate",
+   "status": "full_output"
+  },
+  {
+   "name": "electric-furnace",
+   "recipe": "copper-plate",
+   "status": "full_output"
+  },
+  {
+   "name": "electric-furnace",
+   "recipe": "copper-plate",
+   "status": "full_output"
+  },
+  {
+   "name": "electric-furnace",
+   "recipe": "copper-plate",
+   "status": "full_output"
+  }
+ ],
+ "recipes": {
+  "advanced-circuit": {
+   "energy_ticks": 360,
+   "ingredients": [
+    {
+     "amount": 2,
+     "name": "plastic-bar",
+     "type": "item"
+    },
+    {
+     "amount": 4,
+     "name": "copper-cable",
+     "type": "item"
+    },
+    {
+     "amount": 2,
+     "name": "electronic-circuit",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "assembling-machine-1": {
+   "energy_ticks": 30,
+   "ingredients": [
+    {
+     "amount": 9,
+     "name": "iron-plate",
+     "type": "item"
+    },
+    {
+     "amount": 5,
+     "name": "iron-gear-wheel",
+     "type": "item"
+    },
+    {
+     "amount": 3,
+     "name": "electronic-circuit",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "assembling-machine-2": {
+   "energy_ticks": 30,
+   "ingredients": [
+    {
+     "amount": 2,
+     "name": "steel-plate",
+     "type": "item"
+    },
+    {
+     "amount": 5,
+     "name": "iron-gear-wheel",
+     "type": "item"
+    },
+    {
+     "amount": 3,
+     "name": "electronic-circuit",
+     "type": "item"
+    },
+    {
+     "amount": 1,
+     "name": "assembling-machine-1",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "automation-science-pack": {
+   "energy_ticks": 300,
+   "ingredients": [
+    {
+     "amount": 1,
+     "name": "copper-plate",
+     "type": "item"
+    },
+    {
+     "amount": 1,
+     "name": "iron-gear-wheel",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "big-electric-pole": {
+   "energy_ticks": 30,
+   "ingredients": [
+    {
+     "amount": 5,
+     "name": "steel-plate",
+     "type": "item"
+    },
+    {
+     "amount": 8,
+     "name": "iron-stick",
+     "type": "item"
+    },
+    {
+     "amount": 4,
+     "name": "copper-cable",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "chemical-plant": {
+   "energy_ticks": 300,
+   "ingredients": [
+    {
+     "amount": 5,
+     "name": "steel-plate",
+     "type": "item"
+    },
+    {
+     "amount": 5,
+     "name": "iron-gear-wheel",
+     "type": "item"
+    },
+    {
+     "amount": 5,
+     "name": "electronic-circuit",
+     "type": "item"
+    },
+    {
+     "amount": 5,
+     "name": "pipe",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "chemical-science-pack": {
+   "energy_ticks": 1440,
+   "ingredients": [
+    {
+     "amount": 1,
+     "name": "sulfur",
+     "type": "item"
+    },
+    {
+     "amount": 3,
+     "name": "advanced-circuit",
+     "type": "item"
+    },
+    {
+     "amount": 2,
+     "name": "engine-unit",
+     "type": "item"
+    }
+   ],
+   "product_amount": 2
+  },
+  "copper-cable": {
+   "energy_ticks": 30,
+   "ingredients": [
+    {
+     "amount": 1,
+     "name": "copper-plate",
+     "type": "item"
+    }
+   ],
+   "product_amount": 2
+  },
+  "copper-plate": {
+   "energy_ticks": 192,
+   "ingredients": [
+    {
+     "amount": 1,
+     "name": "copper-ore",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "electric-furnace": {
+   "energy_ticks": 300,
+   "ingredients": [
+    {
+     "amount": 10,
+     "name": "steel-plate",
+     "type": "item"
+    },
+    {
+     "amount": 5,
+     "name": "advanced-circuit",
+     "type": "item"
+    },
+    {
+     "amount": 10,
+     "name": "stone-brick",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "electric-mining-drill": {
+   "energy_ticks": 120,
+   "ingredients": [
+    {
+     "amount": 10,
+     "name": "iron-plate",
+     "type": "item"
+    },
+    {
+     "amount": 5,
+     "name": "iron-gear-wheel",
+     "type": "item"
+    },
+    {
+     "amount": 3,
+     "name": "electronic-circuit",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "electronic-circuit": {
+   "energy_ticks": 30,
+   "ingredients": [
+    {
+     "amount": 1,
+     "name": "iron-plate",
+     "type": "item"
+    },
+    {
+     "amount": 3,
+     "name": "copper-cable",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "engine-unit": {
+   "energy_ticks": 600,
+   "ingredients": [
+    {
+     "amount": 1,
+     "name": "steel-plate",
+     "type": "item"
+    },
+    {
+     "amount": 1,
+     "name": "iron-gear-wheel",
+     "type": "item"
+    },
+    {
+     "amount": 2,
+     "name": "pipe",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "fast-inserter": {
+   "energy_ticks": 30,
+   "ingredients": [
+    {
+     "amount": 2,
+     "name": "iron-plate",
+     "type": "item"
+    },
+    {
+     "amount": 2,
+     "name": "electronic-circuit",
+     "type": "item"
+    },
+    {
+     "amount": 1,
+     "name": "inserter",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "inserter": {
+   "energy_ticks": 30,
+   "ingredients": [
+    {
+     "amount": 1,
+     "name": "iron-plate",
+     "type": "item"
+    },
+    {
+     "amount": 1,
+     "name": "iron-gear-wheel",
+     "type": "item"
+    },
+    {
+     "amount": 1,
+     "name": "electronic-circuit",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "iron-gear-wheel": {
+   "energy_ticks": 30,
+   "ingredients": [
+    {
+     "amount": 2,
+     "name": "iron-plate",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "iron-plate": {
+   "energy_ticks": 192,
+   "ingredients": [
+    {
+     "amount": 1,
+     "name": "iron-ore",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "iron-stick": {
+   "energy_ticks": 30,
+   "ingredients": [
+    {
+     "amount": 1,
+     "name": "iron-plate",
+     "type": "item"
+    }
+   ],
+   "product_amount": 2
+  },
+  "logistic-science-pack": {
+   "energy_ticks": 360,
+   "ingredients": [
+    {
+     "amount": 1,
+     "name": "transport-belt",
+     "type": "item"
+    },
+    {
+     "amount": 1,
+     "name": "inserter",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "long-handed-inserter": {
+   "energy_ticks": 30,
+   "ingredients": [
+    {
+     "amount": 1,
+     "name": "iron-plate",
+     "type": "item"
+    },
+    {
+     "amount": 1,
+     "name": "iron-gear-wheel",
+     "type": "item"
+    },
+    {
+     "amount": 1,
+     "name": "inserter",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "medium-electric-pole": {
+   "energy_ticks": 30,
+   "ingredients": [
+    {
+     "amount": 2,
+     "name": "steel-plate",
+     "type": "item"
+    },
+    {
+     "amount": 4,
+     "name": "iron-stick",
+     "type": "item"
+    },
+    {
+     "amount": 2,
+     "name": "copper-cable",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "oil-refinery": {
+   "energy_ticks": 480,
+   "ingredients": [
+    {
+     "amount": 15,
+     "name": "steel-plate",
+     "type": "item"
+    },
+    {
+     "amount": 10,
+     "name": "iron-gear-wheel",
+     "type": "item"
+    },
+    {
+     "amount": 10,
+     "name": "electronic-circuit",
+     "type": "item"
+    },
+    {
+     "amount": 10,
+     "name": "pipe",
+     "type": "item"
+    },
+    {
+     "amount": 10,
+     "name": "stone-brick",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "passive-provider-chest": {
+   "energy_ticks": 30,
+   "ingredients": [
+    {
+     "amount": 3,
+     "name": "electronic-circuit",
+     "type": "item"
+    },
+    {
+     "amount": 1,
+     "name": "advanced-circuit",
+     "type": "item"
+    },
+    {
+     "amount": 1,
+     "name": "steel-chest",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "pipe": {
+   "energy_ticks": 30,
+   "ingredients": [
+    {
+     "amount": 1,
+     "name": "iron-plate",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "production-science-pack": {
+   "energy_ticks": 1260,
+   "ingredients": [
+    {
+     "amount": 30,
+     "name": "rail",
+     "type": "item"
+    },
+    {
+     "amount": 1,
+     "name": "electric-furnace",
+     "type": "item"
+    },
+    {
+     "amount": 1,
+     "name": "productivity-module",
+     "type": "item"
+    }
+   ],
+   "product_amount": 3
+  },
+  "productivity-module": {
+   "energy_ticks": 900,
+   "ingredients": [
+    {
+     "amount": 5,
+     "name": "electronic-circuit",
+     "type": "item"
+    },
+    {
+     "amount": 5,
+     "name": "advanced-circuit",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "pumpjack": {
+   "energy_ticks": 300,
+   "ingredients": [
+    {
+     "amount": 5,
+     "name": "steel-plate",
+     "type": "item"
+    },
+    {
+     "amount": 10,
+     "name": "iron-gear-wheel",
+     "type": "item"
+    },
+    {
+     "amount": 5,
+     "name": "electronic-circuit",
+     "type": "item"
+    },
+    {
+     "amount": 10,
+     "name": "pipe",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "rail": {
+   "energy_ticks": 30,
+   "ingredients": [
+    {
+     "amount": 1,
+     "name": "stone",
+     "type": "item"
+    },
+    {
+     "amount": 1,
+     "name": "steel-plate",
+     "type": "item"
+    },
+    {
+     "amount": 1,
+     "name": "iron-stick",
+     "type": "item"
+    }
+   ],
+   "product_amount": 2
+  },
+  "requester-chest": {
+   "energy_ticks": 30,
+   "ingredients": [
+    {
+     "amount": 3,
+     "name": "electronic-circuit",
+     "type": "item"
+    },
+    {
+     "amount": 1,
+     "name": "advanced-circuit",
+     "type": "item"
+    },
+    {
+     "amount": 1,
+     "name": "steel-chest",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "roboport": {
+   "energy_ticks": 300,
+   "ingredients": [
+    {
+     "amount": 45,
+     "name": "steel-plate",
+     "type": "item"
+    },
+    {
+     "amount": 45,
+     "name": "iron-gear-wheel",
+     "type": "item"
+    },
+    {
+     "amount": 45,
+     "name": "advanced-circuit",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "splitter": {
+   "energy_ticks": 60,
+   "ingredients": [
+    {
+     "amount": 5,
+     "name": "iron-plate",
+     "type": "item"
+    },
+    {
+     "amount": 5,
+     "name": "electronic-circuit",
+     "type": "item"
+    },
+    {
+     "amount": 4,
+     "name": "transport-belt",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "steel-chest": {
+   "energy_ticks": 30,
+   "ingredients": [
+    {
+     "amount": 8,
+     "name": "steel-plate",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "steel-plate": {
+   "energy_ticks": 960,
+   "ingredients": [
+    {
+     "amount": 5,
+     "name": "iron-plate",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "stone-brick": {
+   "energy_ticks": 192,
+   "ingredients": [
+    {
+     "amount": 2,
+     "name": "stone",
+     "type": "item"
+    }
+   ],
+   "product_amount": 1
+  },
+  "transport-belt": {
+   "energy_ticks": 30,
+   "ingredients": [
+    {
+     "amount": 1,
+     "name": "iron-plate",
+     "type": "item"
+    },
+    {
+     "amount": 1,
+     "name": "iron-gear-wheel",
+     "type": "item"
+    }
+   ],
+   "product_amount": 2
+  },
+  "underground-belt": {
+   "energy_ticks": 60,
+   "ingredients": [
+    {
+     "amount": 10,
+     "name": "iron-plate",
+     "type": "item"
+    },
+    {
+     "amount": 5,
+     "name": "transport-belt",
+     "type": "item"
+    }
+   ],
+   "product_amount": 2
+  }
+ },
+ "source": "laya-c11-20261020 copper-s79405 laya_saved_world/ca417f3cb26d4f8f971cf41b222bee11.json (cluster A, read-only extract)",
+ "stock": {
+  "advanced-circuit": 1,
+  "copper-plate": 4800,
+  "electric-furnace": 30,
+  "iron-plate": 4821,
+  "passive-provider-chest": 3,
+  "steel-plate": 364,
+  "stone-brick": 6740
+ },
+ "tick": 576234
+}
