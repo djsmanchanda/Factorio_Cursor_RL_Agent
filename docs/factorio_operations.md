@@ -50,12 +50,12 @@ Repository, dedicated-server, GUI-client, and WSL mod copies are distinct. Compa
 
 ### Engine version and rollback
 
-Native manager and dashboard defaults target Factorio **2.1.22** (build 87719).
+Native manager and dashboard defaults target Factorio **2.1.23** (build 87750).
 Pair the executable with the same runtime's `data` directory and use a matching
 GUI client for multiplayer. Existing frozen experiments retain their recorded
 engine version; do not merge their results with new-version runs as matched evidence.
 
-Keep the private `factorio-2.1.21` runtime (build 87673) and pre-upgrade save
+Keep the private `factorio-2.1.22` runtime (build 87719), older 2.1.21 runtime, and pre-upgrade save
 copies for rollback.
 Use `--runtime-root` to select the older engine, restore the appropriate copied
 save and matching `read-data` configuration while stopped, then restart only
@@ -67,7 +67,7 @@ establish that an upgraded save can be loaded by the older engine.
 `scripts/manage_linux_training_worker.sh` creates only disposable worker state
 below `~/.local/share/factorio-rl/training/<index>/worker`. It uses a separate
 Factorio `write-data` root plus the private headless runtime at
-`~/.local/share/factorio-rl/runtime/factorio-2.1.22`, local RCON port,
+`~/.local/share/factorio-rl/runtime/factorio-2.1.23`, local RCON port,
 worker-local `script-output`, save, mods, logs, and mode-600 RCON-secret file.
 Its default ports are game
 `35000 + index` and RCON `28000 + index`; RCON remains loopback-only.
@@ -76,7 +76,7 @@ Its default ports are game
 
 `scripts/manage_linux_deterministic_server.sh` owns the isolated deterministic
 root at `~/.local/share/factorio-rl/deterministic`, using the private
-`factorio-2.1.22` runtime.  Its `bootstrap` action requires an explicit source
+`factorio-2.1.23` runtime.  Its `bootstrap` action requires an explicit source
 save and copies it once to the isolated root; it never writes to
 `~/.factorio/saves`.  The default game/RCON endpoints are loopback-only
 `34199/27017`, and the RCON secret is a mode-600 file under the server root.
@@ -111,7 +111,7 @@ uv run --with-requirements requirements.txt python tools/dashboard_server.py \
   --server-manager scripts/manage_linux_deterministic_server.sh \
   --runner-manager scripts/manage_linux_deterministic_runner.sh \
   --campaign-manager scripts/manage_linux_deterministic_campaign.sh \
-  --runtime-root ~/.local/share/factorio-rl/runtime/factorio-2.1.22 \
+  --runtime-root ~/.local/share/factorio-rl/runtime/factorio-2.1.23 \
   --gui-mods ~/.factorio/mods
 ```
 
