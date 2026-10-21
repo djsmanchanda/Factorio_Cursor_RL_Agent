@@ -21,7 +21,7 @@ batch.json:
    "trial_wall_seconds": int, "max_game_ticks": int, "source_save": path, "python": path,
    "seeds": [int, ...], "max_concurrency": optional int (default concurrency + 4),
    "adaptive": optional false | {"min", "window_seconds", "min_ups_p95", "min_ups_p98",
-               "grow_after", "min_available_gb", "max_decision_gap_s", "target_ups"},
+               "grow_after", "grow_step", "min_available_gb", "max_decision_gap_s", "target_ups"},
    "arms": [{"id": str, "code": frozen worktree, "mods": staged mods dir, "revision": sha,
              "change": str, "variant": optional path, "extra_args": optional [str]}],
    "host_budget": optional {"registry": dir of cohort roots, "stale_seconds", "admit_interval_seconds",
@@ -119,6 +119,7 @@ class SlotController:
         self.min_p95 = float(options.get("min_ups_p95", 0.85 * target_ups))
         self.min_p98 = float(options.get("min_ups_p98", 0.75 * target_ups))
         self.grow_after = int(options.get("grow_after", 2))
+        self.grow_step = int(options.get("grow_step", 1))
         self.min_gb = float(options.get("min_available_gb", 3.0))
         self.max_gap_s = float(options.get("max_decision_gap_s", 600))
         # After an up/down/up (or down/up/down) flip-flop, stop growing for this many windows.
@@ -154,7 +155,7 @@ class SlotController:
         else:
             state, decision = adjust_adaptive_slots(
                 self.state, UpsWindow(tuple(samples)) if samples else None, minimum=self.minimum,
-                maximum=self.maximum, step=1, minimum_safe_ups_p95=self.min_p95, minimum_safe_ups_p98=self.min_p98,
+                maximum=self.maximum, step=self.grow_step, minimum_safe_ups_p95=self.min_p95, minimum_safe_ups_p98=self.min_p98,
                 healthy_windows_to_grow=self.grow_after, unhealthy_windows_to_shrink=1)
             if decision == "increase_safe_ups" and (not queued or len(running) < before):
                 # Grow only when the current slots are all in use and work is waiting; keep the healthy streak.
@@ -285,6 +286,28 @@ class Batch:
         self.controller = SlotController(self.cfg, self.root / "controller.jsonl")
         self.host = HostBudget(self.root, self.cfg["host_budget"]) if self.cfg.get("host_budget") else None
 
+    RERUN = ("queued", "preparing", "running", "interrupted", "not_started_interrupted")
+
+    def resume(self) -> None:
+        """Continue a stopped supervisor: keep every finished job, rerun only work it interrupted.
+
+        A rerun records its interrupted attempt and runs again from a fresh world; terminal outcomes (completed,
+        errors, wall caps, deadline censoring) are evidence and never rerun.
+        """
+        previous = {job["id"]: job for job in json.loads((self.root / "job-status.json").read_text())["jobs"]}
+        for index, planned in enumerate(self.jobs):
+            job = previous.get(planned["id"])
+            if job is None:
+                continue
+            if job["status"] in self.RERUN:
+                history = list(job.get("previous_attempts", ()))
+                if job.get("started") or job["status"] == "interrupted":
+                    history.append({k: job[k] for k in ("status", "world", "started", "elapsed_s") if k in job})
+                job = {**planned, "status": "queued", "attempt": len(history), "previous_attempts": history}
+                if not history:
+                    job = dict(planned)
+            self.jobs[index] = job
+
     def save(self) -> None:
         controller = getattr(self, "controller", None)
         with self.lock:
@@ -297,7 +320,9 @@ class Batch:
     def run_job(self, job: dict, slot: int) -> None:
         arm = self.arms[job["arm"]]
         code = Path(arm["code"])
-        world = code / "data/laya-saved-world" / self.cfg["name"] / job["id"]
+        # A rerun after --resume gets a fresh world: a prepared root cannot be prepared again.
+        world = code / "data/laya-saved-world" / self.cfg["name"] / (
+            f"{job['id']}-r{job['attempt']}" if job.get("attempt") else job["id"])
         job["world"] = str(world)
         log_path = self.root / "logs" / f"{job['id']}.out"
         env = dict(os.environ, PYTHONPATH=str(code), PYTHONDONTWRITEBYTECODE="1", PYTHONUNBUFFERED="1")
@@ -352,8 +377,10 @@ class Batch:
         running: dict = {}
         self.save()
         with ThreadPoolExecutor(controller.maximum) as pool:
-            queue = list(self.jobs)
-            admitted: set = set()
+            queue = [job for job in self.jobs if job["status"] == "queued"]
+            # Seeds already started (before a --resume) keep their admission: their blocks finish.
+            admitted: set = {job["seed"] for job in self.jobs if job.get("started")
+                             or any(a.get("started") for a in job.get("previous_attempts", ()))}
             while (queue or active) and not (self.stopping.is_set() and not active):
                 for future in [f for f in active if f.done()]:
                     future.result()
@@ -432,8 +459,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("batch", type=Path)
     parser.add_argument("--report-only", action="store_true")
+    parser.add_argument("--resume", action="store_true", help="keep finished jobs; rerun interrupted ones")
     args = parser.parse_args(argv)
     batch = Batch(args.batch.resolve())
+    if args.resume and (batch.root / "job-status.json").exists():
+        batch.resume()
     if args.report_only:
         batch.jobs = json.loads((batch.root / "job-status.json").read_text())["jobs"]
         batch.report()

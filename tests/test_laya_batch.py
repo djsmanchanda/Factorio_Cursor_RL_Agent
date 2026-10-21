@@ -240,3 +240,55 @@ def test_a_shared_batch_admits_one_trial_per_interval_and_only_with_memory_headr
     assert not host.may_admit(120.0, "hold_safe_ups") and host.may_admit(160.0, "hold_safe_ups")
     monkeypatch.setattr(harness, "_available_gb", lambda: 4.0)  # below the older cohorts' floor plus one world
     assert not host.may_admit(200.0, "increase_safe_ups")
+
+
+def test_resume_keeps_finished_jobs_and_reruns_interrupted_ones_in_fresh_worlds(tmp_path, monkeypatch):
+    import tools.run_laya_batch as harness
+    monkeypatch.setattr(harness.time, "sleep", lambda _s: None)
+    batch = _batch(tmp_path, seeds=(1, 2, 3))
+    status = {"control-s1": {"status": "completed", "started": 5.0, "world": "w/control-s1"},
+              "fix-s1": {"status": "interrupted", "started": 6.0, "world": "w/fix-s1", "elapsed_s": 40},
+              "fix-s2": {"status": "runner_error", "started": 7.0}, "control-s2": {"status": "not_started_interrupted"},
+              "control-s3": {"status": "not_started_interrupted"}, "fix-s3": {"status": "not_started_interrupted"}}
+    (tmp_path / "job-status.json").write_text(json.dumps({"jobs": [dict(j, **status[j["id"]]) for j in batch.jobs]}))
+    batch.resume()
+    jobs = {j["id"]: j for j in batch.jobs}
+    assert jobs["control-s1"]["status"] == "completed" and jobs["fix-s2"]["status"] == "runner_error"  # evidence kept
+    assert jobs["fix-s1"]["status"] == "queued" and jobs["fix-s1"]["attempt"] == 1
+    assert jobs["fix-s1"]["previous_attempts"] == [{"status": "interrupted", "world": "w/fix-s1", "started": 6.0, "elapsed_s": 40}]
+    assert jobs["control-s3"] == {"id": "control-s3", "arm": "control", "seed": 3, "status": "queued"}
+    worlds, ran = {}, []
+
+    class Controller:
+        maximum, slots, last = 4, 4, {}
+
+        def update(self, running, queued, now=None):
+            return None
+
+    def job(item, slot):
+        ran.append(item["id"])
+        item["status"] = "completed"
+    batch.controller = Controller()
+    monkeypatch.setattr(batch, "run_job", job)
+    monkeypatch.setattr(batch, "report", lambda: None)
+    batch.until = 0  # past the deadline: only blocks already started are admitted again
+    batch.run()
+    assert sorted(ran) == ["control-s2", "fix-s1"]  # seed 3 never started, so it stays censored
+    assert {jobs[i]["status"] for i in ("control-s3", "fix-s3")} == {"not_started_deadline"}
+    import tools.run_laya_batch as h
+    code = tmp_path / "code"
+    arm = {"id": "fix", "code": str(code), "mods": "m"}
+    batch.arms["fix"] = arm
+    monkeypatch.setattr(h.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("stop")))
+    rerun = dict(jobs["fix-s1"], status="queued")
+    try:
+        h.Batch.run_job(batch, rerun, 0)  # the real method; the instance's was stubbed above
+    except RuntimeError:
+        pass
+    assert rerun["world"].endswith("/fix-s1-r1")
+
+
+def test_growth_step_is_configurable(tmp_path, monkeypatch):
+    control = _controller(tmp_path, monkeypatch, grow_after=1, grow_step=2)
+    running = [_world(tmp_path, f"w{i}") for i in range(4)]
+    assert control.update(running, queued=10, now=301) == "increase_safe_ups" and control.slots == 6
