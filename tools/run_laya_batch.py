@@ -4,21 +4,28 @@
 Every arm runs the same seeds from the same base save. Jobs are ordered seed-major
 and arm round-robin, so a deadline cut leaves the arms matched. Each trial is a
 fresh `run_laya_clean prepare` + `run` with a game-tick window and a wall cap;
-the world is stopped afterwards. Concurrency is fixed (no adaptive ramp: the host
-is a laptop). Unstarted jobs stay listed as such in job-status.json.
+the world is stopped afterwards. Concurrency is a fixed worker-pool ceiling;
+an optional host budget gates admissions across cohorts. Unstarted jobs stay
+listed as such in job-status.json.
 
 batch.json:
   {"name": str, "until": ISO time, "concurrency": int, "game_port_base": int, "rcon_port_base": int,
    "trial_wall_seconds": int, "max_game_ticks": int, "source_save": path, "python": path,
    "seeds": [int, ...],
+   "host_budget": optional {"registry": path, "stale_seconds": 180,
+                             "admit_interval_seconds": 10, "admit_min_available_gb": 4.5},
+   "runtime": optional {"update_threads": 1..64, "cpu_affinity": "slot" | taskset list,
+                        "nice": 0..19, "python_nice": 0..19},
    "arms": [{"id": str, "code": frozen worktree, "mods": staged mods dir, "revision": sha,
-             "change": str, "variant": optional path, "extra_args": optional [str]}]}
+             "change": str, "variant": optional path, "extra_args": optional [str],
+             "runtime": optional arm override of the batch runtime}]}
 """
 
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import fcntl
 import json
 import os
 import re
@@ -29,6 +36,7 @@ import threading
 import time
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 PHASE = re.compile(r"^\+(\d+)s PHASE REACHED: (C\d) .* at tick (\d+)")
@@ -39,6 +47,66 @@ def _atomic(path: Path, data: object) -> None:
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=1))
     tmp.replace(path)
+
+
+class HostBudget:
+    """Serialize reservations against a fresh scheduler gate, counting legacy worlds too."""
+
+    def __init__(self, root: Path, options: dict) -> None:
+        self.registry = Path(options["registry"]).resolve()
+        if root.resolve().parent != self.registry:
+            raise ValueError("host-budget cohort must be directly inside its registry")
+        self.stale_s = float(options.get("stale_seconds", 180))
+        self.interval_s = float(options.get("admit_interval_seconds", 10))
+        self.min_gb = float(options.get("admit_min_available_gb", 4.5))
+        self.next_admit = 0.0
+        self.reason = "waiting_for_gate"
+
+    @contextmanager
+    def lock(self):
+        with (self.registry / ".host-admission.lock").open("a") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            yield
+
+    def may_admit(self, now: float) -> bool:
+        # A missing/stale gate blocks admissions, including after a timed pause.
+        # Old cohort caps are not host limits; their actual worlds still count.
+        try:
+            gate = json.loads((self.registry / "_host-scheduler-gate/job-status.json").read_text())
+            cap = gate["controller"]["slots"]
+            age = now - float(gate["updated"])
+            if type(cap) is not int or cap < 0 or not 0 <= age <= self.stale_s:
+                raise ValueError("invalid or stale gate")
+            occupied = 0
+            for path in self.registry.glob("*/job-status.json"):
+                if path.parent.name.startswith("_host-scheduler"):
+                    continue
+                data = json.loads(path.read_text())
+                # Stale running records remain reserved until the owner reconciles
+                # them; a dead supervisor may have left its Factorio worlds alive.
+                occupied += sum(bool(job.get("admission_reserved")) or
+                                job.get("status") in {"preparing", "running"}
+                                for job in data["jobs"])
+        except (OSError, ValueError, KeyError, TypeError):
+            self.reason = "unavailable_host_budget"
+            return False
+        memory = None
+        try:
+            for line in Path("/proc/meminfo").read_text().splitlines():
+                if line.startswith("MemAvailable:"):
+                    memory = int(line.split()[1]) / 1048576
+        except OSError:
+            pass
+        if occupied >= cap:
+            self.reason = "host_full_or_paused"
+        elif memory is not None and memory < self.min_gb:
+            self.reason = "memory"
+        elif now < self.next_admit:
+            self.reason = "admission_pacing"
+        else:
+            self.reason = "admitted"
+            return True
+        return False
 
 
 def summarize(world: Path) -> dict:
@@ -74,13 +142,66 @@ class Batch:
         self.jobs = [{"id": f"{arm['id']}-s{seed}", "arm": arm["id"], "seed": seed, "status": "queued"}
                      for seed in self.cfg["seeds"] for arm in self.cfg["arms"]]
         self.arms = {arm["id"]: arm for arm in self.cfg["arms"]}
+        self.host = HostBudget(self.root, self.cfg["host_budget"]) if self.cfg.get("host_budget") else None
+
+    def submit(self, pool, job: dict, slot: int):
+        with self.host.lock() if self.host else nullcontext():
+            if self.host and not self.host.may_admit(time.time()):
+                return None
+            job.update(status="preparing", admission_reserved=True)
+            self.save()  # Publish the reservation before another cohort can admit.
+            try:
+                future = pool.submit(self.run_job, job, slot)
+            except Exception:
+                job.update(status="queued", admission_reserved=False)
+                self.save()
+                raise
+            if self.host:
+                self.host.next_admit = time.time() + self.host.interval_s
+            return future
 
     def save(self) -> None:
         with self.lock:
-            _atomic(self.root / "job-status.json", {"name": self.cfg["name"], "updated": time.time(), "jobs": self.jobs})
+            _atomic(self.root / "job-status.json", {"name": self.cfg["name"], "updated": time.time(), "jobs": self.jobs,
+                    **({"host_budget": {"reason": self.host.reason}} if self.host else {})})
+
+    def _runtime(self, arm: dict) -> dict:
+        runtime = dict(self.cfg.get("runtime") or {})
+        runtime.update(arm.get("runtime") or {})
+        return runtime
+
+    @staticmethod
+    def _cpu_for_slot(slot: int) -> str:
+        """Map a slot to an allowed logical CPU, respecting a cgroup/cpuset mask."""
+        try:
+            cpus = sorted(os.sched_getaffinity(0))
+        except (AttributeError, OSError):
+            cpus = list(range(os.cpu_count() or 1))
+        return str(cpus[slot % len(cpus)])
 
     def _cmd(self, arm: dict, *args: str) -> list[str]:
-        return [self.cfg["python"], str(Path(arm["code"]) / "tools/run_laya_clean.py"), *args]
+        command = [self.cfg["python"], str(Path(arm["code"]) / "tools/run_laya_clean.py"), *args]
+        # Prepare launches Factorio, so lowering its Python priority would also
+        # lower the engine's inherited priority. Apply this only to the runner.
+        nice = int(self._runtime(arm).get("python_nice", 0)) if args and args[0] == "run" else 0
+        return ["nice", "-n", str(nice), *command] if nice else command
+
+    def runtime_args(self, slot: int, arm: dict | None = None) -> list[str]:
+        """Per-world engine settings shared by every arm, with an optional arm override."""
+        runtime = self._runtime(arm or {})
+        args: list[str] = []
+        threads = runtime.get("update_threads")
+        if threads is not None:
+            args += ["--update-threads", str(threads)]
+        affinity = runtime.get("cpu_affinity")
+        if affinity == "slot":
+            affinity = self._cpu_for_slot(slot)
+        if affinity:
+            args += ["--cpu-affinity", str(affinity)]
+        nice = int(runtime.get("nice", 0))
+        if nice:
+            args += ["--nice", str(nice)]
+        return args
 
     def run_job(self, job: dict, slot: int) -> None:
         arm = self.arms[job["arm"]]
@@ -95,7 +216,7 @@ class Batch:
                 job["status"] = "preparing"
                 prepared = subprocess.run(
                     self._cmd(arm, "prepare", "--root", str(world), "--source-save", self.cfg["source_save"],
-                              "--mods-source", arm["mods"], *ports),
+                              "--mods-source", arm["mods"], *ports, *self.runtime_args(slot, arm)),
                     cwd=code, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=240)
                 if prepared.returncode:
                     raise RuntimeError(f"prepare exit {prepared.returncode}")
@@ -125,16 +246,22 @@ class Batch:
         except Exception as error:
             job.update(status="harness_error" if "started" in job else "prepare_failed", error=f"{type(error).__name__}: {error}")
         finally:
-            subprocess.run(self._cmd(arm, "stop", "--root", str(world)), cwd=code, env=env,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
-            self.save()
+            try:
+                subprocess.run(self._cmd(arm, "stop", "--root", str(world)), cwd=code, env=env,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60, check=True)
+                job["admission_reserved"] = False
+            finally:
+                self.save()  # A failed cleanup retains the reservation for reconciliation.
 
     def run(self) -> None:
         (self.root / "logs").mkdir(exist_ok=True)
         signal.signal(signal.SIGTERM, lambda *_: self.stopping.set())
         slots = list(range(self.cfg["concurrency"]))
         active: dict = {}
-        self.save()
+        with self.host.lock() if self.host else nullcontext():
+            if (self.root / "job-status.json").exists():
+                raise ValueError("existing cohort status: use its frozen supervisor; this harness starts fresh cohorts")
+            self.save()
         with ThreadPoolExecutor(self.cfg["concurrency"]) as pool:
             queue = list(self.jobs)
             while (queue or active) and not (self.stopping.is_set() and not active):
@@ -148,13 +275,19 @@ class Batch:
                             job["status"] = "not_started_deadline"
                         queue.clear()
                         break
-                    job, slot = queue.pop(0), slots.pop(0)
-                    active[pool.submit(self.run_job, job, slot)] = slot
+                    job, slot = queue[0], slots[0]
+                    future = self.submit(pool, job, slot)
+                    if future is None:
+                        break
+                    queue.pop(0)
+                    slots.pop(0)
+                    active[future] = slot
                 if self.stopping.is_set():
                     for job in queue:
                         job["status"] = "not_started_interrupted"
                     queue.clear()
                 time.sleep(2)
+                self.save()  # Keep queued and long-running cohorts visible to the scheduler.
         self.save()
         self.report()
 

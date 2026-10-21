@@ -56,6 +56,18 @@ def test_linux_worker_keeps_rcon_loopback_and_generates_a_local_secret() -> None
     assert 'scripts/sync_linux_gui_mods.sh" --mods-dir "$GUI_MODS_PATH"' in source
 
 
+def test_linux_worker_can_bound_update_threads_and_assign_affinity() -> None:
+    source = MANAGER.read_text(encoding="utf-8")
+
+    assert '--update-threads) UPDATE_THREADS="${2:?missing --update-threads value}"' in source
+    assert 'update-runner-threads-count=$UPDATE_THREADS' in source
+    assert 'worker_affinity()' in source
+    assert 'printf \'%d\' "$(( ($1 - 1) % $(nproc) ))"' in source
+    assert 'taskset -c "$affinity" "${launch[@]}"' in source
+    assert '"factorio_update_threads": $threads_json' in source
+    assert 'runtime-settings.json' in source
+
+
 def test_linux_worker_example_requires_local_path_materialization() -> None:
     example = EXAMPLE.read_text(encoding="utf-8")
 

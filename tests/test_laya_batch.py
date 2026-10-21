@@ -1,6 +1,9 @@
 # Path: tests/test_laya_batch.py | Purpose: Protect the experiment batch: matched seed-major job order, runner-log outcome parsing, per-arm report.
 
 import json
+import time
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 from tools.run_laya_batch import Batch, summarize
 
@@ -39,6 +42,24 @@ def test_outcome_and_phase_times_come_from_the_runner_log(tmp_path):
     assert summarize(tmp_path)["phases"] == []
 
 
+def test_batch_can_bound_each_worlds_update_threads_affinity_and_python_priority(tmp_path):
+    batch = _batch(tmp_path)
+    batch.cfg["runtime"] = {"update_threads": 1, "cpu_affinity": "slot", "python_nice": 5}
+
+    args = batch.runtime_args(3)
+
+    assert args[:2] == ["--update-threads", "1"]
+    assert args[2] == "--cpu-affinity" and args[3].isdigit()
+    assert "--nice" not in args
+    assert batch._cmd(batch.arms["control"], "run")[:3] == ["nice", "-n", "5"]
+    assert batch._cmd(batch.arms["control"], "prepare")[0] == "p"
+
+    override = {"id": "override", "code": "o", "runtime": {"update_threads": 4}}
+    assert batch.runtime_args(3, override) == [
+        "--update-threads", "4", "--cpu-affinity", args[3],
+    ]
+
+
 def test_report_counts_phases_per_arm_and_lists_unstarted_jobs(tmp_path):
     batch = _batch(tmp_path, seeds=(1,))
     batch.jobs[0].update(status="completed", runner_stop="stalled", phases=["C0", "C1", "C2"], accepted=["C0"],
@@ -48,3 +69,152 @@ def test_report_counts_phases_per_arm_and_lists_unstarted_jobs(tmp_path):
     report = (tmp_path / "report.md").read_text()
     assert "| control | 1/1 | {'stalled': 1} | 1/1/0/0 | 30.0 (n=1) |" in report
     assert "| fix | 0/1 |" in report and "not_started_deadline" in report
+
+
+def _host_batch(registry, name):
+    root = registry / name
+    root.mkdir(parents=True)
+    batch = _batch(root, seeds=(1,))
+    batch.cfg.update(adaptive=False, host_budget={"registry": str(registry),
+                      "admit_interval_seconds": 0, "admit_min_available_gb": 0})
+    batch.path.write_text(json.dumps(batch.cfg))
+    return Batch(batch.path)
+
+
+class _PendingPool:
+    def submit(self, *args):
+        return object()
+
+
+def test_host_gate_pauses_and_resumes_real_batch_admission(tmp_path, monkeypatch):
+    from tools.laya_host_scheduler import DEFAULTS, cycle
+
+    registry = tmp_path / "experiments"
+    batch = _host_batch(registry, "cohort")
+    host = tmp_path / "host"
+    config = dict(DEFAULTS, manual_target=0, manual_target_until=1001,
+                  manual_previous_target=24, mode="performance")
+    metrics = {"active_slots": 0, "queued": 2, "ups_samples": 0, "ups_p95": None,
+               "ups_p98": None, "total_ups": None, "unstable": [],
+               "temp_c": 70, "available_gb": 20, "power_profile": "performance"}
+    monkeypatch.setattr("tools.laya_host_scheduler.measure", lambda *a, **kw: metrics)
+    monkeypatch.setattr("tools.run_laya_batch.time.time", lambda: 1000)
+    cycle(config, {"target": 24}, registry=registry, root=host, now=1000)
+    job = batch.jobs[0]
+    assert batch.submit(_PendingPool(), job, 0) is None
+    assert job["status"] == "queued"
+
+    monkeypatch.setattr("tools.run_laya_batch.time.time", lambda: 1002)
+    report = cycle(config, {"target": 0}, registry=registry, root=host, now=1002)
+    assert report["target_slots"] == 24
+    assert batch.submit(_PendingPool(), job, 0) is not None
+    saved = json.loads((batch.root / "job-status.json").read_text())
+    assert saved["jobs"][0]["admission_reserved"] is True
+
+
+def test_missing_stale_and_malformed_gates_never_admit(tmp_path):
+    from tools.laya_host_scheduler import write_gate
+
+    batch = _host_batch(tmp_path, "cohort")
+    for gate in (None, "stale", "corrupt"):
+        if gate == "stale":
+            write_gate(tmp_path, 30, 1)
+        elif gate == "corrupt":
+            (tmp_path / "_host-scheduler-gate/job-status.json").write_text("{")
+        assert batch.submit(_PendingPool(), batch.jobs[0], 0) is None
+        assert batch.jobs[0]["status"] == "queued"
+
+
+def test_cohorts_reserve_the_last_slot_atomically(tmp_path):
+    from tools.laya_host_scheduler import write_gate
+
+    first, second = (_host_batch(tmp_path, name) for name in ("first", "second"))
+    write_gate(tmp_path, 1, time.time())
+    barrier = Barrier(2)
+
+    def admit(batch):
+        barrier.wait(timeout=5)
+        return batch.submit(_PendingPool(), batch.jobs[0], 0) is not None
+
+    with ThreadPoolExecutor(2) as pool:
+        results = list(pool.map(admit, (first, second)))
+    assert sorted(results) == [False, True]
+
+
+def test_legacy_occupancy_counts_even_when_status_is_stale(tmp_path):
+    from tools.laya_host_scheduler import write_gate
+
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    (legacy / "job-status.json").write_text(json.dumps({
+        "updated": 0, "controller": {"slots": 14},
+        "jobs": [{"status": "running", "host_occupied_at_start": 0}],
+    }))
+    batch = _host_batch(tmp_path, "new")
+    write_gate(tmp_path, 1, time.time())
+    assert batch.submit(_PendingPool(), batch.jobs[0], 0) is None
+    write_gate(tmp_path, 2, time.time())
+    assert batch.submit(_PendingPool(), batch.jobs[0], 0) is not None
+
+
+def test_failed_submission_releases_its_reservation(tmp_path):
+    import pytest
+    from tools.laya_host_scheduler import write_gate
+
+    class BrokenPool:
+        def submit(self, *args):
+            raise RuntimeError("pool stopped")
+
+    batch = _host_batch(tmp_path, "cohort")
+    write_gate(tmp_path, 1, time.time())
+    with pytest.raises(RuntimeError, match="pool stopped"):
+        batch.submit(BrokenPool(), batch.jobs[0], 0)
+    saved = json.loads((batch.root / "job-status.json").read_text())
+    assert saved["jobs"][0]["status"] == "queued"
+    assert saved["jobs"][0]["admission_reserved"] is False
+
+
+def test_batch_loop_waits_for_the_gate_before_starting_jobs(tmp_path, monkeypatch):
+    from tools.laya_host_scheduler import write_gate
+
+    batch = _host_batch(tmp_path, "cohort")
+    write_gate(tmp_path, 0, time.time())
+    started = []
+    real_sleep = time.sleep
+
+    def fake_job(job, slot):
+        saved = json.loads((batch.root / "job-status.json").read_text())
+        assert next(j for j in saved["jobs"] if j["id"] == job["id"])["admission_reserved"]
+        started.append(job["id"])
+        job.update(status="completed", admission_reserved=False)
+
+    polls = 0
+
+    def poll(seconds):
+        nonlocal polls
+        polls += 1
+        if polls == 1:
+            assert started == []
+            write_gate(tmp_path, 2, time.time())
+        assert polls < 100
+        real_sleep(0.005)
+
+    monkeypatch.setattr(batch, "run_job", fake_job)
+    monkeypatch.setattr("tools.run_laya_batch.time.sleep", poll)
+    monkeypatch.setattr("tools.run_laya_batch.signal.signal", lambda *a: None)
+    batch.run()
+    assert sorted(started) == ["control-s1", "fix-s1"]
+    assert all(job["status"] == "completed" for job in batch.jobs)
+
+
+def test_batch_refuses_to_overwrite_existing_cohort_accounting(tmp_path, monkeypatch):
+    import pytest
+
+    batch = _host_batch(tmp_path, "cohort")
+    status = batch.root / "job-status.json"
+    status.write_text('{"jobs": [{"id": "earned", "status": "completed"}]}')
+    before = status.read_bytes()
+    monkeypatch.setattr("tools.run_laya_batch.signal.signal", lambda *a: None)
+    with pytest.raises(ValueError, match="existing cohort status"):
+        batch.run()
+    assert status.read_bytes() == before

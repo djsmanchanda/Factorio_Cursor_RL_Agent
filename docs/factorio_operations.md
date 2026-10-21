@@ -239,6 +239,11 @@ or has been completed.
 
 ## Training observation
 
+For shared Laya campaign slots, use the [host scheduler runbook](rl/Laya_Host_Scheduler.md).
+Its repository changes require deploying/restarting the installed scheduler and
+freezing future cohorts with the gate-aware batch harness. Active frozen cohorts
+remain separate; legacy admission controllers do not acquire the new shared lock.
+
 Training multiplayer viewing is observational. The Observatory's **View in Factorio** control targets only the active owned training surface and spectator. Client and server training-mod scripts must match exactly before joining.
 
 ## Reporting

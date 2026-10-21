@@ -19,6 +19,11 @@ Options:
   --read-data PATH       Factorio read-data root (defaults below --runtime-root).
   --source-save PATH     Copy this disposable seed save during bootstrap.
   --gui-mods PATH        Linux GUI Factorio mods directory (default: ~/.factorio/mods).
+  --update-threads N     Factorio update-runner thread count per runtime
+                         (engine default when omitted; 1 = single update thread).
+  --cpu-affinity LIST    Pin each runtime to a taskset CPU list, or "auto" to
+                         assign worker N to logical CPU (N-1) % nproc.
+  --nice N               Lower runtime CPU priority by N (0..19).
 
 Without --source-save, bootstrap creates a fresh worker-local save. It never reads
 or modifies ~/.factorio/saves, the deterministic runtime, or historical data/ evidence.
@@ -52,6 +57,9 @@ FACTORIO_BIN=""
 READ_DATA=""
 SOURCE_SAVE=""
 GUI_MODS_PATH="$HOME/.factorio/mods"
+UPDATE_THREADS=""
+CPU_AFFINITY=""
+NICE_LEVEL=0
 
 while (($#)); do
   case "$1" in
@@ -65,6 +73,9 @@ while (($#)); do
     --read-data) READ_DATA="${2:?missing --read-data value}"; shift 2 ;;
     --source-save) SOURCE_SAVE="${2:?missing --source-save value}"; shift 2 ;;
     --gui-mods) GUI_MODS_PATH="${2:?missing --gui-mods value}"; shift 2 ;;
+    --update-threads) UPDATE_THREADS="${2:?missing --update-threads value}"; shift 2 ;;
+    --cpu-affinity) CPU_AFFINITY="${2:?missing --cpu-affinity value}"; shift 2 ;;
+    --nice) NICE_LEVEL="${2:?missing --nice value}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1" ;;
   esac
@@ -80,6 +91,17 @@ esac
 require_positive_integer "worker count" "$WORKER_COUNT" 50
 require_positive_integer "slots per worker" "$SLOTS_PER_WORKER" 80
 [[ "$STAGGER_SECONDS" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "stagger seconds must be non-negative"
+if [[ -n "$UPDATE_THREADS" ]]; then
+  [[ "$UPDATE_THREADS" =~ ^[0-9]+$ ]] && (( 10#$UPDATE_THREADS >= 1 && 10#$UPDATE_THREADS <= 64 )) \
+    || die "update threads must be between 1 and 64"
+fi
+if [[ -n "$CPU_AFFINITY" && "$CPU_AFFINITY" != "auto" ]]; then
+  command -v taskset >/dev/null 2>&1 || die "taskset is required for --cpu-affinity"
+  taskset -c "$CPU_AFFINITY" true >/dev/null 2>&1 \
+    || die "invalid or unavailable CPU affinity list: $CPU_AFFINITY"
+fi
+[[ "$NICE_LEVEL" =~ ^[0-9]+$ ]] && (( 10#$NICE_LEVEL <= 19 )) \
+  || die "nice must be an integer between 0 and 19"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_OUTPUT="$REPO_ROOT/training-workers-linux.json"
@@ -160,6 +182,13 @@ write_worker_files() {
 read-data=$READ_DATA
 write-data=$DATA_ROOT
 EOF
+  if [[ -n "$UPDATE_THREADS" ]]; then
+    cat >> "$CONFIG_PATH" <<EOF
+
+[other]
+update-runner-threads-count=$UPDATE_THREADS
+EOF
+  fi
   cat > "$SERVER_SETTINGS" <<EOF
 {
   "name": "Factorio RL Linux Training Worker $(basename "$(dirname "$WORKER_ROOT")")",
@@ -236,24 +265,57 @@ port_available() {
   ! ss -ltnH "sport = :$port" | grep -q . && ! ss -lunH "sport = :$port" | grep -q .
 }
 
+worker_affinity() {
+  if [[ "$CPU_AFFINITY" == "auto" ]]; then
+    printf '%d' "$(( ($1 - 1) % $(nproc) ))"
+  else
+    printf '%s' "$CPU_AFFINITY"
+  fi
+}
+
+write_worker_runtime_settings() {
+  local affinity="$1" threads_json="null" affinity_json="null"
+  [[ -n "$UPDATE_THREADS" ]] && threads_json="$UPDATE_THREADS"
+  [[ -n "$affinity" ]] && affinity_json="\"$affinity\""
+  cat > "$DATA_ROOT/runtime-settings.json" <<EOF
+{
+  "factorio_update_threads": $threads_json,
+  "cpu_affinity": $affinity_json,
+  "nice": $NICE_LEVEL
+}
+EOF
+}
+
 start_worker() {
   configure_paths "$1"
+  local affinity="$(worker_affinity "$1")"
   assert_stopped
   [[ -x "$FACTORIO_BIN" ]] || die "Factorio executable is missing: $FACTORIO_BIN"
   [[ -f "$SAVE_PATH" ]] || die "worker is not bootstrapped; run bootstrap first"
   [[ -f "$SECRET_PATH" ]] || die "worker RCON secret is missing; run bootstrap first"
   port_available "$(game_port "$1")" || die "game port $(game_port "$1") is already in use"
   port_available "$(rcon_port "$1")" || die "RCON port $(rcon_port "$1") is already in use"
+  if [[ -n "$UPDATE_THREADS" ]]; then
+    write_worker_files
+  fi
+  write_worker_runtime_settings "$affinity"
   mkdir -p "$DATA_ROOT/logs"
   : > "$DATA_ROOT/factorio-current.log"
   : > "$DATA_ROOT/logs/factorio-console.log"
   mkfifo "$STDIN_PATH"
   tail -f /dev/null > "$STDIN_PATH" 2>"$DATA_ROOT/logs/factorio-stdin-keeper.log" &
   echo $! > "$STDIN_KEEPER_PID_PATH"
-  setsid "$FACTORIO_BIN" --config "$CONFIG_PATH" --mod-directory "$MODS_PATH" \
+  local launch=("$FACTORIO_BIN" --config "$CONFIG_PATH" --mod-directory "$MODS_PATH" \
     --start-server "$SAVE_PATH" --server-settings "$SERVER_SETTINGS" \
     --bind "0.0.0.0:$(game_port "$1")" --rcon-bind "127.0.0.1:$(rcon_port "$1")" \
-    --rcon-password "$(<"$SECRET_PATH")" --console-log "$DATA_ROOT/logs/factorio-console.log" \
+    --rcon-password "$(<"$SECRET_PATH")" --console-log "$DATA_ROOT/logs/factorio-console.log")
+  if (( 10#$NICE_LEVEL > 0 )); then
+    launch=(nice -n "$NICE_LEVEL" "${launch[@]}")
+  fi
+  if [[ -n "$affinity" ]]; then
+    launch=(taskset -c "$affinity" "${launch[@]}")
+  fi
+  setsid "${launch[@]}" \
     >"$DATA_ROOT/logs/factorio-stdout.log" 2>"$DATA_ROOT/logs/factorio-stderr.log" < "$STDIN_PATH" &
   echo $! > "$PID_PATH"
   for _ in $(seq 1 40); do

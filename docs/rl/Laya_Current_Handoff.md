@@ -2,6 +2,12 @@
 
 # Laya current evidence index
 
+Host concurrency: [shared scheduler and migration](Laya_Host_Scheduler.md)
+records the 2026-10-21 audit, fixed admission protocol, timed drain controls and
+Miniship's 24 start / 30 performance / 26 balanced / 20 cool ceilings. The audited
+installed copy and active legacy cohorts still need the documented lifecycle;
+a commit does not establish live adoption or throughput gains.
+
 Updated October 8, 2026. Start with [the runner contract](Laya_Clean_Runner.md)
 and [strategy rules](Laya_Strategy_Guidelines.md); read the relevant dated record
 below for evidence. Architecture/ownership remain in [architecture](../architecture.md).
