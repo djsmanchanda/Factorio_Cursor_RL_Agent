@@ -56,3 +56,5 @@ C14 attempt 1 was stopped at 05:18 IST: 150 planned = 1 completed, 4 interrupted
 C15 attempt 1 (stopped 13:41 IST): 150 planned = 1 interrupted, 149 not started; excluded. C15b (`laya-c15b-2123-miniship-20261021`, 150 jobs, steelbill vs vacancy) is the C15 denominator; it is queued behind C14b under the shared host budget.
 
 C12 final (2026-10-21 ~14:20 IST): 192 planned = 160 completed + 32 not_started_deadline (seeds 79440–79447, whole blocks); no errors or interruptions. C2 15/16/11/7, C5 ever/final 14/5, 11/9, 10/8, 6/1, new Laya C6 12/7/8/6 for ref/raw/furnace/seed. No adoption. [Result](Laya_C12_Result_2026-10-21.md).
+
+C15b was superseded before any job started (150 planned, 0 started). The C15 denominator is now C15c: 150 jobs = 50 seeds × steelbill/vacancy/foundation.
