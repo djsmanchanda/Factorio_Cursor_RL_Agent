@@ -214,7 +214,9 @@ class Batch:
     def run_job(self, job: dict, slot: int) -> None:
         arm = self.arms[job["arm"]]
         code = Path(arm["code"])
-        world = code / "data/laya-saved-world" / self.cfg["name"] / job["id"]
+        # A rerun after --resume gets a fresh world: a prepared root cannot be prepared again.
+        world = code / "data/laya-saved-world" / self.cfg["name"] / (
+            f"{job['id']}-r{job['attempt']}" if job.get("attempt") else job["id"])
         job["world"] = str(world)
         log_path = self.root / "logs" / f"{job['id']}.out"
         env = dict(os.environ, PYTHONPATH=str(code), PYTHONDONTWRITEBYTECODE="1", PYTHONUNBUFFERED="1")
@@ -261,17 +263,40 @@ class Batch:
             finally:
                 self.save()  # A failed cleanup retains the reservation for reconciliation.
 
-    def run(self) -> None:
+    RERUN = ("queued", "preparing", "running", "interrupted", "not_started_interrupted")
+
+    def resume(self) -> None:
+        """Continue a cohort whose supervisor died or stopped: keep finished jobs, rerun only unfinished work.
+
+        Terminal outcomes (completed, errors, wall caps, deadline censoring) are evidence and never rerun. A job left
+        preparing/running/interrupted records its dead attempt and reruns in a fresh world; its stale reservation is
+        released. Only call this when the previous supervisor and its worlds are gone.
+        """
+        previous = {job["id"]: job for job in json.loads((self.root / "job-status.json").read_text())["jobs"]}
+        for index, planned in enumerate(self.jobs):
+            job = previous.get(planned["id"])
+            if job is None:
+                continue
+            if job["status"] in self.RERUN:
+                history = list(job.get("previous_attempts", ()))
+                if job.get("started") or job.get("admission_reserved") or job["status"] != "queued":
+                    history.append({k: job[k] for k in ("status", "world", "started", "elapsed_s") if k in job})
+                job = dict(planned, status="queued")
+                if history:
+                    job.update(attempt=len(history), previous_attempts=history)
+            self.jobs[index] = job
+
+    def run(self, resume: bool = False) -> None:
         (self.root / "logs").mkdir(exist_ok=True)
         signal.signal(signal.SIGTERM, lambda *_: self.stopping.set())
         slots = list(range(self.cfg["concurrency"]))
         active: dict = {}
         with self.host.lock() if self.host else nullcontext():
-            if (self.root / "job-status.json").exists():
+            if (self.root / "job-status.json").exists() and not resume:
                 raise ValueError("existing cohort status: use its frozen supervisor; this harness starts fresh cohorts")
             self.save()
         with ThreadPoolExecutor(self.cfg["concurrency"]) as pool:
-            queue = list(self.jobs)
+            queue = [job for job in self.jobs if job["status"] == "queued"]
             while (queue or active) and not (self.stopping.is_set() and not active):
                 for future in [f for f in active if f.done()]:
                     future.result()
@@ -324,13 +349,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("batch", type=Path)
     parser.add_argument("--report-only", action="store_true")
+    parser.add_argument("--resume", action="store_true",
+                        help="continue this cohort after its supervisor died: keep finished jobs, rerun unfinished ones")
     args = parser.parse_args(argv)
     batch = Batch(args.batch.resolve())
+    if args.resume:
+        batch.resume()
     if args.report_only:
         batch.jobs = json.loads((batch.root / "job-status.json").read_text())["jobs"]
         batch.report()
         return 0
-    batch.run()
+    batch.run(resume=args.resume)
     return 0
 
 

@@ -1,6 +1,8 @@
 # Path: tests/test_laya_batch.py | Purpose: Protect the experiment batch: matched seed-major job order, runner-log outcome parsing, per-arm report.
 
 import json
+
+import pytest
 import time
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
@@ -242,3 +244,27 @@ def test_summary_keeps_final_acceptance_separate_from_the_latch(tmp_path):
     assert parsed["accepted_ever"] == ["C0", "C2", "C5"] and parsed["accepted_final"] == ["C0", "C2"]
     (tmp_path / "logs/laya-runner.log").write_text("+9s SUMMARY: stop=stalled decisions=3 failures=0 phases=C0 accepted=C0 accepted_final=unknown\n")
     assert summarize(tmp_path)["accepted_final"] is None
+
+
+def test_resume_after_a_host_crash_keeps_finished_jobs_and_reruns_the_dead_ones(tmp_path, monkeypatch):
+    # Live Miniship 2026-10-22 02:39: a hard stop left C14c/C15d jobs "running" with dead worlds and stale
+    # reservations that the host budget kept counting.
+    batch = _batch(tmp_path, seeds=(1, 2))
+    status = {"control-s1": {"status": "completed", "started": 5.0},
+              "fix-s1": {"status": "running", "started": 6.0, "world": "w/fix-s1", "admission_reserved": True},
+              "fix-s2": {"status": "runner_error", "started": 7.0}, "control-s2": {"status": "queued"}}
+    (tmp_path / "job-status.json").write_text(json.dumps({"jobs": [dict(j, **status[j["id"]]) for j in batch.jobs]}))
+    batch.resume()
+    jobs = {j["id"]: j for j in batch.jobs}
+    assert jobs["control-s1"]["status"] == "completed" and jobs["fix-s2"]["status"] == "runner_error"
+    rerun = jobs["fix-s1"]
+    assert rerun["status"] == "queued" and rerun["attempt"] == 1 and "admission_reserved" not in rerun
+    assert rerun["previous_attempts"] == [{"status": "running", "world": "w/fix-s1", "started": 6.0}]
+    assert jobs["control-s2"] == {"id": "control-s2", "arm": "control", "seed": 2, "status": "queued"}
+    ran = []
+    monkeypatch.setattr(batch, "run_job", lambda job, slot: (ran.append(job["id"]), job.update(status="completed")))
+    monkeypatch.setattr(batch, "report", lambda: None)
+    batch.run(resume=True)
+    assert sorted(ran) == ["control-s2", "fix-s1"]
+    with pytest.raises(ValueError):
+        _batch(tmp_path, seeds=(1, 2)).run()  # a fresh launch still refuses to overwrite a cohort's status
