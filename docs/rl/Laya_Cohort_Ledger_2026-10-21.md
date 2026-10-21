@@ -58,3 +58,5 @@ C15 attempt 1 (stopped 13:41 IST): 150 planned = 1 interrupted, 149 not started;
 C12 final (2026-10-21 ~14:20 IST): 192 planned = 160 completed + 32 not_started_deadline (seeds 79440–79447, whole blocks); no errors or interruptions. C2 15/16/11/7, C5 ever/final 14/5, 11/9, 10/8, 6/1, new Laya C6 12/7/8/6 for ref/raw/furnace/seed. No adoption. [Result](Laya_C12_Result_2026-10-21.md).
 
 C15b was superseded before any job started (150 planned, 0 started). The C15 denominator is now C15c: 150 jobs = 50 seeds × steelbill/vacancy/foundation.
+
+C13 final (2026-10-21 ~16:40 IST): 144/144 completed; no errors. C2 18/14/18, C5 ever/final 12/3, 19/2, 19/2, new Laya C6 10/18/17 for ref/menu/loan. No adoption. [Result](Laya_C13_Result_2026-10-21.md).
