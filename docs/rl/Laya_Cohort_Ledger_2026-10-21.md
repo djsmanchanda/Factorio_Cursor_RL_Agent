@@ -52,3 +52,5 @@ The new Opus 5.5 high owner is scheduled for **2026-10-21 03:32 IST** on minishi
 C14 (launched 2026-10-21 05:05 IST, miniship): 150 planned jobs, 75 seeds 79400–79474 × ref `c1b8680` / steelbill `934f9cb`, Factorio 2.1.23 build 87750, same copied save. It shares one host slot budget with C12/C13 (start 20 total, max 30, older first), using the harness at `57feb31`. Results are pending.
 
 C14 attempt 1 was stopped at 05:18 IST: 150 planned = 1 completed, 4 interrupted, 1 shutdown runner_error, 144 not started. Shared admission ignored host health (fixed in `28a2bb8`). The rerun `laya-c14b-2123-miniship-20261021` (150 jobs, same arms/seeds) is the C14 denominator; attempt 1 is not pooled.
+
+C15 attempt 1 (stopped 13:41 IST): 150 planned = 1 interrupted, 149 not started; excluded. C15b (`laya-c15b-2123-miniship-20261021`, 150 jobs, steelbill vs vacancy) is the C15 denominator; it is queued behind C14b under the shared host budget.
