@@ -41,3 +41,9 @@ Adjacent paired contrasts, 40 pairs each (newer-only : older-only, two-sided sig
 Ref's untyped events are mostly one repeated "modular refinery for stone-brick built but not healthy" (all cells `full_output`, no consumer).
 
 Evidence level: completed matched experiment cohort on one copied save; not terrain generalization; not pooled with 2.1.22 attempts. Sources: `data/laya-experiments/laya-c12-2123-miniship-20261021/{freeze.json,batch.json,job-status.json,controller.jsonl}`, each job's runner log and journals, and `data/laya-orchestration/takeover-20261021/{status.py,failures.py}`.
+
+## Where runs stop (codex read-only analysis of all 160 runs)
+
+111/160 never passed deterministic C2. 77 reached proxy C2, but only 49 passed acceptance. Among the 111, 81 still failed foundation readiness, and 30 had both foundations ready but kept a metal starter (copper only 20, iron only 7, both 3). Dominant exclusive terminal class within never-C2: bootstrap seed/borrow deadlock 55, steel readiness 14, steel site 13, unfinished material bill 12. Before first C2: "no borrowable assembler" in 135 runs (2,434 outcomes); foundation material shortages in 159 (splitters, fast inserters, belts, inserters); steel site waits 44; steel iron/retirement waits 53; explicit starter deconstruction failures 3. There were no tool errors, safety stops or runner errors. Full report: local `data/laya-orchestration/takeover-20261021/checkin_helper_runs/c12-final-blockers-20261021.md`.
+
+Follow-up fixes: `ef38247` reuses released finite mall halves (borrow deadlock; arm in C15b). `d8e3f7c` makes an observed-ready foundation advance the plate stage so its starter retirement is offered (24/30 residual-starter runs had no retirement option).
