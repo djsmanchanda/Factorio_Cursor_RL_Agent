@@ -497,3 +497,8 @@ fresh frozen copy of dabdfd5 with its mods staged into each disposable world.
 - What: expose episode-scoped plate lifecycle facts and retain reconciliation choices after nested/failed outer operations and later proxy phases; no fabricated successful foundation receipt or early retirement.
 - Evidence: 55 runner/initialization checks passed; combined 136 focused checks pass. Final fast gate: 1188 passed, 1 skipped, only the unchanged known import-firewall failure (/tmp/laya-c2-final-fast.log). C12/C13 diagnosis found 51/177 non-C2 terminal jobs with both foundations ready but a starter present; missing choice is confirmed in sampled jobs, not attributed to all 51.
 - Lifecycle: new frozen disposable runners; no active cohort or installed mod changed. No reliability/adoption result yet.
+
+## [2026-10-21 12:39 IST] Funded steel supplier before dependent foundation
+- What: an owned iron provider with observed iron output may fund the compact steel seed before replacement submission, breaking the foundation-chest/plastic/steel cycle. Funding, placement/purity/reservations, power and retirement checks remain enforced. The old retirement-wait code is retained for telemetry continuity, with explicit feed evidence.
+- Evidence: positive pioneer/provisioning cases and absent-feed/collision negatives pass in the 136 focused checks; final fast gate retains only the known firewall failure (1188 pass, 1 skip). Historical C13 ref-s79400 establishes the dependency cycle. Cohort impact remains unmeasured.
+- Lifecycle: new frozen runners only; no Lua deployment, real-base action or existing campaign restart.

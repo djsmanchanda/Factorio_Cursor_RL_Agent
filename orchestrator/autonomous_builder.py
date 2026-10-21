@@ -4270,23 +4270,22 @@ def _build_compact_steel_seed(client, bridge, surface, force, provider, referenc
             code="steel_iron_retirement_wait", state="retiring",
         )
     if state.lifecycle_state != "released":
-        # The iron replacement needs medium poles, while the steel seed makes
-        # the steel that replenishes those poles. Once the exact replacement
-        # has been submitted and its temporary pioneer provider has delivered
-        # iron, let the fenced two-pole steel seed break that cycle. Retirement
-        # still waits for the replacement's own first-output lifecycle proof.
-        if (
-            state.lifecycle_state == "pioneer"
-            or not getattr(state, "replacement_submitted", False)
-            or not _verified_iron_pioneer_output(client, surface, provider)
-        ):
+        # Foundation chests/poles may themselves need steel. Requiring that
+        # foundation's submission makes the supplier depend on its consumer.
+        # A verified owned iron feed is the seed's physical prerequisite;
+        # its complete funded bill and normal validators still apply below.
+        # This does not change the replacement-output proof for retirement.
+        if not _verified_iron_pioneer_output(client, surface, provider):
             raise ProductionPrerequisiteDeferred(
-                "compact steel waits for verified iron production and starter retirement",
+                "compact steel waits for observed iron output at its owned provider",
                 code="steel_iron_retirement_wait", state="retiring",
+                details={"prerequisite": "iron-plate", "lifecycle_state": state.lifecycle_state,
+                         "replacement_submitted": getattr(state, "replacement_submitted", False),
+                         "provider_feed_observed": False},
             )
         emit(
             "  STEEL STARTER CYCLE BREAK: using verified iron pioneer output "
-            "before full starter retirement; the fenced pole reserve funds it"
+            "without waiting for its dependent foundation; the full seed bill must be funded"
         )
     ledger = _MATERIAL_RESERVATION_LEDGER
     if ledger is None:

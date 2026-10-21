@@ -21,17 +21,19 @@ def test_seed_has_no_feed_belt_and_fits(direction, mined):
     assert all("recipe" not in a for a in actions if a["entity"] == "electric-furnace")
 
 
-def test_seed_cannot_precede_iron_retirement(monkeypatch):
+@pytest.mark.parametrize("state,submitted", [("pioneer", False), ("provisioning", False), ("validating", True)])
+def test_unreleased_iron_without_observed_feed_cannot_start_seed(monkeypatch, state, submitted):
     monkeypatch.setattr(
         builder, "_bootstrap_state",
         lambda *_a: SimpleNamespace(
-            lifecycle_state="validating", replacement_submitted=True,
+            lifecycle_state=state, replacement_submitted=submitted,
         ),
     )
     monkeypatch.setattr(builder, "_verified_iron_pioneer_output", lambda *_a: False)
     with pytest.raises(builder.ProductionPrerequisiteDeferred) as error:
         builder._build_compact_steel_seed(object(), object(), "nauvis", "player", (0,0), (0,0), print)
     assert error.value.code == "steel_iron_retirement_wait"
+    assert error.value.details["provider_feed_observed"] is False
 
 
 def test_verified_iron_pioneer_output_breaks_steel_cycle(monkeypatch):
@@ -47,14 +49,16 @@ def test_verified_iron_pioneer_output_breaks_steel_cycle(monkeypatch):
 
 
 @pytest.mark.parametrize("occupied", [set(), {(20, 20)}])
-def test_steel_fallback_submits_the_surveyed_layout_and_rechecks_occupancy(tmp_path, monkeypatch, occupied):
+@pytest.mark.parametrize("state", ["released", "pioneer", "provisioning"])
+def test_steel_fallback_submits_the_surveyed_layout_and_rechecks_occupancy(tmp_path, monkeypatch, occupied, state):
     ledger = MaterialReservationLedger(tmp_path / "script-output", episode_id="steel-site", surface="nauvis", force="player")
     ledger.path.parent.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", ledger)
     monkeypatch.setattr(builder, "_bootstrap_state", lambda _: SimpleNamespace(
-        lifecycle_state="released", reservations={"future": {(99, 99)}}))
+        lifecycle_state=state, replacement_submitted=False, reservations={"future": {(99, 99)}}))
+    monkeypatch.setattr(builder, "_verified_iron_pioneer_output", lambda *_: True)
     monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_: {})
-    monkeypatch.setattr(builder.live_base, "occupied_tiles", lambda *_: occupied)
+    monkeypatch.setattr(builder.live_base, "occupied_tiles", lambda *_: set(occupied))
     surveys = []
 
     def survey(*args, **kwargs):
