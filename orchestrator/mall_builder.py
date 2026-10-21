@@ -791,6 +791,12 @@ def _choose_slot(
             return origin, "left"
     return None
 
+def mall_slot_positions(reference_point: Point) -> list[tuple[tuple[int, int], str, Point]]:
+    """Every declared cell half as (origin, side, machine position), in allocation order."""
+    return [(origin, side, _slot_position(origin, side))
+            for origin in _cell_origins(reference_point) for side in ("left", "right")]
+
+
 def locate_mall_cell(
     machine_position: Point, reference_point: Point,
 ) -> tuple[tuple[int, int], str] | None:

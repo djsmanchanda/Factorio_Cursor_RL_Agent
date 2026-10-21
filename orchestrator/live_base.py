@@ -636,6 +636,30 @@ def entity_at(client: RconClient, surface: str, position: Point) -> dict | None:
     return result
 
 
+def unset_assemblers_at(
+    client: RconClient, surface: str, force: str, positions: Sequence[Point],
+) -> dict[Point, str]:
+    """Real (non-ghost) assemblers of `force` at `positions` with no recipe set, by position -> name."""
+    if not positions:
+        return {}
+    literal = ",".join("{" + str(p[0]) + "," + str(p[1]) + "}" for p in positions)
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local out={};"
+        "for i,p in ipairs({" + literal + "}) do "
+        "local e=s.find_entities_filtered{position=p,radius=0.4,type='assembling-machine',force='" + force + "',limit=1}[1];"
+        "if e then local ok,r=pcall(function() return e.get_recipe() end);"
+        "if ok and not r then out[#out+1]=i..'='..e.name end end end;"
+        "rcon.print(table.concat(out,','))"
+    )
+    raw = _sc(client, lua)
+    found: dict[Point, str] = {}
+    for pair in raw.split(","):
+        index, _, name = pair.partition("=")
+        if index and name in ASSEMBLER_TIERS:
+            found[tuple(positions[int(index) - 1])] = name
+    return found
+
+
 def entity_names_at(
     client: RconClient, surface: str, positions: Sequence[Point],
 ) -> dict[Point, str | None]:

@@ -4500,6 +4500,54 @@ def test_loan_preserves_last_electronic_circuit_ingredient_source(monkeypatch, c
     assert (borrowed is not None) == borrowable
 
 
+def _vacancy_world(monkeypatch, *, groups=(), provider="passive-provider-chest", unset=True):
+    # Live C14 steelbill-s79400: one gear, one cable, one circuit cell (each the sole source of a drill/AM1
+    # input) and a released belt half at (61.5, 33.5) with its recipe cleared. Nothing could lend.
+    circuit = SimpleNamespace(machine_count=1, machine_positions=[(45.5, 38.5)])
+    monkeypatch.setattr(builder.live_base, "find_line", lambda _c, _s, _f, item, _m, **_k:
+                        circuit if item == "electronic-circuit" else None)
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {"electronic-circuit": 36})
+    monkeypatch.setattr(builder, "locate_mall_cell", lambda *_a: ((41, 37), "right"))
+    monkeypatch.setattr(builder, "mall_slot_uses_shared_provider", lambda *_a: False)
+    halves = [((60, 32), "left", (61.5, 33.5)), ((60, 32), "right", (67.5, 33.5)), ((66, 37), "left", (67.5, 38.5))]
+    monkeypatch.setattr(builder, "mall_slot_positions", lambda _ref: halves)
+    monkeypatch.setattr(builder.live_base, "unset_assemblers_at",
+                        lambda _c, _s, _f, positions: {(61.5, 33.5): "assembling-machine-1"} if unset else {})
+    chests = {(64.5, 33.5): "requester-chest", (64.5, 32.5): provider}
+    def entity(_c, _s, pos):
+        name = chests.get(tuple(pos), "assembling-machine-1")
+        return name and {"name": name, "type": "container", "force": "player"}
+    monkeypatch.setattr(builder.live_base, "entity_at", entity)
+    monkeypatch.setattr(builder.live_base, "requester_logistic_groups", lambda *_a: tuple(groups))
+
+
+def _borrow_for(target, excluded=frozenset(), allowed=None):
+    return builder._borrow_free_mall_cell(SimpleNamespace(command=lambda *_a: ""), "nauvis", "player", target, (0, 0),
+                                         allowed_original_recipes=allowed, allow_shared_provider=False,
+                                         require_stocked_original=False, excluded_origins=set(excluded))
+
+
+def test_a_released_finite_half_is_borrowed_as_a_finite_cell_when_no_configured_cell_may_lend(monkeypatch):
+    _vacancy_world(monkeypatch)
+    # The sole circuit producer still never lends to a circuit consumer; the idle released half does.
+    assert _borrow_for("electric-mining-drill") == (
+        "electric-mining-drill", (61.5, 33.5), (60, 32), "left", "assembling-machine-1")
+    assert _borrow_for("electric-mining-drill", excluded={(60, 32)}) is None  # that cell hosts a loan
+    assert _borrow_for("electric-mining-drill", allowed=frozenset({"copper-cable"})) is None
+
+
+@pytest.mark.parametrize("world", [{"groups": ("mall:iron-gear-wheel:left",)}, {"groups": ("mall:iron-gear-wheel",)},
+                                   {"provider": None}, {"unset": False}])
+def test_only_an_unowned_complete_recipe_less_half_counts_as_vacant(monkeypatch, world):
+    _vacancy_world(monkeypatch, **world)
+    assert _borrow_for("assembling-machine-1") is None
+
+
+def test_a_vacant_half_beside_an_active_companion_stays_reusable(monkeypatch):
+    _vacancy_world(monkeypatch, groups=("mall:copper-cable:right",))
+    assert _borrow_for("splitter")[1] == (61.5, 33.5)
+
+
 def test_advanced_seed_craft_counter_alone_does_not_fulfill_delivery():
     from orchestrator.mall_bootstrap import MallBootstrapLoan
     loan = MallBootstrapLoan("transport-belt", "advanced-circuit", 4, "left", (39.5, 32.5),
@@ -4640,3 +4688,12 @@ def test_rationed_parent_finishes_its_durable_prerequisite_before_reclaiming(
         client, object(), "nauvis", "player", (0.0, 0.0), lambda _m: None,
     )
     assert restored == [loans[0]]
+
+
+def test_unset_assembler_survey_reports_only_real_recipe_less_assemblers():
+    sent = []
+    client = SimpleNamespace(command=lambda lua: sent.append(lua) or "1=assembling-machine-2,3=stone-furnace")
+    found = builder.live_base.unset_assemblers_at(client, "nauvis", "player", [(1.5, 1.5), (7.5, 1.5), (13.5, 1.5)])
+    assert found == {(1.5, 1.5): "assembling-machine-2"}  # non-assembler names are discarded
+    assert "type='assembling-machine',force='player'" in sent[0] and "get_recipe" in sent[0]
+    assert builder.live_base.unset_assemblers_at(client, "nauvis", "player", []) == {}
