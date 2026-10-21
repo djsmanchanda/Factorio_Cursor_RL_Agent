@@ -629,14 +629,21 @@ def saturated_feedstock(machines: list[Mapping], recipes: Mapping, stock: Mappin
 def compile_options(board: Mapping, results: list[dict], tick: int | None = None, recipes: Mapping | None = None,
                     stock: Mapping[str, int] | None = None, machines: list[Mapping] | None = None,
                     growable: tuple[str, ...] = (), enabled_recipes: Mapping | None = None,
-                    transactions: Mapping | None = None) -> dict:
-    """Operations worth offering now, each tagged with the need it serves and the facts rules weigh."""
+                    transactions: Mapping | None = None, foundations: Mapping | None = None) -> dict:
+    """Operations worth offering now, each tagged with the need it serves and the facts rules weigh.
+
+    ``foundations`` (plate -> observed ready) advances a plate past "starter" when the world shows its foundation
+    delivering, even if the foundation operation itself last returned a wait.
+    """
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
     goal = {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
     current_materials = material_results(results, transactions)
     stuck = unchanged_failures(current_materials, stock or {})
     sources: dict[str, set] = {}
     stages, codes, short = plate_stages(results), last_codes(results, tick), shortages(current_materials, sources)
+    for plate, ready in (foundations or {}).items():
+        if ready is True and stages.get(plate) == "starter":
+            stages[plate] = "foundation"
     prerequisites = named_prerequisites(results)
     for item, demand in prerequisites.items():
         sources.setdefault(item, set()).update(parent.split(":", 1)[1] for parent in demand["parents"])
@@ -947,7 +954,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         menu = with_economics(compile_options(board, results, facts["tick"], facts.get("recipes"), stock,
                                               facts.get("machines"), getattr(session, "growable", ()),
                                               enabled_recipes=facts.get("enabled_recipes"),
-                                              transactions=(economics or {}).get("transactions")),
+                                              transactions=(economics or {}).get("transactions"),
+                                              foundations=getattr(session, "foundation_facts", None)),
                               results, economics)
         reserved: Counter = Counter()
         for project in ((economics or {}).get("projects") or {}).values():
