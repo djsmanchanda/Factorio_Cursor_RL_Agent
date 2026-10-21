@@ -66,3 +66,5 @@ C15c was superseded before any job started (150 planned, 0 started) by C15d on t
 C14b closed 2026-10-21 17:40 IST after draining: 150 planned = 71 completed + 79 queued-never-started. All 79 (seeds 79435 ref and 79436–79474) are carried by C14c; earlier interrupted/rerun attempts are recorded in its job history. C14 accounting = C14b completed + C14c's 80 jobs, paired within one cohort per seed.
 
 C14 final (2026-10-22 ~04:40 IST): C14b 71 completed + 79 never started (carried by C14c), C14c 80/80 completed (4 reruns after the 02:39 power cut). 75 matched pairs; C2 ref 26 / steelbill 18 (10:18), C5 ever/final 25/11 vs 20/5, new Laya C6 21/17. No adoption. [Result](Laya_C14_Result_2026-10-22.md).
+
+C16 (launched 2026-10-22 04:50 IST, miniship): 150 planned = 50 seeds 79400–79449 × ref c1b8680 / vacancy 0bf1bdc / foundation 7fd2320 (no steelbill). Scheduler-gated harness 65d5613. Results pending.
