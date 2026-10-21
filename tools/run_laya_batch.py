@@ -41,6 +41,7 @@ from pathlib import Path
 
 PHASE = re.compile(r"^\+(\d+)s PHASE REACHED: (C\d) .* at tick (\d+)")
 SUMMARY = re.compile(r"SUMMARY: stop=(\S+) decisions=(\d+) failures=(\d+) phases=(\S*) accepted=(\S*)")
+FINAL_ACCEPTANCE = re.compile(r"\baccepted_final=(\S+)")
 
 
 def _atomic(path: Path, data: object) -> None:
@@ -124,6 +125,11 @@ def summarize(world: Path) -> dict:
             out.update(runner_stop=match.group(1), decisions=int(match.group(2)), failures=int(match.group(3)),
                        phases=[p for p in match.group(4).split(",") if p and p != "none"],
                        accepted=[p for p in match.group(5).split(",") if p and p != "none"])
+            # Ever-passed is the latched history; final is the fresh predicate on the last sample (unknown -> None).
+            out["accepted_ever"] = list(out["accepted"])
+            final = FINAL_ACCEPTANCE.search(line)
+            out["accepted_final"] = (None if final is None or final.group(1) == "unknown" else
+                                     [p for p in final.group(1).split(",") if p and p != "none"])
         elif start_tick is None and " tick=" in line and "DECISION 0 " in line:
             start_tick = int(line.split(" tick=")[1].split()[0])
     for phase in phases.values():

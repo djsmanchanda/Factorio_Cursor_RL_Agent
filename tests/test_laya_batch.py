@@ -231,3 +231,14 @@ def test_pre_registry_status_shapes_do_not_block_admission(tmp_path):
     batch = _host_batch(tmp_path, "new")
     write_gate(tmp_path, 1, time.time())
     assert batch.submit(_PendingPool(), batch.jobs[0], 0) is not None
+
+
+def test_summary_keeps_final_acceptance_separate_from_the_latch(tmp_path):
+    # Live C14c/C15d: this harness recorded only the latched list, so every final count read as zero.
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "logs/laya-runner.log").write_text(
+        "+9s SUMMARY: stop=stalled decisions=3 failures=0 phases=C0 accepted=C0,C2,C5 accepted_final=C0,C2\n")
+    parsed = summarize(tmp_path)
+    assert parsed["accepted_ever"] == ["C0", "C2", "C5"] and parsed["accepted_final"] == ["C0", "C2"]
+    (tmp_path / "logs/laya-runner.log").write_text("+9s SUMMARY: stop=stalled decisions=3 failures=0 phases=C0 accepted=C0 accepted_final=unknown\n")
+    assert summarize(tmp_path)["accepted_final"] is None
