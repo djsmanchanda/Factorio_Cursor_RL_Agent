@@ -218,3 +218,16 @@ def test_batch_refuses_to_overwrite_existing_cohort_accounting(tmp_path, monkeyp
     with pytest.raises(ValueError, match="existing cohort status"):
         batch.run()
     assert status.read_bytes() == before
+
+
+def test_pre_registry_status_shapes_do_not_block_admission(tmp_path):
+    # Live Miniship 2026-10-21: data/laya-experiments/ten-hour-20261015/job-status.json is a bare list; reading it
+    # as {"jobs": ...} made every host-budget admission "unavailable_host_budget".
+    from tools.laya_host_scheduler import write_gate
+
+    for name, content in (("old-list", "[]"), ("no-jobs", "{}")):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "job-status.json").write_text(content)
+    batch = _host_batch(tmp_path, "new")
+    write_gate(tmp_path, 1, time.time())
+    assert batch.submit(_PendingPool(), batch.jobs[0], 0) is not None

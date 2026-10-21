@@ -82,6 +82,8 @@ class HostBudget:
                 if path.parent.name.startswith("_host-scheduler"):
                     continue
                 data = json.loads(path.read_text())
+                if not isinstance(data, dict) or not isinstance(data.get("jobs"), list):
+                    continue  # Pre-registry cohorts wrote other shapes (a bare list); they own no live worlds.
                 # Stale running records remain reserved until the owner reconciles
                 # them; a dead supervisor may have left its Factorio worlds alive.
                 occupied += sum(bool(job.get("admission_reserved")) or
