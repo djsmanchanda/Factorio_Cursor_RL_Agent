@@ -284,3 +284,7 @@ Update 05:25 IST: attempt 1 (`laya-c14-2123-miniship-20261021`) was stopped afte
 ## Cohort 15 queued (2026-10-21 13:45 IST)
 
 `laya-c15b-2123-miniship-20261021`: 150 jobs, seeds 79400–79474 × steelbill `934f9cb` / vacancy `ef38247` (released finite mall-half reuse; only this differs in trial code). Harness `1e8428f`, shared host budget (newer cohorts bounded by older shared totals), ports 37100–37129/30100–30129, admission until 2026-10-22 18:00 IST, cap 110000 s. It waits behind C12/C13/C14b. Attempt 1 is excluded (see CURRENT_STATUS). Read contrasts against the C12-seed/C13-ref A/A spread.
+
+## Cohort 12 complete (2026-10-21 14:30 IST)
+
+C12 finished 160/192 completed plus 32 not_started_deadline; no adoption. See [C12 result](Laya_C12_Result_2026-10-21.md). Active: C13 (until 18:45), C14b and C15b under the shared host budget. Starship's C2 reliability cohort is monitored read-only every 30 minutes (local handoff).
