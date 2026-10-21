@@ -502,3 +502,8 @@ fresh frozen copy of dabdfd5 with its mods staged into each disposable world.
 - What: an owned iron provider with observed iron output may fund the compact steel seed before replacement submission, breaking the foundation-chest/plastic/steel cycle. Funding, placement/purity/reservations, power and retirement checks remain enforced. The old retirement-wait code is retained for telemetry continuity, with explicit feed evidence.
 - Evidence: positive pioneer/provisioning cases and absent-feed/collision negatives pass in the 136 focused checks; final fast gate retains only the known firewall failure (1188 pass, 1 skip). Historical C13 ref-s79400 establishes the dependency cycle. Cohort impact remains unmeasured.
 - Lifecycle: new frozen runners only; no Lua deployment, real-base action or existing campaign restart.
+
+## [2026-10-21 12:40 IST] Truthful strict-C2 cohort reports
+- What: reports lead with strict c2-v1 ever/final acceptance, complete status denominators, unknowns, Wilson intervals and matched terminal pairs; per-job failed checks/recent blockers and maintenance failures are separate from tool faults and proxies. New batches refresh reports on status changes; old frozen evidence has a separate read-only reporting CLI.
+- Evidence: batch reporting/parser regressions pass in the 136 focused checks, including crash/censored accounting, unknown final checks, repeated-vs-job counts and maintenance errors. Final fast gate: 1188 pass, 1 skip, unchanged firewall failure. See docs/rl/Laya_C2_Reliability.md for objective, causal evidence and interpretation limits.
+- Lifecycle: reporting applies to newly frozen harnesses; older cohorts can be read without restarting or modifying them. No adoption or >80% result claimed.

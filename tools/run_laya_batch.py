@@ -46,11 +46,12 @@ import statistics
 import subprocess
 import threading
 import time
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from training.scheduler import AdaptiveScaleState, UpsWindow, adjust_adaptive_slots
+from tools.laya_cohort_report import metrics as cohort_metrics, markdown as cohort_markdown
 
 PHASE = re.compile(r"^\+(\d+)s PHASE REACHED: (C\d) .* at tick (\d+)")
 SUMMARY = re.compile(r"SUMMARY: stop=(\S+) decisions=(\d+) failures=(\d+) phases=(\S*) accepted=(\S*)")
@@ -243,7 +244,13 @@ def summarize(world: Path) -> dict:
     if not log.exists():
         return {"runner_stop": None}
     start_tick, phases, out = None, {}, {"runner_stop": None}
+    codes, recent, upkeep = Counter(), deque(maxlen=20), 0
     for line in log.read_text(errors="replace").splitlines():
+        if (outcome := re.search(r"\bOUTCOME: ([a-z_]+)", line)) and outcome[1] != "ok":
+            codes[outcome[1]] += 1
+            recent.append(outcome[1])
+        if "LOAN RELEASE FAILED:" in line or "MALL CHEST CAP FAILED:" in line:
+            upkeep += 1
         if (match := PHASE.match(line)):
             phases[match.group(2)] = {"seconds": int(match.group(1)), "tick": int(match.group(3))}
         elif (match := SUMMARY.search(line)):
@@ -260,6 +267,20 @@ def summarize(world: Path) -> dict:
         phase["game_seconds"] = (phase["tick"] - start_tick) / 60 if start_tick else None
     out["phase_times"] = phases
     out["untyped_stuck"] = log.read_text(errors="replace").count("OUTCOME: untyped_stuck")
+    out.update(typed_outcomes=dict(codes), recent_typed_outcomes=dict(Counter(recent)),
+               maintenance_failure_events=upkeep, c2_latest_checks=None, malformed_journal_rows=0)
+    journal = world / "evidence/clean-decisions.jsonl"
+    if journal.exists():
+        with journal.open() as records:
+            for line in records:
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    out["malformed_journal_rows"] += 1
+                    continue
+                if record.get("event") == "acceptance":
+                    out["c2_latest_checks"] = ((record.get("checks") or {}).get("C2") or {}).get("checks")
+                    out["c2_checks_at"] = record.get("at")
     return out
 
 
@@ -285,6 +306,7 @@ class Batch:
         with self.lock:
             _atomic(self.root / "job-status.json", {"name": self.cfg["name"], "updated": time.time(), "jobs": self.jobs,
                                                     **({"controller": controller.last} if controller else {})})
+            self.report()
 
     def _cmd(self, arm: dict, *args: str) -> list[str]:
         return [self.cfg["python"], str(Path(arm["code"]) / "tools/run_laya_clean.py"), *args]
@@ -391,7 +413,10 @@ class Batch:
         rows = defaultdict(list)
         for job in self.jobs:
             rows[job["arm"]].append(job)
+        reliability = cohort_metrics(self.jobs, self.cfg["arms"])
+        _atomic(self.root / "report.json", reliability)
         lines = [f"# {self.cfg['name']}", "", f"Planned jobs: {len(self.jobs)}; statuses: {dict(Counter(j['status'] for j in self.jobs))}", "",
+                 *cohort_markdown(reliability), "",
                  "| Arm | Run | Stops | Proxy C1/C2/C3/C4 | Median game-min to C2 | Predicates ever passed | Predicates passed at end (observed runs) | untyped_stuck |",
                  "|---|---:|---|---|---:|---|---|---:|"]
         for arm, jobs in rows.items():

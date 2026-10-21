@@ -28,6 +28,43 @@ def test_jobs_are_seed_major_with_the_arm_order_rotated_per_seed(tmp_path):
     assert [j["id"] for j in _batch(tmp_path).jobs] == ["control-s1", "fix-s1", "fix-s2", "control-s2"]
 
 
+def test_reliability_counts_crashes_keeps_censored_jobs_and_separates_proxies(tmp_path):
+    from tools.laya_cohort_report import metrics
+    batch = _batch(tmp_path, seeds=(1, 2, 3))
+    control = [j for j in batch.jobs if j["arm"] == "control"]
+    control[0].update(status="completed", phases=["C2"], accepted=["C0"], accepted_final=["C0"],
+                      c2_latest_checks={"iron_starter_absent": False},
+                      recent_typed_outcomes={"steel_seed_site_wait": 20})
+    control[1].update(status="runner_error")
+    control[2].update(status="not_started_deadline")
+    fixed = [j for j in batch.jobs if j["arm"] == "fix"]
+    fixed[0].update(status="completed", accepted=["C0", "C2"], accepted_final=["C0", "C2"])
+    report = metrics(batch.jobs, batch.cfg["arms"])
+    row = report["arms"]["control"]
+    assert (row["planned"], row["terminal"], row["strict_c2_ever"], row["acceptance_unknown"]) == (3, 2, 0, 1)
+    assert row["c2_failed_checks_jobs"] == {"iron_starter_absent": 1}
+    assert row["recent_blocker_jobs"] == {"steel_seed_site_wait": 1}
+    assert report["adjacent_pairs"] == [{"old": "control", "new": "fix", "terminal_pairs": 1,
+                                          "new_only": 1, "old_only": 0}]
+    batch.report()
+    assert json.loads((tmp_path / "report.json").read_text())["predicate"] == "c2-v1"
+    assert "Strict C2" in (tmp_path / "report.md").read_text()
+
+
+def test_terminal_summary_reads_actual_checks_and_maintenance_faults(tmp_path):
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "evidence").mkdir()
+    (tmp_path / "logs/laya-runner.log").write_text(LOG + "  LOAN RELEASE FAILED: release_owner_missing\n")
+    (tmp_path / "evidence/clean-decisions.jsonl").write_text("broken row\n" + json.dumps({
+        "event": "acceptance", "at": "end", "checks": {"C2": {"checks": {"copper_foundation_ready": None,
+        "copper_starter_absent": False}}}}) + "\n")
+    row = summarize(tmp_path)
+    assert row["c2_latest_checks"] == {"copper_foundation_ready": None, "copper_starter_absent": False}
+    assert row["c2_checks_at"] == "end"
+    assert row["maintenance_failure_events"] == row["malformed_journal_rows"] == 1
+    assert row["typed_outcomes"] == {"untyped_stuck": 1}
+
+
 def test_the_deadline_admits_whole_seed_blocks(tmp_path, monkeypatch):
     # Review 2026-10-20: a per-job deadline check could start a seed's first arm and censor the rest.
     import tools.run_laya_batch as harness
