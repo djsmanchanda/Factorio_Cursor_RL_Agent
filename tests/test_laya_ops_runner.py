@@ -25,6 +25,32 @@ def test_results_become_plate_stages_and_shortages():
     assert "op.starter.iron-plate" not in ids
 
 
+def test_submitted_replacement_cleanup_survives_failed_outer_action_and_later_phase():
+    results = [{"ok": True, "operation": "starter", "params": {"recipe": p}}
+               for p in ("iron-plate", "copper-plate")]
+    results.append(SHORT)
+    # Live C12 ref-s79400: a nested operation submitted copper, but the
+    # foundation never returned ok before the proxy objective became plastic.
+    board = {"needs": [{"item": "plastic-bar", "condition": "unbuilt", "goal_required_per_s": 1}]}
+    lifecycle = {"copper-plate": {"state": "provisioning", "replacement_submitted": True,
+                                  "measured_output_count": 0}}
+    options = {o["option_id"]: o for o in compile_options(board, results, lifecycles=lifecycle)["options"]}
+    assert "op.retire_starter.copper-plate" in options
+    assert "op.extend.copper-plate" not in options
+    assert options["op.retire_starter.copper-plate"]["features"]["replacement_submitted"] is True
+    assert any(o["family"] == "wait" for o in options.values())
+    lifecycle["copper-plate"]["state"] = "released"
+    assert "op.retire_starter.copper-plate" not in {o["option_id"] for o in compile_options(
+        board, results, lifecycles=lifecycle)["options"]}
+
+
+def test_unknown_or_unsubmitted_lifecycle_does_not_invent_a_cleanup_obligation():
+    for lifecycle in (None, {}, {"error": "unreadable"},
+                      {"iron-plate": {"state": "provisioning", "replacement_submitted": False}}):
+        assert not any(o["family"] == "retire_starter" for o in compile_options(
+            BOARD, [], lifecycles=lifecycle)["options"])
+
+
 def test_the_docs_order_fence_starter_foundation_then_shortage():
     from orchestrator.laya_knowledge import load_guideline_context
     from training.laya_clean_runner import ROOT

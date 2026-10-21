@@ -120,6 +120,17 @@ def test_committed_or_producing_seed_does_not_require_spent_poles(world, monkeyp
     assert result["code"] not in BUILT
 
 
+def test_lifecycle_facts_come_from_the_scoped_ledger_without_selecting_work(world):
+    session = open_session(world)
+    builder._BOOTSTRAP_DISTRICT_LEDGER.record_pioneer("iron-plate", "iron-ore", [{
+        "action_type": "place_ghost", "entity": "electric-furnace", "position": {"x": 0.5, "y": 0.5}}])
+    before = {p: p.read_bytes() for p in session.script_output.parent.rglob("*.json")}
+    facts = session.plate_lifecycles()
+    assert facts == {"iron-plate": {"state": "pioneer", "replacement_submitted": False,
+                                     "measured_output_count": 0}}
+    assert {p: p.read_bytes() for p in session.script_output.parent.rglob("*.json")} == before
+
+
 @pytest.mark.parametrize("submitted", [False, True])
 def test_committed_belt_side_seed_keeps_its_plan_bill(world, monkeypatch, submitted):
     # The belt-side seed bills one pole, fewer than the two-pole opening fence (review 2026-10-18).

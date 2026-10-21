@@ -55,6 +55,12 @@ Receipts must retain transaction identity, selected parameters, typed cause,
 ownership, resource use and observed postconditions. A successful return is not
 by itself proof of delivered output or a standing producer.
 
+The October 21 ops candidate reads episode-owned district lifecycle facts as
+well as action receipts. A submitted replacement keeps its starter reconciliation
+selectable after a nested operation defers or the rate-proxy objective changes.
+That choice retains the shared tool's output, power and exact-removal checks;
+it does not imply a ready foundation or permit expansion from a failed receipt.
+
 Shared service failures now distinguish `infrastructure_collision` (plan and
 observed occupant evidence) from `power_route_unavailable` (endpoints, pole,
 blocked tile count and route reason). Both remain failed bug outcomes; typing

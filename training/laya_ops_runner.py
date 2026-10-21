@@ -629,7 +629,7 @@ def saturated_feedstock(machines: list[Mapping], recipes: Mapping, stock: Mappin
 def compile_options(board: Mapping, results: list[dict], tick: int | None = None, recipes: Mapping | None = None,
                     stock: Mapping[str, int] | None = None, machines: list[Mapping] | None = None,
                     growable: tuple[str, ...] = (), enabled_recipes: Mapping | None = None,
-                    transactions: Mapping | None = None) -> dict:
+                    transactions: Mapping | None = None, lifecycles: Mapping | None = None) -> dict:
     """Operations worth offering now, each tagged with the need it serves and the facts rules weigh."""
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
     goal = {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
@@ -664,8 +664,16 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     for plate in PLATES:
         # Hard lifecycle order of the tooling (its ledgers break otherwise): starter -> foundation -> extend,
         # and retiring the starter once the foundation stands.
+        lifecycle = (lifecycles or {}).get(plate) or {}
+        released = lifecycle.get("state") == "released" if lifecycle else retired(results, plate)
         legal = {"none": ("starter",), "starter": ("foundation",) if starters_done else (),
-                 "foundation": ("extend",) + (() if retired(results, plate) else ("retire_starter",))}[stages.get(plate, "none")]
+                 "foundation": ("extend",) + (() if released else ("retire_starter",))}[stages.get(plate, "none")]
+        # A nested prerequisite may submit a replacement and then defer before
+        # the outer operation succeeds. Its owned cleanup obligation still
+        # exists. Offering reconciliation does not authorize early retirement:
+        # the shared tool rechecks delivery, power and exact starter identity.
+        if lifecycle.get("replacement_submitted") is True and not released and "retire_starter" not in legal:
+            legal += ("retire_starter",)
         if plate not in unmet and PLATES[plate] not in unmet:
             # Retiring a starter is lifecycle cleanup, not production, so it outlives the plate's goal (live
             # 2026-10-15: once C4's board held only plastic, the iron starter was never retired).
@@ -676,6 +684,9 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                         # The tooling said it waits on bots or coverage: retry after a wait, not at once.
                         "waiting": in_progress(codes.get((operation, plate))),
                         "unchanged_failure": (operation, plate) in stuck}
+            if lifecycle:
+                features["lifecycle_state"] = lifecycle.get("state")
+                features["replacement_submitted"] = lifecycle.get("replacement_submitted")
             cause = unbuildable_cause(results, operation, plate)
             if cause is not None:
                 # Typed and terminal for this district: re-picking it cannot change the outcome.
@@ -944,10 +955,12 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         economics = economics_observation(economics, facts.get("networks"))
         economics["capacity"] = mall_capacity(economics, results)
         economics["starters"] = getattr(session, "starter_facts", None)
+        economics["plate_lifecycles"] = session.plate_lifecycles() if hasattr(session, "plate_lifecycles") else None
         menu = with_economics(compile_options(board, results, facts["tick"], facts.get("recipes"), stock,
                                               facts.get("machines"), getattr(session, "growable", ()),
                                               enabled_recipes=facts.get("enabled_recipes"),
-                                              transactions=(economics or {}).get("transactions")),
+                                              transactions=(economics or {}).get("transactions"),
+                                              lifecycles=economics["plate_lifecycles"]),
                               results, economics)
         reserved: Counter = Counter()
         for project in ((economics or {}).get("projects") or {}).values():

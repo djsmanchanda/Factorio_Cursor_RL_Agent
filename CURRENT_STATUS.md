@@ -492,3 +492,8 @@ fresh frozen copy of dabdfd5 with its mods staged into each disposable world.
 - What: shared read-only mining-plan survey checks the actual compact steel templates, all directions/pole sides, ghosts, pure ore and reserved tiles; the fallback no longer tests one unrelated paired-iron starter site. Work isolated on fix/laya-c2-reliability-20261021; previous user edits preserved.
 - Evidence: 47 focused tests pass, including executable Lua survey and collision/retry fixtures. Fast gate: 1186 passed, 1 skipped, only the established training/laya_ops.py import-firewall violation failed (/tmp/laya-c2-site-fast.log). Historical C12/C13 pre-C2 site failures diagnosed; cohort improvement remains unmeasured.
 - Lifecycle: new frozen disposable runners required. No active campaign, installed mod, real server or source save changed; no adoption.
+
+## [2026-10-21 12:39 IST] Persisted replacement cleanup choices
+- What: expose episode-scoped plate lifecycle facts and retain reconciliation choices after nested/failed outer operations and later proxy phases; no fabricated successful foundation receipt or early retirement.
+- Evidence: 55 runner/initialization checks passed; combined 136 focused checks pass. Final fast gate: 1188 passed, 1 skipped, only the unchanged known import-firewall failure (/tmp/laya-c2-final-fast.log). C12/C13 diagnosis found 51/177 non-C2 terminal jobs with both foundations ready but a starter present; missing choice is confirmed in sampled jobs, not attributed to all 51.
+- Lifecycle: new frozen disposable runners; no active cohort or installed mod changed. No reliability/adoption result yet.

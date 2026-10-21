@@ -188,6 +188,19 @@ class DeterministicSession:
         ab._reconcile_submitted_bootstrap_replacement(self.client, self.bridge, SURFACE, FORCE, state, self.emit)
         return {"lifecycle": ab._bootstrap_state(recipe).lifecycle_state, "submitted": True}
 
+    def plate_lifecycles(self) -> dict:
+        """Read exact episode-owned replacement obligations, including nested submissions."""
+        ledger = ab._BOOTSTRAP_DISTRICT_LEDGER
+        if ledger is None:
+            return {}
+        try:
+            return {state.recipe: {"state": state.lifecycle_state,
+                                   "replacement_submitted": state.replacement_submitted,
+                                   "measured_output_count": state.measured_output_count}
+                    for state in ledger.states()}
+        except Exception as error:
+            return {"error": f"{type(error).__name__}: {error}"[:200]}
+
     def run(self, operation: str, **params) -> dict:
         """Run one operation; the tooling's own signals become a typed result."""
         try:
