@@ -4335,12 +4335,24 @@ def _build_compact_steel_seed(client, bridge, surface, force, provider, referenc
             if plan is not None:
                 break
         if plan is None:
-            site = live_base.direct_plate_starter_site(client, surface, force, "iron-ore", reference_point)
+            # A paired iron starter has a different footprint and needs two ore
+            # drills. Survey the actual one-drill steel layouts, including both
+            # pole sides, so one rejected starter site cannot hide legal steel.
+            variants = [(direction, side) for direction in VECTORS for side in (-1, 1)]
+            templates = [steel_seed((0.5, 0.5), direction, mined=True, pole_side=side)
+                         for direction, side in variants]
+            reserved = set().union(*state.reservations.values())
+            site = live_base.mined_plan_site(
+                client, surface, force, "iron-ore", reference_point, templates,
+                reserved_tiles=reserved,
+            )
             if site is not None:
-                candidate = steel_seed(site.drill_position, site.output_direction, mined=True)
+                index, source = site
+                direction, side = variants[index]
+                candidate = steel_seed(source, direction, mined=True, pole_side=side)
                 area = _plan_area(candidate, padding=1)
                 occupied = live_base.occupied_tiles(client, surface, *area)
-                if not planned_footprint_tiles(candidate) & occupied:
+                if not planned_footprint_tiles(candidate) & (occupied | reserved):
                     plan = candidate
         if plan is None:
             raise ProductionPrerequisiteDeferred(

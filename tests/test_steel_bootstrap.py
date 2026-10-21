@@ -46,6 +46,45 @@ def test_verified_iron_pioneer_output_breaks_steel_cycle(monkeypatch):
     ) is True
 
 
+@pytest.mark.parametrize("occupied", [set(), {(20, 20)}])
+def test_steel_fallback_submits_the_surveyed_layout_and_rechecks_occupancy(tmp_path, monkeypatch, occupied):
+    ledger = MaterialReservationLedger(tmp_path / "script-output", episode_id="steel-site", surface="nauvis", force="player")
+    ledger.path.parent.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", ledger)
+    monkeypatch.setattr(builder, "_bootstrap_state", lambda _: SimpleNamespace(
+        lifecycle_state="released", reservations={"future": {(99, 99)}}))
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_: {})
+    monkeypatch.setattr(builder.live_base, "occupied_tiles", lambda *_: occupied)
+    surveys = []
+
+    def survey(*args, **kwargs):
+        surveys.append((args[5], kwargs["reserved_tiles"]))
+        return 1, (20.5, 20.5)  # north, pole side +1
+
+    monkeypatch.setattr(builder.live_base, "mined_plan_site", survey)
+    monkeypatch.setattr(builder, "assert_affordable", lambda *_a, **_k: None)
+    submitted = []
+    monkeypatch.setattr(builder, "_submit", lambda c, b, s, p, *_a, **_k: submitted.append(p))
+    monkeypatch.setattr(builder, "bring_stage_up", lambda *_a, **_k: None)
+    monkeypatch.setattr(builder, "_ensure_power_anchor_on_generated_network", lambda *_a, **_k: None)
+    monkeypatch.setattr(builder, "_diagnose_machines", lambda *_a, **_k: [])
+    client = SimpleNamespace(command=lambda _: "[]")
+    call = lambda: builder._build_compact_steel_seed(client, object(), "nauvis", "player", (0, 0), (0, 0), lambda _: None)
+    if occupied:
+        with pytest.raises(builder.ProductionPrerequisiteDeferred) as error:
+            call()
+        assert error.value.code == "steel_seed_site_wait"
+        assert submitted == []
+    else:
+        assert call() is not None
+        expected = steel_seed((20.5, 20.5), "north", mined=True, pole_side=1)
+        expected.update(surface="nauvis", force="player")
+        assert submitted == [expected]
+    templates, reserved = surveys[0]
+    assert len(templates) == 8
+    assert reserved == {(99, 99)}
+
+
 def test_steel_seed_adopts_legacy_reservation_without_taking_power_bridge_stock(tmp_path):
     """The old split identity must collapse to one pole-owning transaction."""
     ledger = MaterialReservationLedger(

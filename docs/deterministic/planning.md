@@ -154,6 +154,9 @@ These names describe intended responsibilities, not permission to build speculat
   requester. Siting checks its complete footprint and the iron district's
   expansion reservations. If no belt-side site fits, a free ore patch may host
   a compact drill -> iron furnace -> inserter -> steel furnace seed instead.
+  The fallback surveys that complete seed in every cardinal direction and
+  both pole sides, including terrain, ghosts, pure ore and future reservations.
+  A paired iron starter's site is not evidence that the longer steel layout fits.
   The funded seed and its exact identity persist per episode across retries.
   Its startup pole reserve and full construction bill share the same material
   project, `conversion_steel-plate`, at priority 100. A resumed active legacy

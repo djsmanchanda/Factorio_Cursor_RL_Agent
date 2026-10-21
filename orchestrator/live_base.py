@@ -358,6 +358,74 @@ def direct_plate_starter_site(
     )
 
 
+def mined_plan_site(
+    client: RconClient, surface: str, force: str, ore: str, near: Point,
+    templates: Sequence[dict], *, reserved_tiles: frozenset[tuple[int, int]] | set[tuple[int, int]] = frozenset(),
+    search_radius: float = 400.0,
+) -> tuple[int, Point] | None:
+    """Find a legal *complete* layout anchored on ore, rather than another layout's site.
+
+    Templates use a drill anchor at (0.5, 0.5). All placements, drill resource
+    purity, ghosts, terrain and reserved tiles must pass before returning a site.
+    The returned index selects the original template; this survey never builds.
+    """
+    from planners.plan_validation import entity_footprint_tiles, validate_build_plan
+
+    layouts = []
+    for plan in templates:
+        validate_build_plan(plan)
+        actions = [a for phase in plan["phases"] for a in phase["actions"]]
+        if not actions or any(a.get("action_type") != "place_ghost" for a in actions):
+            raise ValueError("mined plan templates must contain only ghost placements")
+        tiles = set().union(*(entity_footprint_tiles(a) for a in actions))
+        layouts.append({"actions": actions, "tiles": sorted(tiles)})
+    payload = json.dumps({"layouts": layouts, "reserved": sorted(reserved_tiles)})
+    lua = (
+        "local s=game.surfaces[" + json.dumps(surface) + "];local f=game.forces[" + json.dumps(force) + "];"
+        "local spec=helpers.json_to_table(" + json.dumps(payload) + ");"
+        "local ore=" + json.dumps(ore) + ";local nx,ny=" + str(near[0]) + "," + str(near[1]) + ";"
+        "local function key(x,y) return math.floor(x)..','..math.floor(y) end;"
+        "local reserved={};for _,p in ipairs(spec.reserved) do reserved[key(p[1],p[2])]=true end;"
+        "local rs=s.find_entities_filtered{name=ore,type='resource',area={{"
+        + str(near[0] - search_radius) + "," + str(near[1] - search_radius) + "},{"
+        + str(near[0] + search_radius) + "," + str(near[1] + search_radius) + "}}};"
+        "table.sort(rs,function(a,b) local ad=(a.position.x-nx)^2+(a.position.y-ny)^2;"
+        "local bd=(b.position.x-nx)^2+(b.position.y-ny)^2;"
+        "if ad~=bd then return ad<bd end;"
+        "if a.position.x~=b.position.x then return a.position.x<b.position.x end;"
+        "return a.position.y<b.position.y end);"
+        "for i=1,math.min(#rs,512) do local p=rs[i].position;local ox,oy=p.x-0.5,p.y-0.5;"
+        "for index,layout in ipairs(spec.layouts) do local ok=true;"
+        "for _,t in ipairs(layout.tiles) do "
+        "if reserved[key(t[1]+ox,t[2]+oy)] then ok=false;break end end;"
+        "if ok then for _,a in ipairs(layout.actions) do "
+        "local q={a.position.x+ox,a.position.y+oy};"
+        "local d=defines.direction[a.direction or 'north'];"
+        "if not s.can_place_entity{name=a.entity,position=q,direction=d,force=f,"
+        "build_check_type=defines.build_check_type.manual} then ok=false;break end;"
+        "local box=prototypes.entity[a.entity].collision_box;"
+        "if #s.find_entities_filtered{type='entity-ghost',area={{q[1]+box.left_top.x,q[2]+box.left_top.y},"
+        "{q[1]+box.right_bottom.x,q[2]+box.right_bottom.y}}}>0 then ok=false;break end;"
+        "if a.entity=='electric-mining-drill' then local found=false;"
+        "for _,r in pairs(s.find_entities_filtered{type='resource',"
+        "area={{q[1]-2.5,q[2]-2.5},{q[1]+2.5,q[2]+2.5}}}) do "
+        "if r.name~=ore then ok=false;break end;found=true end;"
+        "if not found or not ok then ok=false;break end end end end;"
+        "if ok then rcon.print(index..' '..p.x..' '..p.y);return end end end;rcon.print('NONE')"
+    )
+    raw = _sc(client, lua)
+    if raw == "NONE":
+        return None
+    fields = raw.split()
+    try:
+        index, x, y = int(fields[0]) - 1, float(fields[1]), float(fields[2])
+        if len(fields) != 3 or not 0 <= index < len(templates) or not all(map(math.isfinite, (x, y))):
+            raise ValueError
+    except (IndexError, ValueError) as error:
+        raise TelemetryError(f"malformed mined plan site survey: {raw!r}") from error
+    return index, (x, y)
+
+
 
 def drill_siting_conflicts(
     client: RconClient, surface: str, resource: str, centres: list[Point],
