@@ -298,3 +298,7 @@ C13 finished 144/144; no adoption. See [C13 result](Laya_C13_Result_2026-10-21.m
 ## Host scheduler adopted for Miniship cohorts (2026-10-21 17:15 IST)
 
 Active: C14b (draining legacy supervisor; no new admissions), **C14c** `laya-c14c-2123-miniship-20261021` (C14b's remaining seeds 79435–79474, 80 jobs) and **C15d** `laya-c15d-2123-miniship-20261021` (steelbill → vacancy → foundation × 50 seeds, 150 jobs). C14c and C15d run on harness `81f0735` behind `laya-host-scheduler`'s gate (see [Laya_Host_Scheduler.md](Laya_Host_Scheduler.md) on the scheduler branch). C14b analysis: pair within one cohort per seed (C14b seeds 79400–79434, C14c 79435–79474). Stop `laya-legacy-drain-gate` once C14b is inactive.
+
+## Cohort 14 complete (2026-10-22 04:45 IST)
+
+C14 (C14b + C14c) finished with 75 matched pairs; steelbill is not adopted and is dropped from future bases. See [C14 result](Laya_C14_Result_2026-10-22.md). C15d is finishing. The next cohort, C16, tests the fixes on ref without steelbill.
