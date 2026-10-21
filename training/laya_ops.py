@@ -367,7 +367,8 @@ class DeterministicSession:
         """The deterministic runtime's own milestone predicates (orchestrator/checkpoint_milestones.py) on the
         live world: passed / failed / unknown per C0..C6, monotonic once passed. The runner's C phases are rate
         proxies; these are the acceptance checks results are compared on. The first call is the baseline."""
-        from orchestrator.checkpoint_milestones import CheckpointEvaluator, evaluate_milestone, starter_blocker
+        from orchestrator.checkpoint_milestones import (CheckpointEvaluator, _foundation_ready, evaluate_milestone,
+                                                         starter_blocker)
         from orchestrator.checkpoint_observer import LiveCheckpointObservationAdapter, ObservationUnsupported
         if not hasattr(self, "_evaluator"):
             self._evaluator, self._baseline, self._history = CheckpointEvaluator(), None, []
@@ -388,6 +389,11 @@ class DeterministicSession:
                                      "blocker": starter_blocker(snapshot, name), "tick": snapshot.tick}
                               if name in snapshot.starters else {"blocker": "unobserved", "tick": snapshot.tick}
                               for name in ("iron", "copper", "stone")}
+        # Observed foundation readiness per plate: bots may finish a foundation after its operation returned a
+        # wait, which the operation history alone never records (C12: 24 runs never offered the starter retirement).
+        self.foundation_facts = {plate: _foundation_ready(snapshot, name)
+                                 for plate, name in (("iron-plate", "iron"), ("copper-plate", "copper"),
+                                                     ("stone-brick", "stone"))}
         self._history = (self._history + [snapshot])[-20:]
         # Fresh: the stateless predicates on this sample. The evaluator's latch answers "passed" forever once
         # reached, so a latched final could not show a regression (review 2026-10-20).

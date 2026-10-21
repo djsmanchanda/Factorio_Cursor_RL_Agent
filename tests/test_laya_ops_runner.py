@@ -649,3 +649,20 @@ def test_summary_final_acceptance_shows_a_regression_the_latch_hides(tmp_path):
     assert summary["accepted_ever"] == ["C2"] and summary["accepted_final"] == []
     rows = [json.loads(line) for line in (tmp_path / "j.jsonl").read_text().splitlines()]
     assert [r["fresh"]["C2"] for r in rows if r.get("event") == "acceptance"][:2] == ["passed", "failed"]
+
+
+def test_an_observed_ready_foundation_offers_its_starter_retirement_after_a_wait_outcome():
+    # Live C12 ref-s79400: the copper foundation returned roboport_coverage_construction_wait, bots finished it,
+    # deterministic C2 saw it ready, but the menu still thought copper was at "starter": with copper satisfied it
+    # offered nothing for copper, so the starter was never retired (30 of 111 never-C2 runs had this shape).
+    board = {"needs": [{"item": "iron-plate", "condition": "unbuilt", "goal_required_per_s": 0.5},
+                       {"item": "copper-plate", "condition": "satisfied", "goal_required_per_s": 0.5}]}
+    results = [{"ok": True, "operation": "starter", "params": {"recipe": p}} for p in ("iron-plate", "copper-plate")]
+    results.append({"ok": False, "operation": "foundation", "params": {"recipe": "copper-plate"},
+                    "code": "roboport_coverage_construction_wait"})
+    ids = lambda **kw: {o["option_id"] for o in compile_options(board, results, **kw)["options"]}
+    assert not any(i.endswith(".copper-plate") for i in ids())
+    assert "op.retire_starter.copper-plate" in ids(foundations={"copper-plate": True})
+    # Unknown or not-ready observations never invent a foundation.
+    assert not any(i.endswith(".copper-plate") for i in ids(foundations={"copper-plate": None}))
+    assert not any(i.endswith(".copper-plate") for i in ids(foundations={"copper-plate": False}))
