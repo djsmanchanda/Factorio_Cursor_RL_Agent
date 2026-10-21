@@ -57,6 +57,7 @@ from orchestrator.mall_builder import (
     build_compact_mall_stage, compact_mall_project_bill,
     DEMAND_MALL_SLOT_TARGET,
     locate_mall_cell,
+    mall_slot_positions,
     mall_allocation_completes_pair,
     mall_cell_needs_rebuild,
     mall_demand_slot_count,
@@ -6996,7 +6997,12 @@ def _borrow_free_mall_cell(
                 machine_position, origin, side,
             ))
     if not candidates:
-        return None
+        if allowed_original_recipes is not None or not hasattr(client, "command"):
+            # A caller naming its lender recipes wants that cell; offline fixtures have no vacancy survey.
+            return None
+        # Shared-provider halves stay eligible, as they do for configured lenders (ranked, not excluded).
+        return _vacant_mall_half(client, surface, force, target_item, reference_point,
+                                 excluded_origins=excluded_origins)
     (_shared, _spare, _stocked, original_recipe, machine_position, origin,
      side) = min(candidates)
     machine_entity = live_base.entity_at(client, surface, machine_position)
@@ -7006,6 +7012,40 @@ def _borrow_free_mall_cell(
         else "assembling-machine-1"
     )
     return (original_recipe, machine_position, origin, side, machine_name)
+
+
+def _vacant_mall_half(
+    client: RconClient, surface: str, force: str, target_item: str, reference_point: Point, *,
+    excluded_origins: set[tuple[float, float]],
+) -> tuple[str, Point, tuple[int, int], str, str] | None:
+    """A complete owned mall half whose finite batch was released (recipe cleared, its requests gone).
+
+    Releasing a finite cell leaves the real assembler and both chests in place with no recipe. Recipe-based
+    lender search cannot see it and slot allocation treats it as occupied, so a run that later needs one more
+    assembler to make assemblers deadlocked with hardware standing idle (C12/C13/C14 B-class stalls). The
+    vacancy is borrowed as a finite cell of the target -- the existing release path vacates it again -- so no
+    new restore semantics and no producer protection are relaxed.
+    """
+    halves = [(origin, side, position) for origin, side, position in mall_slot_positions(reference_point)
+              if origin not in excluded_origins]
+    unset = live_base.unset_assemblers_at(client, surface, force, [position for _, _, position in halves])
+    for origin, side, position in halves:
+        name = unset.get(tuple(position))
+        if name is None:
+            continue
+        requester_position = (origin[0] + 4.5, origin[1] + 1.5)
+        provider_position = (origin[0] + 4.5, origin[1] + 1.5 + (-1.0 if side == "left" else 1.0))
+        requester = live_base.entity_at(client, surface, requester_position)
+        provider = live_base.entity_at(client, surface, provider_position)
+        if (not requester or requester["name"] != "requester-chest" or requester.get("force") != force
+                or not provider or provider["name"] != "passive-provider-chest" or provider.get("force") != force):
+            continue  # Only a complete half can be configured in place.
+        other = "right" if side == "left" else "left"
+        groups = live_base.requester_logistic_groups(client, surface, requester_position)
+        if any(f":{other}" not in group or f":{side}" in group for group in groups):
+            continue  # A request section still names this half (or no half): another owner, not a vacancy.
+        return (target_item, tuple(position), origin, side, name)
+    return None
 
 
 def _loan_blocked_inputs(
