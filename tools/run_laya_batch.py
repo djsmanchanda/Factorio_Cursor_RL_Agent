@@ -270,6 +270,8 @@ def summarize(world: Path) -> dict:
     out.update(typed_outcomes=dict(codes), recent_typed_outcomes=dict(Counter(recent)),
                maintenance_failure_events=upkeep, c2_latest_checks=None, malformed_journal_rows=0)
     journal = world / "evidence/clean-decisions.jsonl"
+    journal_passes = set(out.get("accepted_ever") or [])
+    observed_acceptance = False
     if journal.exists():
         with journal.open() as records:
             for line in records:
@@ -279,8 +281,16 @@ def summarize(world: Path) -> dict:
                     out["malformed_journal_rows"] += 1
                     continue
                 if record.get("event") == "acceptance":
+                    statuses = record.get("statuses") or {}
+                    if any(value in {"passed", "failed", "unknown"} for value in statuses.values()):
+                        observed_acceptance = True
+                        journal_passes.update(k for k, value in statuses.items() if value == "passed")
                     out["c2_latest_checks"] = ((record.get("checks") or {}).get("C2") or {}).get("checks")
                     out["c2_checks_at"] = record.get("at")
+                    if record.get("at") == "end" and record.get("fresh") is not None:
+                        out["accepted_final"] = sorted(k for k, value in record["fresh"].items() if value == "passed")
+    if observed_acceptance:
+        out["accepted"] = out["accepted_ever"] = sorted(journal_passes)
     return out
 
 

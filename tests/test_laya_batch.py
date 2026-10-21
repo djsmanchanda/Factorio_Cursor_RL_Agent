@@ -65,6 +65,24 @@ def test_terminal_summary_reads_actual_checks_and_maintenance_faults(tmp_path):
     assert row["typed_outcomes"] == {"untyped_stuck": 1}
 
 
+def test_journal_confirmed_checkpoint_survives_a_crash_without_claiming_final_acceptance(tmp_path):
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "evidence").mkdir()
+    (tmp_path / "logs/laya-runner.log").write_text("+10s OUTCOME: tool_error -- process died\n")
+    journal = tmp_path / "evidence/clean-decisions.jsonl"
+    journal.write_text(json.dumps({"event": "acceptance", "at": "decision 19",
+                                   "statuses": {"C0": "passed", "C2": "passed"},
+                                   "fresh": {"C0": "passed", "C2": "passed"}}) + "\n")
+    row = summarize(tmp_path)
+    assert row["accepted_ever"] == ["C0", "C2"]
+    assert row.get("accepted_final") is None
+    with journal.open("a") as out:
+        out.write(json.dumps({"event": "acceptance", "at": "end", "statuses": {"C2": "passed"},
+                              "fresh": {"C0": "passed", "C2": "failed"}}) + "\n")
+    row = summarize(tmp_path)
+    assert row["accepted_ever"] == ["C0", "C2"] and row["accepted_final"] == ["C0"]
+
+
 def test_the_deadline_admits_whole_seed_blocks(tmp_path, monkeypatch):
     # Review 2026-10-20: a per-job deadline check could start a seed's first arm and censor the rest.
     import tools.run_laya_batch as harness

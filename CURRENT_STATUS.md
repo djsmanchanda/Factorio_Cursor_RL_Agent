@@ -507,3 +507,8 @@ fresh frozen copy of dabdfd5 with its mods staged into each disposable world.
 - What: reports lead with strict c2-v1 ever/final acceptance, complete status denominators, unknowns, Wilson intervals and matched terminal pairs; per-job failed checks/recent blockers and maintenance failures are separate from tool faults and proxies. New batches refresh reports on status changes; old frozen evidence has a separate read-only reporting CLI.
 - Evidence: batch reporting/parser regressions pass in the 136 focused checks, including crash/censored accounting, unknown final checks, repeated-vs-job counts and maintenance errors. Final fast gate: 1188 pass, 1 skip, unchanged firewall failure. See docs/rl/Laya_C2_Reliability.md for objective, causal evidence and interpretation limits.
 - Lifecycle: reporting applies to newly frozen harnesses; older cohorts can be read without restarting or modifying them. No adoption or >80% result claimed.
+
+## [2026-10-21 12:42 IST] Review correction and engine survey
+- What: recover accepted-ever milestones from canonical acceptance journals when a runner crashes before its summary; final acceptance requires a final sample. Preserve bounded steel-search limits as a remaining concern (512 nearest ore anchors within 400 tiles).
+- Evidence: 17 batch tests pass, including crash-after-C2 and later regression. Prior unchanged broad gate has only the known firewall failure. On a fresh isolated Factorio 2.1.23 world, the actual template survey returned a legal site at (17.5,1.5), template 0; world stopped. This proves survey/API wiring, not built steel or C2 performance.
+- Lifecycle: corrected reporting will be frozen with the new harness. No active Miniship campaign or real base changed.
