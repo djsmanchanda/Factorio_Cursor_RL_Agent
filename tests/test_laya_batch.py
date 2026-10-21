@@ -196,14 +196,17 @@ def test_a_host_budget_counts_other_cohorts_and_reserves_older_ones_free_room(tm
     own = registry / "own"
     own.mkdir()
     host = HostBudget(own, {"registry": str(registry)}).snapshot([{"status": "queued"}], now)
-    assert len(host["running"]) == 5 and host["reserved"] == 2
+    assert len(host["running"]) == 5 and host["reserved"] == 2 and host["cap"] is None  # no shared older cohort
+    # Live C15 attempt 1: an older shared cohort at a host total of 10 must bound a newer one starting at 20.
+    _cohort(registry, "shared", [dict(running, host_occupied_at_start=8)] + [{"status": "queued"}], 10, now - 10)
+    assert HostBudget(own, {"registry": str(registry)}).snapshot([{"status": "queued"}], now)["cap"] == 10
 
 
 def test_a_shared_batch_admits_only_into_the_host_total(tmp_path, monkeypatch):
     import tools.run_laya_batch as harness
     monkeypatch.setattr(harness.time, "sleep", lambda _s: None)
     batch = _batch(tmp_path, seeds=(1, 2, 3))
-    snapshots = iter([{"running": [{}] * 3, "reserved": 1}] * 2 + [{"running": [], "reserved": 0}] * 100)
+    snapshots = iter([{"running": [{}] * 3, "reserved": 1, "cap": None}] * 2 + [{"running": [], "reserved": 0, "cap": 9}] * 100)
     batch.host = type("Host", (), {"snapshot": lambda self, jobs, now: next(snapshots), "next_admit": 0.0,
                                    "admit_interval_s": 0.0, "may_admit": lambda self, now, decision: True})()
     starts = []

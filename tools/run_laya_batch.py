@@ -209,7 +209,7 @@ class HostBudget:
 
     def snapshot(self, own_jobs: list[dict], now: float) -> dict:
         own_age = min(self._age(own_jobs), now)  # not yet started: younger than every cohort already running
-        running, reserved, cohorts = [], 0, []
+        running, reserved, cohorts, cap = [], 0, [], None
         for path in sorted(self.registry.glob("*/job-status.json")):
             if path.parent.resolve() == self.root:
                 continue
@@ -223,12 +223,17 @@ class HostBudget:
             busy = [j for j in jobs if j.get("status") in self.OCCUPYING]
             queued = sum(j.get("status") == "queued" for j in jobs)
             want = 0
-            if self._age(jobs) < own_age and queued:
-                want = max(0, int((data.get("controller") or {}).get("slots", len(busy))) - len(busy))
+            older = self._age(jobs) < own_age
+            slots = int((data.get("controller") or {}).get("slots", len(busy)))
+            if older and queued:
+                want = max(0, slots - len(busy))
+            if older and any("host_occupied_at_start" in j for j in jobs):
+                # An older shared cohort's slots are already a host total: never push the host above it.
+                cap = slots if cap is None else min(cap, slots)
             running += busy
             reserved += want
             cohorts.append({"name": data.get("name", path.parent.name), "running": len(busy), "reserved": want})
-        return {"running": running, "reserved": reserved, "cohorts": cohorts}
+        return {"running": running, "reserved": reserved, "cohorts": cohorts, "cap": cap}
 
 
 def _atomic(path: Path, data: object) -> None:
@@ -355,7 +360,8 @@ class Batch:
                     slots.append(active.pop(future))
                     running.pop(future, None)
                     slots.sort()
-                host = self.host.snapshot(self.jobs, time.time()) if self.host else {"running": [], "reserved": 0}
+                host = (self.host.snapshot(self.jobs, time.time()) if self.host
+                        else {"running": [], "reserved": 0, "cap": None})
                 if controller.update(list(running.values()) + host["running"], len(queue)) is not None:
                     self.save()
                 # Slots are a host total when shared: other cohorts' jobs and older cohorts' reserved room count.
@@ -363,7 +369,8 @@ class Batch:
                 # The deadline admits seed blocks, not jobs: a new seed starts only if its trials can finish their
                 # wall window before the deadline, and every arm of an admitted seed then runs (complete blocks).
                 # Seeds never admitted are censored and listed.
-                while (queue and slots and len(active) + occupied < controller.slots
+                total = controller.slots if host.get("cap") is None else min(controller.slots, host["cap"])
+                while (queue and slots and len(active) + occupied < total
                        and not self.stopping.is_set() and (not self.host or self.host.may_admit(time.time(), controller.last.get("decision")))):
                     if queue[0]["seed"] not in admitted and time.time() + self.cfg["trial_wall_seconds"] > self.until:
                         for job in queue:
