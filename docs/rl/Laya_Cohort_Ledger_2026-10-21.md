@@ -62,3 +62,5 @@ C15b was superseded before any job started (150 planned, 0 started). The C15 den
 C13 final (2026-10-21 ~16:40 IST): 144/144 completed; no errors. C2 18/14/18, C5 ever/final 12/3, 19/2, 19/2, new Laya C6 10/18/17 for ref/menu/loan. No adoption. [Result](Laya_C13_Result_2026-10-21.md).
 
 C15c was superseded before any job started (150 planned, 0 started) by C15d on the scheduler-gated harness; C15d's own first attempt admitted nothing (legacy registry shape) and was restarted on 81f0735. C14b was drained at ~17:10 IST and continues as C14c (80 jobs, seeds 79435–79474); account C14b's completed/in-flight jobs plus C14c's 80 together.
+
+C14b closed 2026-10-21 17:40 IST after draining: 150 planned = 71 completed + 79 queued-never-started. All 79 (seeds 79435 ref and 79436–79474) are carried by C14c; earlier interrupted/rerun attempts are recorded in its job history. C14 accounting = C14b completed + C14c's 80 jobs, paired within one cohort per seed.
