@@ -88,6 +88,19 @@ def test_linux_deterministic_server_reset_only_replaces_the_isolated_copy() -> N
     assert 'rm -f "$SOURCE_SAVE"' not in source
 
 
+def test_linux_deterministic_server_can_bound_update_threads_affinity_and_priority() -> None:
+    source = MANAGER.read_text(encoding="utf-8")
+
+    assert '--update-threads) UPDATE_THREADS="${2:?missing --update-threads value}"' in source
+    assert 'update-runner-threads-count=$UPDATE_THREADS' in source
+    assert 'taskset -c "$CPU_AFFINITY" "${launch[@]}"' in source
+    assert 'nice -n "$NICE_LEVEL" "${launch[@]}"' in source
+    assert '"factorio_update_threads": $threads_json' in source
+    assert '"cpu_affinity": $affinity_json' in source
+    assert 'runtime-settings.json' in source
+    assert 'update threads must be between 1 and 64' in source
+
+
 def test_linux_deterministic_server_deploys_only_changed_project_mods() -> None:
     source = MANAGER.read_text(encoding="utf-8")
 

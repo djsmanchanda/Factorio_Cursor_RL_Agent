@@ -35,6 +35,7 @@ _TRAINING_FILES = {
     "test_zoning_scoring.py",
 }
 _OPS_HINTS = (
+    "laya_batch", "laya_host_scheduler",
     "campaign", "controls", "dashboard", "journal", "log_retention",
     "observatory", "research_commands", "runner", "server", "worker",
 )
@@ -51,8 +52,9 @@ _DETERMINISTIC_HINTS = (
 # highest-value safety/contracts across all domains; breadth remains in the
 # scheduled/manual full suite instead of masquerading as fast validation.
 _FAST_FILES = {
-    "test_laya_ops_initialization.py",
-    "test_mall_cell_release_lua.py",
+    "test_laya_ops_initialization.py", "test_mall_cell_release_lua.py",
+    "test_laya_batch.py", "test_laya_host_scheduler.py",
+    "test_laya_review_regressions.py", "test_laya_ops_data.py",
     "test_action_catalog.py", "test_bootstrap_district.py",
     "test_capacity_model.py", "test_construction_stock.py",
     "test_factory_invariants.py", "test_fluid_routing.py",

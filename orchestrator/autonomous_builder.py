@@ -9269,11 +9269,36 @@ def _missing_rotating_input(
     crafts = math.ceil(
         missing / max(1, math.floor(float(spec.get("product_amount", 1))))
     )
+    if all(ingredient not in RATIONED_MALL_BATCH_ITEMS
+           or int(usable.get(ingredient, 0)) >= math.ceil(float(amount) * crafts)
+           for ingredient, amount in zip(spec.get("ingredients", ()), spec.get("amounts", ()), strict=True)):
+        return None
+    # An active final recipe needs its next input set, not its entire remaining bill.
+    # Owned cell WIP includes requester stock, machine inputs and inserter hands.
+    live_step = loan is not None and (loan.step_recipe or loan.current_recipe) == item and hasattr(client, "command")
+    physical = None
+    if live_step:
+        try:
+            statuses, _ = live_base.machine_health(client, surface, [loan.machine_position])
+            if statuses.get(loan.machine_position) == "working":
+                return None
+            physical = live_base.transferable_items(client, surface, force)
+        except Exception:
+            return None  # An unreadable delivery window does not authorize discarding a loan.
     for ingredient, amount in zip(
         spec.get("ingredients", ()), spec.get("amounts", ()), strict=True,
     ):
         required = math.ceil(float(amount) * crafts)
-        if int(usable.get(ingredient, 0)) >= required:
+        if physical is not None:
+            try:
+                held = live_base.loan_cell_item_count(client, surface, loan.requester_position,
+                                                     loan.machine_position, ingredient)
+            except Exception:
+                return None
+            # Historical completion credits are not physical inventory.
+            if int(physical.get(ingredient, 0)) + held >= math.ceil(float(amount)):
+                continue
+        elif int(usable.get(ingredient, 0)) >= required:
             continue
         if ingredient not in RATIONED_MALL_BATCH_ITEMS:
             continue

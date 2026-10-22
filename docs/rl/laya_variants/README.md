@@ -23,20 +23,20 @@ Windows:
 - **Local:** `--until-phase C0` or `C1` with a tick cap; fast, many seeds.
 - **Long:** a later phase and a larger cap; fewer seeds.
 
-Matched cohorts run under `tools/run_laya_batch.py`. Its slot count adapts by
-itself: every window (default 300 s) it reads each running world's UPS from its
-runner log and the decision loop's health (fresh heartbeat, decisions advancing,
-no new tracebacks, timeouts or RCON connection errors), plus host memory. It
-grows one slot after two healthy windows while work waits and shrinks one on
-any unhealthy window; running trials are never stopped. After an up/down/up
-(or down/up/down) flip-flop it stops growing for `settle_windows` (default 6). Ports are reserved for
-`max_concurrency` (default `concurrency + 4`); `"adaptive": false` pins slots.
-Decisions go to `controller.jsonl`, and each job records `slots_at_start`.
-Seed-major order, with the arm order rotated per seed, starts a seed's arms under the same
-load. The deadline admits whole seed blocks: a new seed starts only if a trial can finish its wall
-window by `until`, and every arm of an admitted seed then runs with the full window, so the unit's
-runtime cap must allow `until` plus `trial_wall_seconds`. Final acceptance is the fresh predicates
-on the last sample; ever-passed is the monotonic history. Matching them is not non-regression.
+Matched cohorts run under `tools/run_laya_batch.py` with a fixed worker pool
+and the shared host admission gate described in [the scheduler runbook](../Laya_Host_Scheduler.md).
+Arms rotate within successive seeds. Every planned job remains in status and
+`report.json`, including interrupted, failed and unstarted jobs. `until` is the
+hard cohort deadline: the harness stops admitting a job unless its wall window
+fits and caps running jobs at that deadline. A partially admitted seed is not
+a complete pair; the report explicitly counts complete pairs. Do not claim
+whole-seed completion from job order alone.
+
+Strict ever-passed, strict fresh-final, and `laya-c6-choice-output-v2` are
+reported separately, with observed denominators. Missing observations remain
+unknown. `failures` is a caught-exception count; typed outcome codes and bug
+classifications are separate evidence. Archived independent per-cohort scaling
+is under `experimental/old_workflows/per_cohort_adaptive_batch/`.
 
 Before comparing, inspect effective option weights: every matching preference
 multiplies, including overlapping entries in one rule. Change only the intended
@@ -46,9 +46,9 @@ gear/cable/circuit factors from 180 to 30; they do not isolate other slots.
 Default adoption requires more long-window target completions on matched
 conditions, no increase in safety/tool failures, and no earlier-service
 regression. Preserve every planned job's terminal status; omitted crashes or
-interrupted jobs cannot silently improve a denominator. The current harness
-does not yet provide complete-cohort accounting, and its failure counter omits
-typed blocks. Check raw outcomes alongside the report. Changing rate windows
+interrupted jobs cannot silently improve a denominator. The harness reports all planned statuses and complete pairs; legacy exports may
+lack final, C6 or typed-outcome evidence. Check raw outcomes and observed
+denominators alongside the report. Changing rate windows
 changes acceptance conditions and is not a like-for-like promotion comparison.
 
 An explicitly recorded early-milestone default is **provisional**, not evidence

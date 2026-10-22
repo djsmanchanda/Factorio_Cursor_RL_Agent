@@ -79,6 +79,10 @@ def main(argv=None) -> int:
     p.add_argument("--experiment", help="Experiment id recorded with the run")
     p.add_argument("--source-save", type=Path, default=SOURCE_SAVE)
     p.add_argument("--mods-source", type=Path)
+    p.add_argument("--update-threads", type=int,
+                   help="Factorio update-runner threads for this world (engine default when omitted)")
+    p.add_argument("--cpu-affinity", help="taskset CPU list for this world (for example 0-3,8)")
+    p.add_argument("--nice", type=int, default=0, help="Lower this server's CPU priority by 0..19")
     p.add_argument("--resume-bundle", type=Path, help="Hash-verified earned C1 checkpoint")
     p.add_argument("--export-checkpoint", type=Path, help="Save an earned C1 checkpoint after a successful run")
     p.add_argument("--jumpstart", action="store_true",
@@ -89,6 +93,12 @@ def main(argv=None) -> int:
     resume=load_bundle(args.resume_bundle) if args.resume_bundle else None
     if args.action == "prepare":
         extra = ["--mods-source", str(args.mods_source)] if args.mods_source else []
+        if args.update_threads is not None:
+            extra += ["--update-threads", str(args.update_threads)]
+        if args.cpu_affinity:
+            extra += ["--cpu-affinity", args.cpu_affinity]
+        if args.nice:
+            extra += ["--nice", str(args.nice)]
         source=args.resume_bundle/'source.zip' if resume else args.source_save
         print(saved_world("prepare", root, "--source-save", str(source),
                           "--game-port", str(args.game_port), "--rcon-port", str(args.rcon_port), *extra))

@@ -20,6 +20,8 @@ logs, ledger and helper are shared.  Sequencing lives in the docs, not here.
 
 from __future__ import annotations
 
+from orchestrator.operation_observation import economics_observation, item_service_observation
+
 import math
 from collections import Counter
 from collections.abc import Callable, Mapping
@@ -288,34 +290,6 @@ def _outcome(r: Mapping) -> str:
     short = ", ".join(f"{i} {n}" for i, n in missing.items() if n > 0)
     return (r.get("code") or "error") + (f" ({short})" if short else "")
 
-
-def economics_observation(economics: Mapping | None, networks: Mapping | None) -> dict:
-    """Project independent surveys without rebalancing or spending the material ledger.
-
-    Network stock is the saved-world logistic-network survey, not requester WIP or
-    transferable stock. Unreserved counts subtract the ledger's recorded owners;
-    they do not establish a claim's affordability or a cell's borrowability.
-    """
-    observed = {"version": 1, "projects": None, "loans": None, "slots": None, **(economics or {})}
-    stock = None
-    if isinstance(networks, Mapping) and all(isinstance(n, Mapping) and isinstance(n.get("items"), Mapping)
-                                             for n in networks.values()):
-        stock = dict(sum((Counter(n["items"]) for n in networks.values()), Counter()))
-    projects = observed.get("projects")
-    reserved = None
-    if projects is not None:
-        reserved = dict(sum((Counter(p["reserved"]) for p in projects.values()), Counter()))
-    observed["stock"] = {
-        "scope": "logistic_networks", "network": stock,
-        "reserved": reserved,
-        "unreserved": ({i: max(0, n - reserved.get(i, 0)) for i, n in stock.items()}
-                       if stock is not None and reserved is not None else None)}
-    if observed.get("loans") is not None:
-        observed["loans"] = [dict(loan, network_stock=None if stock is None else stock.get(loan["making"], 0),
-                                   remaining_to_target=None if stock is None else
-                                   max(0, loan["target"] - stock.get(loan["making"], 0)))
-                             for loan in observed["loans"]]
-    return observed
 
 
 def mall_capacity(economics: Mapping | None, results: list[dict]) -> dict:
@@ -666,8 +640,13 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                  "foundation": ("extend",) + (() if retired(results, plate) else ("retire_starter",))}[stages.get(plate, "none")]
         if plate not in unmet and PLATES[plate] not in unmet:
             # Retiring a starter is lifecycle cleanup, not production, so it outlives the plate's goal (live
-            # 2026-10-15: once C4's board held only plastic, the iron starter was never retired).
-            legal = tuple(operation for operation in legal if operation == "retire_starter")
+            # 2026-10-15: once C4's board held only plastic, the iron starter was never retired). So does finishing
+            # a foundation the tooling started and the world observes not ready (C17: 7 runs left a stone
+            # foundation at a coverage wait or a failed retirement once bricks stopped being short, failing C3).
+            unfinished = (foundations or {}).get(plate) is False and any(
+                r["operation"] == "foundation" and (r.get("params") or {}).get("recipe") == plate for r in results)
+            legal = tuple(operation for operation in legal
+                          if operation == "retire_starter" or (operation == "foundation" and unfinished))
         for operation in legal:
             features = {"plate_stage": stages.get(plate, "none"), "last_code": codes.get((operation, plate), "new"),
                         "goal_need": plate in goal,
@@ -893,9 +872,12 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         summary["accepted_final"] = (None if "error" in statuses or fresh is None
                                      else sorted(c for c, status in fresh.items() if status == "passed"))
         _append(journal, {"run_id": run_id, "event": "acceptance", "at": event, "statuses": statuses,
-                          "fresh": fresh, "checks": getattr(session, "acceptance_checks", None)})
+                          "fresh": fresh, "checks": getattr(session, "acceptance_checks", None),
+                          "production_service": summary.get("production_service"),
+                          "foundations": getattr(session, "foundation_observations", None)})
     check_acceptance("start")
     _append(journal, {"run_id": run_id, "event": "laya_acceptance", "phase": "C6", **c6.snapshot()})
+    previous_service_facts = None
     index = -1
     while decisions is None or index + 1 < decisions:
         index += 1
@@ -905,6 +887,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         economics = session.economics() if hasattr(session, "economics") else None
         adapter.extra_recipes = recipe_demand(results, economics)
         facts = adapter.query()
+        summary["production_service"] = item_service_observation(facts, previous_service_facts, "plastic-bar")
+        previous_service_facts = facts
         c6.observe(facts)
         record_c6()
         samples.append((facts["tick"], dict(facts["production"]), dict(facts["consumption"])))
@@ -991,7 +975,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                 result = session.run(chosen["family"], **chosen["params"])
             except Exception as error:  # A tooling bug is recorded and the run continues; three in a row stop it.
                 result = {"ok": False, "operation": chosen["family"], "params": chosen["params"],
-                          "code": "tool_error", "message": f"{type(error).__name__}: {error}"[:400]}
+                          "code": "tool_error", "classification": "bug", "state": "failed",
+                          "message": f"{type(error).__name__}: {error}"[:400]}
                 summary["failures"] += 1
         result["tick"] = facts["tick"]
         result["need_id"] = chosen["need_id"]  # per-need no-progress facts
@@ -1018,7 +1003,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                      if chosen['family'] == 'raise_stock_gate' else {}),
                                   "ticks": after["tick"] - facts["tick"], "material_transactions": after_transactions})
         _write_status(status_path, {"run_id": run_id, "index": index, "tick": facts["tick"], "phase": phase,
-                                    "reached": reached, "laya_acceptance": summary["laya_acceptance"], "board": compact, "brief": state["brief"], "choice": {**choice, "summary": chosen["summary"]},
+                                    "reached": reached, "laya_acceptance": summary["laya_acceptance"],
+                                    "production_service": summary.get("production_service"), "board": compact, "brief": state["brief"], "choice": {**choice, "summary": chosen["summary"]},
                                     "menu": {o["option_id"]: o["summary"] for o in menu["options"]},
                                     "decisions": index + 1, "failures": summary["failures"],
                                     "authority": policy.authority})
@@ -1085,6 +1071,9 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     session.close()
     # Typed outcomes, not only caught exceptions: an untyped_stuck is a tool fault even when nothing raised.
     summary["codes"] = dict(Counter(r.get("code") or "error" for r in results if not r.get("ok")))
+    summary["classifications"] = dict(Counter(r.get("classification") or "unclassified"
+                                               for r in results if not r.get("ok")))
+    _append(journal, {"run_id": run_id, "event": "summary", **summary})
     emit(f"SUMMARY: stop={summary['stop']} decisions={summary['decisions']} failures={summary['failures']} "
          f"phases={','.join(reached) or 'none'} accepted={','.join(summary.get('accepted', [])) or 'none'} "
          f"accepted_final={'unknown' if summary.get('accepted_final') is None else ','.join(summary['accepted_final']) or 'none'}")

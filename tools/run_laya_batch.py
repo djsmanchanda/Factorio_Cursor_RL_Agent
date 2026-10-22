@@ -1,35 +1,31 @@
-# Path: tools/run_laya_batch.py | Purpose: Run a matched-seed Laya experiment batch (one factor per arm) at an adaptive concurrency until a deadline, and report per-arm outcomes.
-"""Adaptive-concurrency experiment batch over frozen code arms.
+# Path: tools/run_laya_batch.py | Purpose: Run a matched-seed Laya experiment batch (one factor per arm) at a fixed concurrency until a deadline, and report per-arm outcomes.
+"""Fixed-concurrency experiment batch over frozen code arms.
 
 Every arm runs the same seeds from the same base save. Jobs are ordered seed-major
-with the arm order rotated per seed; the deadline admits whole seed blocks, so the arms stay matched. Each trial is a
+and arm round-robin, so a deadline cut leaves the arms matched. Each trial is a
 fresh `run_laya_clean prepare` + `run` with a game-tick window and a wall cap;
-the world is stopped afterwards. Unstarted jobs stay listed as such in job-status.json.
-
-Concurrency adapts by itself (SlotController): every window it measures each running
-world's UPS from its own runner log (game ticks per wall second between decisions)
-and the Laya decision loop's health (fresh heartbeat, decisions still advancing, no
-new tracebacks, timeouts or RCON connection errors), plus host memory. It grows one slot
-after consecutive healthy windows and shrinks one on any unhealthy window, using the
-RL scheduler's hysteresis. Shrinking only stops new starts; running trials finish.
-Ports are reserved for `max_concurrency` slots. Every decision is journaled to
-controller.jsonl and each job records the slots it started under. Seed-major order
-keeps both arms of a seed under the same load, so the comparison stays matched.
+the world is stopped afterwards. Concurrency is a fixed worker-pool ceiling;
+an optional host budget gates admissions across cohorts. Unstarted jobs stay
+listed as such in job-status.json.
 
 batch.json:
   {"name": str, "until": ISO time, "concurrency": int, "game_port_base": int, "rcon_port_base": int,
    "trial_wall_seconds": int, "max_game_ticks": int, "source_save": path, "python": path,
-   "seeds": [int, ...], "max_concurrency": optional int (default concurrency + 4),
-   "adaptive": optional false | {"min", "window_seconds", "min_ups_p95", "min_ups_p98",
-               "grow_after", "min_available_gb", "max_decision_gap_s", "target_ups"},
+   "seeds": [int, ...],
+   "host_budget": optional {"registry": path, "stale_seconds": 180,
+                             "admit_interval_seconds": 10, "admit_min_available_gb": 4.5},
+   "runtime": optional {"update_threads": 1..64, "cpu_affinity": "slot" | taskset list,
+                        "nice": 0..19, "python_nice": 0..19},
    "arms": [{"id": str, "code": frozen worktree, "mods": staged mods dir, "revision": sha,
-             "change": str, "variant": optional path, "extra_args": optional [str]}]}
+             "change": str, "variant": optional path, "extra_args": optional [str],
+             "runtime": optional arm override of the batch runtime}]}
 """
 
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import fcntl
 import json
 import os
 import re
@@ -40,134 +36,12 @@ import threading
 import time
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
-
-from training.scheduler import AdaptiveScaleState, UpsWindow, adjust_adaptive_slots
 
 PHASE = re.compile(r"^\+(\d+)s PHASE REACHED: (C\d) .* at tick (\d+)")
 SUMMARY = re.compile(r"SUMMARY: stop=(\S+) decisions=(\d+) failures=(\d+) phases=(\S*) accepted=(\S*)")
 FINAL_ACCEPTANCE = re.compile(r"\baccepted_final=(\S+)")
-DECISION = re.compile(r"^\+(\d+)s DECISION \d+ .*?\btick=(\d+)", re.M)
-# Load symptoms only: a plain tool_error is usually a logic bug and must not ratchet the slot count down.
-UNSTABLE = re.compile(r"Traceback|TimeoutError|timed out|Connection(?:Refused|Reset)Error")
-_TAIL_BYTES = 262144
-
-
-def _available_gb() -> float | None:
-    try:
-        for line in Path("/proc/meminfo").read_text().splitlines():
-            if line.startswith("MemAvailable:"):
-                return int(line.split()[1]) / 1048576
-    except OSError:
-        pass
-    return None
-
-
-def world_signals(world: Path, window_s: float, offsets: dict[str, int]) -> dict:
-    """One running world over the last window: UPS from its decisions, loop liveness, new error lines."""
-    out: dict = {"ups": None, "decision_gap_s": None, "errors": 0}
-    log = world / "logs/laya-runner.log"
-    for path in (log, world / "laya-runner.heartbeat.json"):
-        if not path.exists():
-            return out
-    size = log.stat().st_size
-    with log.open("rb") as handle:
-        handle.seek(max(0, size - _TAIL_BYTES))
-        tail = handle.read().decode(errors="replace")
-    points = [(int(e), int(t)) for e, t in DECISION.findall(tail)]
-    if points:
-        last_e = points[-1][0]
-        recent = [p for p in points if p[0] >= last_e - window_s]
-        span = recent[-1][0] - recent[0][0]
-        if span >= min(60.0, window_s / 2) and recent[-1][1] > recent[0][1]:
-            out["ups"] = (recent[-1][1] - recent[0][1]) / span
-        try:
-            beat = json.loads((world / "laya-runner.heartbeat.json").read_text())
-            out["decision_gap_s"] = float(beat.get("elapsed_s", last_e)) - last_e
-        except (OSError, ValueError):
-            pass
-    start = offsets.get(str(log), max(0, size - _TAIL_BYTES))
-    if size > start:
-        with log.open("rb") as handle:
-            handle.seek(start)
-            out["errors"] = len(UNSTABLE.findall(handle.read().decode(errors="replace")))
-    offsets[str(log)] = size
-    out["heartbeat_age_s"] = time.time() - (world / "laya-runner.heartbeat.json").stat().st_mtime
-    return out
-
-
-class SlotController:
-    """Automatic slot count from UPS stability and Laya decision-loop health (no operator input)."""
-
-    def __init__(self, cfg: dict, journal: Path) -> None:
-        options = cfg.get("adaptive", {})
-        self.enabled = options is not False
-        options = options or {}
-        start = int(cfg["concurrency"])
-        self.maximum = int(cfg.get("max_concurrency", start + 4))
-        self.minimum = int(options.get("min", max(1, start // 2)))
-        target_ups = float(options.get("target_ups", 120.0))  # the batch runs every trial at speed 2
-        self.window_s = float(options.get("window_seconds", 300))
-        self.min_p95 = float(options.get("min_ups_p95", 0.85 * target_ups))
-        self.min_p98 = float(options.get("min_ups_p98", 0.75 * target_ups))
-        self.grow_after = int(options.get("grow_after", 2))
-        self.min_gb = float(options.get("min_available_gb", 3.0))
-        self.max_gap_s = float(options.get("max_decision_gap_s", 600))
-        # After an up/down/up (or down/up/down) flip-flop, stop growing for this many windows.
-        self.settle_windows = int(options.get("settle_windows", 6))
-        self.moves: list[int] = []
-        self.settle_until = 0.0
-        self.state = AdaptiveScaleState(min(self.maximum, max(self.minimum, start)))
-        self.journal = journal
-        self.next_at = 0.0  # the first pass journals the starting state; worlds count once they ran a full window
-        self.offsets: dict[str, int] = {}
-        self.last: dict = {"decision": "start", "slots": self.state.slots}
-
-    @property
-    def slots(self) -> int:
-        return self.state.slots
-
-    def update(self, running: list[dict], queued: int, now: float | None = None) -> str | None:
-        now = time.time() if now is None else now
-        if not self.enabled or now < self.next_at:
-            return None
-        self.next_at = now + self.window_s
-        measured = [j for j in running if j.get("status") == "running" and now - j.get("started", now) >= self.window_s]
-        signals = {j["id"]: world_signals(Path(j["world"]), self.window_s, self.offsets) for j in measured}
-        unstable = sorted(i for i, s in signals.items() if s["errors"] or (s["decision_gap_s"] or 0) > self.max_gap_s
-                          or s.get("heartbeat_age_s", 0) > 60)
-        samples = [s["ups"] for s in signals.values() if s["ups"]]
-        memory = _available_gb()
-        before = self.state.slots
-        if memory is not None and memory < self.min_gb:
-            self.state, decision = AdaptiveScaleState(max(self.minimum, before - 1)), "decrease_memory"
-        elif unstable:
-            self.state, decision = AdaptiveScaleState(max(self.minimum, before - 1)), "decrease_laya_unstable"
-        else:
-            state, decision = adjust_adaptive_slots(
-                self.state, UpsWindow(tuple(samples)) if samples else None, minimum=self.minimum,
-                maximum=self.maximum, step=1, minimum_safe_ups_p95=self.min_p95, minimum_safe_ups_p98=self.min_p98,
-                healthy_windows_to_grow=self.grow_after, unhealthy_windows_to_shrink=1)
-            if decision == "increase_safe_ups" and (not queued or len(running) < before):
-                # Grow only when the current slots are all in use and work is waiting; keep the healthy streak.
-                state, decision = AdaptiveScaleState(before, self.state.healthy_windows + 1, 0), "hold_no_demand"
-            self.state = state
-        if self.state.slots > before and now < self.settle_until:
-            self.state, decision = AdaptiveScaleState(before), "hold_settling"
-        if self.state.slots != before:
-            self.moves = (self.moves + [1 if self.state.slots > before else -1])[-3:]
-            if len(self.moves) == 3 and self.moves[0] == self.moves[2] != self.moves[1]:
-                self.settle_until, self.moves = now + self.settle_windows * self.window_s, []
-                decision += "+settle"
-        self.last = {"at": now, "decision": decision, "slots_before": before, "slots": self.state.slots,
-                     "running": len(running), "measured": len(measured), "queued": queued,
-                     "ups_min": min(samples) if samples else None,
-                     "ups_mean": statistics.fmean(samples) if samples else None,
-                     "unstable": unstable, "available_gb": memory,
-                     "settling": now < self.settle_until}
-        with self.journal.open("a") as out:
-            out.write(json.dumps(self.last, sort_keys=True) + "\n")
-        return decision
 
 
 def _atomic(path: Path, data: object) -> None:
@@ -176,8 +50,70 @@ def _atomic(path: Path, data: object) -> None:
     tmp.replace(path)
 
 
+class HostBudget:
+    """Serialize reservations against a fresh scheduler gate, counting legacy worlds too."""
+
+    def __init__(self, root: Path, options: dict) -> None:
+        self.registry = Path(options["registry"]).resolve()
+        if root.resolve().parent != self.registry:
+            raise ValueError("host-budget cohort must be directly inside its registry")
+        self.stale_s = float(options.get("stale_seconds", 180))
+        self.interval_s = float(options.get("admit_interval_seconds", 10))
+        self.min_gb = float(options.get("admit_min_available_gb", 4.5))
+        self.next_admit = 0.0
+        self.reason = "waiting_for_gate"
+
+    @contextmanager
+    def lock(self):
+        with (self.registry / ".host-admission.lock").open("a") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            yield
+
+    def may_admit(self, now: float) -> bool:
+        # A missing/stale gate blocks admissions, including after a timed pause.
+        # Old cohort caps are not host limits; their actual worlds still count.
+        try:
+            gate = json.loads((self.registry / "_host-scheduler-gate/job-status.json").read_text())
+            cap = gate["controller"]["slots"]
+            age = now - float(gate["updated"])
+            if type(cap) is not int or cap < 0 or not 0 <= age <= self.stale_s:
+                raise ValueError("invalid or stale gate")
+            occupied = 0
+            for path in self.registry.glob("*/job-status.json"):
+                if path.parent.name.startswith("_host-scheduler"):
+                    continue
+                data = json.loads(path.read_text())
+                if not isinstance(data, dict) or not isinstance(data.get("jobs"), list):
+                    continue  # Pre-registry cohorts wrote other shapes (a bare list); they own no live worlds.
+                # Stale running records remain reserved until the owner reconciles
+                # them; a dead supervisor may have left its Factorio worlds alive.
+                occupied += sum(bool(job.get("admission_reserved")) or
+                                job.get("status") in {"preparing", "running"}
+                                for job in data["jobs"])
+        except (OSError, ValueError, KeyError, TypeError):
+            self.reason = "unavailable_host_budget"
+            return False
+        memory = None
+        try:
+            for line in Path("/proc/meminfo").read_text().splitlines():
+                if line.startswith("MemAvailable:"):
+                    memory = int(line.split()[1]) / 1048576
+        except OSError:
+            pass
+        if occupied >= cap:
+            self.reason = "host_full_or_paused"
+        elif memory is not None and memory < self.min_gb:
+            self.reason = "memory"
+        elif now < self.next_admit:
+            self.reason = "admission_pacing"
+        else:
+            self.reason = "admitted"
+            return True
+        return False
+
+
 def summarize(world: Path) -> dict:
-    """Outcome facts, separating ever-passed predicates from the final observation."""
+    """Outcome facts from the runner log: stop, phases with their seconds/ticks, strict acceptance."""
     log = world / "logs/laya-runner.log"
     if not log.exists():
         return {"runner_stop": None}
@@ -189,6 +125,7 @@ def summarize(world: Path) -> dict:
             out.update(runner_stop=match.group(1), decisions=int(match.group(2)), failures=int(match.group(3)),
                        phases=[p for p in match.group(4).split(",") if p and p != "none"],
                        accepted=[p for p in match.group(5).split(",") if p and p != "none"])
+            # Ever-passed is the latched history; final is the fresh predicate on the last sample (unknown -> None).
             out["accepted_ever"] = list(out["accepted"])
             final = FINAL_ACCEPTANCE.search(line)
             out["accepted_final"] = (None if final is None or final.group(1) == "unknown" else
@@ -199,6 +136,33 @@ def summarize(world: Path) -> dict:
         phase["game_seconds"] = (phase["tick"] - start_tick) / 60 if start_tick else None
     out["phase_times"] = phases
     out["untyped_stuck"] = log.read_text(errors="replace").count("OUTCOME: untyped_stuck")
+    codes, classifications = Counter(), Counter()
+    observed = 0
+    out["evidence_errors"] = 0
+    for path in (world / "evidence/clean-decisions.jsonl", world / "evidence/decision-states.jsonl"):
+        if not path.exists():
+            continue
+        with path.open() as handle:
+            for line in handle:
+                try:
+                    row = json.loads(line)
+                    if not isinstance(row, dict):
+                        raise ValueError("record must be an object")
+                except (ValueError, TypeError):
+                    out["evidence_errors"] += 1
+                    continue
+                if row.get("event") == "laya_acceptance" and row.get("phase") == "C6":
+                    out["laya_acceptance"] = {"C6": {k: v for k, v in row.items() if k not in {"event", "phase"}}}
+                if row.get("event") == "summary":
+                    out.update({k: row[k] for k in ("laya_acceptance", "production_service") if k in row})
+                outcome = row.get("outcome")
+                if row.get("version") == "laya-decision-record-v1" and isinstance(outcome, dict):
+                    observed += 1
+                    if outcome.get("ok") is not True:
+                        codes[outcome.get("code") or "untyped_result"] += 1
+                        classifications[outcome.get("classification") or "unclassified"] += 1
+    out.update(outcome_observations=observed, outcome_codes=dict(codes) if observed else None,
+               outcome_classifications=dict(classifications) if observed else None)
     return out
 
 
@@ -210,27 +174,78 @@ class Batch:
         self.until = dt.datetime.fromisoformat(self.cfg["until"]).timestamp()
         self.stopping = threading.Event()
         self.lock = threading.Lock()
-        # Seed-major, with the arm order rotated per seed so no arm always starts first (or last) in a block.
-        arms = self.cfg["arms"]
         self.jobs = [{"id": f"{arm['id']}-s{seed}", "arm": arm["id"], "seed": seed, "status": "queued"}
                      for index, seed in enumerate(self.cfg["seeds"])
-                     for arm in arms[index % len(arms):] + arms[:index % len(arms)]]
+                     for arm in (self.cfg["arms"][index % len(self.cfg["arms"]):]
+                                 + self.cfg["arms"][:index % len(self.cfg["arms"])])]
         self.arms = {arm["id"]: arm for arm in self.cfg["arms"]}
-        self.controller = SlotController(self.cfg, self.root / "controller.jsonl")
+        self.host = HostBudget(self.root, self.cfg["host_budget"]) if self.cfg.get("host_budget") else None
+
+    def submit(self, pool, job: dict, slot: int):
+        with self.host.lock() if self.host else nullcontext():
+            if self.host and not self.host.may_admit(time.time()):
+                return None
+            job.update(status="preparing", admission_reserved=True)
+            self.save()  # Publish the reservation before another cohort can admit.
+            try:
+                future = pool.submit(self.run_job, job, slot)
+            except Exception:
+                job.update(status="queued", admission_reserved=False)
+                self.save()
+                raise
+            if self.host:
+                self.host.next_admit = time.time() + self.host.interval_s
+            return future
 
     def save(self) -> None:
-        controller = getattr(self, "controller", None)
         with self.lock:
             _atomic(self.root / "job-status.json", {"name": self.cfg["name"], "updated": time.time(), "jobs": self.jobs,
-                                                    **({"controller": controller.last} if controller else {})})
+                    **({"host_budget": {"reason": self.host.reason}} if self.host else {})})
+
+    def _runtime(self, arm: dict) -> dict:
+        runtime = dict(self.cfg.get("runtime") or {})
+        runtime.update(arm.get("runtime") or {})
+        return runtime
+
+    @staticmethod
+    def _cpu_for_slot(slot: int) -> str:
+        """Map a slot to an allowed logical CPU, respecting a cgroup/cpuset mask."""
+        try:
+            cpus = sorted(os.sched_getaffinity(0))
+        except (AttributeError, OSError):
+            cpus = list(range(os.cpu_count() or 1))
+        return str(cpus[slot % len(cpus)])
 
     def _cmd(self, arm: dict, *args: str) -> list[str]:
-        return [self.cfg["python"], str(Path(arm["code"]) / "tools/run_laya_clean.py"), *args]
+        command = [self.cfg["python"], str(Path(arm["code"]) / "tools/run_laya_clean.py"), *args]
+        # Prepare launches Factorio, so lowering its Python priority would also
+        # lower the engine's inherited priority. Apply this only to the runner.
+        nice = int(self._runtime(arm).get("python_nice", 0)) if args and args[0] == "run" else 0
+        return ["nice", "-n", str(nice), *command] if nice else command
+
+    def runtime_args(self, slot: int, arm: dict | None = None) -> list[str]:
+        """Per-world engine settings shared by every arm, with an optional arm override."""
+        runtime = self._runtime(arm or {})
+        args: list[str] = []
+        threads = runtime.get("update_threads")
+        if threads is not None:
+            args += ["--update-threads", str(threads)]
+        affinity = runtime.get("cpu_affinity")
+        if affinity == "slot":
+            affinity = self._cpu_for_slot(slot)
+        if affinity:
+            args += ["--cpu-affinity", str(affinity)]
+        nice = int(runtime.get("nice", 0))
+        if nice:
+            args += ["--nice", str(nice)]
+        return args
 
     def run_job(self, job: dict, slot: int) -> None:
         arm = self.arms[job["arm"]]
         code = Path(arm["code"])
-        world = code / "data/laya-saved-world" / self.cfg["name"] / job["id"]
+        # A rerun after --resume gets a fresh world: a prepared root cannot be prepared again.
+        world = code / "data/laya-saved-world" / self.cfg["name"] / (
+            f"{job['id']}-r{job['attempt']}" if job.get("attempt") else job["id"])
         job["world"] = str(world)
         log_path = self.root / "logs" / f"{job['id']}.out"
         env = dict(os.environ, PYTHONPATH=str(code), PYTHONDONTWRITEBYTECODE="1", PYTHONUNBUFFERED="1")
@@ -240,7 +255,7 @@ class Batch:
                 job["status"] = "preparing"
                 prepared = subprocess.run(
                     self._cmd(arm, "prepare", "--root", str(world), "--source-save", self.cfg["source_save"],
-                              "--mods-source", arm["mods"], *ports),
+                              "--mods-source", arm["mods"], *ports, *self.runtime_args(slot, arm)),
                     cwd=code, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=240)
                 if prepared.returncode:
                     raise RuntimeError(f"prepare exit {prepared.returncode}")
@@ -253,9 +268,7 @@ class Batch:
                                            start_new_session=True)
                 job.update(status="running", started=time.time())
                 self.save()
-                # Every trial gets the full wall window, also past the deadline: an admitted seed block finishes
-                # with identical budgets (the unit's runtime cap must allow until + the wall window).
-                end = job["started"] + self.cfg["trial_wall_seconds"]
+                end = min(job["started"] + self.cfg["trial_wall_seconds"], self.until)
                 while process.poll() is None and time.time() < end and not self.stopping.is_set():
                     time.sleep(1)
                 if process.poll() is None:  # The runner stops after its current decision on SIGTERM.
@@ -272,49 +285,71 @@ class Batch:
         except Exception as error:
             job.update(status="harness_error" if "started" in job else "prepare_failed", error=f"{type(error).__name__}: {error}")
         finally:
-            subprocess.run(self._cmd(arm, "stop", "--root", str(world)), cwd=code, env=env,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
-            self.save()
+            try:
+                subprocess.run(self._cmd(arm, "stop", "--root", str(world)), cwd=code, env=env,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60, check=True)
+                job["admission_reserved"] = False
+            finally:
+                self.save()  # A failed cleanup retains the reservation for reconciliation.
 
-    def run(self) -> None:
+    RERUN = ("queued", "preparing", "running", "interrupted", "not_started_interrupted")
+
+    def resume(self) -> None:
+        """Continue a cohort whose supervisor died or stopped: keep finished jobs, rerun only unfinished work.
+
+        Terminal outcomes (completed, errors, wall caps, deadline censoring) are evidence and never rerun. A job left
+        preparing/running/interrupted records its dead attempt and reruns in a fresh world; its stale reservation is
+        released. Only call this when the previous supervisor and its worlds are gone.
+        """
+        previous = {job["id"]: job for job in json.loads((self.root / "job-status.json").read_text())["jobs"]}
+        for index, planned in enumerate(self.jobs):
+            job = previous.get(planned["id"])
+            if job is None:
+                continue
+            if job["status"] in self.RERUN:
+                history = list(job.get("previous_attempts", ()))
+                if job.get("started") or job.get("admission_reserved") or job["status"] != "queued":
+                    history.append({k: job[k] for k in ("status", "world", "started", "elapsed_s") if k in job})
+                job = dict(planned, status="queued")
+                if history:
+                    job.update(attempt=len(history), previous_attempts=history)
+            self.jobs[index] = job
+
+    def run(self, resume: bool = False) -> None:
         (self.root / "logs").mkdir(exist_ok=True)
         signal.signal(signal.SIGTERM, lambda *_: self.stopping.set())
-        controller = self.controller
-        slots = list(range(controller.maximum))
+        slots = list(range(self.cfg["concurrency"]))
         active: dict = {}
-        running: dict = {}
-        self.save()
-        with ThreadPoolExecutor(controller.maximum) as pool:
-            queue = list(self.jobs)
-            admitted: set = set()
+        with self.host.lock() if self.host else nullcontext():
+            if (self.root / "job-status.json").exists() and not resume:
+                raise ValueError("existing cohort status: use its frozen supervisor; this harness starts fresh cohorts")
+            self.save()
+        with ThreadPoolExecutor(self.cfg["concurrency"]) as pool:
+            queue = [job for job in self.jobs if job["status"] == "queued"]
             while (queue or active) and not (self.stopping.is_set() and not active):
                 for future in [f for f in active if f.done()]:
                     future.result()
                     slots.append(active.pop(future))
-                    running.pop(future, None)
-                    slots.sort()
-                if controller.update(list(running.values()), len(queue)) is not None:
-                    self.save()
-                # The deadline admits seed blocks, not jobs: a new seed starts only if its trials can finish their
-                # wall window before the deadline, and every arm of an admitted seed then runs (complete blocks).
-                # Seeds never admitted are censored and listed.
-                while queue and slots and len(active) < controller.slots and not self.stopping.is_set():
-                    if queue[0]["seed"] not in admitted and time.time() + self.cfg["trial_wall_seconds"] > self.until:
+                # A trial that cannot finish its wall window before the deadline is not started (censored, listed).
+                while queue and slots and not self.stopping.is_set():
+                    if time.time() + self.cfg["trial_wall_seconds"] > self.until:
                         for job in queue:
-                            if job["seed"] not in admitted:
-                                job["status"] = "not_started_deadline"
-                        queue[:] = [job for job in queue if job["seed"] in admitted]
-                        continue
-                    job, slot = queue.pop(0), slots.pop(0)
-                    admitted.add(job["seed"])
-                    job.update(slots_at_start=controller.slots, active_at_start=len(active) + 1)
-                    future = pool.submit(self.run_job, job, slot)
-                    active[future], running[future] = slot, job
+                            job["status"] = "not_started_deadline"
+                        queue.clear()
+                        break
+                    job, slot = queue[0], slots[0]
+                    future = self.submit(pool, job, slot)
+                    if future is None:
+                        break
+                    queue.pop(0)
+                    slots.pop(0)
+                    active[future] = slot
                 if self.stopping.is_set():
                     for job in queue:
                         job["status"] = "not_started_interrupted"
                     queue.clear()
                 time.sleep(2)
+                self.save()  # Keep queued and long-running cohorts visible to the scheduler.
         self.save()
         self.report()
 
@@ -323,8 +358,8 @@ class Batch:
         for job in self.jobs:
             rows[job["arm"]].append(job)
         lines = [f"# {self.cfg['name']}", "", f"Planned jobs: {len(self.jobs)}; statuses: {dict(Counter(j['status'] for j in self.jobs))}", "",
-                 "| Arm | Run | Stops | Proxy C1/C2/C3/C4 | Median game-min to C2 | Predicates ever passed | Predicates passed at end (observed runs) | untyped_stuck |",
-                 "|---|---:|---|---|---:|---|---|---:|"]
+                 "| Arm | Run | Stops | Proxy C1/C2/C3/C4 | Median game-min to C2 | Strict accepted (any) | untyped_stuck | Strict final | Laya C6 choice/output | Typed refusals |",
+                 "|---|---:|---|---|---:|---|---:|---|---|---|"]
         for arm, jobs in rows.items():
             ran = [j for j in jobs if j.get("runner_stop") or j["status"] in ("completed", "wall_cap", "runner_error")]
             stops = dict(Counter(j.get("runner_stop") or j["status"] for j in ran))
@@ -332,22 +367,42 @@ class Batch:
             c2 = [j["phase_times"]["C2"]["game_seconds"] / 60 for j in ran
                   if "C2" in (j.get("phase_times") or {}) and j["phase_times"]["C2"].get("game_seconds") is not None]
             accepted = dict(Counter(p for j in ran for p in (j.get("accepted") or [])))
-            final_observed = [j for j in ran if j.get("accepted_final") is not None]
-            final = dict(Counter(p for j in final_observed for p in j["accepted_final"]))
+            final_rows = [j for j in ran if isinstance(j.get("accepted_final"), list)]
+            final = dict(Counter(p for j in final_rows for p in j["accepted_final"]))
+            c6_rows = [(j.get("laya_acceptance") or {}).get("C6") for j in ran]
+            c6_rows = [r for r in c6_rows if isinstance(r, dict) and
+                       r.get("version") == "laya-c6-choice-output-v2" and r.get("status") in {"passed", "failed"}]
+            c6_passed = sum(r["status"] == "passed" for r in c6_rows)
+            codes = dict(sum((Counter(j["outcome_codes"]) for j in ran if j.get("outcome_codes") is not None), Counter()))
+            code_observed = sum(j.get("outcome_codes") is not None for j in ran)
             median_c2 = f"{statistics.median(c2):.1f} (n={len(c2)})" if c2 else "-"
             lines.append(f"| {arm} | {len(ran)}/{len(jobs)} | {stops} | {'/'.join(map(str, reached))} | {median_c2} | "
-                         f"{accepted} | {final} (n={len(final_observed)}/{len(ran)}) | "
-                         f"{sum(j.get('untyped_stuck', 0) for j in ran)} |")
-        lines += ["", "Proxy phases and deterministic checkpoint predicates are separate measurements. "
-                  "Ever-passed predicates may later regress; final observations do not prove sustained service. "
-                  "Legacy logs without accepted_final have unknown final acceptance."]
-        journal = self.root / "controller.jsonl"
-        if journal.exists():
-            events = [json.loads(line) for line in journal.read_text().splitlines() if line.strip()]
-            if events:
-                lines += ["", f"Slots (automatic): {events[0]['slots_before']} -> {events[-1]['slots']}, range "
-                          f"{min(e['slots'] for e in events)}-{max(e['slots'] for e in events)}; decisions "
-                          f"{dict(Counter(e['decision'] for e in events))} (controller.jsonl)."]
+                         f"{accepted} | {sum(j.get('untyped_stuck', 0) for j in ran)} | "
+                         f"{final} (n={len(final_rows)}/{len(ran)}) | {c6_passed}/{len(c6_rows)} observed "
+                         f"(planned={len(jobs)}) | {codes} (n={code_observed}/{len(ran)}) |")
+        lines += ["", "Strict final observations do not prove sustained service; unknown is not failure.",
+                  "Laya C6 choice/output and legacy deterministic C6 are separate endpoints.",
+                  "failures counts caught exceptions; typed refusals and untyped faults are reported separately."]
+        paired = {}
+        arm_ids = [a["id"] for a in self.cfg["arms"]]
+        for old, new in zip(arm_ids, arm_ids[1:]):
+            left = {j.get("seed"): j for j in rows[old] if j["status"] == "completed"}
+            right = {j.get("seed"): j for j in rows[new] if j["status"] == "completed"}
+            seeds = left.keys() & right.keys()
+            comparisons = {}
+            for milestone in ("C2", "C5", "C6"):
+                up = down = known = 0
+                for seed in seeds:
+                    a, b = left[seed].get("accepted_ever", left[seed].get("accepted")), right[seed].get("accepted_ever", right[seed].get("accepted"))
+                    if isinstance(a, list) and isinstance(b, list):
+                        known += 1
+                        up += milestone in b and milestone not in a
+                        down += milestone in a and milestone not in b
+                comparisons[milestone + "_ever"] = {"observed_pairs": known, "new_only": up, "old_only": down}
+            paired[new + "_vs_" + old] = {"complete_pairs": len(seeds), "legacy_deterministic": comparisons}
+        _atomic(self.root / "report.json", {"version": "laya-batch-report-v2", "planned_jobs": len(self.jobs),
+                "statuses": dict(Counter(j["status"] for j in self.jobs)), "paired": paired, "jobs": self.jobs})
+        lines += ["", "Complete matched pairs: " + str({k: v["complete_pairs"] for k, v in paired.items()})]
         lines += ["", "Arms:"] + [f"- {a['id']} @ {a.get('revision', '?')[:9]}: {a.get('change', '')}" for a in self.cfg["arms"]]
         (self.root / "report.md").write_text("\n".join(lines) + "\n")
 
@@ -356,13 +411,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("batch", type=Path)
     parser.add_argument("--report-only", action="store_true")
+    parser.add_argument("--resume", action="store_true",
+                        help="continue this cohort after its supervisor died: keep finished jobs, rerun unfinished ones")
     args = parser.parse_args(argv)
     batch = Batch(args.batch.resolve())
+    if args.resume:
+        batch.resume()
     if args.report_only:
         batch.jobs = json.loads((batch.root / "job-status.json").read_text())["jobs"]
         batch.report()
         return 0
-    batch.run()
+    batch.run(resume=args.resume)
     return 0
 
 

@@ -274,3 +274,60 @@ Both private headless engines and stopped fleet configuration defaults are 2.1.2
 The new choice/output endpoint now has live successes: C12 2/21 completed and C13 4/19 at the bounded 02:27 snapshot. Stored receipts show explicit `op.produce.advanced-circuit`, later engine item-production deltas of 1–2, matching force/surface/catalog provenance, and no compatible recycler. This is observed live achievement evidence for `laya-c6-choice-output-v2`, not deterministic C6 acceptance or a completed-cohort adoption result. C5 ever/final is 3/3 (C12) and 4/1 (C13); early-service and full planned denominators still matter.
 
 Run IDs: C12 ref-s79400 and seed-s79401; C13 ref-s79401, menu-s79400, menu-s79403 and loan-s79402. The complete per-arm, paired, typed-failure and health snapshot is in the local `data/laya-orchestration/takeover-20261021/checkin_helper_runs/20261021-0227.md`. Both frozen cohorts continue unchanged; no lifecycle action. The new routing instruction is in the local takeover/startup handoffs and the scheduled launch brief: read the Miniship routing skill and explicitly select a live provider/model before delegation.
+
+## Cohort 14 launched with a shared host budget (2026-10-21 05:05 IST)
+
+Unit `laya-c14-2123-miniship-20261021` runs 150 jobs: 75 seeds (79400–79474) × ref `c1b8680` (code-identical to C13 loan) and steelbill `934f9cb` (steel-seed bill facts). The supervisor runs from a frozen harness worktree at `57feb31`, so its slots are the miniship-wide total. It starts at 20, the controller may grow it to 30 (minimum 10), and the UPS floors are p95 105 / p98 95. C12/C13 job-status counts as occupied, and older cohorts with waiting work keep their free slots. Admission is one trial per 60 s and only while at least 4.5 GiB is free. Seed admission runs until 2026-10-22 02:00 IST, and the unit cap is 83000 s. C12 (until 14:45) and C13 (until 18:45) continue unchanged. The adjacent contrast is steelbill vs ref; adoption follows [variant rules](laya_variants/README.md). Manifest: `data/laya-experiments/laya-c14-2123-miniship-20261021/freeze.json`.
+
+Update 05:25 IST: attempt 1 (`laya-c14-2123-miniship-20261021`) was stopped after 13 minutes because it kept admitting trials while older cohorts shed slots. Its statuses are preserved and it is excluded from results. The current unit is **`laya-c14b-2123-miniship-20261021`** with harness `28a2bb8`: paced, health-gated shared admission and otherwise identical settings.
+
+## Cohort 15 queued (2026-10-21 13:45 IST)
+
+`laya-c15b-2123-miniship-20261021`: 150 jobs, seeds 79400–79474 × steelbill `934f9cb` / vacancy `ef38247` (released finite mall-half reuse; only this differs in trial code). Harness `1e8428f`, shared host budget (newer cohorts bounded by older shared totals), ports 37100–37129/30100–30129, admission until 2026-10-22 18:00 IST, cap 110000 s. It waits behind C12/C13/C14b. Attempt 1 is excluded (see CURRENT_STATUS). Read contrasts against the C12-seed/C13-ref A/A spread.
+
+## Cohort 12 complete (2026-10-21 14:30 IST)
+
+C12 finished 160/192 completed plus 32 not_started_deadline; no adoption. See [C12 result](Laya_C12_Result_2026-10-21.md). Active: C13 (until 18:45), C14b and C15b under the shared host budget. Starship's C2 reliability cohort is monitored read-only every 30 minutes (local handoff).
+
+Update 15:10 IST: C15 is now **`laya-c15c-2123-miniship-20261021`**: 3 cumulative arms (steelbill `934f9cb` → vacancy `ef38247` → foundation `d8e3f7c`) × seeds 79400–79449 = 150 jobs, harness `d8e3f7c`, queued behind C14b. C15b was superseded before any job started.
+
+## Cohort 13 complete (2026-10-21 16:50 IST)
+
+C13 finished 144/144; no adoption. See [C13 result](Laya_C13_Result_2026-10-21.md). Active Miniship cohorts: C14b and C15c (queued). From 16:29 the external `laya-host-scheduler` service publishes `_host-scheduler-gate`, which bounds both through the shared budget.
+
+## Host scheduler adopted for Miniship cohorts (2026-10-21 17:15 IST)
+
+Active: C14b (draining legacy supervisor; no new admissions), **C14c** `laya-c14c-2123-miniship-20261021` (C14b's remaining seeds 79435–79474, 80 jobs) and **C15d** `laya-c15d-2123-miniship-20261021` (steelbill → vacancy → foundation × 50 seeds, 150 jobs). C14c and C15d run on harness `81f0735` behind `laya-host-scheduler`'s gate (see [Laya_Host_Scheduler.md](Laya_Host_Scheduler.md) on the scheduler branch). C14b analysis: pair within one cohort per seed (C14b seeds 79400–79434, C14c 79435–79474). Stop `laya-legacy-drain-gate` once C14b is inactive.
+
+## Cohort 14 complete (2026-10-22 04:45 IST)
+
+C14 (C14b + C14c) finished with 75 matched pairs; steelbill is not adopted and is dropped from future bases. See [C14 result](Laya_C14_Result_2026-10-22.md). C15d is finishing. The next cohort, C16, tests the fixes on ref without steelbill.
+
+## Cohort 15 complete (2026-10-22 06:35 IST)
+
+C15d finished 150/150 with no adoption; see [C15 result](Laya_C15_Result_2026-10-22.md). Active: C16 (no-steelbill ref → vacancy → foundation) and C17 (foundation vs never-configured-loan release fix).
+
+## Cohort 18 launched (2026-10-22 15:09 IST)
+
+C18 `laya-c18-2123-miniship-20261022` tests the loan-credit fix `e37464d` against release `d39b6c7` on seeds 79400–79474 (150 jobs, ports 37500+, scheduler-gated harness 65d5613). Active: C16 (last jobs), C17 and C18. Code fixes continue on `work/miniship/laya-nosteelbill-20261021`.
+
+## Cohort 16 complete (2026-10-22 16:40 IST)
+
+C16 finished 150/150. Vacancy (`0bf1bdc`) and foundation (`7fd2320`) are adopted as the Laya cohort base; see [C16 result](Laya_C16_Result_2026-10-22.md). Every later cohort already builds on them (C17 foundation vs release, C18 release vs credit). Active: C17 and C18.
+
+## Cohort 17 complete (2026-10-22 20:20 IST)
+
+C17 finished 150/150: the release fix removes the false loan-release collisions (169 → 1) with level endpoints, so it is not adopted by the endpoint rule but stays in the experimental line; see [C17 result](Laya_C17_Result_2026-10-22.md). Active: C18 (release vs credit).
+
+## Cohort 19 launched (2026-10-22 20:31 IST)
+
+C19 `laya-c19-2123-miniship-20261022` tests the started-foundation menu fix `b372672` against credit `e37464d` (150 jobs, ports 37600+), queued behind C18. Open diagnostic gap: persist the stone foundation survey tuple (count, health, producing, output) with acceptance; 10 C17 C3 failures cannot be explained without it.
+
+## Starship review integration (2026-10-22 20:43 IST)
+
+[Verified local review fixes](Laya_Review_Fixes_2026-10-22.md) combines the
+current owner records through 855e1b8, b372672's C19 menu change and the shared
+scheduler on a separate Starship branch. It adds exact foundation observations
+for the unresolved C3 cases. No active C18/C19 arm, deployed runtime or 55-minute
+owner schedule was changed. New loan/scheduler changes need separate frozen
+comparisons; the handler owns activation. No policy training was launched.

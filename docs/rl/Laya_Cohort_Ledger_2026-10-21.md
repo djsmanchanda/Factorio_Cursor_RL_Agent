@@ -48,3 +48,35 @@ Both machines have private 2.1.23 headless runtimes, with older runtimes retaine
 Opening-order/coverage remains a research task. Gear-first recovery exists in C11 `ready-s79434` and `reconcile-s79433`; no copper-first legality rule is justified. The needed shared API previews the exact selected mall plan and construction/logistic coverage without declaring ledger bills, claiming slots, changing reservations or submitting work. Steel-seed placement remains unimplemented.
 
 The new Opus 5.5 high owner is scheduled for **2026-10-21 03:32 IST** on miniship, with 55-minute check-ins and authority to continue bounded disposable experiments and verified fixes. Read the local takeover handoff for exact launch/scheduler records. No real-base authority is granted.
+
+C14 (launched 2026-10-21 05:05 IST, miniship): 150 planned jobs, 75 seeds 79400–79474 × ref `c1b8680` / steelbill `934f9cb`, Factorio 2.1.23 build 87750, same copied save. It shares one host slot budget with C12/C13 (start 20 total, max 30, older first), using the harness at `57feb31`. Results are pending.
+
+C14 attempt 1 was stopped at 05:18 IST: 150 planned = 1 completed, 4 interrupted, 1 shutdown runner_error, 144 not started. Shared admission ignored host health (fixed in `28a2bb8`). The rerun `laya-c14b-2123-miniship-20261021` (150 jobs, same arms/seeds) is the C14 denominator; attempt 1 is not pooled.
+
+C15 attempt 1 (stopped 13:41 IST): 150 planned = 1 interrupted, 149 not started; excluded. C15b (`laya-c15b-2123-miniship-20261021`, 150 jobs, steelbill vs vacancy) is the C15 denominator; it is queued behind C14b under the shared host budget.
+
+C12 final (2026-10-21 ~14:20 IST): 192 planned = 160 completed + 32 not_started_deadline (seeds 79440–79447, whole blocks); no errors or interruptions. C2 15/16/11/7, C5 ever/final 14/5, 11/9, 10/8, 6/1, new Laya C6 12/7/8/6 for ref/raw/furnace/seed. No adoption. [Result](Laya_C12_Result_2026-10-21.md).
+
+C15b was superseded before any job started (150 planned, 0 started). The C15 denominator is now C15c: 150 jobs = 50 seeds × steelbill/vacancy/foundation.
+
+C13 final (2026-10-21 ~16:40 IST): 144/144 completed; no errors. C2 18/14/18, C5 ever/final 12/3, 19/2, 19/2, new Laya C6 10/18/17 for ref/menu/loan. No adoption. [Result](Laya_C13_Result_2026-10-21.md).
+
+C15c was superseded before any job started (150 planned, 0 started) by C15d on the scheduler-gated harness; C15d's own first attempt admitted nothing (legacy registry shape) and was restarted on 81f0735. C14b was drained at ~17:10 IST and continues as C14c (80 jobs, seeds 79435–79474); account C14b's completed/in-flight jobs plus C14c's 80 together.
+
+C14b closed 2026-10-21 17:40 IST after draining: 150 planned = 71 completed + 79 queued-never-started. All 79 (seeds 79435 ref and 79436–79474) are carried by C14c; earlier interrupted/rerun attempts are recorded in its job history. C14 accounting = C14b completed + C14c's 80 jobs, paired within one cohort per seed.
+
+C14 final (2026-10-22 ~04:40 IST): C14b 71 completed + 79 never started (carried by C14c), C14c 80/80 completed (4 reruns after the 02:39 power cut). 75 matched pairs; C2 ref 26 / steelbill 18 (10:18), C5 ever/final 25/11 vs 20/5, new Laya C6 21/17. No adoption. [Result](Laya_C14_Result_2026-10-22.md).
+
+C16 (launched 2026-10-22 04:50 IST, miniship): 150 planned = 50 seeds 79400–79449 × ref c1b8680 / vacancy 0bf1bdc / foundation 7fd2320 (no steelbill). Scheduler-gated harness 65d5613. Results pending.
+
+C15d final (2026-10-22 ~06:20 IST): 150/150 completed (8 power-cut reruns under --resume). C2 21/25/27, C5 ever/final 21/2, 24/3, 21/3, new Laya C6 21/21/18 for steelbill/vacancy/foundation. No adoption. [Result](Laya_C15_Result_2026-10-22.md).
+
+C17 (launched 2026-10-22 06:40 IST, miniship): 150 planned = 75 seeds 79400–79474 × foundation 7fd2320 / release d39b6c7. Results pending.
+
+C18 (launched 2026-10-22 15:09 IST, miniship): 150 planned = 75 seeds 79400–79474 × release d39b6c7 / credit e37464d. Results pending.
+
+C16 final (2026-10-22 ~16:30 IST): 150/150 completed. C2 15/25/35, C3 6/22/22, C5 ever/final 13/3, 24/4, 25/4, new Laya C6 11/21/22 for ref/vacancy/foundation. Vacancy and foundation adopted as the cohort base. [Result](Laya_C16_Result_2026-10-22.md).
+
+C17 final (2026-10-22 20:06 IST): 150/150 completed. C2 60/59, C5 ever/final 47/12 vs 45/7, new Laya C6 40/41 for foundation/release; refusals 169 → 1. Not adopted by endpoints; kept as a correctness fix. [Result](Laya_C17_Result_2026-10-22.md).
+
+C19 (launched 2026-10-22 20:31 IST, miniship): 150 planned = 75 seeds 79400–79474 × credit e37464d / started b372672. Results pending.

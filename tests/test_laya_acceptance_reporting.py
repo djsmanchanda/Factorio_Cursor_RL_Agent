@@ -18,6 +18,7 @@ def test_runner_and_batch_preserve_regressions_and_missing_observations(tmp_path
             result = next(self.observations)
             if isinstance(result, Exception):
                 raise result
+            self.acceptance_fresh = result
             return result
 
         def close(self):
@@ -72,6 +73,8 @@ def test_acceptance_names_the_checks_that_block_each_milestone(tmp_path, monkeyp
     ready = {"present": True, "healthy": True, "producing": True, "output_count": 5}
     snapshot = FactorySnapshot.from_mapping({
         "tick": 60, "base_valid": True,
+        "foundations": {"stone": {"machine_count": 6, "healthy": False,
+                                    "producing": False, "output_count": 2200}},
         "starters": {"iron": ready, "copper": ready, "stone": {**ready, "producing": False}},
         "mall_assemblers": [{"recipe": r, "working": True} for r in
                             ("iron-gear-wheel", "copper-cable", "electronic-circuit", "transport-belt")]})
@@ -99,3 +102,7 @@ def test_acceptance_names_the_checks_that_block_each_milestone(tmp_path, monkeyp
         run_id="checks", session=session, emit=lambda line: None)
     record = json.loads((tmp_path / "journal.jsonl").read_text().splitlines()[0])
     assert record["checks"]["C1"]["failed"] == ["stone_starter_ready"]
+    assert record["foundations"]["iron"] == {"tick": 60, "observation": None, "ready": None}
+    assert record["foundations"]["stone"]["observation"] == {"name": "stone", "machine_count": 6,
+        "healthy": False, "producing": False, "output_count": 2200}
+    assert record["foundations"]["stone"]["ready"] is False

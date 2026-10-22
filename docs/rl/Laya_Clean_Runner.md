@@ -206,3 +206,29 @@ real downstream consumer must still craft.
 ## Laya C6 output achievement (2026-10-21)
 
 Ops C6 uses [explicit mall choice followed by measured circuit output](Laya_C6_Choice_Output_2026-10-21.md), version `laya-c6-choice-output-v2`. It requires no consumer or sustained rate. Its journal/status receipt is separate from unchanged deterministic C6 acceptance; legacy cohort counts are not comparable. Fresh frozen runners pick up this Python-only change.
+
+## Shared operation boundary and service observations (2026-10-22)
+
+`orchestrator/operation_session.py` owns the explicit selected-operation API,
+ledgers and typed receipts. `training/laya_ops.py` is its public compatibility
+facade; training no longer imports the strategic builder directly. The session
+initializes operation facts and executes the selected map entry; it never calls
+the deterministic mission opener or run loop. Inherited choosing wrappers remain
+the documented migration debt, not newly transferred policy authority. The pure
+economics projection lives in `orchestrator/operation_observation.py`, so the
+shared session has no dependency back into training.
+
+`item-service-observation-v1` records network stock, scoped production and
+consumption deltas, rates and the observation window beside acceptance records.
+A `stocked_plateau` means measured stock with no observed production or
+consumption in that interval. It grants no sustained-service acceptance; missing
+counters, changed scope/mods or regressing time/counters remain unknown. Existing
+C5 and both C6 predicates are unchanged. The controlled plateau/renewed-demand
+regression proves observation semantics, not a live plastic throughput result.
+
+Active finite loans now check one craft's physical inputs and their own requester,
+assembler and inserter WIP before surrendering their cell for a missing rotating
+prerequisite. An insufficient whole remaining bill alone does not trigger a
+restore while the cell can run. Exhausted prerequisites can still hand off using
+the existing executor; historical credits remain governed by the C18 accounting
+fix. This needs fresh frozen runners for live verification.

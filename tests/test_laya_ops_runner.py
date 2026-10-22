@@ -663,6 +663,24 @@ def test_an_observed_ready_foundation_offers_its_starter_retirement_after_a_wait
     ids = lambda **kw: {o["option_id"] for o in compile_options(board, results, **kw)["options"]}
     assert not any(i.endswith(".copper-plate") for i in ids())
     assert "op.retire_starter.copper-plate" in ids(foundations={"copper-plate": True})
-    # Unknown or not-ready observations never invent a foundation.
+    # Unknown or not-ready observations never invent a ready foundation.
     assert not any(i.endswith(".copper-plate") for i in ids(foundations={"copper-plate": None}))
-    assert not any(i.endswith(".copper-plate") for i in ids(foundations={"copper-plate": False}))
+    # Observed not ready: the started foundation stays to be finished; nothing past it is offered.
+    assert {i for i in ids(foundations={"copper-plate": False}) if i.endswith(".copper-plate")} == {
+        "op.foundation.copper-plate"}
+
+
+def test_a_started_foundation_observed_not_ready_stays_on_the_menu_after_its_plate_is_satisfied():
+    # C17 release-s79435: the stone foundation returned a coverage wait at D42; once bricks stopped being short
+    # the menu dropped it for good and C3 failed with only the starter furnace built.
+    board = {"needs": [{"item": "iron-plate", "condition": "satisfied", "goal_required_per_s": 0.5},
+                       {"item": "stone-brick", "condition": "satisfied", "goal_required_per_s": 0.1}]}
+    results = [{"ok": True, "operation": "starter", "params": {"recipe": p}}
+               for p in ("iron-plate", "copper-plate", "stone-brick")]
+    never_started = {o["option_id"] for o in compile_options(board, results, foundations={"stone-brick": False})["options"]}
+    assert not any(i.endswith(".stone-brick") for i in never_started)
+    results.append({"ok": False, "operation": "foundation", "params": {"recipe": "stone-brick"},
+                    "code": "roboport_coverage_construction_wait"})
+    ids = {o["option_id"] for o in compile_options(board, results, foundations={"stone-brick": False})["options"]}
+    assert "op.foundation.stone-brick" in ids
+    assert "op.extend.stone-brick" not in ids and "op.retire_starter.stone-brick" not in ids

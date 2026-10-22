@@ -9,7 +9,7 @@ import pytest
 from orchestrator import autonomous_builder as builder, material_reservations
 from orchestrator.bootstrap_district import REQUIRED_RESERVATION_ROLES
 from planners import recipe_data
-from training import laya_ops
+from orchestrator import operation_session as laya_ops
 from planners.steel_bootstrap import steel_seed
 from training.laya_ops_runner import BUILT, compile_options
 
