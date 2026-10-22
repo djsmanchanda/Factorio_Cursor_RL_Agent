@@ -84,3 +84,5 @@ C19 (launched 2026-10-22 20:31 IST, miniship): 150 planned = 75 seeds 79400–79
 C20 (launched 2026-10-22 22:46 IST, miniship): 150 planned = 75 seeds × started b372672 / integrated 8507710 (Starship review integration without loan retention). Results pending.
 
 C21 (launched 2026-10-22 22:46 IST, miniship): 150 planned = 75 seeds × integrated 8507710 / retain 657572e (review loan retention). Results pending.
+
+C18/C19 cut (2026-10-23 00:17 IST, user request): C18 → 120 planned (seeds 79400–79459; 30 cut), C19 → 102 planned (seeds 79400–79450; 48 cut). Cut jobs never started; see each root's cut-jobs.json.
