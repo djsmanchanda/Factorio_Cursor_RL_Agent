@@ -74,3 +74,5 @@ C15d final (2026-10-22 ~06:20 IST): 150/150 completed (8 power-cut reruns under 
 C17 (launched 2026-10-22 06:40 IST, miniship): 150 planned = 75 seeds 79400–79474 × foundation 7fd2320 / release d39b6c7. Results pending.
 
 C18 (launched 2026-10-22 15:09 IST, miniship): 150 planned = 75 seeds 79400–79474 × release d39b6c7 / credit e37464d. Results pending.
+
+C16 final (2026-10-22 ~16:30 IST): 150/150 completed. C2 15/25/35, C3 6/22/22, C5 ever/final 13/3, 24/4, 25/4, new Laya C6 11/21/22 for ref/vacancy/foundation. Vacancy and foundation adopted as the cohort base. [Result](Laya_C16_Result_2026-10-22.md).

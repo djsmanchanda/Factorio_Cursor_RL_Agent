@@ -310,3 +310,7 @@ C15d finished 150/150 with no adoption; see [C15 result](Laya_C15_Result_2026-10
 ## Cohort 18 launched (2026-10-22 15:09 IST)
 
 C18 `laya-c18-2123-miniship-20261022` tests the loan-credit fix `e37464d` against release `d39b6c7` on seeds 79400–79474 (150 jobs, ports 37500+, scheduler-gated harness 65d5613). Active: C16 (last jobs), C17 and C18. Code fixes continue on `work/miniship/laya-nosteelbill-20261021`.
+
+## Cohort 16 complete (2026-10-22 16:40 IST)
+
+C16 finished 150/150. Vacancy (`0bf1bdc`) and foundation (`7fd2320`) are adopted as the Laya cohort base; see [C16 result](Laya_C16_Result_2026-10-22.md). Every later cohort already builds on them (C17 foundation vs release, C18 release vs credit). Active: C17 and C18.
