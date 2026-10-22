@@ -78,6 +78,7 @@ H=/home/miniship/.local/share/laya-host/laya_host_scheduler.py
 .venv/bin/python "$H" --root data/laya-host --registry data/laya-experiments target 12 --for 2h
 .venv/bin/python "$H" --root data/laya-host --registry data/laya-experiments pause --for 1h
 .venv/bin/python "$H" --root data/laya-host --registry data/laya-experiments resume
+.venv/bin/python "$H" --root data/laya-host --registry data/laya-experiments bump +2
 .venv/bin/python "$H" --root data/laya-host --registry data/laya-experiments mode auto
 ```
 
@@ -85,7 +86,7 @@ H=/home/miniship/.local/share/laya-host/laya_host_scheduler.py
 Commands take effect on the next service cycle (up to 60 seconds); expiry also
 uses that cycle. Pause means target zero: running worlds finish, and new ones
 wait. Expiry/resume restores the saved target and automatic search. A permanent
-manual target disables automatic growth until `resume`/`clear-target`. Changing
+manual target disables automatic growth until `resume`/`clear-target`. `bump 20` or `bump +2` is a one-off nudge instead: it restarts the automatic search from that target, which then stays, grows or steps down on UPS, temperature, memory and liveness like any other. Changing
 `configure --start` alone does not reset an existing search; `reset` does.
 
 ## Installation and lifecycle

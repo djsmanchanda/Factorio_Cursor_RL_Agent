@@ -262,3 +262,19 @@ def test_pause_and_resume_cli_control_the_manual_target(tmp_path):
     config = json.loads((root / "config.json").read_text())
     assert config["manual_target"] is None
     assert json.loads((root / "state.json").read_text())["target"] == 18
+
+
+def test_bump_restarts_the_search_from_a_new_target_instead_of_pinning_it(tmp_path):
+    root = tmp_path / "host"
+    root.mkdir(parents=True)
+    (root / "state.json").write_text(json.dumps({"target": 18, "mode": "performance", "sweet_spot": 18}))
+    main(["--root", str(root), "target", "20"])
+    main(["--root", str(root), "bump", "+2"])
+    config = json.loads((root / "config.json").read_text())
+    state = json.loads((root / "state.json").read_text())
+    assert config["manual_target"] is None and config["manual_previous_target"] is None
+    assert state["target"] == 20 and state["sweet_spot"] is None
+
+    # Automatic control resumes from the bumped target: an unhealthy window steps it down.
+    target, reason, _ = choose(_config(step=1), state, _metrics(active_slots=20, ups_p95=90.0))
+    assert (target, reason) == (19, "unhealthy")

@@ -596,6 +596,8 @@ def main(argv: list[str] | None = None) -> int:
     pause = sub.add_parser("pause", help="stop new admissions (target 0)")
     pause.add_argument("--for", dest="duration", help="resume after 30m, 2h, or 1d")
     pause.add_argument("--until", help="resume at an ISO timestamp")
+    bump = sub.add_parser("bump", help="restart the automatic search from a new target (20 or +2)")
+    bump.add_argument("slots", help="absolute slots, or +N/-N relative to the current target")
     sub.add_parser("resume", help="clear a manual target and resume automatic growth")
     sub.add_parser("clear-target", help="alias for resume")
 
@@ -626,6 +628,21 @@ def main(argv: list[str] | None = None) -> int:
                              manual_previous_target=previous)
         print(json.dumps({"manual_target": config["manual_target"],
                           "manual_target_until": config["manual_target_until"]}, sort_keys=True))
+        return 0
+    if args.command == "bump":
+        # A one-off nudge, not a ceiling: the search continues from here and
+        # still steps down on UPS, temperature, memory or liveness.
+        config = _load_config(root)
+        state = _load_state(root)
+        current = int(state.get("target", config["start_slots"]))
+        relative = args.slots[:1] in {"+", "-"}
+        slots = current + int(args.slots) if relative else int(args.slots)
+        slots = max(int(config["min_slots"]), min(int(config["max_slots"]), slots))
+        state.update({"target": slots, "trial_base": None, "trial_total_ups": None, "trial_started": None,
+                      "trial_ready_since": None, "settle_until": 0.0, "sweet_spot": None})
+        _atomic(root / "state.json", state)
+        _set_config(root, manual_target=None, manual_target_until=None, manual_previous_target=None)
+        print(json.dumps({"target": slots, "previous": current}, sort_keys=True))
         return 0
     if args.command in {"resume", "clear-target"}:
         config = _load_config(root)
