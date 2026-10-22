@@ -314,3 +314,7 @@ C18 `laya-c18-2123-miniship-20261022` tests the loan-credit fix `e37464d` agains
 ## Cohort 16 complete (2026-10-22 16:40 IST)
 
 C16 finished 150/150. Vacancy (`0bf1bdc`) and foundation (`7fd2320`) are adopted as the Laya cohort base; see [C16 result](Laya_C16_Result_2026-10-22.md). Every later cohort already builds on them (C17 foundation vs release, C18 release vs credit). Active: C17 and C18.
+
+## Cohort 17 complete (2026-10-22 20:20 IST)
+
+C17 finished 150/150: the release fix removes the false loan-release collisions (169 → 1) with level endpoints, so it is not adopted by the endpoint rule but stays in the experimental line; see [C17 result](Laya_C17_Result_2026-10-22.md). Active: C18 (release vs credit).
