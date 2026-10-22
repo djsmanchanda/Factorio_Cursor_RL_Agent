@@ -306,3 +306,7 @@ C14 (C14b + C14c) finished with 75 matched pairs; steelbill is not adopted and i
 ## Cohort 15 complete (2026-10-22 06:35 IST)
 
 C15d finished 150/150 with no adoption; see [C15 result](Laya_C15_Result_2026-10-22.md). Active: C16 (no-steelbill ref → vacancy → foundation) and C17 (foundation vs never-configured-loan release fix).
+
+## Cohort 18 launched (2026-10-22 15:09 IST)
+
+C18 `laya-c18-2123-miniship-20261022` tests the loan-credit fix `e37464d` against release `d39b6c7` on seeds 79400–79474 (150 jobs, ports 37500+, scheduler-gated harness 65d5613). Active: C16 (last jobs), C17 and C18. Code fixes continue on `work/miniship/laya-nosteelbill-20261021`.
