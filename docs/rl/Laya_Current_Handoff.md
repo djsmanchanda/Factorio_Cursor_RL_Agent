@@ -302,3 +302,7 @@ Active: C14b (draining legacy supervisor; no new admissions), **C14c** `laya-c14
 ## Cohort 14 complete (2026-10-22 04:45 IST)
 
 C14 (C14b + C14c) finished with 75 matched pairs; steelbill is not adopted and is dropped from future bases. See [C14 result](Laya_C14_Result_2026-10-22.md). C15d is finishing. The next cohort, C16, tests the fixes on ref without steelbill.
+
+## Cohort 15 complete (2026-10-22 06:35 IST)
+
+C15d finished 150/150 with no adoption; see [C15 result](Laya_C15_Result_2026-10-22.md). Active: C16 (no-steelbill ref → vacancy → foundation) and C17 (foundation vs never-configured-loan release fix).
