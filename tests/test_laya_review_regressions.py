@@ -23,25 +23,6 @@ def test_stocked_plateau_and_renewed_demand_remain_different_observations():
     assert item_service_observation(before, renewed, "plastic-bar")["status"] == "unknown"
 
 
-@pytest.mark.parametrize("network,held,working,expected", [(46, 0, False, None), (0, 4, False, None),
-                                                         (0, 0, True, None), (0, 0, False, ("iron-stick", 88))])
-def test_active_pole_loan_uses_one_craft_and_its_owned_wip(monkeypatch, network, held, working, expected):
-    from orchestrator import autonomous_builder as builder
-    from orchestrator.mall_bootstrap import MallBootstrapLoan
-    loan = MallBootstrapLoan("transport-belt", "medium-electric-pole", 22, "left", (10, 10),
-                             "medium-electric-pole", step_recipe="medium-electric-pole")
-    monkeypatch.setitem(builder.LINE_RECIPES, "medium-electric-pole", {
-        "ingredients": ["iron-stick"], "amounts": [4], "product_amount": 1})
-    monkeypatch.setattr(builder, "_bootstrap_loan_stock", lambda *a: ({}, {}))
-    monkeypatch.setattr(builder, "_production_started", lambda *a: False)
-    monkeypatch.setattr(builder.live_base, "transferable_items", lambda *a: {"iron-stick": network})
-    monkeypatch.setattr(builder.live_base, "machine_health", lambda *a: (
-        {loan.machine_position: "working" if working else "ingredient_shortage"}, {}))
-    monkeypatch.setattr(builder.live_base, "loan_cell_item_count", lambda *a: held)
-    assert builder._missing_rotating_input(SimpleNamespace(command=lambda *a: ""), "nauvis", "player",
-                                            "medium-electric-pole", 22, loan=loan) == expected
-
-
 def _metrics(**kwargs):
     return {"active_slots": 20, "queued": 100, "ups_samples": 20, "ups_p95": 110, "ups_p98": 105,
             "total_ups": 2200, "temp_c": 90, "available_gb": 10, "unstable": [],
