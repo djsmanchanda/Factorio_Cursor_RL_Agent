@@ -7,7 +7,9 @@
 at 24 and permits at most 30 worlds; balanced permits 26 and cool permits 20.
 `powerprofilesctl get` selects the mode automatically. Miniship's configured limits
 (`data/laya-host/config.json`, 2026-10-22) are 95 C (97 C hard) for
-performance/balanced, 85 C for cool, and UPS floors of 100 (p95) / 90 (p98). These
+performance/balanced, 85 C for cool, and UPS floors of 100 (p95) / 90 (p98). A trial
+keeps its extra world whenever aggregate UPS does not fall (`min_total_ups_gain` 0,
+set 2026-10-22 so the count grows while there is headroom). These
 are configured ceilings, not measured sustainable capacities.
 
 The scheduler reads decision-log UPS, temperature, memory and runner liveness.
