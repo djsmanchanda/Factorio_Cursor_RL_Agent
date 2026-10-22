@@ -5,9 +5,10 @@
 `tools/laya_host_scheduler.py` owns the host ceiling; the fixed pool in
 `tools/run_laya_batch.py` admits worlds against its fresh gate. Performance starts
 at 24 and permits at most 30 worlds; balanced permits 26 and cool permits 20.
-`powerprofilesctl get` selects the mode automatically. Thermal limits are 93 C
-(95 C hard) for performance/balanced and 85 C for cool. These are configured
-ceilings, not measured sustainable capacities.
+`powerprofilesctl get` selects the mode automatically. Miniship's configured limits
+(`data/laya-host/config.json`, 2026-10-22) are 95 C (97 C hard) for
+performance/balanced, 85 C for cool, and UPS floors of 100 (p95) / 90 (p98). These
+are configured ceilings, not measured sustainable capacities.
 
 The scheduler reads decision-log UPS, temperature, memory and runner liveness.
 Growth compares aggregate UPS after the increased population has a complete
@@ -85,9 +86,19 @@ H=/home/miniship/.local/share/laya-host/laya_host_scheduler.py
 `--until "2026-10-21T22:00:00+05:30"` is an alternative to `--for`.
 Commands take effect on the next service cycle (up to 60 seconds); expiry also
 uses that cycle. Pause means target zero: running worlds finish, and new ones
-wait. Expiry/resume restores the saved target and automatic search. A permanent
-manual target disables automatic growth until `resume`/`clear-target`. `bump 20` or `bump +2` is a one-off nudge instead: it restarts the automatic search from that target, which then stays, grows or steps down on UPS, temperature, memory and liveness like any other. Changing
+wait. Expiry/resume restores the saved target and automatic search. Changing
 `configure --start` alone does not reset an existing search; `reset` does.
+
+Two ways to change the slot count:
+
+- **`target N` pins a ceiling.** The count stays at N (lower only under a safety
+  cap) and automatic growth stops until `resume`/`clear-target` or expiry, which
+  restore the previous target.
+- **`bump N` or `bump +N` nudges the search.** It clears any manual target and
+  restarts the automatic search from the new count. The scheduler then keeps it
+  while healthy, tries higher when aggregate UPS improves, and steps down on the
+  UPS floors, temperature, memory or an unstable runner. Use it to say "try more"
+  without taking control away from the scheduler.
 
 ## Installation and lifecycle
 
