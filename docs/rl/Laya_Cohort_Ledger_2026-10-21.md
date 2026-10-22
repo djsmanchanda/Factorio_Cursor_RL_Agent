@@ -70,3 +70,5 @@ C14 final (2026-10-22 ~04:40 IST): C14b 71 completed + 79 never started (carried
 C16 (launched 2026-10-22 04:50 IST, miniship): 150 planned = 50 seeds 79400–79449 × ref c1b8680 / vacancy 0bf1bdc / foundation 7fd2320 (no steelbill). Scheduler-gated harness 65d5613. Results pending.
 
 C15d final (2026-10-22 ~06:20 IST): 150/150 completed (8 power-cut reruns under --resume). C2 21/25/27, C5 ever/final 21/2, 24/3, 21/3, new Laya C6 21/21/18 for steelbill/vacancy/foundation. No adoption. [Result](Laya_C15_Result_2026-10-22.md).
+
+C17 (launched 2026-10-22 06:40 IST, miniship): 150 planned = 75 seeds 79400–79474 × foundation 7fd2320 / release d39b6c7. Results pending.
