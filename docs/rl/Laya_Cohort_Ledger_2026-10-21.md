@@ -78,3 +78,5 @@ C18 (launched 2026-10-22 15:09 IST, miniship): 150 planned = 75 seeds 79400–79
 C16 final (2026-10-22 ~16:30 IST): 150/150 completed. C2 15/25/35, C3 6/22/22, C5 ever/final 13/3, 24/4, 25/4, new Laya C6 11/21/22 for ref/vacancy/foundation. Vacancy and foundation adopted as the cohort base. [Result](Laya_C16_Result_2026-10-22.md).
 
 C17 final (2026-10-22 20:06 IST): 150/150 completed. C2 60/59, C5 ever/final 47/12 vs 45/7, new Laya C6 40/41 for foundation/release; refusals 169 → 1. Not adopted by endpoints; kept as a correctness fix. [Result](Laya_C17_Result_2026-10-22.md).
+
+C19 (launched 2026-10-22 20:31 IST, miniship): 150 planned = 75 seeds 79400–79474 × credit e37464d / started b372672. Results pending.

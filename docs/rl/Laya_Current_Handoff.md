@@ -318,3 +318,7 @@ C16 finished 150/150. Vacancy (`0bf1bdc`) and foundation (`7fd2320`) are adopted
 ## Cohort 17 complete (2026-10-22 20:20 IST)
 
 C17 finished 150/150: the release fix removes the false loan-release collisions (169 → 1) with level endpoints, so it is not adopted by the endpoint rule but stays in the experimental line; see [C17 result](Laya_C17_Result_2026-10-22.md). Active: C18 (release vs credit).
+
+## Cohort 19 launched (2026-10-22 20:31 IST)
+
+C19 `laya-c19-2123-miniship-20261022` tests the started-foundation menu fix `b372672` against credit `e37464d` (150 jobs, ports 37600+), queued behind C18. Open diagnostic gap: persist the stone foundation survey tuple (count, health, producing, output) with acceptance; 10 C17 C3 failures cannot be explained without it.
