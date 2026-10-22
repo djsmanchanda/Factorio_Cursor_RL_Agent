@@ -640,13 +640,8 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                  "foundation": ("extend",) + (() if retired(results, plate) else ("retire_starter",))}[stages.get(plate, "none")]
         if plate not in unmet and PLATES[plate] not in unmet:
             # Retiring a starter is lifecycle cleanup, not production, so it outlives the plate's goal (live
-            # 2026-10-15: once C4's board held only plastic, the iron starter was never retired). So does finishing
-            # a foundation the tooling started and the world observes not ready (C17: 7 runs left a stone
-            # foundation at a coverage wait or a failed retirement once bricks stopped being short, failing C3).
-            unfinished = (foundations or {}).get(plate) is False and any(
-                r["operation"] == "foundation" and (r.get("params") or {}).get("recipe") == plate for r in results)
-            legal = tuple(operation for operation in legal
-                          if operation == "retire_starter" or (operation == "foundation" and unfinished))
+            # 2026-10-15: once C4's board held only plastic, the iron starter was never retired).
+            legal = tuple(operation for operation in legal if operation == "retire_starter")
         for operation in legal:
             features = {"plate_stage": stages.get(plate, "none"), "last_code": codes.get((operation, plate), "new"),
                         "goal_need": plate in goal,
