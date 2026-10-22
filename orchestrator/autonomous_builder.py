@@ -6064,6 +6064,11 @@ def _restore_bootstrap_loan(
 ) -> None:
     """Restore the borrowed cell before another dependency may claim it."""
     global _BOOTSTRAP_LOAN_CONFIGURATION_REVISION
+    if loan.proposed:
+        # The donor was selected but never borrowed: nothing changed on the map, so nothing is released.
+        emit(f"  MALL BOOTSTRAP LOAN NOT STARTED: {loan.target_item} on {loan.original_recipe} at "
+             f"{loan.machine_position} -- {reason}; the donor cell is unchanged")
+        return
     if hasattr(client, "command") and not (loan.releasing and loan.current_recipe == loan.original_recipe
                                            and loan.original_recipe != loan.target_item):
         release = release_bootstrap_loan_plan(loan)
@@ -6637,6 +6642,7 @@ def _submit_bootstrap_loan(
             client, bridge, surface, plan,
             f"bootstrap_loan_{loan.target_item}", emit,
         )
+        loan = replace(loan, proposed=False)  # Configured: its tag now exists and restoration must release it.
         _BOOTSTRAP_LOAN_CONFIGURATION_REVISION += 1
         _MALL_REFRESH_SIGNATURES.clear()
         _BOOTSTRAP_LOAN_PROGRESS_REVISION += 1
@@ -7481,6 +7487,7 @@ def _start_bootstrap_loan(
         requester_position=requester_position,
         current_recipe=original_recipe,
         machine_name=machine_name,
+        proposed=True,
     )
     return _submit_bootstrap_loan(
         client, bridge, surface, force, loan, emit,

@@ -706,6 +706,14 @@ def _submit(
                 cleared_any = True
             else:
                 blocking.append({**failure, "occupant": occupant})
+        if blocking and all(str(b.get("reason", "")).startswith("release_") for b in blocking):
+            # A mall cell's loan release was refused (ownership/recipe/recovery state), not a placement collision.
+            raise StuckError(
+                f"{name}: mall cell release refused -- {blocking[:3]}",
+                code="mall_cell_lifecycle_conflict",
+                details={"plan": name, "surface": surface, "force": plan.get("force", "player"),
+                         "reasons": sorted({b.get("reason") for b in blocking}), "blockers": blocking[:3]},
+            )
         if blocking:
             raise StuckError(
                 f"{name}: blocked by real infrastructure, not map clutter -- needs a "

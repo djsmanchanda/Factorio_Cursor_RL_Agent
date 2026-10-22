@@ -55,6 +55,9 @@ class MallBootstrapLoan:
     # The tag read from the requester. `group` is recomputed from the fields, so it runs ahead of
     # the chest as soon as a step is credited in memory; releasing or clearing must name the chest's tag.
     observed_group: str | None = field(default=None, compare=False)
+    # Chosen by the borrower but never configured on the map: there is no tag, recovery record or recipe change to
+    # release, so restoring it must not submit a release (C13: 98 release_owner_missing refusals, all of this kind).
+    proposed: bool = field(default=False, compare=False)
 
     @property
     def live_group(self) -> str:

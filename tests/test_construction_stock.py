@@ -4697,3 +4697,57 @@ def test_unset_assembler_survey_reports_only_real_recipe_less_assemblers():
     assert found == {(1.5, 1.5): "assembling-machine-2"}  # non-assembler names are discarded
     assert "type='assembling-machine',force='player'" in sent[0] and "get_recipe" in sent[0]
     assert builder.live_base.unset_assemblers_at(client, "nauvis", "player", []) == {}
+
+
+def test_restoring_a_never_configured_loan_submits_nothing(monkeypatch):
+    # C13: 98 release_owner_missing refusals came from releasing a donor chosen by _start_bootstrap_loan but never
+    # configured (missing chemical predecessor, or the bill already met during donor discovery).
+    submitted, said = [], []
+    monkeypatch.setattr(builder, "_submit", lambda *a, **k: submitted.append(a[4]) or {})
+    client = SimpleNamespace(command=lambda *_a: "")
+    proposed = _craft_loan(original_recipe="advanced-circuit", target_item="passive-provider-chest",
+                           current_recipe="advanced-circuit", proposed=True)
+    builder._restore_bootstrap_loan(client, object(), "nauvis", "player", proposed, said.append,
+                                    reason="chemical handoff to missing chemical-plant")
+    assert submitted == [] and "NOT STARTED" in said[0]
+    # A configured loan still releases through the normal recovery path.
+    monkeypatch.setattr(builder, "mall_slot_uses_shared_provider", lambda *_a: False)
+    try:
+        builder._restore_bootstrap_loan(client, object(), "nauvis", "player", _craft_loan(), said.append,
+                                        reason="done")
+    except Exception:
+        pass  # later restore steps need a richer fake; only the first submission matters here
+    assert submitted and submitted[0].startswith("release_bootstrap_loan_")
+
+
+def test_the_borrower_marks_a_new_donor_as_proposed_until_configured(monkeypatch):
+    seen = []
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: [])
+    monkeypatch.setattr(builder, "_borrow_free_mall_cell", lambda *a, **k: (
+        "advanced-circuit", (33.5, 33.5), (32, 32), "left", "assembling-machine-1"))
+    monkeypatch.setattr(builder, "_submit_bootstrap_loan", lambda *a, **k: seen.append(a[4]) or "remedy")
+    assert builder._start_bootstrap_loan(SimpleNamespace(command=lambda *_a: ""), object(), "nauvis", "player",
+                                         "passive-provider-chest", 9, (0, 0), print) == "remedy"
+    assert seen[0].proposed is True
+    assert seen[0].group == seen[0].live_group  # proposed-ness never changes the tag it would install
+
+
+def test_a_refused_mall_cell_release_is_a_lifecycle_conflict_not_a_collision(monkeypatch):
+    import orchestrator.construction_coverage as ss
+    plan = {"phases": [{"actions": [{"action_type": "configure_entity", "entity": "assembling-machine-1",
+                                     "position": {"x": 33.5, "y": 33.5}}]}], "force": "player"}
+
+    class FakeBridge:
+        def build_layout(self, authorization, plan_dict):
+            return {"ok": False, "failed_placements": 1, "placement_failures": [
+                {"reason": "release_owner_missing", "position": {"x": 33.5, "y": 33.5}}]}
+
+    monkeypatch.setattr(ss, "load_json", lambda r: r)
+    monkeypatch.setattr(ss, "clear_plan_clutter", lambda *_a: None)
+    monkeypatch.setattr(ss, "assert_affordable", lambda *_a: None)
+    monkeypatch.setattr(ss, "build_layout_authorization", lambda *_a: object())
+    with pytest.raises(ss.StuckError) as refused:
+        ss._submit(object(), FakeBridge(), "nauvis", plan, "release_bootstrap_loan_passive-provider-chest",
+                   lambda _m: None)
+    assert refused.value.code == "mall_cell_lifecycle_conflict"
+    assert refused.value.details["reasons"] == ["release_owner_missing"]
