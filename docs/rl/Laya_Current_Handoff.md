@@ -326,3 +326,7 @@ C19 `laya-c19-2123-miniship-20261022` tests the started-foundation menu fix `b37
 ## Starship review integrated; C20 and C21 launched (2026-10-22 22:46 IST)
 
 The Starship review fixes run on Miniship from branch `work/miniship/laya-integrated-20261022` (`8507710`); its loan retention is a separate candidate on `work/miniship/laya-retain-20261022` (`657572e`). The host scheduler runs the integrated script, restarted alone at 22:42 IST. C20 checks that the integration is behaviour-neutral and C21 tests retention. Active: C18, C19, C20 and C21. Future code fixes go on the integrated branch; next ports 37900+.
+
+## Cohort 18 complete (2026-10-23 01:50 IST)
+
+The loan-credit fix `e37464d` is adopted into the cohort base (C5 20:5, C2 13:4); see [C18 result](Laya_C18_Result_2026-10-23.md). Caution: interim C19 shows the started-foundation menu change `b372672` hurting C2/C6, and C20/C21 carry it in every arm; an analysis is under way before the next cohort.

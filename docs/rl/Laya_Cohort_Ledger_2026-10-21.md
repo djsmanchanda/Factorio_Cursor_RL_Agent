@@ -86,3 +86,5 @@ C20 (launched 2026-10-22 22:46 IST, miniship): 150 planned = 75 seeds × started
 C21 (launched 2026-10-22 22:46 IST, miniship): 150 planned = 75 seeds × integrated 8507710 / retain 657572e (review loan retention). Results pending.
 
 C18/C19 cut (2026-10-23 00:17 IST, user request): C18 → 120 planned (seeds 79400–79459; 30 cut), C19 → 102 planned (seeds 79400–79450; 48 cut). Cut jobs never started; see each root's cut-jobs.json.
+
+C18 final (2026-10-23 01:39 IST): 120/120 completed + 30 cut. C2 42/51, C5 ever/final 29/8 vs 44/12, new Laya C6 24/35 for release/credit. Credit adopted. [Result](Laya_C18_Result_2026-10-23.md).
