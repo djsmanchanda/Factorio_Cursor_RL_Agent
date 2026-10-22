@@ -80,3 +80,7 @@ C16 final (2026-10-22 ~16:30 IST): 150/150 completed. C2 15/25/35, C3 6/22/22, C
 C17 final (2026-10-22 20:06 IST): 150/150 completed. C2 60/59, C5 ever/final 47/12 vs 45/7, new Laya C6 40/41 for foundation/release; refusals 169 → 1. Not adopted by endpoints; kept as a correctness fix. [Result](Laya_C17_Result_2026-10-22.md).
 
 C19 (launched 2026-10-22 20:31 IST, miniship): 150 planned = 75 seeds 79400–79474 × credit e37464d / started b372672. Results pending.
+
+C20 (launched 2026-10-22 22:46 IST, miniship): 150 planned = 75 seeds × started b372672 / integrated 8507710 (Starship review integration without loan retention). Results pending.
+
+C21 (launched 2026-10-22 22:46 IST, miniship): 150 planned = 75 seeds × integrated 8507710 / retain 657572e (review loan retention). Results pending.
