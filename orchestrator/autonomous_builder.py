@@ -6032,6 +6032,28 @@ def _bootstrap_loan_credited_stock(
     return credited_actual, credited_usable
 
 
+def _bootstrap_loan_spend_credits(
+    loan: MallBootstrapLoan, crafts: int,
+) -> MallBootstrapLoan:
+    """Charge final-recipe crafts against the prerequisite credits that funded them.
+
+    A credit stands in for prerequisite stock in flight to this loan. Once the
+    final recipe has crafted, that stock is consumed; left in place, the credit
+    funded every renewed batch (C16: pole loans kept "32 iron-stick" credit
+    after eight poles ate them, then starved on zero sticks for the rest of the run).
+    """
+    spec = LINE_RECIPES.get(loan.target_item, {})
+    per_craft = dict(zip(spec.get("ingredients", ()), spec.get("amounts", ())))
+    remaining = []
+    for recipe, count in loan.completed_step_targets:
+        if recipe in per_craft:
+            count -= math.ceil(float(per_craft[recipe]) * max(0, crafts))
+        if count > 0:
+            remaining.append((recipe, count))
+    # The requester still carries the old tag until the next plan replaces it.
+    return replace(loan, completed_step_targets=tuple(remaining), observed_group=loan.live_group)
+
+
 def _bootstrap_loan_persisted_step(
     loan: MallBootstrapLoan, actual: Mapping[str, int],
 ) -> MallBootstrapStep | None:
@@ -6446,6 +6468,28 @@ def _submit_bootstrap_loan(
             "construction may already have consumed them"
         )
         step = None
+    if (
+        step is not None
+        and step.recipe == loan.target_item == loan.step_recipe
+        and loan.completed_step_targets
+        and loan.step_baseline_finished is not None
+        and loan.step_required_crafts is not None
+        and products_finished is not None
+        and products_finished - loan.step_baseline_finished
+        >= loan.step_required_crafts
+    ):
+        # Renewing a finished final batch: its crafts spent the credit, so
+        # plan the next batch on the stock that is actually left.
+        spent = _bootstrap_loan_spend_credits(
+            loan, products_finished - loan.step_baseline_finished,
+        )
+        if spent.completed_step_targets != loan.completed_step_targets:
+            spent_actual, spent_usable = _bootstrap_loan_credited_stock(
+                spent, actual, usable,
+            )
+            loan, step = spent, next_bootstrap_step(
+                loan.target_item, planning_target, spent_usable, spent_actual,
+            )
     if step is not None:
         predecessor = _missing_chemical_ladder_predecessor(
             client, surface, force, step.recipe,

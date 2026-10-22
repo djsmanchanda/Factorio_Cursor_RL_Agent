@@ -2069,6 +2069,76 @@ def test_started_parent_step_does_not_regress_when_stock_is_consumed(
     assert submitted == []
 
 
+def test_a_renewed_final_batch_does_not_reuse_credit_its_crafts_consumed(
+    monkeypatch,
+) -> None:
+    monkeypatch.setitem(builder.LINE_RECIPES, "electric-mining-drill", {
+        "machine": "assembling-machine-2",
+        "ingredients": ["electronic-circuit", "iron-gear-wheel", "iron-plate"],
+        "amounts": [3, 5, 10], "product_amount": 1, "craft_time": 2.0,
+    })
+    monkeypatch.setitem(builder.LINE_RECIPES, "iron-gear-wheel", {
+        "machine": "assembling-machine-2", "ingredients": ["iron-plate"],
+        "amounts": [2], "product_amount": 1, "craft_time": 0.5,
+    })
+    monkeypatch.setattr(builder, "_BLOCKING_MALL_ITEMS", set())
+    # Five drills crafted on the 25 credited gears; construction took them all.
+    loan = builder.MallBootstrapLoan(
+        original_recipe="electronic-circuit", target_item="electric-mining-drill",
+        target_count=6, spare_target_count=8, side="right",
+        requester_position=(50.5, 32.5), current_recipe="electric-mining-drill",
+        step_recipe="electric-mining-drill", step_target_count=6,
+        step_baseline_finished=356, step_required_crafts=5,
+        step_minimum_crafts=5,
+        completed_step_targets=(("iron-gear-wheel", 25),),
+    )
+    stock = {
+        "electric-mining-drill": 0, "electronic-circuit": 30,
+        "iron-gear-wheel": 0, "iron-plate": 100,
+    }
+    submitted: list[dict] = []
+    monkeypatch.setattr(builder, "_bootstrap_loan_stock", lambda *_a: (stock, stock))
+    monkeypatch.setattr(builder, "_bootstrap_loan_products_finished", lambda *_a: 361)
+    monkeypatch.setattr(builder.live_base, "transferable_items", lambda *_a: {})
+    monkeypatch.setattr(builder, "_missing_chemical_ladder_predecessor", lambda *_a: None)
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _c, _b, _s, plan, _name, _e: submitted.append(plan),
+    )
+
+    builder._submit_bootstrap_loan(
+        SimpleNamespace(command=None), object(), "nauvis", "player", loan,
+        lambda _message: None,
+    )
+
+    actions = submitted[0]["phases"][0]["actions"]
+    machine = next(a for a in actions if a["entity"] == loan.machine_name)
+    requester = next(a for a in actions if a["entity"] == "requester-chest")
+    assert machine["recipe"] == "iron-gear-wheel"
+    assert "iron-gear-wheel=25" not in requester["logistic_sections"][0]["group"]
+    assert loan.group in requester["clear_logistic_groups"]
+
+
+def test_spending_credit_charges_only_the_final_recipes_ingredients(monkeypatch) -> None:
+    monkeypatch.setitem(builder.LINE_RECIPES, "medium-electric-pole", {
+        "machine": "assembling-machine-1",
+        "ingredients": ["copper-cable", "iron-stick", "steel-plate"],
+        "amounts": [2, 4, 2], "product_amount": 1, "craft_time": 0.5,
+    })
+    loan = builder.MallBootstrapLoan(
+        original_recipe="inserter", target_item="medium-electric-pole",
+        target_count=22, side="left", requester_position=(58.5, 33.5),
+        current_recipe="medium-electric-pole",
+        completed_step_targets=(("iron-gear-wheel", 10), ("iron-stick", 32)),
+    )
+
+    assert builder._bootstrap_loan_spend_credits(loan, 3).completed_step_targets == (
+        ("iron-gear-wheel", 10), ("iron-stick", 20))
+    spent = builder._bootstrap_loan_spend_credits(loan, 8)
+    assert spent.completed_step_targets == (("iron-gear-wheel", 10),)
+    assert spent.live_group == loan.live_group
+
+
 def test_rotating_loan_restores_and_defers_before_missing_chemical_rung(
     monkeypatch,
 ) -> None:
