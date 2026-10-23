@@ -46,6 +46,37 @@ def test_verified_iron_pioneer_output_breaks_steel_cycle(monkeypatch):
     ) is True
 
 
+@pytest.mark.parametrize("missing,health,owned,expected", [
+    ("passive-provider-chest", "working", True, True),
+    ("passive-provider-chest", "full_output", True, True),
+    ("transport-belt", "working", True, False),
+    ("passive-provider-chest", "no_power", True, False),
+    ("passive-provider-chest", "working", False, False),
+])
+def test_unsubmitted_replacement_cycle_uses_owned_bill_and_healthy_iron(
+        tmp_path, monkeypatch, missing, health, owned, expected):
+    ledger = MaterialReservationLedger(tmp_path / "script-output", episode_id="steel-cycle",
+                                       surface="nauvis", force="player")
+    ledger.declare("modular_iron-plate_refinery" if owned else "foreign_refinery",
+                   {missing: 1}, {}, priority=50)
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", ledger)
+    monkeypatch.setattr(builder, "LINE_RECIPES", {
+        "passive-provider-chest": {"ingredients": {"steel-chest": 1, "advanced-circuit": 1}},
+        "steel-chest": {"ingredients": {"steel-plate": 8}},
+        "transport-belt": {"ingredients": {"iron-plate": 1}},
+    })
+    # The live recipe closure is used, including modded intermediate recipes.
+    state = SimpleNamespace(surface="nauvis", force="player", pioneer_actions=[
+        {"entity": "passive-provider-chest", "position": {"x": 1, "y": 2}},
+        {"entity": "electric-furnace", "position": {"x": 3, "y": 4}},
+    ])
+    monkeypatch.setattr(builder.live_base, "machine_health",
+                        lambda *_: ({(3, 4): health}, {(3, 4): 1000}))
+    assert builder._iron_replacement_needs_steel(object(), "nauvis", "player", (1, 2), state) is expected
+    assert not builder._iron_replacement_needs_steel(object(), "nauvis", "other", (1, 2), state)
+    assert not builder._iron_replacement_needs_steel(object(), "nauvis", "player", (8, 9), state)
+
+
 def test_steel_seed_adopts_legacy_reservation_without_taking_power_bridge_stock(tmp_path):
     """The old split identity must collapse to one pole-owning transaction."""
     ledger = MaterialReservationLedger(
@@ -77,6 +108,52 @@ def test_steel_seed_adopts_legacy_reservation_without_taking_power_bridge_stock(
         "medium-electric-pole": 2,
     }
     assert ledger.required_stock("medium-electric-pole") == 4
+
+
+@pytest.mark.parametrize("submitted", [False, True])
+@pytest.mark.parametrize("funded", [False, True])
+def test_cycle_admission_keeps_seed_funding_and_retries(tmp_path, monkeypatch, submitted, funded):
+    from orchestrator.material_reservations import plan_material_bill, set_active_material_ledger
+    from orchestrator.parts_mall import MaterialShortage
+    ledger = MaterialReservationLedger(tmp_path / "script-output", episode_id="steel-funding",
+                                       surface="nauvis", force="player")
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", ledger)
+    set_active_material_ledger(ledger)
+    plan = steel_seed((0.5, 0.5), "south")
+    stock = plan_material_bill(plan)
+    ledger.declare("modular_iron-plate_refinery", {"passive-provider-chest": 2}, {}, priority=50)
+    ledger.declare("conversion_steel-plate", stock, stock, priority=100)
+    if not funded:
+        ledger.declare("foreign-power", {"medium-electric-pole": 1}, stock, priority=200)
+    ledger.path.with_suffix(".steel-seed.json").write_text(json.dumps(plan))
+    monkeypatch.setattr(builder, "_bootstrap_state", lambda *_: SimpleNamespace(
+        lifecycle_state="validating" if submitted else "provisioning", replacement_submitted=submitted,
+        surface="nauvis", force="player", pioneer_actions=[
+            {"entity": "passive-provider-chest", "position": {"x": 1, "y": 2}},
+            {"entity": "electric-furnace", "position": {"x": 3, "y": 4}},
+        ]))
+    monkeypatch.setattr(builder, "LINE_RECIPES", {
+        "passive-provider-chest": {"ingredients": ["steel-chest"]},
+        "steel-chest": {"ingredients": ["steel-plate"]},
+    })
+    monkeypatch.setattr(builder.live_base, "machine_health",
+                        lambda *_: ({(3, 4): "working"}, {(3, 4): 1000}))
+    monkeypatch.setattr(builder, "_verified_iron_pioneer_output", lambda *_: True)
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_: stock)
+    monkeypatch.setattr(builder.live_base, "transferable_items", lambda *_: stock)
+    class FundedBoundary(Exception):
+        pass
+    def submit(c, b, s, p, name, emit, **kwargs):
+        builder.assert_affordable(c, s, "player", p, name, emit, reserve_project=True,
+                                  reservation_priority=kwargs["reservation_priority"])
+        raise FundedBoundary
+    monkeypatch.setattr(builder, "_submit", submit)
+    for _ in range(2):
+        with pytest.raises(FundedBoundary if funded else MaterialShortage):
+            builder._build_compact_steel_seed(object(), object(), "nauvis", "player", (1, 2), (0, 0), lambda _: None)
+    assert ledger.projects["modular_iron-plate_refinery"].state != "completed"
+    if not funded:
+        assert ledger.projects["foreign-power"].reserved == {"medium-electric-pole": 1}
 
 
 def test_steel_seed_adoption_renames_legacy_project_when_fence_is_absent(tmp_path):
