@@ -112,3 +112,5 @@ C24 final (2026-10-23 23:28 IST): 120/120 completed. C2 42/41 (12:13), new Laya 
 C26/C27 (2026-10-23): cancelled before any start, 60 cancelled_queued each, superseded by C26b/C27b (2026-10-24 00:50 IST; same design and seeds, 7,200 s wall, ports 38500/38600). Results pending.
 
 C25 final (2026-10-24 04:52 IST): 120/120 completed. New Laya C6 31/29 (10:12), C2 46/44, C3 33/28; backing slower to strict C3 (14:28). Backing not adopted. [Result](Laya_C25_Result_2026-10-24.md). C26b/C27b admitting since. C28 (`laya-c28-2123-miniship-20261024`, 60 jobs: control_a/control_b/steel30/feedstock16 on 2d9b4b5, seeds 82400–82414) belongs to thread 94dcfaf2 (user-authorized Starship follow-up), queued behind C26b/C27b.
+
+C29 (queued 2026-10-24 06:40 IST, waits for C26b+C27b): 120 planned = 60 seeds 79680–79739 × control daefefc / release 5a5ed28 (stale paired-mall reservation release); ports 38800/31800 (C28 holds 38700); 7200 s wall. Primary: strict C2.
