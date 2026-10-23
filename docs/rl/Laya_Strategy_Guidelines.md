@@ -158,3 +158,14 @@ delivery, power and lab operations against its bottleneck; do not manufacture a
 sink just to advance a target. Persist the rung and evidence across coherent
 recovery. Completion means the requested research level actually finished;
 science-pack production alone establishes readiness.
+
+## Mall utilization experiments
+
+The [October 23 candidates](Laya_Mall_Utilization_2026-10-23.md) expose selected
+reconciliation of measured completed loan prerequisites and, independently,
+linear 3% per game minute wait acceleration. They change no quoted preference
+or numeric rule weight. Prefer evidence of useful bottleneck output and earlier
+goal completion when assessing them; a stocked producer being gated off is
+not itself a reason to manufacture more. Status samples describe observed
+idleness, not measured working-time utilization. Broader lender eligibility
+and parallel cell-kit planning remain separate work.

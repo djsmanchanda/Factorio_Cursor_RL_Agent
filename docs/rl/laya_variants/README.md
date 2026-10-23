@@ -17,6 +17,14 @@ What a variant may change:
 - **Policy:** `policy.epsilon` (exploration floor).
 - **Runtime:** `runtime.speed`; geometry uses `settings.stall_decisions`.
   Ops has a separate 18,000-tick stall constant; that setting does not tune it.
+- **Optional ops mechanics:** `settings.mall_loan_reconciliation` exposes a
+  measured ready-loan choice; `settings.decision_wait_schedule` shortens selected
+  waits on the elapsed game clock. Defaults are false/off. See the
+  [October 23 contracts and proposed contrasts](../Laya_Mall_Utilization_2026-10-23.md).
+  `ops-ready-loans` and the user-selected `ops-wait-linear3` isolate those factors;
+  `ops-wait-growth5` and `ops-wait-sqrt` retain earlier timing alternatives.
+  These files use the standard ops catalog. To compare against another admitted
+  baseline, overlay only their named settings onto that baseline's full variant.
 
 Windows:
 

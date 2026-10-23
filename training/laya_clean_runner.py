@@ -80,6 +80,16 @@ class Settings:
     research_progressive: bool = True
     research_sustain_ticks: int = 18000
     max_wall_seconds: float | None = None
+    mall_loan_reconciliation: bool = False
+    decision_wait_schedule: str = "off"
+    decision_wait_growth_per_minute: float = 0.03
+    decision_wait_sqrt_minutes: float = 20.0
+    decision_wait_max_multiplier: float = 4.0
+    decision_wait_min_ticks: int = 60
+
+    def __post_init__(self):
+        from training.laya_decision_pacing import validate
+        validate(self)
 WAIT_TICKS = (300, 1800)
 MAX_MENU = 20  # laya_state schema: options maxItems
 EXPLORATION_MODEL = {"model_id": "laya-exploration-v1", "model_hash": "sha256:" + "0" * 64}

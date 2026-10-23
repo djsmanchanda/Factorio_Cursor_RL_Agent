@@ -311,3 +311,21 @@ queue rescheduling. All planned jobs, cuts, attempts and unknown outcomes stay
 in the denominator; conditional continuations and fresh starts are reported
 separately. No repository change mutates active frozen campaigns or grants
 real-base authority.
+
+## Optional mall reconciliation and wait pacing
+
+The [October 23 candidate contract](Laya_Mall_Utilization_2026-10-23.md) adds
+opt-in `mall_loan_reconciliation` and `decision_wait_schedule` settings for
+deterministic actions. A selected reconciliation re-observes one completed
+prerequisite/pending release and uses the existing shared loan transaction;
+its receipt proves configuration change, not delivered output. It skips
+unselected post-operation mall upkeep.
+
+The user-selected timing candidate is linear: divide selected waits by
+`min(4, 1 + .03 * elapsed_game_minutes)`, rounded up with a 60-tick floor.
+Defaults remain off; ordinary operations have no added loop delay. Exact ops
+recovery retains the original game clock and settings. Decision journals retain
+nominal/effective waits and typed reconciliation receipts; current status and
+summary expose actual decision rates and an instantaneous assembler status
+sample with explicit known denominators. These are separate experimental factors,
+not adopted defaults or measured time utilization.

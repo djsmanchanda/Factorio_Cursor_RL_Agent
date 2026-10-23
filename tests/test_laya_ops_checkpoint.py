@@ -81,7 +81,8 @@ class Session:
     def close(self): pass
 
 
-def test_restored_next_distribution_rng_draw_and_total_decisions_match_uninterrupted(tmp_path, monkeypatch):
+@pytest.mark.parametrize("schedule", ["off", "linear", "exponential", "sqrt"])
+def test_restored_next_distribution_rng_draw_and_total_decisions_match_uninterrupted(tmp_path, monkeypatch, schedule):
     captures = []
     def capture(adapter, policy, session, destination, controller):
         stored = {**controller, "rng": policy.rng.getstate(), "session": {"episode_id": "logical"},
@@ -90,7 +91,7 @@ def test_restored_next_distribution_rng_draw_and_total_decisions_match_uninterru
         return {"tick": adapter.tick, "capture_seconds": 0}
     monkeypatch.setattr(checkpoint, "capture", capture)
     monkeypatch.setattr(checkpoint, "restore_session", lambda *a: None)
-    settings = Settings(max_game_ticks=540000, max_wall_seconds=6000)
+    settings = Settings(max_game_ticks=540000, max_wall_seconds=6000, decision_wait_schedule=schedule)
     full = run(World(), GuidedPolicy(3), session=Session(), journal=tmp_path / "full.jsonl", decisions=8,
                measure_ticks=600, seed=3, run_id="logical-run", settings=settings,
                checkpoint_dir=tmp_path / "bundles", checkpoint_ticks=300)

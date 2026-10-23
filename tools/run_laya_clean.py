@@ -159,6 +159,8 @@ def main(argv=None) -> int:
         p.error("coherent ops capture requires finite game and active-wall budgets")
     if args.research_target and (args.actions != "deterministic" or args.research_sustain_ticks < 300):
         p.error("research requires deterministic actions and a sustain window >=300 ticks")
+    if args.actions != "deterministic" and (settings.mall_loan_reconciliation or settings.decision_wait_schedule != "off"):
+        p.error("loan reconciliation and decision wait schedules require deterministic actions")
     speed = float(runtime.get("speed", args.speed))
     tag = {"variant_id": variant["variant_id"], "variant_hash": variant_hash(variant), "experiment": args.experiment}
     paths = runner_paths(root)

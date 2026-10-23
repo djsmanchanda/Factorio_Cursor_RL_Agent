@@ -1,0 +1,7 @@
+{
+  "version": "1.0.0",
+  "variant_id": "ops-wait-linear3",
+  "description": "User-selected timing candidate: shorten waits by min(4, 1 + 0.03 times elapsed game minutes); unchanged operation availability and policy.",
+  "catalog": "docs/rl/laya_ops_guidelines.json",
+  "settings": {"decision_wait_schedule": "linear", "decision_wait_growth_per_minute": 0.03}
+}

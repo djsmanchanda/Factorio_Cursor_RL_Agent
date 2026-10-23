@@ -56,7 +56,7 @@ def _journal_scalar(value: object) -> bool:
 
 def receipt(operation: str, params: dict, result: object) -> dict:
     """A normal return as a typed receipt: ``ok`` only when the operation's own postcondition holds."""
-    if operation in {"raise_stock_gate", "reserve_steel_seed", "research_select", "research_labs"}:
+    if operation in {"raise_stock_gate", "reserve_steel_seed", "research_select", "research_labs", "reconcile_mall_loan"}:
         return {"operation": operation, "params": params, **result}
     if operation in PRODUCING_OPERATIONS:
         code = "producing" if result is not None else "prerequisite_advanced"
@@ -116,11 +116,13 @@ class DeterministicSession:
 
     def _operations(self) -> dict[str, Callable[..., object]]:
         from orchestrator.research_operations import build_labs, select_research, scale_production
+        from orchestrator.mall_reconciliation import reconcile
         c, b, ref, emit = self.client, self.bridge, self.reference_point, self.emit
         return {
             "research_select": lambda **params: select_research(b, force=FORCE, **params),
             "research_labs": lambda **params: build_labs(self, **params),
             "scale_production": lambda **params: scale_production(self, **params),
+            "reconcile_mall_loan": lambda **params: reconcile(self, **params),
             # Direct starter: drills feeding a furnace, no belts or bots (iron, copper, stone).
             "starter": lambda recipe: ab._bootstrap_direct_plate_line(c, b, SURFACE, FORCE, recipe, ref, emit),
             # Opening mine + six-furnace refinery + haul belt, sited by the full transport bill.
@@ -205,7 +207,7 @@ class DeterministicSession:
                        "message": str(signal)[:500]}
         else:
             outcome = receipt(operation, params, result)
-        if operation != "raise_stock_gate":
+        if operation not in {"raise_stock_gate", "reconcile_mall_loan"}:
             self._maintain_mall()
         return outcome
 
@@ -238,7 +240,6 @@ class DeterministicSession:
 
     def economics(self) -> dict:
         """Read-only mall facts; failed components stay null, independently of other surveys."""
-        from orchestrator.mall_bootstrap import active_bootstrap_loans
         ledger = ab._MATERIAL_RESERVATION_LEDGER
         projects = None if ledger is None else {}
         if ledger is not None:
@@ -273,29 +274,8 @@ class DeterministicSession:
         except Exception:
             pass
         try:
-            loans = []
-            active = active_bootstrap_loans(self.client, SURFACE, FORCE)
-            try:
-                statuses, counters = ab.live_base.machine_health(self.client, SURFACE,
-                                                                 [loan.machine_position for loan in active])
-            except Exception:
-                statuses, counters = {}, {}
-            for loan in active:
-                counter = counters.get(loan.machine_position)
-                # machine_health encodes finished crafts * 1000 plus fractional progress.
-                crafts = (int(counter // 1000) - loan.step_baseline_finished
-                          if counter is not None and loan.step_baseline_finished is not None
-                          and loan.current_recipe == loan.step_recipe else None)
-                crafts = crafts if crafts is not None and crafts >= 0 else None
-                loans.append({"lender": loan.original_recipe, "making": loan.target_item, "target": loan.target_count,
-                              "owner": ab._material_project_id(loan.target_item),
-                              "requester_position": list(loan.requester_position), "side": loan.side,
-                              "current_recipe": loan.current_recipe, "production_target": loan.production_target,
-                              "step_recipe": loan.step_recipe, "step_target": loan.step_target_count,
-                              "step_required_crafts": loan.step_required_crafts,
-                              "step_completed_crafts": crafts,
-                              "machine_status": statuses.get(loan.machine_position),
-                              "completed_step_targets": dict(loan.completed_step_targets)})
+            from orchestrator.mall_reconciliation import observe_loans
+            loans = observe_loans(self.client, SURFACE, FORCE)
         except Exception:
             loans = None
         try:

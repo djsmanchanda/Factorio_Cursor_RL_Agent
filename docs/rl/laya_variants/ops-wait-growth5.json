@@ -1,0 +1,7 @@
+{
+  "version": "1.0.0",
+  "variant_id": "ops-wait-growth5",
+  "description": "Shorten selected waits by a multiplier growing 5 percent per elapsed game minute, capped at four; unchanged operation availability and policy.",
+  "catalog": "docs/rl/laya_ops_guidelines.json",
+  "settings": {"decision_wait_schedule": "exponential", "decision_wait_growth_per_minute": 0.05}
+}

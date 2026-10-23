@@ -466,7 +466,7 @@ def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, pha
     return text
 
 
-def with_economics(menu: dict, results: list[dict], economics: Mapping | None) -> dict:
+def with_economics(menu: dict, results: list[dict], economics: Mapping | None, *, reconcile_loans: bool = False) -> dict:
     """Attach what each option is known to cost and displace (audit finding 3).
 
     ``bill`` is the item bill the operation last reported short of; without one, ``bill_known`` is False, so a
@@ -481,6 +481,9 @@ def with_economics(menu: dict, results: list[dict], economics: Mapping | None) -
                 bills[_key(r)] = {i: int(n) for i, n in required.items()}
     from orchestrator.mall_control import raise_options
     additions = raise_options(economics)
+    if reconcile_loans:
+        from orchestrator.mall_reconciliation import options as reconciliation_options
+        additions += reconciliation_options(economics)
     menu["options"].extend(additions)
     for option in additions:
         need = next((n for n in menu["needs"] if n["need_id"] == option["need_id"]), None)
@@ -501,6 +504,9 @@ def with_economics(menu: dict, results: list[dict], economics: Mapping | None) -
         if option["family"] == "raise_stock_gate":
             option["bill"] = {}
             option["features"]["bill_known"] = True
+            continue
+        if option["family"] == "reconcile_mall_loan":
+            option["features"]["bill_known"] = True  # Existing-cell transaction, not a construction bill.
             continue
         params = option["params"]
         bill = bills.get((option["family"], params.get("recipe") or params.get("item")))
@@ -1013,15 +1019,20 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                 stock[name] = stock.get(name, 0) + int(count)
         economics = economics_observation(economics, facts.get("networks"))
         economics["capacity"] = mall_capacity(economics, results)
+        from orchestrator.operation_observation import assembler_utilization
+        economics["utilization"] = assembler_utilization(facts, economics)
         economics["starters"] = getattr(session, "starter_facts", None)
         menu = with_economics(compile_options(board, results, facts["tick"], facts.get("recipes"), stock,
                                               facts.get("machines"), getattr(session, "growable", ()),
                                               enabled_recipes=facts.get("enabled_recipes"),
                                               transactions=(economics or {}).get("transactions"),
                                               foundations=getattr(session, "foundation_facts", None)),
-                              results, economics)
+                              results, economics, reconcile_loans=settings.mall_loan_reconciliation)
         if objective:
             menu = add_research_options(menu, board, research, facts, objective)
+        from training.laya_decision_pacing import apply_waits, multiplier
+        elapsed_game_ticks = facts["tick"] - samples[0][0]
+        menu = apply_waits(menu, settings, elapsed_game_ticks)
         reserved: Counter = Counter()
         for project in ((economics or {}).get("projects") or {}).values():
             reserved.update(project["reserved"])
@@ -1046,6 +1057,12 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                  "guidelines": rules}
         if objective:
             state["observation_digest"]["research"] = {"observation": research, "objective": objective.brief()}
+        if settings.decision_wait_schedule != "off":
+            state["observation_digest"]["decision_pacing"] = {
+                "schedule": settings.decision_wait_schedule, "clock": "elapsed_game_ticks",
+                "elapsed_ticks": elapsed_game_ticks, "wait_multiplier": multiplier(settings, elapsed_game_ticks),
+                "maximum_multiplier": settings.decision_wait_max_multiplier,
+                "minimum_wait_ticks": settings.decision_wait_min_ticks}
         choice = policy.choose(state, menu)
         chosen = next(o for o in menu["options"] if o["option_id"] == choice["option_id"])
         emit(f"DECISION {index} phase={phase['phase_id']} tick={facts['tick']} need={chosen['need_id']} "
@@ -1066,6 +1083,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         if chosen["family"] == "wait":
             adapter.advance(chosen["wait_ticks"])
             result = {"ok": True, "operation": "wait", "params": {"ticks": chosen["wait_ticks"]}}
+            if "base_wait_ticks" in chosen:
+                result["params"]["base_ticks"] = chosen["base_wait_ticks"]
         else:
             try:
                 result = session.run(chosen["family"], **chosen["params"])
@@ -1089,7 +1108,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
              + (f" -- {result.get('message', '')[:200]}" if not result.get("ok") else ""))
         _training_record(records, run_id=run_id, index=index, tick=facts["tick"], phase=phase["phase_id"],
                          state=state, options=[{k: o.get(k) for k in ("option_id", "family", "need_id", "product",
-                                                                      "params", "features", "bill", "bill_owner")} for o in menu["options"]],
+                                                                      "params", "features", "bill", "bill_owner",
+                                                                      "wait_ticks", "base_wait_ticks")} for o in menu["options"]],
                          distribution=choice["distribution"], choice=choice,
                          outcome={**{k: result.get(k) for k in ("ok", "code", "classification", "state", "details",
                                                                  "message", "result")},
@@ -1097,15 +1117,29 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                       k: result[k] for k in ('submitted', 'submission_attempted', 'verified',
                                                             'observed', 'error') if k in result}}
                                      if chosen['family'] == 'raise_stock_gate' else {}),
+                                  **({'reconciliation_receipt': {
+                                      k: result[k] for k in ('attempted', 'configuration_changed', 'observed', 'error')
+                                      if k in result}} if chosen['family'] == 'reconcile_mall_loan' else {}),
                                   "ticks": after["tick"] - facts["tick"], "material_transactions": after_transactions})
+        summary["decisions"] = index + 1
+        wall_elapsed = elapsed_before + time.monotonic() - active_started
+        game_elapsed = after["tick"] - samples[0][0]
+        summary["decision_timing"] = {
+            "wall_seconds": wall_elapsed, "game_ticks": game_elapsed,
+            "decisions_per_wall_second": summary["decisions"] / wall_elapsed if wall_elapsed > 0 else None,
+            "decisions_per_game_second": summary["decisions"] * 60 / game_elapsed if game_elapsed > 0 else None,
+            "wait_schedule": settings.decision_wait_schedule,
+            "wait_multiplier": multiplier(settings, game_elapsed)}
+        summary["mall_utilization"] = economics["utilization"]
         _write_status(status_path, {"run_id": run_id, "index": index, "tick": facts["tick"], "phase": phase,
                                     "research_acceptance": objective.brief() if objective else None,
                                     "reached": reached, "laya_acceptance": summary["laya_acceptance"],
                                     "production_service": summary.get("production_service"), "board": compact, "brief": state["brief"], "choice": {**choice, "summary": chosen["summary"]},
                                     "menu": {o["option_id"]: o["summary"] for o in menu["options"]},
+                                    "mall_utilization": summary["mall_utilization"],
+                                    "decision_timing": summary["decision_timing"],
                                     "decisions": index + 1, "failures": summary["failures"],
                                     "authority": policy.authority})
-        summary["decisions"] = index + 1
         if summary["decisions"] % 10 == 0:
             check_acceptance(f"decision {index}")
         gap = _goal_gap(compile_status(after, phase["targets"], measurement))
