@@ -34,7 +34,7 @@ from training.laya_clean_runner import (ROOT, Settings, _append, _goal_gap, _sta
 from training.laya_factory_status import STATUS_BUCKETS, compact_status, compile_status
 from training.laya_mall_slots import obtainable
 from training.laya_mission import PHASES, current_phase
-from training.laya_phase_acceptance import LayaC6Acceptance, ops_phase_reached
+from training.laya_phase_acceptance import ITEM as C6_ITEM, LayaC6Acceptance, ops_phase_reached
 
 PLATES = {"iron-plate": "iron-ore", "copper-plate": "copper-ore", "stone-brick": "stone"}
 # The tooling is already making it (a mall batch or loan in progress, a borrow queued): wait, and it is progress.
@@ -594,11 +594,15 @@ def saturated_feedstock(machines: list[Mapping], recipes: Mapping, stock: Mappin
 def compile_options(board: Mapping, results: list[dict], tick: int | None = None, recipes: Mapping | None = None,
                     stock: Mapping[str, int] | None = None, machines: list[Mapping] | None = None,
                     growable: tuple[str, ...] = (), enabled_recipes: Mapping | None = None,
-                    transactions: Mapping | None = None, foundations: Mapping | None = None) -> dict:
+                    transactions: Mapping | None = None, foundations: Mapping | None = None,
+                    open_receipts: tuple[str, ...] = ()) -> dict:
     """Operations worth offering now, each tagged with the need it serves and the facts rules weigh.
 
     ``foundations`` (plate -> observed ready) advances a plate past "starter" when the world shows its foundation
     delivering, even if the foundation operation itself last returned a wait.
+
+    ``open_receipts`` names items whose explicit-choice receipt is still open in the current phase (C6: choose advanced
+    circuits, then see new output); each stays chooseable for one more batch even when stock already meets its target.
     """
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
     goal = {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
@@ -742,6 +746,14 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                 and plates_in(item, recipes or {}) <= started):
             demand = demands.setdefault(item, {"target": 1, "missing": 0, "parents": []})
             demand["capability"] = True
+    # C18 credit: 6 runs had their circuit receipt superseded by another mall choice after the batch filled its gate,
+    # then the menu went wait-only because stock met the target, so C6 could never be earned.
+    for item in open_receipts:
+        if (item not in PLATES and plates_in(item, recipes or {}) <= started
+                and ((recipes or {}) if enabled_recipes is None else enabled_recipes).get(item)):
+            have = int((stock or {}).get(item, 0))
+            demand = demands.setdefault(item, {"target": have + 1, "missing": 1, "capability": False, "parents": []})
+            demand.update(target=max(demand["target"], have + 1), missing=max(demand["missing"], 1), receipt_open=True)
     for item, demand in demands.items():
         # The tooling's stock_target is a network level (the mall's stock gate), not a delta: asking for the
         # bare shortage gated a drill cell at 4 while the network held 6 and the starter needed 8.
@@ -760,6 +772,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                          "waiting": in_progress(codes.get(("produce", item))),
                          "unchanged_failure": ("produce", item) in stuck, "batch_active": batch_active,
                          "goal_need": item in goal or bool(sources.get(item, set()) & goal),
+                         **({"receipt_open": True} if demand.get("receipt_open") else {}),
                          **({"packets_pending": packets_pending[item]} if item in packets_pending else {})}})
     # A feedstock producer at its limit (live 2026-10-15: one gear AM1 behind every belt, inserter and drill).
     for item, fact in saturated_feedstock(machines or [], recipes or {}, stock or {}, growable).items():
@@ -921,7 +934,9 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                               facts.get("machines"), getattr(session, "growable", ()),
                                               enabled_recipes=facts.get("enabled_recipes"),
                                               transactions=(economics or {}).get("transactions"),
-                                              foundations=getattr(session, "foundation_facts", None)),
+                                              foundations=getattr(session, "foundation_facts", None),
+                                              open_receipts=(C6_ITEM,) if phase["phase_id"] == "C6"
+                                              and c6.snapshot().get("status") != "passed" else ()),
                               results, economics)
         reserved: Counter = Counter()
         for project in ((economics or {}).get("projects") or {}).values():

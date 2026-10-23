@@ -666,3 +666,18 @@ def test_an_observed_ready_foundation_offers_its_starter_retirement_after_a_wait
     # Unknown or not-ready observations never invent a foundation.
     assert not any(i.endswith(".copper-plate") for i in ids(foundations={"copper-plate": None}))
     assert not any(i.endswith(".copper-plate") for i in ids(foundations={"copper-plate": False}))
+
+
+def test_an_open_c6_receipt_keeps_one_more_circuit_batch_on_the_menu():
+    # C18 credit-s79410: the circuit batch filled its gate (stock 1/1), another mall choice superseded the receipt,
+    # and the menu went wait-only, so the explicit choice-then-output receipt could never be earned.
+    board = {"needs": [{"item": "advanced-circuit", "condition": "satisfied", "goal_required_per_s": 0.1}]}
+    results = [{"ok": True, "operation": "starter", "params": {"recipe": p}} for p in ("iron-plate", "copper-plate")]
+    results.append({"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}})
+    recipes = {"advanced-circuit": {"ingredients": [{"name": "iron-plate"}, {"name": "copper-plate"}]}}
+    produce = lambda **kw: [o for o in compile_options(board, results, recipes=recipes, stock={"advanced-circuit": 1},
+                                                       **kw)["options"]
+                            if o["option_id"] == "op.produce.advanced-circuit"]
+    assert not produce()
+    (option,) = produce(open_receipts=("advanced-circuit",))
+    assert option["params"]["stock_target"] == 2 and option["features"]["receipt_open"] is True
