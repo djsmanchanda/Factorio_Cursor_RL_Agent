@@ -558,3 +558,7 @@ Readback confirms the observer's explicit-user-directed host config change:temp_
 ## 2026-10-23 22:34 IST — superseding user-approved 12-server host controls
 
 Verified observer's second explicit user instruction:thermal thresholds200/210 effectively disable scheduler thermal gating; manual target12 has no expiry. Retained latest controls and preserved prior96/98 acknowledgement in remote history; backup config.pre-nothermal-20261023.json. Observed10 active worlds:4 capital+6 freshness (3 per arm),6 freshness queued, zero completed pairs. Freshness's frozen concurrency6 remains authoritative; no active manifest/source edit. All72 cuts, planned denominators and deadlines unchanged. Lifecycle:existing scheduler already applying controls, no additional target command or restart; no comparison result/adoption claimed.
+
+## 2026-10-23 22:51 IST — freshness repair has live mechanism exposure
+
+Matched repair cohort6 running/6 queued,3 per arm,0 complete pairs. Post-initial availability within first500 decisions/job:repair391/391 known vs control0/358; objectives391 vs0; option offers/selections535/15 vs6/0 under existing check-in semantics. Source/freeze checks pass. These are repeated samples, not trial denominators; no demand-rung advance, earned research, paired outcome or adoption. Remote immutable observation snapshot and state now record live mechanism evidence. Lifecycle:none; current host controls, cuts, hard end and55-minute observer continue.

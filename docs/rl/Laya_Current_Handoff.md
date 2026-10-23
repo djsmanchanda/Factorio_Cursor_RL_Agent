@@ -496,3 +496,18 @@ host target12 does not increase that cohort's own ceiling. Keep the active
 freeze intact. All72 cuts, original plans, seed order, budgets, hard cutoff and
 55-minute cadence remain. Report fresh-known telemetry after the initial300
 ticks and completed pairs separately from successful admission.
+
+### First live freshness mechanism exposure (2026-10-23 22:51 IST)
+
+Readback confirms6 freshness running/6 queued,3 per arm,0 complete pairs.
+Bounded first500 decisions/job, availability after initial300 ticks:repair391/391
+available/known and391 objective-available; control0/358 and0 objective-available.
+Research options offered/selected535/15 repair vs6/0 control, using existing
+check-in option-count semantics. Control post-initial failures cite stale/future
+reports; all391 eligible repair samples are available. No demand-rung advance,
+earned research or completed comparison yet. These are repeated observations
+from3 worlds/arm, not independent trial counts. Frozen-source checks pass.
+Remote observations/freshness-first-exposure-20261023T2251IST.json preserves
+the snapshot and hash; state.source_fix.live_validation now records mechanism
+exposure with paired outcomes pending. No lifecycle/control change. Keep current
+user-approved host settings, existing cuts, deadline and55-minute monitoring.

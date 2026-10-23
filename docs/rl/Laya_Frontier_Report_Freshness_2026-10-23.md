@@ -86,3 +86,24 @@ Replacement schedules are enabled in Miniship thread
 then every thirty minutes; terminal accounting October 24 03:53 IST.
 Hard testing cutoff remains 03:51:47 IST. Exact IDs and launch attempts are in
 remote operational state. No running arm was restarted or patched.
+
+## First live mechanism exposure, 2026-10-23 22:51 IST
+
+The existing matched repair comparison has six running jobs (three per arm),
+six queued and zero completed pairs. Within the first500 decisions per job,
+excluding the initial300 ticks for availability, `fresh-ticks` has391 available
+of391 known research observations and391 available objectives; control has0
+available of358 known and0 available objectives. Repair-arm research options
+were offered535 times and selected15, versus6 offers/0 selections in control
+under the check-in's existing option-count semantics. Control's post-initial
+observations cite stale/future reports; all391 eligible repair observations
+are available. Research demand rungs remain zero.
+
+This is observed live evidence that the freshness mechanism is exercised and
+usable research actions are selected. No earned research, completed-pair result,
+factory speed gain or adoption is established. The decisions are repeated samples
+from three running worlds per arm, not391/358 independent trials. All12 planned
+jobs and any later cuts/caps remain in terminal accounting. No new lifecycle
+action was taken for this observation; existing55-minute monitoring and hard
+deadline continue. The immutable remote snapshot is
+`data/laya-orchestration/frontier-starship-20261023/observations/freshness-first-exposure-20261023T2251IST.json`.
