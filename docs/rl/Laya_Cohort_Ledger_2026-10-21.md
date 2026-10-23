@@ -98,3 +98,7 @@ C23 (launched 2026-10-23 05:56 IST, miniship): 150 planned = 75 seeds × integra
 C19 final (stopped 2026-10-23 06:44 IST): 70 completed + 48 cut + 32 stopped. 35 pairs: C2 3:9, new Laya C6 5:10; b372672 reverted. [Result](Laya_C19_Result_2026-10-23.md). C20 (33 completed + 117 stopped) and C21 (70 + 80) superseded by C22.
 
 C22/C23 trimmed to 120 planned each (2026-10-23 06:30 IST, user; before any job started): C22 seeds 79400–79439 × 3, C23 seeds 79400–79459 × 2.
+
+C23 final (2026-10-23 15:40 IST): 120/120 completed + 30 cut. New Laya C6 29/37 (15:7), legacy C6 9/14 for integrated/receipt. Receipt not adopted now; baseline d8a4825. [Result](Laya_C23_Result_2026-10-23.md).
+
+C24 (prepared by thread cb16c604, waiting): 120 planned = 60 seeds 79500–79559 × integrated d8a4825 / steel 5fb6371; ports 38100/31100. C25 (waiting behind C24): 120 planned = 60 seeds 79560–79619 × integrated / isolated backing patch; ports 38200/31200. Both gated on C22/C23 closure and the baseline decision.
