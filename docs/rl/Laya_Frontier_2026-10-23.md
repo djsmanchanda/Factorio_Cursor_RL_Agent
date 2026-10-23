@@ -128,3 +128,14 @@ in place. Remote decision evidence is
 `data/laya-orchestration/frontier-starship-20261023/operator-decisions/frontier-thermal-freshness-priority-20261023-v1.json`;
 it binds before/after status, four accepted requests, cut receipts and unchanged
 manifest/freeze/plan hashes.
+
+At 22:30 IST the owner acknowledged the observer's separate host-only change,
+made on explicit user instruction around 22:24: `temp_limit_c` 93 -> 96 and
+`temp_hard_c` 95 -> 98. Readback against `config.pre-warm-20261023.json` verifies
+that only those two settings differ. Retain the user-approved values; target
+remains four with no manual override. This is distinct from the queue cuts.
+The source helper `_package_temp_c` falls back to the hottest sysfs thermal
+zone when AMD Tctl is absent. On Intel Starship its `temp_c` is not necessarily
+the `coretemp` package reading; firmware TCPU and package sensors have different
+reported trips. Preserve sensor provenance when interpreting peaks. No capacity
+gain or sustained package-temperature conclusion follows from these spot samples.

@@ -466,3 +466,16 @@ in denominators. Last admission02:06:47, cohort end03:46:47, hard end03:51:47
 and terminal accounting03:53 Oct24 are unchanged. Shared55-minute observer
 continues read-only. No code, mod, save, installed service or hardware setting
 changed; no deployment or restart is required. No candidate adoption.
+
+### Separate user-approved thermal thresholds (2026-10-23 22:30 IST)
+
+Observer disclosed a host config change made on explicit user instruction
+around22:24:soft limit93->96 C, hard95->98 C. Readback against
+`window/host/config.pre-warm-20261023.json` verifies exactly those two differences.
+Owner retained them; no restore, slot override or restart. Target4/active4 and
+freshness12 queued/ready at verification. Remote `state.json.host_configuration_ack`
+records authorization, diff, backup and sensor caveat. Scheduler `_package_temp_c`
+uses hottest sysfs thermal zone without AMD Tctl, so Intel `temp_c` is not always
+the `coretemp` package sensor; firmware TCPU has a separate reported trip.
+Label telemetry accordingly. No observed capacity gain established. Queue cuts,
+paired order, deadlines and observer cadence remain unchanged.
