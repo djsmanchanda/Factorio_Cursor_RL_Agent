@@ -334,3 +334,4 @@ The loan-credit fix `e37464d` is adopted into the cohort base (C5 20:5, C2 13:4)
 ## b372672 reverted; C19–C21 stopped; C22 launched (2026-10-23 06:00 IST)
 
 The started-foundation menu change is reverted on the integrated branch (`d8a4825`) after C19 showed it harmful. C19, C20 and C21 are stopped cleanly. C22 tests the integration (`d8a4825`) and loan retention (`3d221aa`) on the adopted credit base. Next ports 38000+.
+C23 (06:20 IST) tests the C6 receipt menu fix `3b7d702` against integrated `d8a4825`; next ports 38100+.

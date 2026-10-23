@@ -92,3 +92,5 @@ C18 final (2026-10-23 01:39 IST): 120/120 completed + 30 cut. C2 42/51, C5 ever/
 C19/C20/C21 stopped (2026-10-23 05:52 IST, user, after reverting b372672): running worlds finish; not-started jobs listed in each root's cut-jobs.json. C19's completed pairs are its result.
 
 C22 (launched 2026-10-23 06:00 IST, miniship): 150 planned = 50 seeds 79400–79449 × credit e37464d / integrated d8a4825 / retain 3d221aa. Results pending.
+
+C23 (launched 2026-10-23 06:20 IST, miniship): 150 planned = 75 seeds × integrated d8a4825 / receipt 3b7d702. Results pending.
