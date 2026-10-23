@@ -515,3 +515,7 @@ The compact steel seed can use a healthy owned iron starter before replacement s
 ## 2026-10-23 14:29 IST — durable cohort controls
 
 New frozen batch supervisors support idempotent run/drain/queued cuts, immutable original plans and append-only attempt records, predecessor admission without reserved slots, a single-owner lock, live reports and cleanup-failure reservation retention. Interrupted queue retries preserve full attempt evidence and refuse live owned processes. Evidence: 38 batch/scheduler checks including a real child-process boundary passed; fast gate 1,241 passed/one skipped. Runtime performance/adoption is unmeasured. Lifecycle: freeze new supervisors; no installed scheduler or active C22/C23 changes.
+
+## 2026-10-23 14:38 IST — unfinished-loan credit backing
+
+Starved unfinished final batches now replan unsupported direct ingredients against current allocatable supply, owned cell WIP and assigned cargo. Fed/unknown cells keep their receipts; reduced credit persists through the existing tag/transaction path. Evidence: 283 stock/loan checks passed, then all90 material-reservation checks including full partial-batch reconfiguration passed; fast gate1,248 passed/one skipped. No live/cohort benefit claimed. Lifecycle: new frozen disposable Python runners; no installed mod change.

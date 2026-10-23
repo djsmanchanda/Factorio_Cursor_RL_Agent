@@ -232,3 +232,15 @@ prerequisite. An insufficient whole remaining bill alone does not trigger a
 restore while the cell can run. Exhausted prerequisites can still hand off using
 the existing executor; historical credits remain governed by the C18 accounting
 fix. This needs fresh frozen runners for live verification.
+
+## Current supply backs unfinished-loan credit (2026-10-23)
+
+On observed final-step ingredient starvation, an unfinished finite loan clips
+unsupported direct-input credit and replans its missing prerequisite. Backing is
+allocatable transferable stock plus its own requester, machine, feeding hands
+and assigned incoming deliveries. Other consumers' WIP is excluded. A fed next
+craft or assigned cargo preserves the batch; missing telemetry leaves credit
+unknown and unchanged. Reduced credit is persisted in the existing loan tag by
+the normal configuration transaction. Finished-batch credit spending remains a
+separate rule. The incoming probe uses the engine's
+[logistic-point delivery API](https://lua-api.factorio.com/2.1.23/classes/LuaLogisticPoint.html#targeted_items_deliver).

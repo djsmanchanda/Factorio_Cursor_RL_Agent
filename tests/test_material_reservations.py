@@ -2948,3 +2948,75 @@ def test_retry_reserves_only_uninstalled_material_and_releases_a_paid_bill(monke
     stock.clear()  # Bots consumed it; replay cannot demand a second copy.
     construction_coverage.assert_affordable(client, "nauvis", "player", plan, "packet", lambda _m: None, True)
     assert ledger.projects["packet"].state == "completed" and not ledger.stock_targets()
+
+
+@pytest.mark.parametrize("owned,incoming,foreign,expected", [(0, 0, 0, True), (4, 0, 0, False),
+                                                            (0, 4, 0, False), (0, 0, 4, True)])
+def test_starved_unfinished_loan_credit_requires_its_own_current_backing(
+        tmp_path, monkeypatch, owned, incoming, foreign, expected):
+    loan = builder.MallBootstrapLoan(
+        original_recipe="inserter", target_item="big-electric-pole", target_count=2,
+        side="left", requester_position=(58.5, 33.5), current_recipe="big-electric-pole",
+        step_recipe="big-electric-pole", step_baseline_finished=100, step_required_crafts=2,
+        completed_step_targets=(("iron-stick", 16),))
+    monkeypatch.setitem(builder.LINE_RECIPES, "big-electric-pole", {
+        "ingredients": ["iron-stick", "steel-plate"], "amounts": [4, 5]})
+    ledger = MaterialReservationLedger(tmp_path / "script-output", episode_id="credit-backing",
+                                       surface="nauvis", force="player")
+    ledger.declare("foreign-consumer", {"iron-stick": foreign or 1}, {"iron-stick": foreign})
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", ledger)
+    monkeypatch.setattr(builder.live_base, "entity_status_name", lambda *_: "item_ingredient_shortage")
+    monkeypatch.setattr(builder.live_base, "loan_cell_item_count", lambda *_, **kw: owned + incoming)
+    revised, clipped = builder._loan_credit_backing(SimpleNamespace(command=lambda *_: ""), "nauvis", "player",
+                                                    loan, 101, {"iron-stick": foreign})
+    assert bool(clipped) is expected
+    assert revised.live_group == loan.live_group
+    assert dict(revised.completed_step_targets).get("iron-stick", 0) == (0 if expected else 16)
+    # Reconciliation is idempotent; a fresh parse must not spend twice.
+    again, _ = builder._loan_credit_backing(SimpleNamespace(command=lambda *_: ""), "nauvis", "player",
+                                           revised, 101, {"iron-stick": foreign})
+    assert again.completed_step_targets == revised.completed_step_targets
+
+
+def test_unknown_or_advancing_loan_does_not_lose_credit(monkeypatch):
+    loan = builder.MallBootstrapLoan(
+        original_recipe="inserter", target_item="big-electric-pole", target_count=2,
+        side="left", requester_position=(58.5, 33.5), current_recipe="big-electric-pole",
+        step_recipe="big-electric-pole", step_baseline_finished=100, step_required_crafts=2,
+        completed_step_targets=(("iron-stick", 16),))
+    monkeypatch.setitem(builder.LINE_RECIPES, "big-electric-pole", {"ingredients": ["iron-stick"], "amounts": [4]})
+    client = SimpleNamespace(command=lambda *_: "")
+    for status in ("working", "item_ingredient_shortage"):
+        monkeypatch.setattr(builder.live_base, "entity_status_name", lambda *_: status)
+        monkeypatch.setattr(builder.live_base, "loan_cell_item_count", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("unknown")))
+        assert builder._loan_credit_backing(client, "nauvis", "player", loan, 101, {}) == (loan, {})
+
+
+def test_unfinished_starved_batch_replans_prerequisite_and_persists_reduced_credit(monkeypatch):
+    loan = builder.MallBootstrapLoan(
+        original_recipe="inserter", target_item="big-electric-pole", target_count=2,
+        side="left", requester_position=(58.5, 33.5), current_recipe="big-electric-pole",
+        step_recipe="big-electric-pole", step_target_count=2, step_baseline_finished=100,
+        step_required_crafts=2, step_minimum_crafts=2, completed_step_targets=(("iron-stick", 16),))
+    monkeypatch.setitem(builder.LINE_RECIPES, "big-electric-pole", {
+        "machine": "assembling-machine-1", "ingredients": ["iron-stick", "steel-plate"],
+        "amounts": [4, 5], "product_amount": 1, "craft_time": 0.5})
+    monkeypatch.setitem(builder.LINE_RECIPES, "iron-stick", {
+        "machine": "assembling-machine-1", "ingredients": ["iron-plate"],
+        "amounts": [1], "product_amount": 2, "craft_time": 0.5})
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", None)
+    stock = {"big-electric-pole": 1, "iron-stick": 100, "steel-plate": 10, "iron-plate": 100}
+    monkeypatch.setattr(builder, "_bootstrap_loan_stock", lambda *_: (stock, stock))
+    monkeypatch.setattr(builder.live_base, "transferable_items", lambda *_: {"big-electric-pole": 1, "steel-plate": 10, "iron-plate": 100})
+    monkeypatch.setattr(builder.live_base, "entity_status_name", lambda *_: "item_ingredient_shortage")
+    monkeypatch.setattr(builder.live_base, "loan_cell_item_count", lambda *_, **kw: 0)
+    monkeypatch.setattr(builder, "_bootstrap_loan_products_finished", lambda *_: 101)
+    monkeypatch.setattr(builder, "_missing_chemical_ladder_predecessor", lambda *_: None)
+    submitted = []
+    monkeypatch.setattr(builder, "_submit", lambda c,b,s,plan,*_: submitted.append(plan))
+    builder._submit_bootstrap_loan(SimpleNamespace(command=lambda *_: ""), object(), "nauvis", "player", loan, lambda _: None)
+    actions = submitted[0]["phases"][0]["actions"]
+    assert next(a for a in actions if a["entity"] == loan.machine_name)["recipe"] == "iron-stick"
+    requester = next(a for a in actions if a["entity"] == "requester-chest")
+    assert "iron-stick=16" not in requester["logistic_sections"][0]["group"]
+    assert loan.group in requester["clear_logistic_groups"]
