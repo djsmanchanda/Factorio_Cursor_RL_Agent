@@ -1,0 +1,11 @@
+{
+  "version": "1.0.0",
+  "variant_id": "ops-steel-prior-30",
+  "description": "Retest the Starship steel30 signal on the admitted Miniship library: raise only the existing steel-family prior from 5 to 30.",
+  "catalog": "docs/rl/laya_ops_guidelines.json",
+  "catalog_patch": {
+    "mission.ops-steel": {
+      "prefer": [{"when": {"family": "steel"}, "weight": 30.0}]
+    }
+  }
+}

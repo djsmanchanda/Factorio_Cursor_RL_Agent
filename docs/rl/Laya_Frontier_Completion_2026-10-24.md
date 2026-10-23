@@ -211,3 +211,20 @@ Both existing timer prompts record the user's intent. After automatic suspend,
 SSH unavailability is expected and does not establish failed jobs or authorize
 a restart. Final reports remain on Starship; retrieve them when it is reachable.
 No Opus notification was sent.
+
+## Completion and log transfer (2026-10-24 04:54 IST)
+
+All72 new jobs completed; the joined capital60/bottleneck60 accounting and all219
+unique Starship results are now local. The final selected logs/evidence copy
+(5,246 files/3,354,952,365 bytes) was hash-verified and acknowledged at04:41:36
+IST. Local completion receipts show cleanup complete, no owned world processes
+and inactive host/capital/bottleneck units. The additional copy hold released
+for the approved automatic suspend; actual kernel suspend remains unobserved.
+
+[The transfer and C28 decision](Laya_Starship_Transfer_Decision_2026-10-24.md)
+records complete own-control outcomes, intervention exposure and the calibrated
+Miniship follow-up. It supersedes earlier pending-results/timer instructions:
+the same two owned schedules now monitor C28 locally,55-minute checks plus
+October27 18:07 IST terminal accounting. Do not SSH/wake Starship or disable
+these schedules merely because Starship finished. No Opus notification or
+shared-observer change.

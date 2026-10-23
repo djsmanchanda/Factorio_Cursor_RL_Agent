@@ -673,3 +673,34 @@ details state.sleep_guard/state.automatic_sleep. Actual sleep is pending jobs.
 Both existing check-in prompts now expect possible intentional SSH loss after
 completion; do not restart/wake worlds or infer failure. Retrieve final reports
 when host reachable. No Opus notification. See completion record for full setup.
+
+## Starship copied; calibrated Miniship C28 queued (2026-10-24 04:54 IST)
+
+[Transfer and follow-up decision](Laya_Starship_Transfer_Decision_2026-10-24.md)
+supersedes the preceding pending-copy/jobs/timer lifecycle snapshots. All219
+unique Starship trials completed, including72 omitted jobs in a separate window.
+Local import `data/laya-orchestration/starship-frontier-import-20261024` holds
+5,246 selected files/3,354,952,365 bytes, every hash verified and acknowledged
+at04:41:36 IST. Owned remote units/worlds were cleaned; copy hold released for
+approved autosleep. Actual kernel suspend unobserved; don't wake/check Starship.
+
+Steel30 is primary follow-up:8/12 vs6/12 C6-v2, discordance4:2 and exposure11/12.
+Feedstock16 is exploratory:8/12 vs2/12, discordance7:1, but only3/12 exposed
+and five extra wins unexposed. Bugs/service guards prevent adoption. C28 has
+15 fresh seeds82400–82414 ×control_a/control_b/steel30/feedstock16 =60 jobs;
+identical A/A controls calibrate variation, candidates compare to BOTH controls.
+Frozen incumbent2d9b4b5, research/reconciliation/pacing off; no experimental
+Starship code or C24/C25 winners transplanted. Wall7200/ticks540000, unchanged
+shared gate, dependency order C24→C25→C26b→C27b preserved. At04:53 all60 queued,
+unit `laya-c28-2123-miniship-20261024.service` active, waiting C26b, freeze clean.
+Deadline October27 18:00 IST, latest full admission16:00, cleanup cap18:05.
+
+Own two existing timers now monitor C28,55-minute next05:10:55 IST and final
+October27 18:07 IST, bound to this thread. Exact IDs/readbacks and local
+`checkin.py`: `data/laya-orchestration/starship-frontier-followup-20261024`.
+Finalize all60 statuses, both-control/A/A/exposure/strict/service/bug evidence,
+verify scoped cleanup, then disable only these timers. No automatic adoption,
+new cohort, Opus notification or shared-observer change. Validation: native
+variant/catalog/Batch preflight,16/16 exposed Miniship replay distributions
+changed, fast gate1322 passed/1 skipped. Lifecycle: queued C28 auto-start only;
+no mod/Factorio/scheduler restart. Keep active batch/freeze/code unchanged.

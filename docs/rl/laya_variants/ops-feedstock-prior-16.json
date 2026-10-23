@@ -1,0 +1,11 @@
+{
+  "version": "1.0.0",
+  "variant_id": "ops-feedstock-prior-16",
+  "description": "Retest the exploratory Starship feedstock16 signal with explicit exposure and duplicate-control checks: raise only the measured grow-family prior from 4 to 16.",
+  "catalog": "docs/rl/laya_ops_guidelines.json",
+  "catalog_patch": {
+    "mission.ops-grow-feedstock": {
+      "prefer": [{"when": {"family": "grow"}, "weight": 16.0}]
+    }
+  }
+}
