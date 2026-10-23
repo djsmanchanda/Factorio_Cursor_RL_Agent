@@ -94,3 +94,7 @@ C19/C20/C21 stopped (2026-10-23 05:52 IST, user, after reverting b372672): runni
 C22 (launched 2026-10-23 05:53 IST, miniship): 150 planned = 50 seeds 79400–79449 × credit e37464d / integrated d8a4825 / retain 3d221aa. Results pending.
 
 C23 (launched 2026-10-23 05:56 IST, miniship): 150 planned = 75 seeds × integrated d8a4825 / receipt 3b7d702. Results pending.
+
+C19 final (stopped 2026-10-23 06:44 IST): 70 completed + 48 cut + 32 stopped. 35 pairs: C2 3:9, new Laya C6 5:10; b372672 reverted. [Result](Laya_C19_Result_2026-10-23.md). C20 (33 completed + 117 stopped) and C21 (70 + 80) superseded by C22.
+
+C22/C23 trimmed to 120 planned each (2026-10-23 06:30 IST, user; before any job started): C22 seeds 79400–79439 × 3, C23 seeds 79400–79459 × 2.
