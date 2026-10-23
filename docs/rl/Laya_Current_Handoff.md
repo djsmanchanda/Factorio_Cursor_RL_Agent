@@ -445,3 +445,24 @@ is disabled. Source/lifecycle ownership and03:53 terminal accounting stay in
 `94dcfaf2-9531-4234-bde5-b6ae616de9b1`. Hard cutoff03:51:47 unchanged. Do not
 disable the shared55-minute Miniship observer at Starship cleanup; its ID is
 stored separately in state.observation, outside continuation state.schedules.
+
+## Starship capacity cut and freshness priority (2026-10-23 22:27 IST)
+
+Thermal derating reached four slots (96.05 C sample), so the owner used the
+existing idempotent admission controls to drain capital/bottleneck and cancel
+only queued jobs. Verified capital:44 completed/4 running/12 cancelled_queued,
+original60 planned. Bottleneck:60 cancelled_queued/0 started, all60 retained.
+Four already-running capital attempts continue. Existing12-job freshness
+comparison now reports admission reason `ready`,12 queued/zero reserved and
+will use released slots in its frozen paired order. Do not restart supervisors,
+edit frozen dependencies, force a higher slot target or claim12 starts assured.
+
+Remote `state.json.capacity_reprioritization` links the exact operator decision
+and before/after evidence. All four requests exited zero and their capital/
+bottleneck cut events are recorded. Check-in exited zero:freeze_errors=[],
+source_unchanged=true, code_diff_exit=0; manifest/freeze/planned-job hashes match.
+Record all72 cuts in terminal accounting and keep unknown/unstarted outcomes
+in denominators. Last admission02:06:47, cohort end03:46:47, hard end03:51:47
+and terminal accounting03:53 Oct24 are unchanged. Shared55-minute observer
+continues read-only. No code, mod, save, installed service or hardware setting
+changed; no deployment or restart is required. No candidate adoption.

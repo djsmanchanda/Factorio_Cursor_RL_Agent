@@ -100,3 +100,31 @@ installed GUI/server mod copies and real saves are not touched. No user restart
 is required. Further code changes need new frozen runners after their predecessor
 finishes. The one implementation helper is an ordinary top-level T3 thread on
 Personal_2 / GPT-6.1-Sol xhigh; no subagent harness is used.
+
+## Capacity amendment, 2026-10-23 22:27 IST
+
+The owner prioritized the existing 12-job report-freshness comparison after the
+shared scheduler thermally derated from 14 to four slots. Idempotent admission
+controls drained capital and bottleneck and cancelled only their queued jobs:
+capital retained 44 completed and four running attempts, with 12 queued cuts;
+bottleneck retained all 60 planned jobs as `cancelled_queued`, with zero starts.
+All original planned denominators and append-only cut events remain intact.
+No running attempt was interrupted. This is a capacity cut, not a selection
+based on interim arm outcomes.
+
+The bottleneck terminal cut releases the existing freshness dependency. At
+verification all 12 freshness jobs remained queued, admission reason `ready`,
+zero reserved; they can enter in their frozen rotated order as host slots free.
+The automatic four-slot thermal gate remains authoritative. No manual target,
+hardware control, source, variant, save, mod or manifest was changed. Rerun
+check-in exited zero, with no freeze errors and unchanged frozen source.
+
+The final admission time remains October 24 02:06:47 IST for the full 6,000-second
+allowance, cohort end 03:46:47 and hard cleanup end 03:51:47. All 12 starts are
+not guaranteed. Incomplete pairs, capacity cuts and unexercised bottleneck
+factors remain explicit; no confirmation or adoption follows from interim
+capital leads. The shared 55-minute observer and 03:53 terminal accounting stay
+in place. Remote decision evidence is
+`data/laya-orchestration/frontier-starship-20261023/operator-decisions/frontier-thermal-freshness-priority-20261023-v1.json`;
+it binds before/after status, four accepted requests, cut receipts and unchanged
+manifest/freeze/plan hashes.
