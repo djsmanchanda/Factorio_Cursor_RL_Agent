@@ -621,3 +621,24 @@ terminal with no reservations, as recorded in both owned timer prompts. All72
 mapped IDs, budgets, source/assets/order/ticks/predicates and13:21:41 hard end
 remain. No Opus notification; shared observer untouched. The completion record
 and remote amendments/parallel-six-20261024-v1/ supersede sequential-launch notes.
+
+## Capital complete; T3 timers disabled (2026-10-24 02:51 IST)
+
+All 12 resumed capital jobs completed; capital now has all 60 jobs and 12 known
+C6-v2 endpoints per arm. Control6/12, mall-flat6/12, foundation8 6/12,
+batch-free7/12, steel30 8/12; own-control discordances2:2,3:3,3:2,4:2. Strict C6
+ever/final is2/1 for both control and steel30. No adoption or confirmation.
+Zero caught exceptions across capital; typed bug events remain nonzero and
+distinct. Remote state.capital_complete links the full archived result/hash.
+At02:49 IST bottleneck14 completed/18 running/28 queued; no freeze errors.
+After verifying capital terminal/no reservations, restored host target22 at
+02:49:50; bottleneck concurrency18 and the13:21:41 hard end are unchanged.
+
+Both completion timers are OFF with no next wake. A bounded T3 trace read
+identified UI scheduledTasks.setEnabled calls, rather than a scheduler failure;
+do not recreate timers to override that state. The user was offered an optional
+choice to re-enable checks here; leave them off until requested. This supersedes
+the earlier enabled/02:23/13:23 timer notes. Systemd remains independently bounded.
+No Opus notification; shared observer unchanged. On user continuation, read the
+completion state and run checkin.py --cleanup, then finalize once all mapped
+jobs are terminal; do not treat the disabled schedule as a paused campaign.
