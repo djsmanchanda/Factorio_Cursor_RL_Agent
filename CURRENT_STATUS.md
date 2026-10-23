@@ -558,3 +558,7 @@ fresh frozen copy of dabdfd5 with its mods staged into each disposable world.
 - 2026-10-23 22:30 IST: Starship frontier host, at the user's explicit instruction: thermal limit removed (window/host/config.json temp 200/210; backups config.pre-warm/pre-nothermal-20261023.json) and target pinned at 12. Owner thread 94dcfaf2 informed. Its thermal reading is max(thermal_zone*), not coretemp package.
 
 - 2026-10-23 23:50 IST: C24 complete: 120/120, no errors. C2 control/steel 42/41 (12:13, preregistered primary); C3 25/31; C5 ever/final 30/9 vs 33/9; new Laya C6 23/26. Speed: steel reaches strict C2 later (21:33, RMST 71 vs 75), C3–C6 marginally sooner. **Steel `5fb6371` not adopted.** C26/C27 (steel excluded) stay valid. [Result](docs/rl/Laya_C24_Result_2026-10-23.md).
+
+## 2026-10-24 00:17 IST —7200-second ordinary trial allowance
+
+Set shared new-cohort default7200 and updated generators; longer15000-second research windows retained. C26/C27 safely drained/stopped before any admission, original records archived, both arms amended7200 and wrappers resumed behind C25; verified60 queued each, hashes intact, original unit horizon preserved. C25 and Starship live attempts keep6000 because no safe hot extension exists. Evidence:frontier37 focused/1358 fast+3 skips; Miniship36/1326+3 skips, all exit0; live waiting-supervisor readback verified. Lifecycle:new Python freezes for future defaults; no Factorio/mod restart or controller message. See docs/rl/Laya_Wall_Allowance_2026-10-24.md and data/laya-orchestration/wall-allowance-7200-20261024/.
