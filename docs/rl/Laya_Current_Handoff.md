@@ -578,3 +578,31 @@ retained with the scheduler stopped. No further Starship lifecycle action or
 wake remains; later work requires a fresh authorized window/freeze. Miniship
 C26/C27 are already safely amended7200 before admission; C25 keeps6000. Do not
 overwrite those amendments from the observer's older blanket frozen-budget note.
+
+## Starship omitted jobs resumed (2026-10-24 01:24 IST)
+
+The user authorized a new twelve-hour window for the 72 omitted jobs and
+explicitly requested no Opus controller notification. The new
+[completion record](Laya_Frontier_Completion_2026-10-24.md) supersedes the prior
+closed-state lifecycle instructions for this follow-up. Hard end is October 24
+13:21:41 IST, cohort end13:16:41. Capital admits only its12 never-started IDs at
+6000 seconds and carries48 original completions unchanged; bottleneck then
+admits its60 original IDs at7200 seconds. No completed job is rerun, and each
+original cohort still has60 distinct jobs. Original terminal/cut ledgers remain
+unchanged; the new ledgers and source/asset/freeze receipts are under remote
+`data/laya-orchestration/frontier-completion-starship-20261024/`.
+
+Source5fa9a89, original arms/seeds/mods/save/ticks/predicates, Factorio2.1.23,
+host target22/max24 and cohort concurrency18 are preserved. Known original
+research staleness remains; no freshness/research benefit or adoption is claimed.
+At01:24:34 IST all three bounded user units were active, eight capital worlds
+running/four queued, bottleneck60 waiting for capital, zero freeze errors.
+A private manifest/source hash and progressing runner construction were observed.
+By01:27:17 all12 omitted capital jobs were running,60 bottleneck queued, freeze checks clean.
+The completion-specific55-minute monitor next runs02:23:07 IST; terminal accounting is13:23 IST.
+The initial reused old-window timer IDs were disabled again and remain disabled;
+two new completion-specific IDs are enabled/read back in state.schedules.
+Both schedules are bound here, with no new thread/subagent. Shared Opus/Miniship
+observer untouched; no controller message. Run the new root's `checkin.py
+--cleanup` on each wake, reconcile72 new IDs plus48 carried records, stop only
+owned units at completion/cutoff, and disable the two owned schedules afterward.
