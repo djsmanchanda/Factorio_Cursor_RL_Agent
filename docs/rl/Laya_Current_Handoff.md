@@ -357,3 +357,7 @@ Strict times come from fresh acceptance samples, taken every 10 decisions and at
 ## Mall-utilization cohorts queued (2026-10-23 22:30 IST)
 
 C26 (ready-loans) and C27 (linear3 waits) wait behind C24 and C25 on integrated commit `2d9b4b5` (branch `work/miniship/laya-mall-integrated-20261023`; steel and backing reverted pending their cohorts). Next free ports 38500+. Contract: [Mall utilization](Laya_Mall_Utilization_2026-10-23.md) on that branch.
+
+## Cohort 24 complete (2026-10-23 23:50 IST)
+
+Steel `5fb6371` is not adopted (C2 level 12:13, slower to strict C2); see [C24 result](Laya_C24_Result_2026-10-23.md). C25 runs now; C26/C27 follow on base `2d9b4b5`, which already excludes steel.

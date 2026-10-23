@@ -106,3 +106,5 @@ C24 (prepared by thread cb16c604, waiting): 120 planned = 60 seeds 79500–79559
 C22 final (2026-10-23 17:38 IST): 120/120 completed + 30 cut. New Laya C6 23/18/27, C5 final 5/7/1 for credit/integrated/retain. Baseline d8a4825 decided; retention not adopted. [Result](Laya_C22_Result_2026-10-23.md). C24/C25 gate released 18:16 IST.
 
 C26 (queued 2026-10-23 22:30 IST, waits for C24+C25): 60 planned = 30 seeds 79620–79649 × control / ready (2d9b4b5 + mall_loan_reconciliation). C27 (same): 60 planned = 30 seeds 79650–79679 × control / linear3 (2d9b4b5 + linear wait pacing). Results pending.
+
+C24 final (2026-10-23 23:28 IST): 120/120 completed. C2 42/41 (12:13), new Laya C6 23/26; steel slower to strict C2 (21:33). Steel not adopted. [Result](Laya_C24_Result_2026-10-23.md). C25 admitting since.
