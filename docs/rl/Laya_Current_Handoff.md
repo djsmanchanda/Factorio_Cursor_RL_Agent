@@ -353,3 +353,7 @@ The user wants faster progress, not only more of it. Every cohort result reports
 - per-seed paired faster:slower counts.
 
 Strict times come from fresh acceptance samples, taken every 10 decisions and at proxy changes. Strict C1 needs four working mall assemblers and almost never passes (C22: 4/120; C24 so far: 1/68). That makes mall utilization the first speed bottleneck.
+
+## Mall-utilization cohorts queued (2026-10-23 22:30 IST)
+
+C26 (ready-loans) and C27 (linear3 waits) wait behind C24 and C25 on integrated commit `2d9b4b5` (branch `work/miniship/laya-mall-integrated-20261023`; steel and backing reverted pending their cohorts). Next free ports 38500+. Contract: [Mall utilization](Laya_Mall_Utilization_2026-10-23.md) on that branch.
