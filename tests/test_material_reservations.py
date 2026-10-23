@@ -2948,3 +2948,29 @@ def test_retry_reserves_only_uninstalled_material_and_releases_a_paid_bill(monke
     stock.clear()  # Bots consumed it; replay cannot demand a second copy.
     construction_coverage.assert_affordable(client, "nauvis", "player", plan, "packet", lambda _m: None, True)
     assert ledger.projects["packet"].state == "completed" and not ledger.stock_targets()
+
+
+def test_producing_mall_cell_releases_its_constructing_reservation(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """A cell served once while idle and never re-served must not hold its bill after it runs (C25)."""
+    ledger = _ledger(tmp_path)
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", ledger)
+    stock = {"passive-provider-chest": 1, "inserter": 2}
+    for item in ("electronic-circuit", "transport-belt"):
+        ledger.declare(f"paired_mall_{item}", {"passive-provider-chest": 1}, stock,
+                       target_item=item, priority=100, hold_until_producing=True)
+        ledger.mark_constructing(f"paired_mall_{item}", stock)
+    working = {"electronic-circuit": 1, "transport-belt": 0}
+    monkeypatch.setattr(
+        builder.live_base, "find_line",
+        lambda _c, _s, _f, recipe, _m, **_k: builder.live_base.LineState(
+            recipe=recipe, machine_count=1, working_count=working[recipe], output_position=None),
+    )
+
+    builder.complete_producing_material_projects(object(), "nauvis", "player", lambda _m: None)
+
+    assert ledger.projects["paired_mall_electronic-circuit"].state == "completed"
+    # An idle, never-run cell keeps holding its bill until it produces.
+    assert ledger.projects["paired_mall_transport-belt"].state == "constructing"
+    assert ledger.allocatable_stock(stock, claimant="foundation")["passive-provider-chest"] == 0

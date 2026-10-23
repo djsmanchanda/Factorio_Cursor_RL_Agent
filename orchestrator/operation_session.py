@@ -212,8 +212,11 @@ class DeterministicSession:
         return outcome
 
     def _maintain_mall(self) -> None:
-        """After every operation: cap standing gear/cable cells, hand back cells whose loan is already stocked."""
+        """After every operation: cap standing gear/cable cells, hand back cells whose loan is already stocked,
+        and release the reservations of mall cells that are already producing."""
         for name, upkeep in (
+                ("MATERIAL PROJECT CLOSE", lambda: ab.complete_producing_material_projects(self.client, SURFACE, FORCE,
+                                                                                            self.emit)),
                 ("MALL CHEST CAP", lambda: ab.refresh_feedstock_chest_caps(self.client, self.bridge, SURFACE, FORCE,
                                                                            self.emit)),
                 ("LOAN RELEASE", lambda: ab.release_finished_bootstrap_loans(self.client, self.bridge, SURFACE, FORCE,

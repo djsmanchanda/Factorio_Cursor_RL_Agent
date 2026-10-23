@@ -7784,6 +7784,39 @@ def _complete_material_producer(item: str) -> None:
         _MATERIAL_RESERVATION_LEDGER.complete(_material_project_id(item))
 
 
+def complete_producing_material_projects(
+    client: RconClient, surface: str, force: str, emit: Callable[[str], None],
+) -> None:
+    """Close submitted mall-cell projects whose producer has since run.
+
+    ``ensure_produced`` closes a project only when it is called again for the
+    same item and finds the line working. A cell served once while still idle
+    (the repair path) and never re-served kept its whole bill reserved:
+    2026-10-24, C25 never-C2 runs held passive-provider chests for producing
+    electronic-circuit and belt cells while the iron foundation waited on one.
+    """
+    ledger = _MATERIAL_RESERVATION_LEDGER
+    if ledger is None:
+        return
+    for project in list(ledger.projects.values()):
+        item = project.target_item
+        if (
+            project.state != "constructing" or not project.hold_until_producing
+            or item is None or project.project_id != _material_project_id(item)
+            or item not in LINE_RECIPES
+        ):
+            continue
+        line = live_base.find_line(
+            client, surface, force, item, LINE_RECIPES[item]["machine"],
+            include_ghosts=False,
+        )
+        if line is not None and (
+            line.working_count > 0 or getattr(line, "produced_count", 0) > 0
+        ):
+            ledger.complete(project.project_id)
+            emit(f"  MATERIAL PROJECT CLOSED: {project.project_id} producer has run")
+
+
 def _ingredient_sources(
     client: RconClient, bridge: GameBridge, surface: str, force: str, item: str,
     reference_point: Point, emit: Callable[[str], None], plan: _LinePlan, *,
