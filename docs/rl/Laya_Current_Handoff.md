@@ -436,3 +436,12 @@ independent raw decision pass confirms0/3026 fresh known research observations
 after the first300 ticks across original pilots (bounded first500 records/job).
 Their earned-research endpoint remains unknown; no research-growth improvement
 or live benefit of the repair has been established.
+
+Latest user steering2026-10-23 20:46 IST consolidates Starship read-only
+observation into the existing55-minute cycle in
+`mcp:94f918da-f279-4342-bc00-c5d125c67e16`; its persistent prompt and handoff
+are updated, next check21:00:40 IST. The duplicate30-minute continuation timer
+is disabled. Source/lifecycle ownership and03:53 terminal accounting stay in
+`94dcfaf2-9531-4234-bde5-b6ae616de9b1`. Hard cutoff03:51:47 unchanged. Do not
+disable the shared55-minute Miniship observer at Starship cleanup; its ID is
+stored separately in state.observation, outside continuation state.schedules.
