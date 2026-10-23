@@ -356,3 +356,42 @@ remain a subsequent stage requiring a preregistered earned frontier or explicit
 fresh-origin cohort, not reuse of the supplied wiring fixture. The automated
 owner receives the frozen queue paths and release instructions at handoff.
 No active campaign, installed scheduler, installed mod or production save changed.
+
+### C24/C25 queued (2026-10-23 15:41 IST)
+
+Both bounded user units are active with **120 queued / zero admitted** each,
+fresh two-second heartbeats, complete planned manifests and live reports:
+
+- `laya-c24-2123-miniship-20261023`: integrated `d8a4825` vs steel `5fb6371`,
+  seeds79500–79559; ports38100–38129 /31100–31129; waits for C22 and C23.
+- `laya-c25-2123-miniship-20261023`: integrated `d8a4825` vs isolated backing
+  patch recorded verbatim in freeze.json (steel excluded), seeds79560–79619;
+  ports38200–38229 /31200–31229; waits for C24.
+
+Both freeze the verified batch harness `1b2b7da`; arm source, private mod and
+source-save hashes are recorded in each main-repository
+`data/laya-experiments/<unit-name>/freeze.json`. Each job keeps the existing
+540,000-tick /6,000-wall-second legacy objective; no research change is mixed
+into these contrasts. Campaign admission ends **2026-10-27 18:00 IST**;
+user units have a100-hour hard cap from2026-10-23 15:41 IST. C24 preregisters
+strict C2 attainment, C25 downstream Laya C6 choice/output; report all planned
+jobs, earlier service, safety/tool failures and versioned versus legacy scores.
+Neither comparison alone proves research completion or long-window adoption.
+
+Both also require
+`data/laya-orchestration/research-implementation-20261023/baseline-decision.json`:
+status=`ready`, revision=full `d8a4825` SHA, nonempty evidence and decided_by.
+It currently remains pending. The automated owner must close C22/C23, record
+complete accounting and decide the baseline before release. If the chosen
+baseline differs, cancel queued jobs through the frozen harness's idempotent
+`--admission cancel_queued --request-id ... --reason ...`, preserve both original
+plans/cuts, and create new named freezes against that baseline. Do not edit arms
+or manifests beneath these active supervisors. A pending gate never reserves a
+world slot. No scheduler tuning or C22/C23 restart was performed.
+
+The next research experiment remains gated on earned-frontier eligibility or a
+preregistered fresh-start design; the wiring fixture must never become its
+source corpus. Use matched fixed0.25 versus progressive arms with the same
+new objective, budgets and source; begin long-window pilots at1,080,000 ticks /
+15,000 active-wall seconds only after selecting and freezing eligible starts.
+Preserve original-attempt statuses and prefix/continuation costs separately.
