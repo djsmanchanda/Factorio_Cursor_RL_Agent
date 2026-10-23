@@ -4260,39 +4260,6 @@ def _verified_iron_pioneer_output(
     return int(contents.get("iron-plate", 0)) > 0
 
 
-def _iron_replacement_needs_steel(client, surface, force, provider, state) -> bool:
-    """Prove the unsubmitted replacement's dependency using its owned bill.
-
-    This permits steel construction, never pioneer retirement. The ordinary
-    seed funding and site checks still apply after admission.
-    """
-    ledger = _MATERIAL_RESERVATION_LEDGER
-    if (ledger is None or ledger.surface != surface or ledger.force != force
-            or getattr(state, "surface", None) != surface
-            or getattr(state, "force", None) != force):
-        return False
-    project = ledger.projects.get("modular_iron-plate_refinery")
-    if project is None or project.state not in {"planned", "supply_wait", "ready"}:
-        return False
-    if not any(count > project.reserved.get(item, 0)
-               and (item == "steel-plate" or "steel-plate" in _recipe_ingredient_closure(item))
-               for item, count in project.required.items()):
-        return False
-    actions = getattr(state, "pioneer_actions", ())
-    providers = {(a["position"]["x"], a["position"]["y"])
-                 for a in actions if a.get("entity") == "passive-provider-chest"}
-    furnaces = [(a["position"]["x"], a["position"]["y"])
-                for a in actions if a.get("entity") == "electric-furnace"]
-    if provider not in providers or not furnaces:
-        return False
-    try:
-        statuses, counters = live_base.machine_health(client, surface, furnaces)
-        return (all(statuses.get(p) in {"working", "full_output"} for p in furnaces)
-                and any(counters.get(p, 0) >= 1000 for p in furnaces))
-    except Exception:
-        return False
-
-
 def _build_compact_steel_seed(client, bridge, surface, force, provider, reference_point, emit):
     """Fund and remember a belt-side seed, falling back to direct mining."""
     from planners.steel_bootstrap import steel_seed, VECTORS
@@ -4308,12 +4275,11 @@ def _build_compact_steel_seed(client, bridge, surface, force, provider, referenc
         # has been submitted and its temporary pioneer provider has delivered
         # iron, let the fenced two-pole steel seed break that cycle. Retirement
         # still waits for the replacement's own first-output lifecycle proof.
-        submitted = (state.lifecycle_state != "pioneer"
-                     and getattr(state, "replacement_submitted", False))
-        dependency = (not getattr(state, "replacement_submitted", False)
-                      and _iron_replacement_needs_steel(client, surface, force, provider, state))
-        if not ((submitted or dependency)
-                and _verified_iron_pioneer_output(client, surface, provider)):
+        if (
+            state.lifecycle_state == "pioneer"
+            or not getattr(state, "replacement_submitted", False)
+            or not _verified_iron_pioneer_output(client, surface, provider)
+        ):
             raise ProductionPrerequisiteDeferred(
                 "compact steel waits for verified iron production and starter retirement",
                 code="steel_iron_retirement_wait", state="retiring",
