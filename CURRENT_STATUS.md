@@ -567,3 +567,5 @@ Set shared new-cohort default7200 and updated generators; longer15000-second res
   - C26b `laya-c26b-2123-miniship-20261024`: control vs ready, seeds 79620–79649, ports 38500/31500.
   - C27b `laya-c27b-2123-miniship-20261024`: control vs linear3, seeds 79650–79679, ports 38600/31600.
   - Both use code `2d9b4b5` and 540,000 ticks / 7,200 s, and wait for C25.
+
+- 2026-10-24 05:45 IST: C25 complete, 120/120. Backing `65604cd` is not adopted. The preregistered new Laya C6 is level (10:12; 31 vs 29). Strict C3 is slower (14:28 pairs, +43 min median), and power-route refusals halve (142 to 61) without any milestone gain. See docs/rl/Laya_C25_Result_2026-10-24.md. C26b/C27b were admitted on schedule at about 04:55 on base `2d9b4b5`, which excludes backing. Lifecycle: nothing.
