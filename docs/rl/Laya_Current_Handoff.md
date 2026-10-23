@@ -383,3 +383,7 @@ work/miniship/laya-mall-integrated-20261023; frontier default19de678. Current
 C26/C27 keep their original2d9b4b5 harness/arms and explicitly amended7200
 manifests. Future generators must write7200, including when reusing older
 verified source. This is a wall-budget setting, not new policy adoption.
+
+## C26/C27 superseded by C26b/C27b (2026-10-24 00:50 IST)
+
+On the user's instruction ("shift 26/27 to 7200"), C26 and C27 were cancelled before any job started (60 `cancelled_queued` each; they are not results). They were refrozen as `laya-c26b-2123-miniship-20261024` (ports 38500/31500) and `laya-c27b-2123-miniship-20261024` (ports 38600/31600). Both use the same seeds, arms and code `2d9b4b5`, with `trial_wall_seconds` 7200, and both wait behind C24+C25 (60 queued each). The branch head `daefefc` changes only allowance defaults. Next free ports are 38700+.
