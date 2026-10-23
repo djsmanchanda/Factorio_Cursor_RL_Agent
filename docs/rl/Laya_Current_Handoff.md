@@ -426,3 +426,13 @@ remain unexercised/inconclusive; C6-v2 results are separate. Any new repair
 comparison needs its own immutable freeze and must queue behind the original
 screens, using the same deadline and shared host registry. Active sources,
 batches, variants and installed mods remain untouched.
+
+The separate repair comparison is now frozen at `3cf5f37` and queued behind
+bottleneck: unit `laya-frontier-freshness-r2-20261023.service` verified active,
+12 queued/zero reserved. The initial missing-module supervisor launch failed
+before world attempts and is retained in state. Replacement monitoring next
+fires2026-10-23 21:02:30 IST, terminal accounting2026-10-24 03:53 IST. An
+independent raw decision pass confirms0/3026 fresh known research observations
+after the first300 ticks across original pilots (bounded first500 records/job).
+Their earned-research endpoint remains unknown; no research-growth improvement
+or live benefit of the repair has been established.

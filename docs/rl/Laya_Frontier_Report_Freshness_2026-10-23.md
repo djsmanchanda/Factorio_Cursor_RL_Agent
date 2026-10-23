@@ -24,6 +24,12 @@ fresh identical-state science reports and returned the old sample. The research
 freshness validator correctly rejected it. Ramp-arm C6 differences cannot show
 an effect of demand growth when the modified rung was never reached.
 
+An independent pass over the first 500 decision records per research job,
+excluding the first 300 game ticks, found **0/3,026** fresh known research
+observations. It matches the operational accounting totals: control 0/717,
+growth x1.25 0/1,144, growth x4 0/1,165. This bounds the observation failure;
+it does not classify unknown earned research as measured failure.
+
 The repair includes the observation tick in report identity. Exact same-tick
 duplicates can still share a file; later observations retain their real tick,
 bounded by the existing 200-report retention window. No freshness, funding,
@@ -64,3 +70,19 @@ systemd deadline in a supplemental freeze and operational state. Do not edit
 the original window's frozen batches, source copies or variants. Future checks
 must include this supplemental cohort without merging its denominator or
 endpoint with the original research-growth pilots.
+
+## Queue and supervision verified (2026-10-23 20:40 IST)
+
+Repair source `3cf5f37` is frozen separately. Unit
+`laya-frontier-freshness-r2-20261023.service` is active with all twelve jobs
+queued, zero reserved slots and dependency `bottleneck`. Its systemd limit is
+25,842 seconds from 20:40:34 IST with 30-second cgroup cleanup. The first
+supervisor invocation exited before any world attempt because its Python
+module path was missing; that launch and journal remain recorded separately.
+
+The old Starship monitor/terminal schedules were backed up and disabled.
+Replacement schedules are enabled in Miniship thread
+`94dcfaf2-9531-4234-bde5-b6ae616de9b1`: next monitor October 23 21:02:30 IST,
+then every thirty minutes; terminal accounting October 24 03:53 IST.
+Hard testing cutoff remains 03:51:47 IST. Exact IDs and launch attempts are in
+remote operational state. No running arm was restarted or patched.
