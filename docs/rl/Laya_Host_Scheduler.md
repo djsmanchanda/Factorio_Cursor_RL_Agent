@@ -149,3 +149,28 @@ do not combine it with the controller change when estimating either effect.
 Activation requires the handler to synchronize the verified script and restart
 only the scheduler at a recorded campaign boundary. Active frozen arms are not
 changed by this repository work.
+
+## Cohort admission and durable attempts (2026-10-23)
+
+New frozen `run_laya_batch` supervisors support `--admission drain|run|cancel_queued
+--request-id ID --reason TEXT` (optional repeated `--job-id ID` for selective
+cuts). Requests are idempotent; reusing an ID with different content fails.
+Drain stops new admissions while reaping, heartbeats, reports and cleanup
+continue. It does not signal running children. Cancel affects only queued jobs.
+The supervisor remains alive until work is resumed, cancelled or deadline-cut.
+Never SIGSTOP a supervisor to edit its queue.
+
+`planned-jobs.json` preserves the original denominator; `batch-events.jsonl`
+retains requests, cuts and complete attempt receipts. Interrupted queue retries
+remain fresh-world attempts with full prior evidence. `--resume` refuses a live
+owned runner/world and a second supervisor is excluded by a lifetime lock.
+Cleanup errors keep their world reservation and slot; other completions still
+reap. Exit/collection and cleanup timestamps are separate. A game-window stop,
+wall cap, cohort deadline and operator stop have distinct causes.
+
+A manifest's `depends_on` lists predecessor cohort roots. Missing, unknown or
+unreconciled occupancy blocks admission without reserving slots. Terminal
+predecessors unlock only execution, never candidate adoption. Freeze the chosen
+baseline and contrast explicitly. Live/final v3 reports retain all planned jobs
+and unknown-aware final, choice/output and research pair counts. Older frozen
+supervisors do not gain these controls; do not modify active freezes.

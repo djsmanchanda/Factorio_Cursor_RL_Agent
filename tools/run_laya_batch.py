@@ -38,6 +38,7 @@ from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
+from tools.laya_batch_state import CohortLedger, dependencies_ready, file_lock, read_records, request_admission
 
 PHASE = re.compile(r"^\+(\d+)s PHASE REACHED: (C\d) .* at tick (\d+)")
 SUMMARY = re.compile(r"SUMMARY: stop=(\S+) decisions=(\d+) failures=(\d+) phases=(\S*) accepted=(\S*)")
@@ -154,7 +155,7 @@ def summarize(world: Path) -> dict:
                 if row.get("event") == "laya_acceptance" and row.get("phase") == "C6":
                     out["laya_acceptance"] = {"C6": {k: v for k, v in row.items() if k not in {"event", "phase"}}}
                 if row.get("event") == "summary":
-                    out.update({k: row[k] for k in ("laya_acceptance", "production_service") if k in row})
+                    out.update({k: row[k] for k in ("laya_acceptance", "production_service", "research_acceptance") if k in row})
                 outcome = row.get("outcome")
                 if row.get("version") == "laya-decision-record-v1" and isinstance(outcome, dict):
                     observed += 1
@@ -180,8 +181,50 @@ class Batch:
                                  + self.cfg["arms"][:index % len(self.cfg["arms"])])]
         self.arms = {arm["id"]: arm for arm in self.cfg["arms"]}
         self.host = HostBudget(self.root, self.cfg["host_budget"]) if self.cfg.get("host_budget") else None
+        self.ledger = CohortLedger(self.root, self.cfg)
+        self.admission = "run"
+        self.admission_reason = "ready"
+        self._resumed = False
+        existing = {j["id"] for j in self.jobs}
+        for job in self.ledger.plan["jobs"]:
+            if job["id"] not in existing:
+                self.jobs.append(dict(job, status="cancelled_queued", termination_cause="legacy_cut"))
+
+    def apply_requests(self) -> None:
+        with file_lock(self.root / ".admission-requests.lock"):
+            requests = read_records(self.root / "admission-requests.jsonl")
+        for row in requests:
+            event_id = "request:" + row["request_id"]
+            prior = next((r for r in self.ledger.events if r["event_id"] == event_id), None)
+            if row["mode"] in {"run", "drain"}:
+                self.admission = row["mode"]
+            if prior is not None:
+                for job in self.jobs:
+                    if job["id"] in prior["cuts"] and job["status"] == "queued":
+                        job.update(status="cancelled_queued", termination_cause="operator_cut")
+                continue
+            ids = row.get("job_ids")
+            known = {j["id"] for j in self.jobs}
+            if ids is not None and not set(ids) <= known:
+                raise ValueError("cancellation contains unknown planned job IDs")
+            cuts = []
+            if row["mode"] == "cancel_queued":
+                for job in self.jobs:
+                    if job["status"] == "queued" and (ids is None or job["id"] in ids):
+                        job.update(status="cancelled_queued", termination_cause="operator_cut")
+                        cuts.append(job["id"])
+            self.ledger.append(event_id, "admission_request", at=time.time(), request=row, cuts=cuts)
+
+    def may_admit(self) -> bool:
+        if self.admission != "run":
+            self.admission_reason = "draining"
+            return False
+        ready, self.admission_reason = dependencies_ready(self.cfg.get("depends_on", []), own_root=self.root)
+        return ready
 
     def submit(self, pool, job: dict, slot: int):
+        if not self.may_admit():
+            return None
         with self.host.lock() if self.host else nullcontext():
             if self.host and not self.host.may_admit(time.time()):
                 return None
@@ -199,7 +242,10 @@ class Batch:
 
     def save(self) -> None:
         with self.lock:
+            self.ledger.initialize()
             _atomic(self.root / "job-status.json", {"name": self.cfg["name"], "updated": time.time(), "jobs": self.jobs,
+                    "owner_pid": os.getpid(), "admission": self.admission,
+                    "admission_reason": self.admission_reason,
                     **({"host_budget": {"reason": self.host.reason}} if self.host else {})})
 
     def _runtime(self, arm: dict) -> dict:
@@ -246,10 +292,13 @@ class Batch:
         # A rerun after --resume gets a fresh world: a prepared root cannot be prepared again.
         world = code / "data/laya-saved-world" / self.cfg["name"] / (
             f"{job['id']}-r{job['attempt']}" if job.get("attempt") else job["id"])
-        job["world"] = str(world)
+        job.update(world=str(world), slot=slot, preparation_started=time.time())
+        attempt_id = f"{job['id']}:{job.get('attempt', 0)}"
+        self.ledger.append("start:" + attempt_id, "attempt_started", at=time.time(), job=dict(job))
         log_path = self.root / "logs" / f"{job['id']}.out"
         env = dict(os.environ, PYTHONPATH=str(code), PYTHONDONTWRITEBYTECODE="1", PYTHONUNBUFFERED="1")
         ports = ["--game-port", str(self.cfg["game_port_base"] + slot), "--rcon-port", str(self.cfg["rcon_port_base"] + slot)]
+        process = None
         try:
             with log_path.open("a") as log:
                 job["status"] = "preparing"
@@ -266,30 +315,46 @@ class Batch:
                                 *arm.get("extra_args", []))
                 process = subprocess.Popen(run, cwd=code, env=env, stdout=log, stderr=subprocess.STDOUT,
                                            start_new_session=True)
-                job.update(status="running", started=time.time())
+                job.update(status="running", started=time.time(), runner_pid=process.pid)
                 self.save()
                 end = min(job["started"] + self.cfg["trial_wall_seconds"], self.until)
                 while process.poll() is None and time.time() < end and not self.stopping.is_set():
                     time.sleep(1)
                 if process.poll() is None:  # The runner stops after its current decision on SIGTERM.
-                    job["status"] = "interrupted" if self.stopping.is_set() else "wall_cap"
+                    cause = ("operator_stop" if self.stopping.is_set() else
+                             "cohort_deadline" if end == self.until else "wall_window")
+                    job.update(status="interrupted" if self.stopping.is_set() else
+                               "deadline_cap" if end == self.until else "wall_cap", termination_cause=cause)
                     process.send_signal(signal.SIGTERM)
                     try:
                         process.wait(timeout=120)
                     except subprocess.TimeoutExpired:
                         process.kill()
+                        process.wait(timeout=30)
                 else:
                     job["status"] = "completed" if process.returncode == 0 else "runner_error"
-                job["elapsed_s"] = round(time.time() - job["started"])
+                job.update(runner_exited=time.time(), runner_returncode=process.returncode)
+                job["elapsed_s"] = round(job["runner_exited"] - job["started"])
                 job.update(summarize(world))
+                job.setdefault("termination_cause", "game_window" if job.get("runner_stop") == "window_timeout"
+                               else job.get("runner_stop") or job["status"])
         except Exception as error:
             job.update(status="harness_error" if "started" in job else "prepare_failed", error=f"{type(error).__name__}: {error}")
         finally:
+            if process is not None and process.poll() is None:
+                process.kill()
+                process.wait(timeout=30)
+                job.update(runner_exited=time.time(), runner_returncode=process.returncode)
+            job["cleanup_started"] = time.time()
             try:
                 subprocess.run(self._cmd(arm, "stop", "--root", str(world)), cwd=code, env=env,
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60, check=True)
                 job["admission_reserved"] = False
+                job["cleanup_completed"] = time.time()
+            except Exception as error:
+                job["cleanup_error"] = f"{type(error).__name__}: {error}"
             finally:
+                self.ledger.append("terminal:" + attempt_id, "attempt_terminal", at=time.time(), job=dict(job))
                 self.save()  # A failed cleanup retains the reservation for reconciliation.
 
     RERUN = ("queued", "preparing", "running", "interrupted", "not_started_interrupted")
@@ -307,15 +372,35 @@ class Batch:
             if job is None:
                 continue
             if job["status"] in self.RERUN:
+                world = Path(job["world"]) if job.get("world") else None
+                if world and (world / "server/factorio.pid").exists():
+                    pid = int((world / "server/factorio.pid").read_text())
+                    proc = Path(f"/proc/{pid}/cmdline")
+                    if proc.exists() and str(world / "server/config.ini").encode() in proc.read_bytes():
+                        raise ValueError(f"resume requires stopped owned world: {job['id']}")
+                if job.get("runner_pid") and Path(f"/proc/{job['runner_pid']}/cmdline").exists():
+                    argv = Path(f"/proc/{job['runner_pid']}/cmdline").read_bytes()
+                    if world and str(world).encode() in argv:
+                        raise ValueError(f"resume requires stopped runner: {job['id']}")
                 history = list(job.get("previous_attempts", ()))
                 if job.get("started") or job.get("admission_reserved") or job["status"] != "queued":
-                    history.append({k: job[k] for k in ("status", "world", "started", "elapsed_s") if k in job})
+                    attempt = {k: v for k, v in job.items() if k != "previous_attempts"}
+                    history.append(attempt)
+                    self.ledger.append(f"recovery:{job['id']}:{job.get('attempt', 0)}", "attempt_interrupted",
+                                       at=time.time(), job=attempt)
                 job = dict(planned, status="queued")
                 if history:
                     job.update(attempt=len(history), previous_attempts=history)
             self.jobs[index] = job
+        self._resumed = True
 
     def run(self, resume: bool = False) -> None:
+        with file_lock(self.root / ".supervisor.lock", blocking=False):
+            if resume and not self._resumed:
+                self.resume()
+            self._run(resume=resume)
+
+    def _run(self, resume: bool = False) -> None:
         (self.root / "logs").mkdir(exist_ok=True)
         signal.signal(signal.SIGTERM, lambda *_: self.stopping.set())
         slots = list(range(self.cfg["concurrency"]))
@@ -327,11 +412,24 @@ class Batch:
         with ThreadPoolExecutor(self.cfg["concurrency"]) as pool:
             queue = [job for job in self.jobs if job["status"] == "queued"]
             while (queue or active) and not (self.stopping.is_set() and not active):
+                self.apply_requests()
+                queue = [j for j in queue if j["status"] == "queued"]
+                if time.time() + self.cfg["trial_wall_seconds"] > self.until:
+                    for job in queue:
+                        job.update(status="not_started_deadline", termination_cause="cohort_deadline")
+                    queue.clear()
                 for future in [f for f in active if f.done()]:
-                    future.result()
-                    slots.append(active.pop(future))
+                    slot = active.pop(future)
+                    try:
+                        future.result()
+                    except Exception as error:
+                        self.ledger.append(f"worker-error:{time.time_ns()}", "worker_error", at=time.time(),
+                                           error=f"{type(error).__name__}: {error}", slot=slot)
+                    # A failed cleanup retains its slot and host reservation.
+                    if not any(j.get("slot") == slot and j.get("admission_reserved") for j in self.jobs):
+                        slots.append(slot)
                 # A trial that cannot finish its wall window before the deadline is not started (censored, listed).
-                while queue and slots and not self.stopping.is_set():
+                while queue and slots and not self.stopping.is_set() and self.may_admit():
                     if time.time() + self.cfg["trial_wall_seconds"] > self.until:
                         for job in queue:
                             job["status"] = "not_started_deadline"
@@ -350,6 +448,7 @@ class Batch:
                     queue.clear()
                 time.sleep(2)
                 self.save()  # Keep queued and long-running cohorts visible to the scheduler.
+                self.report()
         self.save()
         self.report()
 
@@ -399,8 +498,25 @@ class Batch:
                         up += milestone in b and milestone not in a
                         down += milestone in a and milestone not in b
                 comparisons[milestone + "_ever"] = {"observed_pairs": known, "new_only": up, "old_only": down}
+            def endpoint(job, name):
+                if name.endswith("_final"):
+                    observed = job.get("accepted_final")
+                    return name[:-6] in observed if isinstance(observed, list) else None
+                if name == "C6_v2":
+                    receipt = (job.get("laya_acceptance") or {}).get("C6", {})
+                    return (receipt["status"] == "passed" if receipt.get("version") == "laya-c6-choice-output-v2"
+                            and receipt.get("status") in {"passed", "failed"} else None)
+                research = job.get("research_acceptance")
+                return research.get("earned") if isinstance(research, dict) and type(research.get("earned")) is bool else None
+            for name in ("C2_final", "C5_final", "C6_final", "C6_v2", "research"):
+                values = [(endpoint(left[s], name), endpoint(right[s], name)) for s in seeds]
+                known = [(a, b) for a, b in values if a is not None and b is not None]
+                comparisons[name] = {"observed_pairs": len(known),
+                                     "new_only": sum(b and not a for a, b in known),
+                                     "old_only": sum(a and not b for a, b in known)}
             paired[new + "_vs_" + old] = {"complete_pairs": len(seeds), "legacy_deterministic": comparisons}
-        _atomic(self.root / "report.json", {"version": "laya-batch-report-v2", "planned_jobs": len(self.jobs),
+        _atomic(self.root / "report.json", {"version": "laya-batch-report-v3", "planned_jobs": len(self.jobs),
+                "ledger_events": len(self.ledger.events), "admission": self.admission,
                 "statuses": dict(Counter(j["status"] for j in self.jobs)), "paired": paired, "jobs": self.jobs})
         lines += ["", "Complete matched pairs: " + str({k: v["complete_pairs"] for k, v in paired.items()})]
         lines += ["", "Arms:"] + [f"- {a['id']} @ {a.get('revision', '?')[:9]}: {a.get('change', '')}" for a in self.cfg["arms"]]
@@ -411,12 +527,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("batch", type=Path)
     parser.add_argument("--report-only", action="store_true")
+    parser.add_argument("--admission", choices=("run", "drain", "cancel_queued"))
+    parser.add_argument("--request-id")
+    parser.add_argument("--reason")
+    parser.add_argument("--job-id", action="append")
     parser.add_argument("--resume", action="store_true",
                         help="continue this cohort after its supervisor died: keep finished jobs, rerun unfinished ones")
     args = parser.parse_args(argv)
     batch = Batch(args.batch.resolve())
-    if args.resume:
-        batch.resume()
+    if args.admission:
+        request_admission(batch.root, request_id=args.request_id, mode=args.admission,
+                          reason=args.reason, job_ids=args.job_id)
+        return 0
     if args.report_only:
         batch.jobs = json.loads((batch.root / "job-status.json").read_text())["jobs"]
         batch.report()

@@ -259,7 +259,8 @@ def test_resume_after_a_host_crash_keeps_finished_jobs_and_reruns_the_dead_ones(
     assert jobs["control-s1"]["status"] == "completed" and jobs["fix-s2"]["status"] == "runner_error"
     rerun = jobs["fix-s1"]
     assert rerun["status"] == "queued" and rerun["attempt"] == 1 and "admission_reserved" not in rerun
-    assert rerun["previous_attempts"] == [{"status": "running", "world": "w/fix-s1", "started": 6.0}]
+    assert rerun["previous_attempts"] == [dict(id="fix-s1", arm="fix", seed=1, status="running",
+                                              world="w/fix-s1", started=6.0, admission_reserved=True)]
     assert jobs["control-s2"] == {"id": "control-s2", "arm": "control", "seed": 2, "status": "queued"}
     ran = []
     monkeypatch.setattr(batch, "run_job", lambda job, slot: (ran.append(job["id"]), job.update(status="completed")))
@@ -268,3 +269,105 @@ def test_resume_after_a_host_crash_keeps_finished_jobs_and_reruns_the_dead_ones(
     assert sorted(ran) == ["control-s2", "fix-s1"]
     with pytest.raises(ValueError):
         _batch(tmp_path, seeds=(1, 2)).run()  # a fresh launch still refuses to overwrite a cohort's status
+
+
+def test_drain_and_idempotent_cuts_replay_without_reserving_slots(tmp_path):
+    from tools.laya_batch_state import request_admission
+    batch = _batch(tmp_path)
+    request_admission(tmp_path, request_id="pause", mode="drain", reason="review")
+    batch.apply_requests()
+    assert batch.submit(_PendingPool(), batch.jobs[0], 0) is None
+    batch.jobs[0].update(status="running", admission_reserved=True)
+    request_admission(tmp_path, request_id="cut", mode="cancel_queued", reason="120 job cap")
+    request_admission(tmp_path, request_id="cut", mode="cancel_queued", reason="120 job cap")
+    batch.apply_requests()
+    assert batch.jobs[0]["status"] == "running"
+    assert sum(j["status"] == "cancelled_queued" for j in batch.jobs) == 3
+    assert len(batch.ledger.events) == 2
+    # The event was durable before the current status write: replay repairs it.
+    batch.jobs[1]["status"] = "queued"
+    batch.apply_requests()
+    assert batch.jobs[1]["status"] == "cancelled_queued"
+    assert len(batch.ledger.events) == 2
+    with pytest.raises(ValueError, match="different content"):
+        request_admission(tmp_path, request_id="cut", mode="run", reason="different")
+    request_admission(tmp_path, request_id="continue", mode="run", reason="reviewed")
+    batch.apply_requests()
+    assert batch.admission == "run"
+
+
+def test_dependencies_wait_for_reconciled_occupancy_without_automatic_adoption(tmp_path):
+    batch = _batch(tmp_path)
+    predecessor = tmp_path / "previous"
+    predecessor.mkdir()
+    batch.cfg["depends_on"] = [str(predecessor)]
+    for row in (None, {"status": "running"}, {"status": "completed", "admission_reserved": True},
+                {"status": "mystery"}):
+        if row is not None:
+            (predecessor / "job-status.json").write_text(json.dumps({"jobs": [row]}))
+        assert batch.submit(_PendingPool(), batch.jobs[0], 0) is None
+        assert batch.jobs[0]["status"] == "queued"
+    (predecessor / "job-status.json").write_text(json.dumps({"jobs": [{"status": "completed"}]}))
+    assert batch.submit(_PendingPool(), batch.jobs[0], 0) is not None
+    assert batch.arms["control"]["code"] == "c"
+
+
+def test_immutable_plan_keeps_cuts_after_manifest_shortening(tmp_path):
+    from tools.laya_batch_state import request_admission
+    batch = _batch(tmp_path, seeds=(1, 2, 3))
+    cuts = [j["id"] for j in batch.jobs if j["seed"] == 3]
+    request_admission(tmp_path, request_id="cut", mode="cancel_queued", reason="budget", job_ids=cuts)
+    batch.apply_requests()
+    batch.save()
+    cfg = batch.cfg
+    cfg["seeds"] = [1, 2]
+    batch.path.write_text(json.dumps(cfg))
+    resumed = Batch(batch.path)
+    resumed.resume()
+    assert len(resumed.jobs) == 6
+    assert all(j["status"] == "cancelled_queued" for j in resumed.jobs if j["seed"] == 3)
+    resumed.report()
+    assert json.loads((tmp_path / "report.json").read_text())["planned_jobs"] == 6
+
+
+def test_failed_cleanup_keeps_reservation_and_terminal_attempt(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    batch = _batch(tmp_path, seeds=(1,))
+    (tmp_path / "logs").mkdir()
+    batch.arms["control"].update(mods="m")
+    job = batch.jobs[0]
+    job["admission_reserved"] = True
+    def run(cmd, **kwargs):
+        if "stop" in cmd:
+            raise RuntimeError("cleanup failed")
+        return SimpleNamespace(returncode=1)
+    monkeypatch.setattr("tools.run_laya_batch.subprocess.run", run)
+    batch.run_job(job, 0)
+    assert job["status"] == "prepare_failed"
+    assert job["admission_reserved"] and "cleanup failed" in job["cleanup_error"]
+    assert [e["event"] for e in batch.ledger.events] == ["attempt_started", "attempt_terminal"]
+    assert batch.ledger.events[-1]["job"]["cleanup_started"] > 0
+
+
+def test_worker_process_boundary_records_exit_and_releases_only_after_cleanup(tmp_path, monkeypatch):
+    import sys
+    batch = _batch(tmp_path, seeds=(1,))
+    (tmp_path / "logs").mkdir()
+    batch.arms["control"].update(code=str(tmp_path), mods="m")
+    monkeypatch.setattr(batch, "_cmd", lambda arm, action, *args:
+                        [sys.executable, "-c", "print('synthetic isolated runner')"])
+    job = batch.jobs[0]
+    job["admission_reserved"] = True
+    batch.run_job(job, 0)
+    assert job["status"] == "completed" and job["runner_returncode"] == 0
+    assert job["started"] <= job["runner_exited"] <= job["cleanup_started"] <= job["cleanup_completed"]
+    assert job["admission_reserved"] is False
+    assert batch.ledger.events[-1]["job"]["cleanup_completed"] == job["cleanup_completed"]
+
+
+def test_supervisor_lock_rejects_a_second_owner(tmp_path):
+    from tools.laya_batch_state import file_lock
+    batch = _batch(tmp_path)
+    with file_lock(tmp_path / ".supervisor.lock"):
+        with pytest.raises(BlockingIOError):
+            batch.run()

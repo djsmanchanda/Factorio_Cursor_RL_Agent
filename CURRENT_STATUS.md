@@ -511,3 +511,7 @@ fresh frozen copy of dabdfd5 with its mods staged into each disposable world.
 ## 2026-10-23 14:22 IST — shared steel dependency admission
 
 The compact steel seed can use a healthy owned iron starter before replacement submission when the exact outstanding iron-refinery bill has a steel-dependent live recipe closure. Canonical seed funding, foreign reservations, site checks and measured retirement requirements remain in force. Evidence: 55 steel/bootstrap regressions passed; curated fast gate passed (1,236 collected, one skipped). This is offline behavior evidence, not cohort adoption. Lifecycle: new frozen disposable runners only; active C22/C23 unchanged.
+
+## 2026-10-23 14:29 IST — durable cohort controls
+
+New frozen batch supervisors support idempotent run/drain/queued cuts, immutable original plans and append-only attempt records, predecessor admission without reserved slots, a single-owner lock, live reports and cleanup-failure reservation retention. Interrupted queue retries preserve full attempt evidence and refuse live owned processes. Evidence: 38 batch/scheduler checks including a real child-process boundary passed; fast gate 1,241 passed/one skipped. Runtime performance/adoption is unmeasured. Lifecycle: freeze new supervisors; no installed scheduler or active C22/C23 changes.
