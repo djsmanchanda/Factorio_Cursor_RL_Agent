@@ -77,3 +77,25 @@ def economics_observation(economics: Mapping | None, networks: Mapping | None) -
                                    max(0, loan["target"] - stock.get(loan["making"], 0)))
                              for loan in observed["loans"]]
     return observed
+
+
+def assembler_utilization(facts: Mapping, economics: Mapping) -> dict:
+    """Instantaneous survey status, not a measured working-time fraction or a reward."""
+    from orchestrator.mall_reconciliation import ready_reason
+
+    machines = facts.get("machines")
+    loans = economics.get("loans")
+    result = {"version": "assembler-utilization-sample-v1", "tick": facts.get("tick"),
+              "scope": "survey_assemblers", "basis": "instantaneous_status_sample",
+              "assemblers": None, "known_statuses": None, "status_counts": None,
+              "working_sample_share": None,
+              "ready_loans": None if loans is None else sum(bool(ready_reason(l)) for l in loans)}
+    if not isinstance(machines, list):
+        return result
+    assemblers = [m for m in machines if m.get("name") in
+                  {"assembling-machine-1", "assembling-machine-2", "assembling-machine-3"}]
+    counts = Counter(m["status"] for m in assemblers if isinstance(m.get("status"), str))
+    known = sum(counts.values())
+    result.update(assemblers=len(assemblers), known_statuses=known, status_counts=dict(counts),
+                  working_sample_share=counts["working"] / known if known else None)
+    return result

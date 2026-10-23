@@ -1,0 +1,7 @@
+{
+  "version": "1.0.0",
+  "variant_id": "ops-wait-sqrt",
+  "description": "Shorten selected waits by sqrt(1 + elapsed game minutes / 20), capped at four; unchanged operation availability and policy.",
+  "catalog": "docs/rl/laya_ops_guidelines.json",
+  "settings": {"decision_wait_schedule": "sqrt"}
+}

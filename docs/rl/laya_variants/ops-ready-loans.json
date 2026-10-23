@@ -1,0 +1,7 @@
+{
+  "version": "1.0.0",
+  "variant_id": "ops-ready-loans",
+  "description": "Offer guarded reconciliation of measured completed loan prerequisites; unchanged policy weights and waits.",
+  "catalog": "docs/rl/laya_ops_guidelines.json",
+  "settings": {"mall_loan_reconciliation": true}
+}
