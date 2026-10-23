@@ -10,7 +10,7 @@ listed as such in job-status.json.
 
 batch.json:
   {"name": str, "until": ISO time, "concurrency": int, "game_port_base": int, "rcon_port_base": int,
-   "trial_wall_seconds": int, "max_game_ticks": int, "source_save": path, "python": path,
+   "trial_wall_seconds": optional int (default 7200), "max_game_ticks": int, "source_save": path, "python": path,
    "seeds": [int, ...],
    "host_budget": optional {"registry": path, "stale_seconds": 180,
                              "admit_interval_seconds": 10, "admit_min_available_gb": 4.5},
@@ -38,6 +38,7 @@ from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
+from tools.laya_batch_defaults import DEFAULT_TRIAL_WALL_SECONDS
 from tools.laya_batch_state import CohortLedger, dependencies_ready, file_lock, read_records, request_admission
 
 PHASE = re.compile(r"^\+(\d+)s PHASE REACHED: (C\d) .* at tick (\d+)")
@@ -172,6 +173,7 @@ class Batch:
         self.path = path
         self.root = path.parent
         self.cfg = json.loads(path.read_text())
+        self.cfg.setdefault("trial_wall_seconds", DEFAULT_TRIAL_WALL_SECONDS)
         self.until = dt.datetime.fromisoformat(self.cfg["until"]).timestamp()
         self.stopping = threading.Event()
         self.lock = threading.Lock()

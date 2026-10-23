@@ -1,6 +1,7 @@
 # Path: tests/test_laya_batch.py | Purpose: Protect the experiment batch: matched seed-major job order, runner-log outcome parsing, per-arm report.
 
 import json
+import datetime as dt
 
 import pytest
 import time
@@ -31,6 +32,27 @@ def _batch(tmp_path, seeds=(1, 2)):
 
 def test_jobs_are_seed_major_so_a_deadline_cut_keeps_arms_matched(tmp_path):
     assert [j["id"] for j in _batch(tmp_path).jobs] == ["control-s1", "fix-s1", "fix-s2", "control-s2"]
+
+
+def test_default_allowance_prevents_admission_without_a_full_7200_seconds(tmp_path, monkeypatch):
+    batch = _batch(tmp_path, seeds=(1,))
+    cfg = dict(batch.cfg)
+    cfg.pop("trial_wall_seconds")
+    cfg["until"] = dt.datetime.fromtimestamp(time.time() + 7100, dt.timezone.utc).isoformat()
+    batch.path.write_text(json.dumps(cfg))
+    batch = Batch(batch.path)
+    monkeypatch.setattr(batch, "submit", lambda *a: pytest.fail("less than a full allowance remains"))
+    batch.run()
+    assert batch.cfg["trial_wall_seconds"] == 7200
+    assert all(job["status"] == "not_started_deadline" for job in batch.jobs)
+
+
+@pytest.mark.parametrize("allowance", [6000, 15000])
+def test_explicit_frozen_allowances_are_not_silently_reinterpreted(tmp_path, allowance):
+    batch = _batch(tmp_path)
+    cfg = {**batch.cfg, "trial_wall_seconds": allowance}
+    batch.path.write_text(json.dumps(cfg))
+    assert Batch(batch.path).cfg["trial_wall_seconds"] == allowance
 
 
 def test_outcome_and_phase_times_come_from_the_runner_log(tmp_path):

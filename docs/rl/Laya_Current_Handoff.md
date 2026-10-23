@@ -534,3 +534,19 @@ Freshness continues6 completed/6 running with3 complete pairs; C6-v2 tied2/6
 (known3 each), available research1876/1876 repair vs0/1615 control; no earned
 research observed and control research endpoint remains unknown. Existing
 55-minute reads and03:53 accounting remain; keep hard end03:51:47 Oct24.
+
+## Wall allowance policy and safe current amendments (2026-10-24 00:17 IST)
+
+User selected7200 seconds everywhere, current only if safe. New ordinary cohorts
+on either host use7200 explicitly; research15000 is retained. Shared source
+default/generators updated. C26/C27 each verified60 queued, zero worlds/admissions,
+drained/stopped, original manifests/freezes preserved, budget-only amended7200,
+and same wrappers resumed with --resume behind unchanged C25 dependency. Both
+units active and60 queued, source/mod/save/plan hashes intact; unit hard horizon
+not extended. Latest admission for Oct27 18:00 deadline is now16:00 IST.
+C25 and Starship freshness have cached running deadlines and no safe hot
+extension:retain their full current6000-second comparisons and history. No
+controller notification. Detailed evidence and future activation contract:
+[Laya wall allowance](Laya_Wall_Allowance_2026-10-24.md); main-repo operation
+records:data/laya-orchestration/wall-allowance-7200-20261024/. No mod/Factorio
+restart required. Freeze future Python supervisors with the updated default.

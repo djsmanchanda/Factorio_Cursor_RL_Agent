@@ -44,6 +44,7 @@ def test_fresh_manifest_pins_deadline_counts_and_separate_ports(tmp_path):
     assert dt.datetime.fromisoformat(result['until']) == end - dt.timedelta(minutes=5)
     for entry in result['cohorts']:
         cfg = json.loads((Path(entry['root']) / 'batch.json').read_text())
+        assert cfg['trial_wall_seconds'] == (15000 if entry['id'] == 'research' else 7200)
         assert len(cfg['arms']) * len(cfg['seeds']) <= 60
         assert all(a['extra_args'] == ['--research-target', 'mining-productivity-4'] for a in cfg['arms'])
         assert Path(cfg['host_budget']['registry']) == Path(entry['root']).parent

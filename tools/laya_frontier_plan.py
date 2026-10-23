@@ -6,6 +6,7 @@ import datetime as dt
 import hashlib
 import json
 from pathlib import Path
+from tools.laya_batch_defaults import DEFAULT_TRIAL_WALL_SECONDS
 
 CATALOG = 'docs/rl/laya_ops_guidelines.json'
 
@@ -51,11 +52,11 @@ def variants(catalog: dict) -> dict[str, dict]:
 def cohorts() -> list[dict]:
     return [
         dict(id='sampling', variants=['control', 'epsilon45', 'temperature3', 'families', 'novelty4'],
-             seed_start=80600, seed_count=12, concurrency=18, wall=6000, ticks=540000, ports=39000, depends=[]),
+             seed_start=80600, seed_count=12, concurrency=18, wall=DEFAULT_TRIAL_WALL_SECONDS, ticks=540000, ports=39000, depends=[]),
         dict(id='capital', variants=['control', 'mall-flat', 'foundation8', 'batch-free', 'steel30'],
-             seed_start=80700, seed_count=12, concurrency=18, wall=6000, ticks=540000, ports=39100, depends=['sampling']),
+             seed_start=80700, seed_count=12, concurrency=18, wall=DEFAULT_TRIAL_WALL_SECONDS, ticks=540000, ports=39100, depends=['sampling']),
         dict(id='bottleneck', variants=['control', 'deepest16', 'parallel-goals', 'retry-free', 'feedstock16'],
-             seed_start=80800, seed_count=12, concurrency=18, wall=6000, ticks=540000, ports=39200, depends=['capital']),
+             seed_start=80800, seed_count=12, concurrency=18, wall=DEFAULT_TRIAL_WALL_SECONDS, ticks=540000, ports=39200, depends=['capital']),
         dict(id='research', variants=['control', 'ramp125', 'ramp4'], seed_start=80900, seed_count=4,
              concurrency=6, wall=15000, ticks=1080000, ports=39300, depends=[]),
     ]
