@@ -31,7 +31,7 @@ Paired contrasts, 40 pairs each (newer-only : older-only, two-sided sign test):
 | power route refusal | 9/6 | 14/8 | **90/8** |
 | loan-release refusals (journals) | 2 in 2 worlds | 0 | 2 in 2 worlds |
 
-## Baseline decision (2026-10-23 18:20 IST): integrated `d8a4825`
+## Baseline decision (2026-10-23 18:16 IST): integrated `d8a4825`
 
 - **Integration accepted as the base.** It is a refactor plus acceptance diagnostics and is meant to change no decision. Across 40 pairs no endpoint moves consistently. C2 and C3 lean toward integrated (9:7, 9:4), while C5 ever and new Laya C6 lean toward credit (8:10, 6:11). Legacy C6 ever is 6 vs 11, and its final is equal (6/6). Tool errors and safety stops stay at zero. This is read as neutral within run-to-run noise, not as an improvement. The C6 lean toward credit is recorded and should be checked again in the C24/C25 control arms (both run `d8a4825`).
 - **Retention `3d221aa` not adopted.** New Laya C6 rises (14:5), but C5 final collapses: 1 of 40 retain runs keeps it, against 7 integrated (1:7). Power-route refusals rise about sixfold (90 in 8 runs vs 14 in 8). The mechanism keeps loans on their cells; the refusal increase and the final-window plastic loss are not explained. Explain them before any retest.

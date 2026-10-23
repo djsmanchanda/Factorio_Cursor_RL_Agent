@@ -103,4 +103,4 @@ C23 final (2026-10-23 15:40 IST): 120/120 completed + 30 cut. New Laya C6 29/37 
 
 C24 (prepared by thread cb16c604, waiting): 120 planned = 60 seeds 79500–79559 × integrated d8a4825 / steel 5fb6371; ports 38100/31100. C25 (waiting behind C24): 120 planned = 60 seeds 79560–79619 × integrated / isolated backing patch; ports 38200/31200. Both gated on C22/C23 closure and the baseline decision.
 
-C22 final (2026-10-23 17:38 IST): 120/120 completed + 30 cut. New Laya C6 23/18/27, C5 final 5/7/1 for credit/integrated/retain. Baseline d8a4825 decided; retention not adopted. [Result](Laya_C22_Result_2026-10-23.md). C24/C25 gate released 18:20 IST.
+C22 final (2026-10-23 17:38 IST): 120/120 completed + 30 cut. New Laya C6 23/18/27, C5 final 5/7/1 for credit/integrated/retain. Baseline d8a4825 decided; retention not adopted. [Result](Laya_C22_Result_2026-10-23.md). C24/C25 gate released 18:16 IST.

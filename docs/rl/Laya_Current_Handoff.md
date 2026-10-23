@@ -340,6 +340,6 @@ C23 (05:56 IST) tests the C6 receipt menu fix `3b7d702` against integrated `d8a4
 
 C19 is written up and `b372672` stays reverted; C20/C21 are superseded by C22. Cohorts are now planned at about 120 jobs (user): C22 and C23 are 120 each. Active: C22, C23.
 
-## Baseline decided; C24/C25 released (2026-10-23 18:20 IST)
+## Baseline decided; C24/C25 released (2026-10-23 18:16 IST)
 
 After full C22/C23 accounting the baseline is integrated `d8a4825` ([C22 result](Laya_C22_Result_2026-10-23.md), [C23 result](Laya_C23_Result_2026-10-23.md)); retention and receipt are not adopted. The research-implementation gate is ready, so C24 (steel `5fb6371`) admits now and C25 (backing patch) follows. The code line is `work/miniship/laya-research-orchestrator-20261023`; next free ports 38300+.
