@@ -642,3 +642,16 @@ the earlier enabled/02:23/13:23 timer notes. Systemd remains independently bound
 No Opus notification; shared observer unchanged. On user continuation, read the
 completion state and run checkin.py --cleanup, then finalize once all mapped
 jobs are terminal; do not treat the disabled schedule as a paused campaign.
+
+## Checks explicitly re-enabled here (2026-10-24 04:02 IST)
+
+User answered "Re-enable checks in this thread." Re-enabled the SAME completion
+monitor (55 minutes, next04:56:53 IST) and terminal task (13:23 IST), both bound
+to94dcfaf2-9531-4234-bde5-b6ae616de9b1. No duplicate/new timer or thread; old-window
+tasks stay disabled, shared Opus observer unchanged and no controller message.
+This supersedes the preceding OFF/no-next-wake notes. Remote state.schedules
+records the reactivation/next times; refreshed prompts carry current ownership,
+host target22 already restored, no extra trials, cleanup and self-disable rules.
+Immediate04:01 IST check:58 new jobs complete/14 running/none queued; capital12
+complete (original60/60), bottleneck46 complete/14 running, zero freeze errors.
+Hard end13:21:41 unchanged; no world/runner restart or budget amendment.

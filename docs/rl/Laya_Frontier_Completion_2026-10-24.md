@@ -82,15 +82,15 @@ Owned user units are `laya-frontier-completion-host-20261024.service`,
 the window independently of model authentication. Unit expiry is set before
 the deadline with termination margin.
 
-Completion-specific timers were initially created at a 55-minute cadence and
-13:23 IST for terminal accounting. **Both are currently disabled, with no next
-wake**, superseding the earlier 02:23:07/13:23 schedule notes. A bounded trace
-review at 02:49 IST found T3 UI WebSocket calls to `scheduledTasks.setEnabled`:
-the old-window monitor was disabled around 01:25 IST and the completion-specific
-monitor around 01:36 IST; both corresponding terminal timers are also disabled.
-Do not recreate timers to override that UI state. The user has been offered an
-optional choice to re-enable checks here; leave them off unless requested.
-Exact task IDs/readbacks are in `state.schedules`. Both completion tasks are bound to thread
+At **04:01 IST**, the user explicitly requested re-enabling checks in this
+thread. Both existing completion-specific timers are now enabled: the
+**55-minute monitor next runs at 04:56:53 IST**, and terminal accounting runs
+at **13:23 IST** on October 24. This supersedes the prior disabled/no-next-wake
+state. No new task IDs or threads were created. A bounded earlier trace review
+identified T3 UI `scheduledTasks.setEnabled` calls behind the earlier disabling;
+respect any future UI disable rather than recreating tasks to override it.
+Exact task IDs/readbacks and the user-authorized reactivation are recorded in
+`state.schedules`. Both completion tasks are bound to thread
 `94dcfaf2-9531-4234-bde5-b6ae616de9b1`; no new thread or subagent was created.
 The shared Opus/Miniship observer was left unchanged and
 no controller notification was sent. The parent remains on managed Personal_2;
@@ -129,8 +129,8 @@ before the bottleneck supervisor resumed with its remaining original systemd
 allowance. This bounds the initial activity to12 capital plus6 bottleneck worlds
 without introducing a second set of trials. Existing memory/liveness admission
 checks still apply. Both owned timer prompts carry this amendment and the
-instruction to restore target22 when capital finishes, but the timers are now
-disabled as described above. The13:21:41 hard end and no-Opus-notification
+instruction to restore target22 when capital finishes; that restoration is now
+complete and timer prompts have been refreshed. The13:21:41 hard end and no-Opus-notification
 requirement remain. Preserve the differing load epoch when reporting timing.
 
 ## Capital complete; bottleneck continues, 2026-10-24 02:51 IST
@@ -158,5 +158,21 @@ CLI. Bottleneck retains its 18-world cohort limit; no world was restarted or
 budget changed. The command/readback receipt is
 `amendments/parallel-six-20261024-v1/target22-restore.json`. The capital unit is
 inactive; host and bottleneck units continue under the existing bounded window.
-With T3 timers off, systemd still enforces the cutoff; final accounting and
-earlier idle-host cleanup need a user continuation or re-enabled monitoring.
+At that observation the T3 timers were off; systemd independently enforced the
+cutoff. The user's later reactivation below restores scheduled accounting.
+
+## Checks re-enabled in this thread, 2026-10-24 04:02 IST
+
+On the user's explicit answer, re-enabled the same completion-specific monitor
+and terminal tasks, both bound to this thread. The next monitor is 04:56:53 IST;
+the 13:23 IST terminal check remains a fallback. Refreshed prompts describe the
+current parallel workflow, already-restored host target22, completed capital,
+frozen inputs, original deadline, no extra trials/adoption and no Opus messages.
+They stop the owned idle host and disable both completion timers once all mapped
+jobs are terminal and cleanup is verified. The shared Opus observer is unchanged.
+
+The immediate check at04:01:14 IST found58/72 new jobs completed and14 running,
+none queued:capital12 complete, bottleneck46 complete/14 running. Source/freeze
+checks passed; capital unit inactive, host and bottleneck units active. This is
+an interim status, not a final bottleneck result. No runner, world, manifest,
+budget or systemd deadline was changed while restoring the timers.
