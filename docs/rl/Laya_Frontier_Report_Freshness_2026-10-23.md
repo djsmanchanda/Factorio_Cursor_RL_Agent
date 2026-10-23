@@ -107,3 +107,27 @@ jobs and any later cuts/caps remain in terminal accounting. No new lifecycle
 action was taken for this observation; existing55-minute monitoring and hard
 deadline continue. The immutable remote snapshot is
 `data/laya-orchestration/frontier-starship-20261023/observations/freshness-first-exposure-20261023T2251IST.json`.
+
+## Terminal diagnostic, 2026-10-24 00:41 IST
+
+All12 jobs completed with six matched pairs and zero caught exceptions. Repair
+has2,313/2,313 usable post-initial research observations versus0/2,223 control;
+research offers/selections are4,236/142 versus14/0. These remain repeated samples
+within the first500 decisions/job. Terminal research acceptance is known6/6 in
+repair,0/6 in control. No earned completion is observed, and control's unknown
+endpoints cannot be counted as measured failures. Neither arm advances a demand
+rung. The primary observation mechanism is exercised.
+
+C6-v2 is4/6 repair versus5/6 control, paired candidate-only/control-only0:1;
+strict C2/C3/C5 ever is4/3/4 versus5/4/5, final4/3/0 versus5/4/0. Strict C6
+ever/final is2/1 in each arm. Laya C6 capped-time means are107 versus91 game
+minutes (150-minute cap); no speed or downstream performance gain is observed.
+No performance adoption follows. The full
+[terminal result](Laya_Frontier_Result_2026-10-24.md) retains every original and
+supplemental job, source checks, research unknowns and timing limitations.
+
+At00:46:17 IST the owner closed this window: idle owned host scheduler stopped,
+all owned units inactive/cgroups empty, both continuation timers disabled.
+Shared Miniship55-minute monitoring remains enabled. User host configuration
+is retained; no further Starship lifecycle action is required. No controller
+notification was sent.

@@ -2,7 +2,7 @@
 
 # Laya current evidence index
 
-Updated October 21, 2026. The current owner/engine section at the end supersedes older lifecycle snapshots. Start with [the runner contract](Laya_Clean_Runner.md)
+Updated October 24, 2026. The current owner/engine section at the end supersedes older lifecycle snapshots. Start with [the runner contract](Laya_Clean_Runner.md)
 and [strategy rules](Laya_Strategy_Guidelines.md); read the relevant dated record
 below for evidence. Architecture/ownership remain in [architecture](../architecture.md).
 
@@ -550,3 +550,31 @@ controller notification. Detailed evidence and future activation contract:
 [Laya wall allowance](Laya_Wall_Allowance_2026-10-24.md); main-repo operation
 records:data/laya-orchestration/wall-allowance-7200-20261024/. No mod/Factorio
 restart required. Freeze future Python supervisors with the updated default.
+
+## Starship frontier closed (2026-10-24 00:46 IST)
+
+The [terminal result](Laya_Frontier_Result_2026-10-24.md) supersedes earlier
+Starship liveness/timer snapshots. All219 planned jobs reconcile:147 completed,
+72 cancelled before starting; no missing, queued or running statuses. Original
+scored192 are120 completed/72 cuts, separate smoke15 completed and freshness12
+completed. Frozen source/asset checks pass; caught exceptions0, typed bug events
+remain separately recorded. No confirmation/A/A, performance adoption or new
+training. Every owned unit is inactive with zero PID/empty cgroups; idle host
+scheduler stopped and both frontier timers disabled. Shared Miniship55-minute
+observer remains enabled, next2026-10-24 01:35:51 IST. No controller message.
+
+Freshness diagnostic has six complete pairs: C6-v2 repair4/6 vs control5/6,
+paired0:1. Usable research2,313/2,313 repeated post-initial samples vs0/2,223;
+offers/selections4,236/142 vs14/0. Research terminal endpoints known6/6 repair
+and0/6 control; no earned completion observed, no demand-rung advance. Control
+research stays unknown. This confirms mechanism exposure without a downstream
+win. Original growth pilots remain unexercised. Timing artifacts disclose a
+missing foundation8 strict-C3 timestamp; ledger attainment remains authoritative.
+
+Remote state is terminal and links final-accounting.json plus immutable00:41
+observation and terminal-cleanup receipts. Preserve all219 planned IDs, attempt
+events and frozen sources. Host target22 and thermal200/210 configuration are
+retained with the scheduler stopped. No further Starship lifecycle action or
+wake remains; later work requires a fresh authorized window/freeze. Miniship
+C26/C27 are already safely amended7200 before admission; C25 keeps6000. Do not
+overwrite those amendments from the observer's older blanket frozen-budget note.
