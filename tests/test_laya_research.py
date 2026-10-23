@@ -39,6 +39,35 @@ def pair(tick, *, made=0, consumed=0, progress=0, complete=False, inventory=10):
     return observed, facts
 
 
+def test_unchanged_science_reports_keep_fresh_research_evidence(tmp_path, monkeypatch):
+    from orchestrator.game_bridge import GameBridge, load_json
+
+    monkeypatch.setattr("orchestrator.game_bridge.RconClient", lambda *a, **kw: object())
+    bridge = GameBridge(tmp_path, retain_reports=2)
+    directory = tmp_path / "factorio_mod/science_reports"
+    directory.mkdir(parents=True)
+    objective = ResearchObjective()
+    for tick in (100, 1000, 2000):
+        raw = reports(tick)
+        path = directory / f"science_status_{tick}.json"
+
+        def command(text):
+            assert text.startswith("/science_status ")
+            path.write_text(json.dumps(raw["science"]))
+            return ""
+
+        monkeypatch.setattr(bridge, "command", command)
+        raw["science"] = load_json(bridge.science_status("nauvis", "player"))
+        observation = research_observation(raw, tick=tick, surface="nauvis", force="player",
+                                           requested="mining-productivity-4")
+        _, facts = pair(tick)
+        evidence = objective.observe(observation, facts)
+        assert evidence["available"], evidence["reason"]
+        assert evidence["previous"]["tick"] == tick
+        assert not evidence["earned"]
+        assert len(list(directory.glob("*.json"))) <= 2
+
+
 @pytest.mark.parametrize("mutation", ["stale", "force", "level", "identity"])
 def test_research_report_fails_closed(mutation):
     raw = reports()

@@ -181,11 +181,10 @@ def test_collect_waits_for_expected_report_instead_of_newer_concurrent_file(
     assert collected.name == "research_status_request42.json"
 
 
-def test_collect_drops_report_identical_to_previous_ignoring_tick(
+def test_collect_keeps_later_observation_when_only_tick_changed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """If nothing has changed, no new log: the repeat is deleted and the
-    caller is handed the report it duplicates."""
+    """Unchanged state at a later tick is fresh evidence for validators."""
     directory = tmp_path / SUBDIR
     body = {"force": "player", "research_queue": [], "options": ["a"], "ok": True}
     first = _write_named_report(
@@ -197,8 +196,25 @@ def test_collect_drops_report_identical_to_previous_ignoring_tick(
         bridge, directory, monkeypatch, "layout_0002.json", {**body, "tick": 200},
     )
 
-    assert collected == first
-    assert first.exists()
+    assert collected == directory / "layout_0002.json"
+    assert json.loads(collected.read_text())["tick"] == 200
+    assert first.exists() and collected.exists()
+    assert len(list(directory.glob("*.json"))) == 2
+
+
+def test_collect_deduplicates_identical_samples_at_the_same_tick(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    directory = tmp_path / SUBDIR
+    body = {"force": "player", "tick": 100, "ok": True}
+    first = _write_named_report(tmp_path, "layout_0001.json", body, 1_000_000_000)
+    bridge = _bridge(tmp_path, monkeypatch)
+
+    collected = _collect_with_fresh_report(
+        bridge, directory, monkeypatch, "layout_0002.json", body,
+    )
+
+    assert collected == first and first.exists()
     assert not (directory / "layout_0002.json").exists()
     assert len(list(directory.glob("*.json"))) == 1
 

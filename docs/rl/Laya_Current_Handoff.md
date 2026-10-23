@@ -408,3 +408,21 @@ evidence only. Main state path:data/laya-orchestration/frontier-starship-2026102
 No real-base or installed-mod action. Read the state manifest for actual units,
 deadlines and current counts before resuming; later launch evidence supersedes
 this prepared-state entry. No subagents are authorized for this window.
+
+## Starship continuation and report freshness (2026-10-23 20:35 IST)
+
+Thread `94dcfaf2-9531-4234-bde5-b6ae616de9b1` on Miniship now supervises the
+existing Starship window via SSH. The earlier Starship monitoring turns failed;
+their two schedules were backed up and disabled, and replacement schedules are
+bound to this thread. Read remote state for IDs and the unchanged hard end,
+2026-10-24 03:51:47 IST. No subagents or account changes.
+
+[Report-freshness diagnosis and repair protocol](Laya_Frontier_Report_Freshness_2026-10-23.md)
+records the first causal failure: duplicate-state science reports were replaced
+with an old tick, so research freshness failed after the initial observation.
+The isolated source fix passed70 focused checks and the fast gate (1,354 passed,
+one skipped). This is offline repair evidence. Original research-growth pilots
+remain unexercised/inconclusive; C6-v2 results are separate. Any new repair
+comparison needs its own immutable freeze and must queue behind the original
+screens, using the same deadline and shared host registry. Active sources,
+batches, variants and installed mods remain untouched.
