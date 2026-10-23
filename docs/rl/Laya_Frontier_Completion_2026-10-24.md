@@ -43,9 +43,13 @@ Thus the joined ledgers have 120 rows, comprising **72 new admissions and 48
 carried completions**. They are not 120 new trials. Original cancellation events
 remain evidence; they are linked rather than replayed as new cancellation orders.
 
-Capital precedes bottleneck. Their cohort concurrency remains 18. A new shared
-registry/host scheduler preserves the user-selected target 22, maximum 24,
-thermal settings 200/210, and the original memory and liveness controls. Private
+Capital launched first. At 01:35 IST, the user's request to start six more jobs
+authorized bottleneck to overlap capital. Their cohort concurrency remains 18.
+The shared host target is temporarily 18, admitting six bottleneck worlds beside
+the 12 capital worlds; bottleneck may fill freed slots as capital finishes.
+Restore the prior target 22 once capital is terminal with zero reservations.
+Maximum 24, thermal settings 200/210, and the original memory and liveness
+controls are preserved. Private
 world namespaces end in `-completion-20261024`; capital ports start at
 39500/31500 and bottleneck at 39600/31600. Existing world evidence and installed
 mods are untouched. No real-base mutation or installed-mod deployment occurs.
@@ -98,3 +102,29 @@ and world processes are empty, retain every failed/unstarted/interrupted or
 unknown outcome, publish final own-control accounting, and disable both owned
 schedules. Leave other-owner schedules and campaigns untouched. Do not cancel
 queued jobs to reprioritize another diagnostic or to select an interim winner.
+
+## Six additional concurrent jobs, 2026-10-24 01:35 IST
+
+The user requested six more starts if the existing work was healthy. At
+01:32:59 IST all 12 capital heartbeats were fresh, no process failure was
+observed, and 10.9 GiB was available. The host reported about 100 mean UPS;
+the manual host target remained authoritative. This is startup/liveness
+evidence, not evidence that the experimental policies are successful.
+
+Before any bottleneck admission, only its waiting supervisor was stopped.
+Original manifest/freeze/status/plan/events and host configuration were archived
+under `amendments/parallel-six-20261024-v1/`. The sole batch change removes
+`depends_on: [capital]`; concurrency18, all60 IDs/order,7200-second allowance,
+source/variants, tick cap and original deadline remain unchanged. The stopped
+controller had no admitted world or attempt; its shutdown receipt is retained.
+No capital world was stopped or restarted. Amended hashes and an append-only
+preadmission receipt are in the completion ledger/state.
+
+The supported scheduler CLI set target18 and published a fresh18-slot gate
+before the bottleneck supervisor resumed with its remaining original systemd
+allowance. This bounds the initial activity to12 capital plus6 bottleneck worlds
+without introducing a second set of trials. Existing memory/liveness admission
+checks still apply. Both owned timer prompts now carry this amendment and the
+instruction to restore target22 when capital finishes. The13:21:41 hard end,
+02:23:07 monitor,13:23 terminal accounting and no-Opus-notification requirement
+are unchanged. Preserve the differing load epoch when reporting timing.

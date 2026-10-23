@@ -606,3 +606,18 @@ Both schedules are bound here, with no new thread/subagent. Shared Opus/Miniship
 observer untouched; no controller message. Run the new root's `checkin.py
 --cleanup` on each wake, reconcile72 new IDs plus48 carried records, stop only
 owned units at completion/cutoff, and disable the two owned schedules afterward.
+
+## Starship six extra concurrent worlds (2026-10-24 01:35 IST)
+
+Latest user instruction starts six more jobs if healthy. All12 capital runners
+had fresh heartbeats/no observed process failure and10.9GiB available. Before
+any bottleneck admission, archived its waiting-supervisor contract/status and
+host controls; stopped only that waiting supervisor, removed its capital
+dependency, amended freeze/state hashes and resumed it under the original
+absolute deadline. No capital world restarted. Shared target is temporarily18
+for12 capital+6 bottleneck initially; bottleneck concurrency stays18 and can
+fill slots as capital finishes. Restore prior host target22 after capital is
+terminal with no reservations, as recorded in both owned timer prompts. All72
+mapped IDs, budgets, source/assets/order/ticks/predicates and13:21:41 hard end
+remain. No Opus notification; shared observer untouched. The completion record
+and remote amendments/parallel-six-20261024-v1/ supersede sequential-launch notes.
