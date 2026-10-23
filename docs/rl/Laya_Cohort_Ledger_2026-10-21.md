@@ -108,3 +108,5 @@ C22 final (2026-10-23 17:38 IST): 120/120 completed + 30 cut. New Laya C6 23/18/
 C26 (queued 2026-10-23 22:30 IST, waits for C24+C25): 60 planned = 30 seeds 79620–79649 × control / ready (2d9b4b5 + mall_loan_reconciliation). C27 (same): 60 planned = 30 seeds 79650–79679 × control / linear3 (2d9b4b5 + linear wait pacing). Results pending.
 
 C24 final (2026-10-23 23:28 IST): 120/120 completed. C2 42/41 (12:13), new Laya C6 23/26; steel slower to strict C2 (21:33). Steel not adopted. [Result](Laya_C24_Result_2026-10-23.md). C25 admitting since.
+
+C26/C27 (2026-10-23): cancelled before any start, 60 cancelled_queued each, superseded by C26b/C27b (2026-10-24 00:50 IST; same design and seeds, 7,200 s wall, ports 38500/38600). Results pending.
