@@ -96,6 +96,29 @@ def test_completed_requested_level_needs_fresh_factory_earned_supply():
     assert result["requested"] == "mining-productivity-4"
 
 
+@pytest.mark.parametrize("growth", [1.25, 2.0, 4.0])
+def test_demand_growth_changes_only_after_measured_supply_and_is_restore_bound(growth):
+    objective = ResearchObjective(sustain_ticks=600, growth_factor=growth)
+    objective.observe(*pair(0), service_ok=True)
+    assert objective.state["target"] == .25
+    restored = ResearchObjective(sustain_ticks=600, growth_factor=growth, state=objective.snapshot())
+    data = pair(600, made=3, consumed=3, progress=.003)
+    result = objective.observe(*data, service_ok=True)
+    assert result == restored.observe(*data, service_ok=True)
+    assert result["target"] == .25 * growth and not result["earned"]
+    with pytest.raises(ValueError, match="incompatible"):
+        ResearchObjective(sustain_ticks=600, growth_factor=3.0, state=result)
+    # Demand advancement grants no research credit; a complete target still
+    # requires the identical fresh earned-supply predicate in every arm.
+    assert objective.observe(*pair(1200, made=10, consumed=10, complete=True), service_ok=True)["earned"]
+
+
+@pytest.mark.parametrize("growth", [True, 0, 1, -1, 4.01, float("inf"), float("nan"), "2"])
+def test_research_growth_rejects_invalid_values(growth):
+    with pytest.raises(ValueError, match="growth factor"):
+        ResearchObjective(growth_factor=growth)
+
+
 def test_funded_lab_geometry_has_no_scaffolding_or_item_grants():
     plan = logistic_lab_row(6, {PACK: 1, "chemical-science-pack": 1})
     validate_no_collisions([("labs", plan)])

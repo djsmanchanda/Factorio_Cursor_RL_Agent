@@ -395,3 +395,16 @@ source corpus. Use matched fixed0.25 versus progressive arms with the same
 new objective, budgets and source; begin long-window pilots at1,080,000 ticks /
 15,000 active-wall seconds only after selecting and freezing eligible starts.
 Preserve original-attempt statuses and prefix/continuation costs separately.
+
+## Starship experimental window prepared (2026-10-23 16:08 IST)
+
+[Frontier protocol](Laya_Frontier_2026-10-23.md) records the user's new Starship
+window through2026-10-24 03:51:47 IST, <=60 total trials per cohort, and14 candidate
+factors. The source is independently isolated from the dirty root and Miniship
+C22–C25; it builds on9ac7937 without declaring those common fixes adopted.
+Initial192 planned trials await disposable wiring verification and a fresh freeze.
+Fast gate1353 passed/1 skipped;110 focused checks and1080-state replay are offline
+evidence only. Main state path:data/laya-orchestration/frontier-starship-20261023/.
+No real-base or installed-mod action. Read the state manifest for actual units,
+deadlines and current counts before resuming; later launch evidence supersedes
+this prepared-state entry. No subagents are authorized for this window.

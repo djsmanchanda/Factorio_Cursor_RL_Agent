@@ -19,7 +19,9 @@ later fine-tuning.
 from __future__ import annotations
 
 import json
+import math
 import random
+from collections import Counter
 from fnmatch import fnmatch
 from collections.abc import Mapping
 from pathlib import Path
@@ -138,37 +140,101 @@ def matches(when: Mapping, features: Mapping) -> bool:
     return True
 
 
+def _finite_number(value: float, name: str, *, allow_zero: bool = False) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(f"{name} must be a finite {'nonnegative' if allow_zero else 'positive'} number") from None
+    if isinstance(value, (bool, str)) or not math.isfinite(number) or number < 0 or (not allow_zero and number == 0):
+        raise ValueError(f"{name} must be a finite {'nonnegative' if allow_zero else 'positive'} number")
+    return number
+
+
 class GuidedPolicy:
-    """Sample options in proportion to doc-rule weights, with an exploration floor."""
+    """Sample doc-rule weights; experimental keywords are fresh-run only until recovery identity supports them."""
 
     authority = "guided_exploration"
     model_ref = GUIDED_MODEL
 
-    def __init__(self, seed: int, epsilon: float = 0.15, preferences: Mapping[str, list] | None = None) -> None:
-        if not 0 < epsilon <= 1:
+    def __init__(self, seed: int, epsilon: float = 0.15, preferences: Mapping[str, list] | None = None, *,
+                 temperature: float = 1.0, exploration_mode: str = "options", novelty_strength: float = 0.0) -> None:
+        epsilon = _finite_number(epsilon, "epsilon")
+        if epsilon > 1:
             raise ValueError("epsilon must be in (0, 1]")
+        self.temperature = _finite_number(temperature, "temperature")
+        if exploration_mode not in ("options", "families"):
+            raise ValueError("exploration_mode must be 'options' or 'families'")
+        self.exploration_mode = exploration_mode
+        self.novelty_strength = _finite_number(novelty_strength, "novelty_strength", allow_zero=True)
         self.rng = random.Random(seed)
         self.epsilon = epsilon
         self.preferences = dict(preferences) if preferences is not None else load_preferences()
+        for prefs in self.preferences.values():
+            for pref in prefs:
+                _finite_number(float(pref["weight"]), "preference weight", allow_zero=True)
 
     def distribution(self, state: Mapping, menu: Mapping) -> list[dict]:
         seen = {g["rule_id"] for g in state.get("guidelines", [])}
         active = {rule: prefs for rule, prefs in self.preferences.items() if rule in seen}
         features = option_features(state, menu)
         rows = []
+        factors = []
         for option in menu["options"]:
             f = features[option["option_id"]]
             weight, hits = 1.0, []
+            priors = []
             for rule, prefs in active.items():
                 for pref in prefs:
                     if matches(pref["when"], f):
-                        weight *= float(pref["weight"])
+                        factor = _finite_number(float(pref["weight"]), "preference weight", allow_zero=True)
+                        weight *= factor
                         hits.append(rule)
+                        priors.append({"rule_id": rule, "weight": factor})
             rows.append({"option_id": option["option_id"], "need_id": f["need"], "weight": weight,
                          "rules": hits, "features": f})
+            factors.append(priors)
+        if not rows:
+            raise ValueError("guided policy requires at least one legal option")
         total = sum(r["weight"] for r in rows)
-        for row in rows:
-            row["probability"] = (1 - self.epsilon) * row["weight"] / total + self.epsilon / len(rows)
+        # Retain the original arithmetic and row shape for ordinary default calls: reordering
+        # normalization can change seeded choices at a cumulative-probability boundary.
+        defaults = self.temperature == 1 and self.exploration_mode == "options" and self.novelty_strength == 0
+        representable = all(row["weight"] > 0 or any(p["weight"] == 0 for p in priors)
+                            for row, priors in zip(rows, factors))
+        if defaults and math.isfinite(total) and total > 0 and representable:
+            for row in rows:
+                row["probability"] = (1 - self.epsilon) * row["weight"] / total + self.epsilon / len(rows)
+            if all(row["probability"] > 0 for row in rows):
+                return rows
+
+        prior_logs = [math.fsum(math.log(p["weight"]) for p in priors) if all(p["weight"] > 0 for p in priors)
+                      else -math.inf for priors in factors]
+        peak = max(prior_logs)
+        if peak == -math.inf:
+            raise ValueError("guided policy requires at least one positive prior weight")
+        # Ops logs factual binary history on options.features.tried; absent is unknown.
+        tried = [row["features"].get("tried") for row in rows]
+        novelty_logs = [math.log1p(self.novelty_strength) if value is False else 0.0 for value in tried]
+        # Center *before* dividing so even a subnormal temperature cannot overflow the peak.
+        logits = [(prior - peak) / self.temperature + novelty for prior, novelty in zip(prior_logs, novelty_logs)]
+        peak = max(logits)
+        weights = [math.exp(value - peak) for value in logits]
+        total = math.fsum(weights)
+        families = Counter(option["family"] for option in menu["options"])
+        for index, (row, option) in enumerate(zip(rows, menu["options"])):
+            exploration = (1 / len(families) / families[option["family"]]
+                           if self.exploration_mode == "families" else 1 / len(rows))
+            exploitation = weights[index] / total
+            row.update(weight=weights[index], weight_basis="max_scaled_effective",
+                       prior_log_weight=prior_logs[index] if math.isfinite(prior_logs[index]) else None,
+                       exploration_probability=exploration, exploitation_probability=exploitation,
+                       factors={"priors": factors[index], "temperature": self.temperature,
+                                "exploration_mode": self.exploration_mode,
+                                "novelty_strength": self.novelty_strength,
+                                "tried": tried[index] if type(tried[index]) is bool else None,
+                                "novelty_source": "options.features.tried",
+                                "novelty_multiplier": 1 + self.novelty_strength if tried[index] is False else 1.0})
+            row["probability"] = max((1 - self.epsilon) * exploitation + self.epsilon * exploration, math.ulp(0.0))
         return rows
 
     def choose(self, state: Mapping, menu: Mapping) -> dict:

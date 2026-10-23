@@ -79,6 +79,7 @@ class Settings:
     research_target: str | None = None
     research_progressive: bool = True
     research_sustain_ticks: int = 18000
+    research_growth_factor: float = 2.0
     max_wall_seconds: float | None = None
 WAIT_TICKS = (300, 1800)
 MAX_MENU = 20  # laya_state schema: options maxItems

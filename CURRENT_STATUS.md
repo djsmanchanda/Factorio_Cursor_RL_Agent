@@ -527,3 +527,10 @@ Added opt-in level-aware mining-productivity-4 completion, funded bot-built lab/
 ## 2026-10-23 15:41 IST — C24/C25 dependency-gated queues
 
 Started bounded disposable C24/C25 waiting supervisors on frozen verified harness1b2b7da, each120 jobs and zero admitted/reserved worlds at verification. Separate steel/credit-only arms preserve legacy540000-tick/6000-second windows, rotated seeds and distinct ports. They wait for predecessors plus explicit evidence-backed baseline settlement; no candidate is auto-adopted. Main-repository freeze.json files bind source/mod/harness hashes and the isolated C25 patch. Fresh heartbeats, reports and four-day/four-hour systemd limits verified. Lifecycle: automated owner closes C22/C23 and releases a matching baseline gate, or preserves/cancels these plans and creates new freezes if the base changes; no active-arm edit, installed scheduler change or mod redeploy.
+
+## 2026-10-23 16:08 IST — Starship frontier experiment source verified
+
+- Added opt-in temperature, family-balanced exploration and factual binary novelty, plus research-demand growth factors with unchanged .25 start and earned acceptance. Defaults remain unchanged; experimental sampling modes fail closed for ops capture/resume.
+- Preregistered 14 candidates, three 60-job screens and one 12-job research pilot (192 planned), all <=60 per cohort. Control derives from9ac7937 and is explicitly experimental. Hard end2026-10-24 03:51:47 IST; see docs/rl/Laya_Frontier_2026-10-23.md.
+- Evidence:110 integrated focused checks,41 harness/scheduler checks, fast gate1353 passed/1 skipped. Replay of1080 retained decisions confirms all12 policy/prior interventions change probabilities at some offered choices (exposure varies). No live outcome or adoption yet.
+- Lifecycle: freeze this commit, run private disposable wiring checks, then start owned bounded Starship units; no installed-mod/GUI/production action. Existing dirty root and Miniship cohorts preserved. No subagents; one separate Personal_2 Sol6.1 xhigh thread supplied policy source for main-agent review/integration.

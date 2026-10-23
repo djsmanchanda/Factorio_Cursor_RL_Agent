@@ -135,6 +135,10 @@ def main(argv=None) -> int:
         p.error("decisions must be >= 0 (0 = no limit) and measure ticks 300..18000")
     variant = load_variant(args.variant)
     settings, policy_options, runtime = apply_variant(variant)
+    if (args.ops_checkpoint_dir or args.ops_resume_bundle) and any(
+            policy_options.get(key, default) != default for key, default in
+            (("temperature", 1.0), ("exploration_mode", "options"), ("novelty_strength", 0.0))):
+        p.error("experimental guided modes are not supported by ops recovery identity; use fresh trials")
     settings = dataclasses.replace(settings, until_phase=args.until_phase or settings.until_phase,
                                    max_game_ticks=args.max_game_ticks or settings.max_game_ticks,
                                    research_target=args.research_target,

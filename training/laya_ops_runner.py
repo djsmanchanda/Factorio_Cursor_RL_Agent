@@ -865,6 +865,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     from orchestrator.research_operations import collect_research_reports, research_observation
     objective = (ResearchObjective(settings.research_target, progressive=settings.research_progressive,
                                   sustain_ticks=settings.research_sustain_ticks,
+                                  growth_factor=settings.research_growth_factor,
                                   state=recovery.get("research") if recovery else None) if settings.research_target else None)
     research = {}
     summary["laya_acceptance"] = {"C6": c6.snapshot()}

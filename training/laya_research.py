@@ -46,17 +46,26 @@ def _sample(observation, facts):
 
 
 class ResearchObjective:
-    def __init__(self, requested="mining-productivity-4", *, progressive=True, sustain_ticks=18000, state=None):
+    def __init__(self, requested="mining-productivity-4", *, progressive=True, sustain_ticks=18000,
+                 growth_factor=2.0, state=None):
         if type(sustain_ticks) is not int or sustain_ticks < 300:
             raise ValueError("research sustain window must be >=300 ticks")
+        if (type(growth_factor) not in (int, float) or not math.isfinite(growth_factor)
+                or not 1 < growth_factor <= 4):
+            raise ValueError("research growth factor must be finite and in (1, 4]")
         self.state = copy.deepcopy(state) if state is not None else {
             "version": VERSION, "requested": requested, "progressive": progressive,
+            "growth_factor": float(growth_factor),
             "sustain_ticks": sustain_ticks, "target": 0.25, "achieved": 0.0,
             "initial": None, "previous": None, "window": [], "rungs": [], "earned": False,
             "available": False, "research_units": 0.0}
         if (self.state.get("version") != VERSION or self.state.get("requested") != requested
-                or self.state.get("progressive") != progressive or self.state.get("sustain_ticks") != sustain_ticks):
+                or self.state.get("progressive") != progressive or self.state.get("sustain_ticks") != sustain_ticks
+                or self.state.get("growth_factor", 2.0) != growth_factor):
             raise ValueError("incompatible research objective state")
+        # Older bundles used the fixed doubling curriculum. They cannot restore
+        # into a different demand experiment, even though acceptance is unchanged.
+        self.state.setdefault("growth_factor", 2.0)
 
     def snapshot(self):
         return copy.deepcopy(self.state)
@@ -140,7 +149,7 @@ class ResearchObjective:
                 if not s["rungs"] or s["rungs"][-1]["rate"] != target:
                     s["rungs"].append({"rate": target, "tick": sample["tick"]})
                 if s["progressive"]:
-                    s["target"] *= 2
+                    s["target"] *= s["growth_factor"]
                     s["advanced"] = True
                     window.clear()
             return self.snapshot()

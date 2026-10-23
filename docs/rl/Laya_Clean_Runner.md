@@ -275,6 +275,10 @@ buffers maintained and no new tool/safety fault. Alternate pack consumers make
 attribution unknown. Target increases are never progress. The achieved rate,
 current demand, windows and prior rungs are separate persisted facts.
 `--fixed-science-target` freezes the initial 0.25 target for a matched contrast.
+Experimental variants may set `settings.research_growth_factor` in `(1, 4]`;
+the default is still 2. The initial 0.25 demand, sustain window, earned-supply
+requirements and completion predicate remain identical. Recovery binds this
+factor to its recorded state. See [the Starship experiment protocol](Laya_Frontier_2026-10-23.md).
 Lab capacity uses live research energy, normal lab speed and force speed bonus;
 measured consumption, rather than theoretical capacity, controls advancement.
 Research progress handles repeatable-level resets. The research objective also
