@@ -655,3 +655,21 @@ host target22 already restored, no extra trials, cleanup and self-disable rules.
 Immediate04:01 IST check:58 new jobs complete/14 running/none queued; capital12
 complete (original60/60), bottleneck46 complete/14 running, zero freeze errors.
 Hard end13:21:41 unchanged; no world/runner restart or budget amendment.
+
+## Keep awake, then automatically sleep (2026-10-24 04:22 IST)
+
+User authorized keeping Starship awake until jobs finish and explicitly asked
+automatic sleep once done. At04:15:64 new complete/8 running, freeze checks clean.
+Verified temporary user sleep/lid block inhibitor in
+laya-frontier-completion-awake-20261024.service; it performs final checkin/owned
+cleanup then releases. One YubiKey-approved root command armed the one-shot
+SYSTEM unit laya-frontier-autosleep-20261024.service. Its wait runs as djsm;
+only success after all120 joined records terminal/no reservations, cleanup
+verified/no owned world processes or freeze errors, owned units inactive and
+inhibitor released triggers privileged systemctl suspend, once. It times out
+without sleep if cleanup is not verified by hard end+90s. No power/SSH/polkit
+policy changes. Current receipts:remote sleep-guard.json and auto-sleep.json;
+details state.sleep_guard/state.automatic_sleep. Actual sleep is pending jobs.
+Both existing check-in prompts now expect possible intentional SSH loss after
+completion; do not restart/wake worlds or infer failure. Retrieve final reports
+when host reachable. No Opus notification. See completion record for full setup.

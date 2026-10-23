@@ -176,3 +176,38 @@ none queued:capital12 complete, bottleneck46 complete/14 running. Source/freeze
 checks passed; capital unit inactive, host and bottleneck units active. This is
 an interim status, not a final bottleneck result. No runner, world, manifest,
 budget or systemd deadline was changed while restoring the timers.
+
+## Stay awake until done, then suspend (2026-10-24 04:22 IST)
+
+The user first authorized keeping Starship awake until the remaining jobs
+finish, then explicitly requested automatic sleep once done. At04:15 IST the
+window had64/72 new jobs complete and8 running, with no freeze errors.
+
+A temporary user service, `laya-frontier-completion-awake-20261024.service`,
+holds a verified `sleep:handle-lid-switch` block inhibitor. Its `sleep_guard.py`
+checks job states and owned world units, runs a final `checkin.py --cleanup`
+once jobs are terminal and world units inactive, saves
+`sleep-guard-final-checkin.log`, and exits to release the blocker. The existing
+campaign hard end bounds the guard. No desktop configuration changed.
+
+The SSH session's `CanSuspend` returned `challenge`, so automatic suspend needed
+one YubiKey-approved root command. The resulting one-shot SYSTEM service
+`laya-frontier-autosleep-20261024.service` is armed. Its completion wait,
+`auto_sleep_wait.py`, runs as `djsm`, not root. Only a successful wait triggers
+the privileged `ExecStartPost=/usr/bin/systemctl suspend`, once. No password,
+SSH/polkit authorization change, permanent power policy or recurring suspend
+timer was introduced.
+
+The wait requires all120 joined records terminal, no reservations, verified
+cleanup, no live owned world processes or freeze errors, inactive host/capital/
+bottleneck units, and the temporary guard released/inactive. It cancels without
+sleep if those conditions are not met by the campaign hard end plus90seconds.
+Setup/verification are in state.sleep_guard/state.automatic_sleep; live receipts
+are `sleep-guard.json` and `auto-sleep.json`. Unit readback confirms the normal
+user wait is active and the privileged suspend action is registered. Actual
+suspend has not yet occurred and is intentionally deferred until completion.
+
+Both existing timer prompts record the user's intent. After automatic suspend,
+SSH unavailability is expected and does not establish failed jobs or authorize
+a restart. Final reports remain on Starship; retrieve them when it is reachable.
+No Opus notification was sent.
