@@ -343,3 +343,13 @@ C19 is written up and `b372672` stays reverted; C20/C21 are superseded by C22. C
 ## Baseline decided; C24/C25 released (2026-10-23 18:16 IST)
 
 After full C22/C23 accounting the baseline is integrated `d8a4825` ([C22 result](Laya_C22_Result_2026-10-23.md), [C23 result](Laya_C23_Result_2026-10-23.md)); retention and receipt are not adopted. The research-implementation gate is ready, so C24 (steel `5fb6371`) admits now and C25 (backing patch) follows. The code line is `work/miniship/laya-research-orchestrator-20261023`; next free ports 38300+.
+
+## Speed is now an endpoint (2026-10-23)
+
+The user wants faster progress, not only more of it. Every cohort result reports time-to-milestone from local `data/laya-orchestration/takeover-20261021/time_to.py <root>`. It covers strict C1–C6, Laya C6 and proxy C1–C6, measured in game minutes from the first decision. For each it gives:
+- runs reached out of completed;
+- the median among runs that reached it;
+- RMST over the 150-minute window, with unreached runs counted at the cap (lower means faster);
+- per-seed paired faster:slower counts.
+
+Strict times come from fresh acceptance samples, taken every 10 decisions and at proxy changes. Strict C1 needs four working mall assemblers and almost never passes (C22: 4/120; C24 so far: 1/68). That makes mall utilization the first speed bottleneck.
