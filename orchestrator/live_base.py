@@ -2391,7 +2391,6 @@ def chest_contents(client: RconClient, surface: str, position: Point) -> dict[st
 
 def loan_cell_item_count(
     client: RconClient, surface: str, requester_position: Point, machine_position: Point, item: str,
-    *, include_incoming: bool = False, force: str | None = None, expected_recipe: str | None = None,
 ) -> int:
     """`item` physically inside one mall cell: its requester chest, its assembler's input slots and the
     hands of inserters feeding that assembler. None of these are logistic-network stock."""
@@ -2408,15 +2407,7 @@ def loan_cell_item_count(
         "for _,i in pairs(s.find_entities_filtered{position=m.position,radius=4,type='inserter'}) do "
         "local h=i.held_stack;if i.drop_target==m and h and h.valid_for_read and h.name=='" + item + "' then "
         "n=n+h.count end end end;"
-        + (("if not c or not m or c.force.name~=" + json.dumps(force)
-            + " or m.force.name~=" + json.dumps(force)
-            + " or not m.get_recipe() or m.get_recipe().name~=" + json.dumps(expected_recipe)
-            + " then rcon.print('UNKNOWN') return end;"
-            "local p=c.get_logistic_point(defines.logistic_member_index.logistic_container);"
-            "if not p then rcon.print('UNKNOWN') return end;"
-            "for _,v in pairs(p.targeted_items_deliver) do if v.name==" + json.dumps(item)
-            + " then n=n+v.count end end;") if include_incoming else "")
-        + "rcon.print(n)"
+        "rcon.print(n)"
     )
     raw = _sc(client, lua)
     if not raw.isdigit():

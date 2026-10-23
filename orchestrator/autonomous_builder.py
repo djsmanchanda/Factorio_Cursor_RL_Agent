@@ -6095,44 +6095,6 @@ def _bootstrap_loan_spend_credits(
     return replace(loan, completed_step_targets=tuple(remaining), observed_group=loan.live_group)
 
 
-def _loan_credit_backing(client, surface, force, loan, products_finished, spendable):
-    """Clip unsupported direct-input credit only on observed final-step starvation.
-
-    Completed prerequisite receipts are history, not perpetual physical supply.
-    A fed next craft or an assigned delivery keeps its cell. Missing telemetry
-    leaves the receipt unchanged and must never be interpreted as zero supply.
-    """
-    if (not callable(getattr(client, "command", None)) or spendable is None
-            or loan.step_recipe != loan.target_item or not loan.completed_step_targets
-            or products_finished is None or loan.step_baseline_finished is None
-            or loan.step_required_crafts is None
-            or products_finished - loan.step_baseline_finished >= loan.step_required_crafts):
-        return loan, {}
-    try:
-        if live_base.entity_status_name(client, surface, loan.machine_position) != "item_ingredient_shortage":
-            return loan, {}
-        spec = LINE_RECIPES[loan.target_item]
-        ingredients = dict(zip(spec["ingredients"], spec["amounts"], strict=True))
-        ledger = _MATERIAL_RESERVATION_LEDGER
-        free = (ledger.allocatable_stock(spendable, claimant=_material_project_id(loan.target_item))
-                if ledger is not None else spendable)
-        clipped = {}
-        for item, count in loan.completed_step_targets:
-            if item not in ingredients:
-                continue
-            backing = int(free.get(item, 0)) + live_base.loan_cell_item_count(
-                client, surface, loan.requester_position, loan.machine_position, item,
-                include_incoming=True, force=force, expected_recipe=loan.step_recipe)
-            if backing < float(ingredients[item]) and count > backing:
-                clipped[item] = backing
-    except Exception:
-        return loan, {}
-    credits = tuple((item, min(count, clipped.get(item, count)))
-                    for item, count in loan.completed_step_targets
-                    if min(count, clipped.get(item, count)) > 0)
-    return replace(loan, completed_step_targets=credits, observed_group=loan.live_group), clipped
-
-
 def _bootstrap_loan_persisted_step(
     loan: MallBootstrapLoan, actual: Mapping[str, int],
 ) -> MallBootstrapStep | None:
@@ -6466,23 +6428,16 @@ def _submit_bootstrap_loan(
             f"target {persisted.target_count} reached ({crafts_done} crafted); "
             "advancing the durable loan"
         )
-    loan, unsupported_credit = _loan_credit_backing(
-        client, surface, force, loan, products_finished, spendable)
-    if unsupported_credit:
-        emit(f"  MALL BOOTSTRAP CREDIT BACKING: {loan.target_item} starved; current backing {unsupported_credit}")
     planning_actual, planning_usable = _bootstrap_loan_credited_stock(
         loan, actual, usable,
     )
-    # Available stock includes other consumers' WIP. It cannot refill this cell.
-    planning_actual.update(unsupported_credit)
-    planning_usable.update(unsupported_credit)
     planning_target = (
         loan.production_target if minimum_fulfilled else loan.target_count
     )
     step = next_bootstrap_step(
         loan.target_item, planning_target, planning_usable, planning_actual,
     )
-    if not completed_prerequisite and not unsupported_credit and loan.step_recipe is not None:
+    if not completed_prerequisite and loan.step_recipe is not None:
         persisted = _bootstrap_loan_persisted_step(loan, actual)
         if (
             persisted is not None
