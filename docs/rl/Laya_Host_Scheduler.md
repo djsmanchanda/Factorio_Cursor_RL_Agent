@@ -174,3 +174,30 @@ predecessors unlock only execution, never candidate adoption. Freeze the chosen
 baseline and contrast explicitly. Live/final v3 reports retain all planned jobs
 and unknown-aware final, choice/output and research pair counts. Older frozen
 supervisors do not gain these controls; do not modify active freezes.
+
+## Trial wall allowance (2026-10-24)
+
+The user-selected allowance for new ordinary Laya trials is **7,200 seconds**
+on both hosts. New cohort generators must write `trial_wall_seconds: 7200`
+explicitly. The batch supervisor uses the shared default from
+`tools/laya_batch_defaults.py` when that field is absent. Explicit budgets in
+existing freezes remain authoritative; longer research windows such as15,000
+seconds are retained. This changes wall allowance, not game ticks, stall
+horizons, acceptance or the hard cohort deadline. Admission still requires a
+whole trial allowance to fit before cohort end.
+
+Current cohorts may receive the increase only through a supported transition
+that preserves live worlds, attempt history and matched conditions. The active
+legacy supervisors cache both manifest budgets and per-attempt end times;
+their run/drain/cancel controls do not extend those budgets. Editing a manifest
+would not extend running attempts. Do not restart a supervisor with live worlds,
+patch its active freeze or reset a world to force the increase. Retain such cohorts' declared windows and
+apply7,200 seconds at their next newly frozen comparison. Old6,000-second
+evidence and restored checkpoint budgets must never be relabeled as7,200.
+
+A waiting cohort with zero admissions may be drained, verified world-free and
+stopped for an offline pre-admission amendment. Preserve the original batch,
+freeze, plan, source identities and unit deadline; record the budget-only diff
+and refreshed batch hash, then resume its frozen supervisor with `--resume`
+behind unchanged dependencies. Both matched arms receive the same new budget.
+This is a recorded new contract before first admission, not a hot extension.

@@ -2,6 +2,13 @@
 
 # Laya runner contract
 
+New ordinary cohort trials use the shared **7,200-second wall allowance**;
+longer research windows remain explicit. See the
+[allowance and safe activation contract](Laya_Host_Scheduler.md#trial-wall-allowance-2026-10-24).
+Explicit existing freeze and coherent-recovery budgets remain unchanged unless
+a supported safe transition records otherwise. The wall allowance does not
+extend the game-tick window or cohort deadline.
+
 Status: migration prototype, updated October 8, 2026. Product intent and
 ownership live in [architecture](../architecture.md); delivery order lives in
 [the implementation plan](Laya_Implementation_Plan.md). The deterministic

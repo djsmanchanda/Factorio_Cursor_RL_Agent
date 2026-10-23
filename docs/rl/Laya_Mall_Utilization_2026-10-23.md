@@ -155,3 +155,13 @@ Fresh frozen Python runners are required for use. This change adds no Lua or
 executor capability requirement, so it adds no mod redeployment or Factorio
 restart requirement beyond the chosen baseline's existing requirements. No
 active campaign, world, server, installed mod or observer cadence was changed.
+
+## Wall-budget amendment, 2026-10-24
+
+The user-selected ordinary trial allowance is now7200 seconds for new runs.
+C26/C27 received a recorded pre-admission amendment on both arms, with zero
+worlds started; all original source/plan identities remain. See
+[Laya wall allowance](Laya_Wall_Allowance_2026-10-24.md). This supersedes the
+previous prepared6000-second wall window, while preserving540000 game ticks
+and the existing campaign deadline. Historical/live6000-second comparisons
+remain labelled with their original budgets.
