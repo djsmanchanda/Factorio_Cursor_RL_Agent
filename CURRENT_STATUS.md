@@ -554,3 +554,7 @@ At automatic target4 (96.05 C sample), drained capital/bottleneck and cancelled 
 ## 2026-10-23 22:30 IST — acknowledged user-approved Starship thermal settings
 
 Readback confirms the observer's explicit-user-directed host config change:temp_limit_c93->96 and temp_hard_c95->98, only two differences from config.pre-warm-20261023.json. Retained those values; target4, no manual override or restart. Frozen sensor helper falls back to hottest sysfs zone on Intel, so scheduler temp_c is not necessarily CPU package temperature; record sensor provenance before interpreting peaks. No measured capacity gain. Remote state/operator record and tracked handoff preserve this separate change; freshness priority, cuts, deadline and observer cadence stand. Lifecycle:none.
+
+## 2026-10-23 22:34 IST — superseding user-approved 12-server host controls
+
+Verified observer's second explicit user instruction:thermal thresholds200/210 effectively disable scheduler thermal gating; manual target12 has no expiry. Retained latest controls and preserved prior96/98 acknowledgement in remote history; backup config.pre-nothermal-20261023.json. Observed10 active worlds:4 capital+6 freshness (3 per arm),6 freshness queued, zero completed pairs. Freshness's frozen concurrency6 remains authoritative; no active manifest/source edit. All72 cuts, planned denominators and deadlines unchanged. Lifecycle:existing scheduler already applying controls, no additional target command or restart; no comparison result/adoption claimed.

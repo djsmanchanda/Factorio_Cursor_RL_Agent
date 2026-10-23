@@ -139,3 +139,20 @@ zone when AMD Tctl is absent. On Intel Starship its `temp_c` is not necessarily
 the `coretemp` package reading; firmware TCPU and package sensors have different
 reported trips. Preserve sensor provenance when interpreting peaks. No capacity
 gain or sustained package-temperature conclusion follows from these spot samples.
+
+At 22:34 IST readback acknowledged a second explicit user instruction reported
+by the observer, given around 22:30: remove the scheduler thermal limit and set
+12 servers. Current host config has `temp_limit_c=200`, `temp_hard_c=210`,
+`manual_target=12` and previous target four; target status confirms 12 with no
+expiry. The backup of 96/98 settings is `config.pre-nothermal-20261023.json`.
+These settings supersede the preceding thermal-limit acknowledgement. Prior
+controls remain in operational history. The owner made no further config or
+target change on acknowledgement.
+
+Observed ten active worlds: four capital plus six freshness, three per freshness
+arm; six freshness jobs remain queued, zero completed pairs. The frozen freshness
+cohort has concurrency six, so a host target of 12 does not by itself allow more
+than six of its worlds concurrently. Keep that frozen cohort limit and original
+paired order. Memory/liveness controls, 72 queued cuts, sources and deadlines
+remain as recorded; do not label the target increase as a completed comparison
+or a measured performance improvement. Sensor provenance caveat still applies.

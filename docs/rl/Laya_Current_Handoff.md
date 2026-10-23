@@ -479,3 +479,20 @@ uses hottest sysfs thermal zone without AMD Tctl, so Intel `temp_c` is not alway
 the `coretemp` package sensor; firmware TCPU has a separate reported trip.
 Label telemetry accordingly. No observed capacity gain established. Queue cuts,
 paired order, deadlines and observer cadence remain unchanged.
+
+### Superseding user instruction: 12 servers, no scheduler thermal limit (2026-10-23 22:34 IST)
+
+Observer reported a second explicit user instruction around22:30 and applied
+host-only controls:temp_limit_c200/temp_hard_c210, manual target12 with no expiry.
+Readback confirms these settings and manual_previous_target4; prior96/98 backup
+is window/host/config.pre-nothermal-20261023.json. Retained the latest instruction;
+remote host_configuration_ack now holds it and host_configuration_history keeps
+the earlier acknowledgement. No extra target command, restart or active-source
+change. Do not restore old thresholds from an earlier handoff.
+
+Verified10 active:4 capital and6 freshness (3 control/3 fresh-ticks), another6
+freshness queued, zero completed pairs. Freshness's frozen concurrency is6, so
+host target12 does not increase that cohort's own ceiling. Keep the active
+freeze intact. All72 cuts, original plans, seed order, budgets, hard cutoff and
+55-minute cadence remain. Report fresh-known telemetry after the initial300
+ticks and completed pairs separately from successful admission.
