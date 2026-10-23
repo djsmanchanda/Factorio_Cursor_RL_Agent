@@ -220,6 +220,15 @@ class Batch:
             self.admission_reason = "draining"
             return False
         ready, self.admission_reason = dependencies_ready(self.cfg.get("depends_on", []), own_root=self.root)
+        gate = self.cfg.get("baseline_gate")
+        if ready and gate:
+            try:
+                decision = json.loads(Path(gate["path"]).read_text())
+                ready = (decision.get("status") == "ready" and decision.get("revision") == gate["revision"]
+                         and bool(decision.get("evidence")) and bool(decision.get("decided_by")))
+                self.admission_reason = "ready" if ready else "baseline_not_settled"
+            except (OSError, ValueError, KeyError, TypeError):
+                ready, self.admission_reason = False, "baseline_not_settled"
         return ready
 
     def submit(self, pool, job: dict, slot: int):
@@ -299,12 +308,15 @@ class Batch:
         env = dict(os.environ, PYTHONPATH=str(code), PYTHONDONTWRITEBYTECODE="1", PYTHONUNBUFFERED="1")
         ports = ["--game-port", str(self.cfg["game_port_base"] + slot), "--rcon-port", str(self.cfg["rcon_port_base"] + slot)]
         process = None
+        resume_bundle = job.get("resume_bundle")
+        recovery_args = ["--ops-resume-bundle", resume_bundle] if resume_bundle else []
+        checkpoints = arm.get("ops_checkpoints", self.cfg.get("ops_checkpoints", False))
         try:
             with log_path.open("a") as log:
                 job["status"] = "preparing"
                 prepared = subprocess.run(
                     self._cmd(arm, "prepare", "--root", str(world), "--source-save", self.cfg["source_save"],
-                              "--mods-source", arm["mods"], *ports, *self.runtime_args(slot, arm)),
+                              "--mods-source", arm["mods"], *ports, *self.runtime_args(slot, arm), *recovery_args),
                     cwd=code, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=240)
                 if prepared.returncode:
                     raise RuntimeError(f"prepare exit {prepared.returncode}")
@@ -312,12 +324,19 @@ class Batch:
                                 "--actions", "deterministic", "--policy", "guided", "--speed", "2", "--decisions", "0",
                                 "--no-helper", "--max-game-ticks", str(self.cfg["max_game_ticks"]),
                                 "--experiment", self.cfg["name"], *(["--variant", arm["variant"]] if arm.get("variant") else []),
-                                *arm.get("extra_args", []))
+                                *arm.get("extra_args", []), *recovery_args,
+                                *(["--ops-checkpoint-dir", str(world / "checkpoints"),
+                                   "--max-wall-seconds", str(self.cfg["trial_wall_seconds"])] if checkpoints else []))
                 process = subprocess.Popen(run, cwd=code, env=env, stdout=log, stderr=subprocess.STDOUT,
                                            start_new_session=True)
                 job.update(status="running", started=time.time(), runner_pid=process.pid)
                 self.save()
-                end = min(job["started"] + self.cfg["trial_wall_seconds"], self.until)
+                allowance = self.cfg["trial_wall_seconds"]
+                if resume_bundle:
+                    meta = json.loads((Path(resume_bundle) / "checkpoint.json").read_text())
+                    allowance = max(0, allowance - meta["cumulative_active_wall_seconds"]
+                                    - (job["started"] - job["preparation_started"]))
+                end = min(job["started"] + allowance, self.until)
                 while process.poll() is None and time.time() < end and not self.stopping.is_set():
                     time.sleep(1)
                 if process.poll() is None:  # The runner stops after its current decision on SIGTERM.
@@ -391,6 +410,18 @@ class Batch:
                 job = dict(planned, status="queued")
                 if history:
                     job.update(attempt=len(history), previous_attempts=history)
+                arm = self.arms[job["arm"]]
+                if world and arm.get("ops_checkpoints", self.cfg.get("ops_checkpoints", False)):
+                    candidates = []
+                    for meta_path in (world / "checkpoints").glob("*/checkpoint.json"):
+                        meta = json.loads(meta_path.read_text())
+                        if meta.get("version") != "laya-ops-checkpoint-v1":
+                            raise ValueError("incompatible ops checkpoint on interrupted attempt")
+                        candidates.append((meta["created_at"], meta_path.parent))
+                    if candidates:
+                        job.update(resume_bundle=str(max(candidates)[1]), resume_mode="coherent_ops_generation")
+                    elif history:
+                        job.update(status="incompatible_checkpoint", termination_cause="no_complete_ops_generation")
             self.jobs[index] = job
         self._resumed = True
 
@@ -507,14 +538,17 @@ class Batch:
                     return (receipt["status"] == "passed" if receipt.get("version") == "laya-c6-choice-output-v2"
                             and receipt.get("status") in {"passed", "failed"} else None)
                 research = job.get("research_acceptance")
-                return research.get("earned") if isinstance(research, dict) and type(research.get("earned")) is bool else None
+                return (research.get("earned") if isinstance(research, dict) and research.get("available") is True
+                        and type(research.get("earned")) is bool else None)
             for name in ("C2_final", "C5_final", "C6_final", "C6_v2", "research"):
                 values = [(endpoint(left[s], name), endpoint(right[s], name)) for s in seeds]
                 known = [(a, b) for a, b in values if a is not None and b is not None]
                 comparisons[name] = {"observed_pairs": len(known),
                                      "new_only": sum(b and not a for a, b in known),
                                      "old_only": sum(a and not b for a, b in known)}
-            paired[new + "_vs_" + old] = {"complete_pairs": len(seeds), "legacy_deterministic": comparisons}
+            paired[new + "_vs_" + old] = {"complete_pairs": len(seeds),
+                "legacy_deterministic": {k: v for k, v in comparisons.items() if k not in {"C6_v2", "research"}},
+                "versioned_endpoints": {k: comparisons[k] for k in ("C6_v2", "research")}}
         _atomic(self.root / "report.json", {"version": "laya-batch-report-v3", "planned_jobs": len(self.jobs),
                 "ledger_events": len(self.ledger.events), "admission": self.admission,
                 "statuses": dict(Counter(j["status"] for j in self.jobs)), "paired": paired, "jobs": self.jobs})

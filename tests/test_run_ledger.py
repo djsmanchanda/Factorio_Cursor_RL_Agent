@@ -72,3 +72,11 @@ def test_times_are_local_and_run_length_is_readable(tmp_path, monkeypatch):
     assert list(csv.DictReader((tmp_path / "l.csv").open()))[0]["run_length"] == "10m 00s"
     monkeypatch.delenv("TZ")
     time.tzset()
+
+
+def test_research_completion_requires_earned_acceptance_in_the_ledger(tmp_path):
+    index={'root':str(tmp_path),'run_id':'research-1234567890','summary':{'stop':'research_complete'}}
+    assert run_ledger.laya_entry(index)['outcome']=='error'
+    index['summary']['research_acceptance']={'version':'laya-research-consumption-v1','earned':True,'requested':'mining-productivity-4'}
+    entry=run_ledger.laya_entry(index)
+    assert entry['outcome']=='completed' and entry['research_acceptance']['earned']

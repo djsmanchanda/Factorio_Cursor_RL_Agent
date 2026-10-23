@@ -43,7 +43,7 @@ PROFILE = "reduced-v1"  # no seed stock: every construction item is produced in 
 # What each operation promises when it returns normally (training/laya_ops_runner reads ``code``):
 # produce/mall_slot/steel promise a producing output; ensure_produced returns None after building only ONE
 # missing stage, which is progress but not the requested postcondition.
-PRODUCING_OPERATIONS = {"produce", "mall_slot", "steel", "grow"}
+PRODUCING_OPERATIONS = {"produce", "mall_slot", "steel", "grow", "scale_production"}
 SUBMITTING_OPERATIONS = {"starter", "foundation", "extend"}  # their layout is submitted (bots build it)
 
 
@@ -56,7 +56,7 @@ def _journal_scalar(value: object) -> bool:
 
 def receipt(operation: str, params: dict, result: object) -> dict:
     """A normal return as a typed receipt: ``ok`` only when the operation's own postcondition holds."""
-    if operation in {"raise_stock_gate", "reserve_steel_seed"}:
+    if operation in {"raise_stock_gate", "reserve_steel_seed", "research_select", "research_labs"}:
         return {"operation": operation, "params": params, **result}
     if operation in PRODUCING_OPERATIONS:
         code = "producing" if result is not None else "prerequisite_advanced"
@@ -85,13 +85,14 @@ class DeterministicSession:
     growable = ab.GROWABLE_PRODUCERS  # producers the "grow" operation may add a cell to
 
     def __init__(self, root: Path, *, goal_item: str = "automation-science-pack",
-                 reference_point: tuple[float, float] = (0.0, 0.0), emit: Callable[[str], None] = print) -> None:
+                 reference_point: tuple[float, float] = (0.0, 0.0), emit: Callable[[str], None] = print,
+                 logical_episode_id: str | None = None) -> None:
         import json
         manifest = json.loads((root / "manifest.json").read_text())
         server = root / "server"
         password = (server / "rcon-password").read_text().strip()
         self.script_output = server / "script-output"
-        self.episode_id = f"laya-{root.name}"
+        self.episode_id = logical_episode_id or f"laya-{root.name}"
         self.reference_point = reference_point
         self.emit = emit
         self.stock_networks = lambda: None
@@ -114,8 +115,12 @@ class DeterministicSession:
         ab._reserve_plastic_output_chest(self.client, SURFACE, FORCE, {"plastic-bar": 1}, emit)
 
     def _operations(self) -> dict[str, Callable[..., object]]:
+        from orchestrator.research_operations import build_labs, select_research, scale_production
         c, b, ref, emit = self.client, self.bridge, self.reference_point, self.emit
         return {
+            "research_select": lambda **params: select_research(b, force=FORCE, **params),
+            "research_labs": lambda **params: build_labs(self, **params),
+            "scale_production": lambda **params: scale_production(self, **params),
             # Direct starter: drills feeding a furnace, no belts or bots (iron, copper, stone).
             "starter": lambda recipe: ab._bootstrap_direct_plate_line(c, b, SURFACE, FORCE, recipe, ref, emit),
             # Opening mine + six-furnace refinery + haul belt, sited by the full transport bill.
@@ -216,10 +221,10 @@ class DeterministicSession:
             except WorkStateSignal as signal:  # Not this operation's outcome; retried after the next one.
                 self.emit(f"  {name} FAILED: {signal}")
 
-    def active_batch_crafts(self) -> dict[tuple, int]:
+    def active_batch_crafts(self, *, bounded: bool = False) -> dict[tuple, int]:
         """Craft counters of the tooling's active finite batches that still owe their bill (a rising one is progress)."""
         try:
-            return ab.active_batch_crafts(self.client, SURFACE, FORCE)
+            return ab.active_batch_crafts(self.client, SURFACE, FORCE, bounded=bounded)
         except Exception:  # noqa: BLE001 -- an unreadable survey is no evidence of progress
             return {}
 

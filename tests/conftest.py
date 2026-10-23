@@ -53,7 +53,7 @@ _DETERMINISTIC_HINTS = (
 # scheduled/manual full suite instead of masquerading as fast validation.
 _FAST_FILES = {
     "test_laya_ops_initialization.py", "test_mall_cell_release_lua.py",
-    "test_laya_batch.py", "test_laya_host_scheduler.py",
+    "test_laya_batch.py", "test_laya_host_scheduler.py", "test_laya_research.py", "test_laya_ops_checkpoint.py",
     "test_laya_review_regressions.py", "test_laya_ops_data.py",
     "test_action_catalog.py", "test_bootstrap_district.py",
     "test_capacity_model.py", "test_construction_stock.py",
@@ -268,7 +268,11 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
         path = Path(str(item.path))
         filename = path.name
         nodeid = item.nodeid
-        item.add_marker(getattr(pytest.mark, _primary_domain(filename)))
+        primary = {m.name for m in item.iter_markers() if m.name in {"contracts", "deterministic", "training", "ops"}}
+        if len(primary) > 1:
+            raise pytest.UsageError(f"multiple primary domains for {nodeid}: {sorted(primary)}")
+        if not primary:
+            item.add_marker(getattr(pytest.mark, _primary_domain(filename)))
 
         slow = filename in _SLOW_FILES or any(
             fragment in nodeid for fragment in _SLOW_NODE_FRAGMENTS

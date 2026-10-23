@@ -55,6 +55,16 @@ def current_phase(reached: Sequence[str]) -> dict | None:
     return next((p for p in PHASES if p["phase_id"] not in reached), None)
 
 
+def research_phase(reached: Sequence[str], targets: Mapping[str, float]) -> dict:
+    """A versioned research objective retains science readiness as a separate stage."""
+    current = current_phase(reached)
+    if current and current["phase_id"] != "S1":
+        return current
+    science = phase("S1")
+    return {**science, "targets": dict(targets) or dict(science["targets"]),
+            **({"phase_id": "R1", "name": "research_completion"} if current is None else {})}
+
+
 def phase_reached(board: Mapping) -> bool:
     """Every phase target measured as satisfied on the status board."""
     needs = {n["item"]: n for n in board["needs"]}

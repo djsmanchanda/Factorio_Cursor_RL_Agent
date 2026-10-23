@@ -139,6 +139,7 @@ def dependencies_ready(roots: list[str], *, own_root: Path) -> tuple[bool, str]:
             terminal = {"completed", "runner_error", "harness_error", "prepare_failed", "wall_cap",
                         "deadline_cap", "interrupted", "not_started_deadline",
                         "not_started_interrupted", "cancelled_queued"}
+            terminal.add("incompatible_checkpoint")
             if any(j.get("status") not in terminal for j in jobs):
                 return False, f"unknown_predecessor:{root.name}"
         except (OSError, ValueError, KeyError, TypeError):

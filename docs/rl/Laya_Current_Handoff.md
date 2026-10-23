@@ -331,3 +331,28 @@ scheduler on a separate Starship branch. It adds exact foundation observations
 for the unresolved C3 cases. No active C18/C19 arm, deployed runtime or 55-minute
 owner schedule was changed. New loan/scheduler changes need separate frozen
 comparisons; the handler owns activation. No policy training was launched.
+
+## Research implementation ready for frozen queues (2026-10-23 15:39 IST)
+
+Implementation branch `work/miniship/laya-research-orchestrator-20261023`
+contains steel dependency admission `5fb6371`, durable cohort controls `0720ef8`,
+and current-backed unfinished-loan credit `65604cd`. The following research/recovery
+change is verified by 92 focused checks and the fast gate (1,281 passed, one
+skipped). Read the current [research/recovery contract](Laya_Clean_Runner.md#research-objective-and-recovery-contract-2026-10-23).
+
+Live mechanics evidence is in main-repository
+`data/laya-experiments/laya-research-wiring-20261023-r5/recovery-review.json`:
+funded bot-built lab, delivered/consumed packs, paused save reload at tick241561,
+three matching remaining policy choices. Preserve the original failed validation
+assertion and job status; the immutable-bundle review corrects its mutated prefix
+offset. Supplied packs make this fixture ineligible for earned research/frontier
+claims. No full factory-earned mining-productivity-4 result exists.
+
+C24/C25 manifests prepare separate 120-job steel and credit-backing comparisons,
+with unchanged 540,000-tick/6,000-second legacy objectives. Admission requires
+C22/C23 closure and an explicit baseline decision; candidate receipt/retention
+changes are not silently adopted. Research fixed-versus-progressive long runs
+remain a subsequent stage requiring a preregistered earned frontier or explicit
+fresh-origin cohort, not reuse of the supplied wiring fixture. The automated
+owner receives the frozen queue paths and release instructions at handoff.
+No active campaign, installed scheduler, installed mod or production save changed.

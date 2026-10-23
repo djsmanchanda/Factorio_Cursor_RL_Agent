@@ -35,7 +35,7 @@ from tools.laya_helper_agent import RUN_INDEX, launch as launch_helper
 from core.local_time import local_stamp
 from tools.run_ledger import LEDGER, record_laya_run
 from tools.runner_process import runner_pid_record
-from training.laya_clean_runner import ExplorationPolicy, LiveWorld, run
+from training.laya_clean_runner import ExplorationPolicy, LiveWorld, Settings, run
 from training.laya_guided_policy import GuidedPolicy, load_preferences
 from training.laya_variants import apply as apply_variant, load_variant, variant_hash
 from training.laya_run_log import RunLog
@@ -76,6 +76,13 @@ def main(argv=None) -> int:
     p.add_argument("--variant", type=Path, help="Variant JSON (docs/rl/laya_variants/); default: the current workflow")
     p.add_argument("--until-phase", help="Experiment window: stop once this phase is reached")
     p.add_argument("--max-game-ticks", type=int, help="Experiment window: stop after this many game ticks")
+    p.add_argument("--research-target", help="Opt-in level-aware research objective (for example mining-productivity-4)")
+    p.add_argument("--fixed-science-target", action="store_true", help="Research contrast: keep the initial 0.25 units/s target")
+    p.add_argument("--research-sustain-ticks", type=int, default=18000)
+    p.add_argument("--ops-checkpoint-dir", type=Path, help="Publish coherent ops generations under repository data")
+    p.add_argument("--ops-checkpoint-ticks", type=int, default=54000)
+    p.add_argument("--ops-resume-bundle", type=Path, help="Restore an exact, hash-verified ops generation")
+    p.add_argument("--max-wall-seconds", type=float, help="Cumulative active wall budget across ops recovery")
     p.add_argument("--experiment", help="Experiment id recorded with the run")
     p.add_argument("--source-save", type=Path, default=SOURCE_SAVE)
     p.add_argument("--mods-source", type=Path)
@@ -90,6 +97,13 @@ def main(argv=None) -> int:
                         "(experiment): carry only earlier segments' lifecycle receipts")
     args = p.parse_args(argv)
     root = owned_root(args.root)
+    ops_resume = None
+    ops_meta = None
+    if args.ops_resume_bundle:
+        from training.laya_ops_checkpoint import load_bundle as load_ops_bundle
+        ops_meta, ops_resume = load_ops_bundle(args.ops_resume_bundle)
+        if args.resume_bundle or args.jumpstart or args.export_checkpoint:
+            p.error("ops recovery cannot be mixed with geometry bundles or jumpstart")
     resume=load_bundle(args.resume_bundle) if args.resume_bundle else None
     if args.action == "prepare":
         extra = ["--mods-source", str(args.mods_source)] if args.mods_source else []
@@ -99,10 +113,20 @@ def main(argv=None) -> int:
             extra += ["--cpu-affinity", args.cpu_affinity]
         if args.nice:
             extra += ["--nice", str(args.nice)]
-        source=args.resume_bundle/'source.zip' if resume else args.source_save
+        source=(args.ops_resume_bundle/'source.zip' if ops_resume else args.resume_bundle/'source.zip' if resume else args.source_save)
+        preparation_started = time.monotonic()
         print(saved_world("prepare", root, "--source-save", str(source),
                           "--game-port", str(args.game_port), "--rcon-port", str(args.rcon_port), *extra))
         if resume:restore_context(args.resume_bundle,root)
+        if ops_resume:
+            from training.laya_ops_checkpoint import restore_context as restore_ops_context
+            restore_ops_context(args.ops_resume_bundle, root)
+            manifest = json.loads((root / "manifest.json").read_text())
+            manifest["ancestor_source_sha256"] = ops_meta["ancestor_source_sha256"]
+            manifest["fixture_assisted"] = ops_meta["lineage"]["fixture_assisted"]
+            manifest["ops_recovery"] = {"bundle": str(args.ops_resume_bundle.resolve()),
+                                        "preparation_wall_seconds": time.monotonic() - preparation_started}
+            (root / "manifest.json").write_text(json.dumps(manifest, indent=2))
         return 0
     if args.action == "stop":
         print(saved_world("stop", root))
@@ -112,7 +136,29 @@ def main(argv=None) -> int:
     variant = load_variant(args.variant)
     settings, policy_options, runtime = apply_variant(variant)
     settings = dataclasses.replace(settings, until_phase=args.until_phase or settings.until_phase,
-                                   max_game_ticks=args.max_game_ticks or settings.max_game_ticks)
+                                   max_game_ticks=args.max_game_ticks or settings.max_game_ticks,
+                                   research_target=args.research_target,
+                                   research_progressive=not args.fixed_science_target,
+                                   research_sustain_ticks=args.research_sustain_ticks,
+                                   max_wall_seconds=args.max_wall_seconds)
+    if ops_resume:
+        saved_settings = Settings(**ops_resume["settings"])
+        if ((args.max_game_ticks is not None and args.max_game_ticks != saved_settings.max_game_ticks)
+                or (args.max_wall_seconds is not None and args.max_wall_seconds != saved_settings.max_wall_seconds)
+                or (args.research_target is not None and args.research_target != saved_settings.research_target)):
+            p.error("ops recovery cannot reset or replace its frozen objective/budgets")
+        settings = saved_settings
+        if args.decisions and args.decisions != ops_resume["decision_limit"]:
+            p.error("ops recovery cannot replace its cumulative decision budget")
+        args.decisions = ops_resume["decision_limit"] or 0
+        args.seed = ops_resume["seed"]
+        if args.actions != "deterministic":
+            p.error("ops recovery requires deterministic actions")
+    if args.ops_checkpoint_dir and (args.actions != "deterministic" or not settings.max_game_ticks
+                                    or not settings.max_wall_seconds or settings.max_wall_seconds <= 0):
+        p.error("coherent ops capture requires finite game and active-wall budgets")
+    if args.research_target and (args.actions != "deterministic" or args.research_sustain_ticks < 300):
+        p.error("research requires deterministic actions and a sustain window >=300 ticks")
     speed = float(runtime.get("speed", args.speed))
     tag = {"variant_id": variant["variant_id"], "variant_hash": variant_hash(variant), "experiment": args.experiment}
     paths = runner_paths(root)
@@ -122,6 +168,8 @@ def main(argv=None) -> int:
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     source_hash = file_hash(SOURCE_SAVE)
     run_id = f"{root.name}-s{args.seed}-{int(time.time())}"
+    if ops_resume:
+        run_id = ops_resume["run_id"]
     mode = "stepped" if args.stepped else "live"
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
     started = local_stamp()
@@ -138,11 +186,22 @@ def main(argv=None) -> int:
         if not args.no_helper:  # Live observer from RUN START; it writes the final review after RUN END.
             log("LAYA HELPER: observing " + launch_helper(run_id, paths["log"], root.resolve()))
         try:
+            if ops_resume:
+                from training.laya_ops_checkpoint import verify_restored
+                verify_restored(adapter, args.ops_resume_bundle)
             if not args.stepped:
                 adapter.go_live()
                 log(f"LIVE: game unpaused at speed {speed:g}; decisions are taken while the factory runs")
             policy = (GuidedPolicy(args.seed, preferences=load_preferences(ROOT / settings.catalog), **policy_options)
                       if args.policy == "guided" else ExplorationPolicy(args.seed))
+            if ops_resume:
+                config = ops_resume["policy"]
+                if config["class"] == "GuidedPolicy":
+                    policy = GuidedPolicy(args.seed, epsilon=config["epsilon"], preferences=config["preferences"])
+                elif config["class"] == "ExplorationPolicy":
+                    policy = ExplorationPolicy(args.seed)
+                else:
+                    raise ValueError("unsupported recovered policy")
             if args.actions == "deterministic":
                 from training.laya_ops_runner import lifecycle_receipts, run as run_ops
                 carried = (lifecycle_receipts(paths["journal"].parent / "decision-states.jsonl")
@@ -150,7 +209,10 @@ def main(argv=None) -> int:
                 summary = run_ops(adapter, policy, journal=paths["journal"], decisions=args.decisions or None,
                                   measure_ticks=args.measure_ticks, seed=args.seed, run_id=run_id, emit=log,
                                   should_stop=stop.is_set, status_path=paths["status"], settings=settings,
-                                  carried=carried)
+                                  carried=carried, recovery=ops_resume, checkpoint_dir=args.ops_checkpoint_dir,
+                                  checkpoint_ticks=args.ops_checkpoint_ticks,
+                                  recovery_wall_seconds=(ops_meta["capture_seconds"] +
+                                      manifest.get("ops_recovery", {}).get("preparation_wall_seconds", 0)) if ops_resume else 0)
             else:
                 summary = run(adapter, policy, journal=paths["journal"],
                               decisions=args.decisions or None, measure_ticks=args.measure_ticks, seed=args.seed,

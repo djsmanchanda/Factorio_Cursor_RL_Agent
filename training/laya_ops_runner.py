@@ -23,6 +23,9 @@ from __future__ import annotations
 from orchestrator.operation_observation import economics_observation, item_service_observation
 
 import math
+import time
+import dataclasses
+import copy
 from collections import Counter
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -818,14 +821,31 @@ def lifecycle_receipts(records: Path) -> list[dict]:
 def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, measure_ticks: int, seed: int,
         run_id: str, emit: Callable[[str], None] = lambda _: None, should_stop: Callable[[], bool] = lambda: False,
         status_path: Path | None = None, settings: Settings = Settings(), session: Any = None,
-        carried: list[dict] = ()) -> dict:
+        carried: list[dict] = (), recovery: dict | None = None,
+        checkpoint_dir: Path | None = None, checkpoint_ticks: int = 54000,
+        recovery_wall_seconds: float = 0) -> dict:
     """Observe -> board -> operations -> choose -> run one -> record, until the mission ends or stalls.
 
     ``carried`` seeds the history with an earlier segment's lifecycle receipts when a fresh controller is
     restarted on the same world; everything else starts fresh.
     """
     from training.laya_ops import DeterministicSession
-    session = session or DeterministicSession(adapter.root, emit=lambda line: emit(f"  TOOL {line}"))
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    active_started = time.monotonic()
+    if recovery:
+        recovery = copy.deepcopy(recovery)
+    if recovery and carried:
+        raise ValueError("exact ops recovery cannot be mixed with jumpstart receipts")
+    if checkpoint_ticks < 300:
+        raise ValueError("checkpoint interval must be >=300 ticks")
+    if checkpoint_dir is not None and (not settings.max_game_ticks or not settings.max_wall_seconds
+                                     or settings.max_wall_seconds <= 0):
+        raise ValueError("ops checkpoint requires finite cumulative game/wall budgets")
+    if recovery and (recovery["settings"] != dataclasses.asdict(settings) or recovery["run_id"] != run_id
+                     or recovery["decision_limit"] != decisions):
+        raise ValueError("ops recovery settings/logical run mismatch")
+    session = session or DeterministicSession(adapter.root, emit=lambda line: emit(f"  TOOL {line}"),
+                                              logical_episode_id=recovery["session"]["episode_id"] if recovery else None)
     session.stock_networks = lambda: adapter.query().get("networks")
     records = journal.parent / "decision-states.jsonl"
     reached: list[str] = []
@@ -835,10 +855,18 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
              f"segments: {', '.join(sorted({r['operation'] for r in carried}))}")
     samples: list = []
     measurement = None
-    summary: dict = {"decisions": 0, "failures": 0, "phases_reached": reached, "stop": "decision_budget"}
+    summary: dict = {"decisions": 0, "failures": 0, "phases_reached": reached, "stop": "decision_budget",
+                     "objective_version": "laya-research-consumption-v1" if settings.research_target else "legacy-science-readiness-v1"}
     stall = {"since": 0, "best_gap": math.inf, "tick": None, "machines": 0, "missing": math.inf, "made": {},
              "batches": {}, "installed": {}, "network": None, "rungs": None, "mark": None, "mark_tick": None}
     c6 = LayaC6Acceptance(run_id)
+    from training.laya_research import ResearchObjective, SUPPORT, add_research_options
+    from training.laya_mission import research_phase
+    from orchestrator.research_operations import collect_research_reports, research_observation
+    objective = (ResearchObjective(settings.research_target, progressive=settings.research_progressive,
+                                  sustain_ticks=settings.research_sustain_ticks,
+                                  state=recovery.get("research") if recovery else None) if settings.research_target else None)
+    research = {}
     summary["laya_acceptance"] = {"C6": c6.snapshot()}
 
     def record_c6() -> None:
@@ -870,18 +898,86 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                           "fresh": fresh, "checks": getattr(session, "acceptance_checks", None),
                           "production_service": summary.get("production_service"),
                           "foundations": getattr(session, "foundation_observations", None)})
-    check_acceptance("start")
-    _append(journal, {"run_id": run_id, "event": "laya_acceptance", "phase": "C6", **c6.snapshot()})
+    if not recovery:
+        check_acceptance("start")
+        _append(journal, {"run_id": run_id, "event": "laya_acceptance", "phase": "C6", **c6.snapshot()})
     previous_service_facts = None
     index = -1
+    elapsed_before = recovery_wall_seconds
+    last_checkpoint = None
+    if recovery:
+        from training.laya_ops_checkpoint import restore_session
+        if recovery["policy"] != {"class": type(policy).__name__, "epsilon": getattr(policy, "epsilon", None),
+                                  "preferences": getattr(policy, "preferences", None)}:
+            raise ValueError("ops recovery policy differs")
+        restore_session(session, recovery["session"])
+        policy.rng.setstate(recovery["rng"])
+        reached[:] = recovery["reached"]
+        results, samples, measurement, summary, stall = (recovery[k] for k in ("results", "samples", "measurement", "summary", "stall"))
+        summary["phases_reached"] = reached
+        c6.evidence = recovery["c6"]
+        if c6.evidence.get("run_id") != run_id:
+            raise ValueError("C6 recovery belongs to a different logical run")
+        previous_service_facts = recovery["previous_service_facts"]
+        index = summary["decisions"] - 1
+        elapsed_before += recovery["elapsed_wall"]
+        last_checkpoint = recovery["checkpoint_tick"]
+        _append(journal, {"run_id": run_id, "event": "ops_recovery", "index": index,
+                          "cumulative_wall_seconds": elapsed_before})
+
+    def save_checkpoint(tick, *, final=False):
+        nonlocal last_checkpoint
+        if checkpoint_dir is None or (not final and last_checkpoint is not None and tick - last_checkpoint < checkpoint_ticks):
+            return
+        from training.laya_ops_checkpoint import capture
+        controller = {"run_id": run_id, "seed": seed, "settings": dataclasses.asdict(settings), "decision_limit": decisions, "reached": reached,
+                      "results": results, "samples": samples, "measurement": measurement, "summary": summary,
+                      "stall": stall, "c6": c6.snapshot(), "previous_service_facts": previous_service_facts,
+                      "research": objective.snapshot() if objective else None,
+                      "elapsed_wall": elapsed_before + time.monotonic() - active_started,
+                      "checkpoint_tick": tick, "extra_recipes": tuple(adapter.extra_recipes)}
+        destination = Path(checkpoint_dir) / f"tick-{tick}-decision-{summary['decisions']}"
+        if destination.exists():
+            return
+        meta = capture(adapter, policy, session, destination, controller)
+        last_checkpoint = meta["tick"]
+        summary["latest_checkpoint"] = {"path": str(destination), "tick": meta["tick"],
+                                         "capture_seconds": meta["capture_seconds"]}
+
     while decisions is None or index + 1 < decisions:
         index += 1
         if should_stop():
             summary["stop"] = "stopped"
             break
+        if settings.max_wall_seconds and elapsed_before + time.monotonic() - active_started >= settings.max_wall_seconds:
+            summary["stop"] = "wall_budget"
+            break
         economics = session.economics() if hasattr(session, "economics") else None
         adapter.extra_recipes = recipe_demand(results, economics)
+        reports = None
+        if objective:
+            reports = collect_research_reports(session.bridge, surface="nauvis", force="player", requested=settings.research_target)
+            packs = ((reports.get("research") or {}).get("technology") or {}).get("science_packs", {})
+            adapter.extra_recipes = (*adapter.extra_recipes, *packs, "lab")
         facts = adapter.query()
+        if objective:
+            research = research_observation(reports, tick=facts["tick"], surface="nauvis", force="player", requested=settings.research_target)
+            support_board = compile_status(facts, objective.targets(research), measurement) if objective.targets(research) else None
+            service_ok = bool(support_board and all(n["condition"] == "satisfied" for n in support_board["needs"]
+                                                   if n["item"] in SUPPORT))
+            evidence = objective.observe(research, facts, service_ok=service_ok,
+                                         clean=not results or results[-1].get("classification") not in {"bug", "safety"})
+            summary["research_acceptance"] = evidence
+            if evidence["earned"]:
+                if "R1" not in reached:
+                    reached.append("R1")
+                    summary.setdefault("phase_ticks", {})["R1"] = facts["tick"] - samples[0][0]
+                    _append(journal, {"run_id": run_id, "event": "phase_reached", "phase": "R1",
+                                      "tick": facts["tick"], "acceptance_version": evidence["version"]})
+                _append(journal, {"run_id": run_id, "event": "research_acceptance", **evidence})
+                emit(f"RESEARCH COMPLETE: {settings.research_target} at tick {facts['tick']}")
+                summary["stop"] = "research_complete"
+                break
         summary["production_service"] = item_service_observation(facts, previous_service_facts, "plastic-bar")
         previous_service_facts = facts
         c6.observe(facts)
@@ -891,9 +987,10 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         if settings.max_game_ticks and facts["tick"] - samples[0][0] >= settings.max_game_ticks:
             summary["stop"] = "window_timeout"
             break
-        phase = current_phase(reached)
+        get_phase = lambda: research_phase(reached, objective.targets(research)) if objective else current_phase(reached)
+        phase = get_phase()
         board = compile_status(facts, phase["targets"], measurement) if phase else None
-        while phase and ops_phase_reached(phase, board, c6.snapshot()):
+        while phase and phase["phase_id"] != "R1" and ops_phase_reached(phase, board, c6.snapshot()):
             reached.append(phase["phase_id"])
             summary.setdefault("phase_ticks", {})[phase["phase_id"]] = facts["tick"] - samples[0][0]
             _append(journal, {"run_id": run_id, "event": "phase_reached", "phase": phase["phase_id"], "tick": facts["tick"],
@@ -902,7 +999,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             check_acceptance(f"proxy {phase['phase_id']}")
             emit(f"ACCEPTANCE: {summary.get('acceptance')}")
             stall.update(since=0, best_gap=math.inf)
-            phase = current_phase(reached)
+            phase = get_phase()
             board = compile_status(facts, phase["targets"], measurement) if phase else None
         if phase is None:
             summary["stop"] = "mission_complete"
@@ -923,6 +1020,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                               transactions=(economics or {}).get("transactions"),
                                               foundations=getattr(session, "foundation_facts", None)),
                               results, economics)
+        if objective:
+            menu = add_research_options(menu, board, research, facts, objective)
         reserved: Counter = Counter()
         for project in ((economics or {}).get("projects") or {}).values():
             reserved.update(project["reserved"])
@@ -945,6 +1044,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                                         "source_networks": facts.get("networks", {}),
                                                         "reserved_stock": {"network": dict(reserved)}}},
                  "guidelines": rules}
+        if objective:
+            state["observation_digest"]["research"] = {"observation": research, "objective": objective.brief()}
         choice = policy.choose(state, menu)
         chosen = next(o for o in menu["options"] if o["option_id"] == choice["option_id"])
         emit(f"DECISION {index} phase={phase['phase_id']} tick={facts['tick']} need={chosen['need_id']} "
@@ -998,6 +1099,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                      if chosen['family'] == 'raise_stock_gate' else {}),
                                   "ticks": after["tick"] - facts["tick"], "material_transactions": after_transactions})
         _write_status(status_path, {"run_id": run_id, "index": index, "tick": facts["tick"], "phase": phase,
+                                    "research_acceptance": objective.brief() if objective else None,
                                     "reached": reached, "laya_acceptance": summary["laya_acceptance"],
                                     "production_service": summary.get("production_service"), "board": compact, "brief": state["brief"], "choice": {**choice, "summary": chosen["summary"]},
                                     "menu": {o["option_id"]: o["summary"] for o in menu["options"]},
@@ -1015,10 +1117,17 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         # Crafting a short item is progress even before the blocked operation is retried.
         made = {item: int((after.get("production") or {}).get(item, 0)) for item in short}
         crafted = any(count > stall["made"].get(item, count) for item, count in made.items())
+        finite_credits = []
+        if objective:
+            from training.laya_research import finite_material_progress
+            finite_credits = finite_material_progress(stall.setdefault("demand_credit", {}), results,
+                                                      after_transactions, after.get("production") or {})
+            crafted = bool(finite_credits)
         stall["made"] = {**stall["made"], **made}
         # An active finite batch whose craft counter rose is progress the shortage map cannot see (internal
         # chemical-ladder batches); a first sighting or an unchanged counter is not.
-        batches = session.active_batch_crafts() if hasattr(session, "active_batch_crafts") else {}
+        batches = (session.active_batch_crafts(**({"bounded": True} if objective else {}))
+                   if hasattr(session, "active_batch_crafts") else {})
         advancing = batch_advanced(stall["batches"], batches)
         stall["batches"] = batches
         installed = {(tid, tx["intent_sha256"]): sum(tx["installed"].values())
@@ -1039,12 +1148,19 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         climbed = rungs is not None and stall["rungs"] is not None and rungs > stall["rungs"]
         if rungs is not None:
             stall["rungs"] = max(stall["rungs"] if stall["rungs"] is not None else rungs, rungs)
-        progressed = (machines > stall["machines"] or missing < stall["missing"] or crafted or advancing or delivered
-                      or extended or climbed or gap < stall["best_gap"] * 0.95)
+        progress_signals = {"research_units": bool(objective and objective.state.get("progressed")),
+                            "machines": machines > stall["machines"], "missing_materials": missing < stall["missing"],
+                            "goal_gap": gap < stall["best_gap"] * .95, "material_crafts": crafted,
+                            "owned_batch": advancing, "installed": delivered, "network": extended, "ladder": climbed}
+        progressed = any(progress_signals.values())
         stall["machines"], stall["missing"] = max(stall["machines"], machines), min(stall["missing"], missing)
         stall["best_gap"] = min(stall["best_gap"], gap)
         if progressed or stall["tick"] is None:
             stall["tick"] = after["tick"]
+            stall["last_reset"] = {"tick": after["tick"], "reasons": [name for name, value in progress_signals.items() if value],
+                                  "material_obligations": finite_credits}
+        summary["progress_guard"] = {"last_reset": stall.get("last_reset"), "observed_tick": after["tick"],
+                                     "stall_after_ticks": STALL_TICKS, "remaining_shortages": short}
         # Operations decide in seconds of game time, so the stall limit is game time, not a decision count.
         if after["tick"] - stall["tick"] >= STALL_TICKS:
             summary["stop"] = "stalled"
@@ -1062,7 +1178,12 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         if summary["failures"] >= 3 and all(r.get("code") == "tool_error" for r in results[-3:]):
             summary["stop"] = "safe_stop_after_repeated_failures"
             break
+        # Receipt, progress guard and acceptance state belong to one generation.
+        save_checkpoint(after["tick"])
     check_acceptance("end")
+    if checkpoint_dir is not None and samples:
+        save_checkpoint(adapter.query()["tick"], final=True)
+    summary["cumulative_wall_seconds"] = elapsed_before + time.monotonic() - active_started
     session.close()
     # Typed outcomes, not only caught exceptions: an untyped_stuck is a tool fault even when nothing raised.
     summary["codes"] = dict(Counter(r.get("code") or "error" for r in results if not r.get("ok")))

@@ -244,3 +244,70 @@ unknown and unchanged. Reduced credit is persisted in the existing loan tag by
 the normal configuration transaction. Finished-batch credit spending remains a
 separate rule. The incoming probe uses the engine's
 [logistic-point delivery API](https://lua-api.factorio.com/2.1.23/classes/LuaLogisticPoint.html#targeted_items_deliver).
+
+## Research objective and recovery contract (2026-10-23)
+
+`--actions deterministic --research-target mining-productivity-4` selects
+`laya-research-consumption-v1`. Existing frozen cohorts and the default legacy
+science-readiness ladder retain their conditions; their science-only
+`mission_complete` is not a research completion. The new objective stops as
+`research_complete` only on fresh requested/canonical level evidence after an
+incomplete start, with newly manufactured and lab-consumed packs and measured
+research progress. Already-complete starts remain ineligible. Wrong-force,
+stale, regressing or incomplete observations cannot earn success.
+
+S1 remains science readiness; R1 is research completion. Pack requirements and
+cost come from the force, including repeatable technology aliases. Selection is
+an explicit operation with expected-current/queue guards, declared replacement
+and readback. Repeated selection of an already queued/current target is
+idempotent. No research cascade or research/item grant is available as a policy
+operation. Separate operations construct funded bot-built labs, configure their
+requesters after construction, connect normal power/logistics and request
+production capacity from the shared deterministic line operation. Sandbox lab
+scaffolding is omitted. Missing bills stay normal production needs.
+
+Science demand starts at **0.25** ingredient sets per game second and doubles
+through 0.5, 1, 2 and onward. Pack rates use the live ingredient coefficients;
+the status board propagates recipe demand upstream. A rung requires 18,000
+observed ticks of manufacture, delivery into labs, lab consumption and useful
+research units at its target, with essential service, supporting stock and lab
+buffers maintained and no new tool/safety fault. Alternate pack consumers make
+attribution unknown. Target increases are never progress. The achieved rate,
+current demand, windows and prior rungs are separate persisted facts.
+`--fixed-science-target` freezes the initial 0.25 target for a matched contrast.
+Lab capacity uses live research energy, normal lab speed and force speed bonus;
+measured consumption, rather than theoretical capacity, controls advancement.
+Research progress handles repeatable-level resets. The research objective also
+bounds craft progress by owned finite material/batch obligations; background
+production cannot perpetually credit the same bill. Summaries identify the last
+progress reset and current shortages. Legacy stall behavior is unchanged.
+
+For coherent ops generations, supply finite `--max-game-ticks` and
+`--max-wall-seconds`, plus `--ops-checkpoint-dir <repository-data-path>`.
+`--ops-checkpoint-ticks` defaults to 54,000. Captures occur at complete operation
+boundaries and final shutdown, using a paused unique save, completion barrier,
+authoritative sidecars, controller/rate/progress/research/evaluator/C6 state,
+policy RNG and logical identity. Atomic manifests bind source/schema/catalog,
+engine, mods, tick and every copied file. Prior complete generations remain
+available. Geometry earned-C1 bundles and `--jumpstart` are separate protocols.
+
+Prepare a fresh owned root with `--ops-resume-bundle <generation>` and the same
+private mod/runtime/port configuration, then run it with deterministic actions
+and the same bundle. The runner restores the frozen policy, seed, decision
+limit, objective and cumulative budgets; preparation/capture overhead consumes
+remaining active-wall allowance. Queued downtime is excluded. It verifies the
+actual restored world and external state before any operation. Incompatible,
+tampered or incomplete state is an infrastructure failure; it cannot silently
+become a fresh attempt. Code-changing continuation requires a separately
+versioned explicit migration and is currently rejected. A coherent mechanics
+fixture is not an earned frontier: corpus eligibility and lineage clustering
+must still be preregistered independently.
+
+New batch arms may opt into `ops_checkpoints: true`. Their queue recovery uses
+the newest complete generation, retains the interrupted attempt and caps the
+remaining wall budget. Missing generations are explicitly
+`incompatible_checkpoint`. Existing/default `--resume` remains fresh-world
+queue rescheduling. All planned jobs, cuts, attempts and unknown outcomes stay
+in the denominator; conditional continuations and fresh starts are reported
+separately. No repository change mutates active frozen campaigns or grants
+real-base authority.

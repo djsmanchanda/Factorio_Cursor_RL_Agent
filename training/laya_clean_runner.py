@@ -76,6 +76,10 @@ class Settings:
     mall_buildable_multiplier: int = 5
     context_view: str = 'full'
     reservation_mode: str = 'strict'
+    research_target: str | None = None
+    research_progressive: bool = True
+    research_sustain_ticks: int = 18000
+    max_wall_seconds: float | None = None
 WAIT_TICKS = (300, 1800)
 MAX_MENU = 20  # laya_state schema: options maxItems
 EXPLORATION_MODEL = {"model_id": "laya-exploration-v1", "model_hash": "sha256:" + "0" * 64}

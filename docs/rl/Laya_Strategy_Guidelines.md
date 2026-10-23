@@ -147,3 +147,14 @@ Geometry selects relevant rules before its count limit. Ops uses catalog order
 and a character budget after its brief; neither is a tokenizer guarantee.
 Changing scopes, weights, rule visibility or representation requires its own
 recorded comparison. See [variant adoption](laya_variants/README.md).
+
+## Progressive science objective
+
+For the versioned research objective, science throughput starts at **0.25**
+and increases after a measured sustain window of manufacture, delivery and lab
+consumption with continued useful research and stable supporting supply. The
+current rung is demand, not an achieved result. Choose normal funded capacity,
+delivery, power and lab operations against its bottleneck; do not manufacture a
+sink just to advance a target. Persist the rung and evidence across coherent
+recovery. Completion means the requested research level actually finished;
+science-pack production alone establishes readiness.

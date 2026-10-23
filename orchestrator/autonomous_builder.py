@@ -5747,6 +5747,7 @@ def grow_producer(
 
 def active_batch_crafts(
     client: RconClient, surface: str, force: str,
+    *, bounded: bool = False,
 ) -> dict[tuple, int]:
     """Craft counters of active finite batches whose bill is not yet met.
 
@@ -5767,7 +5768,13 @@ def active_batch_crafts(
             continue
         key = (loan.original_recipe, loan.target_item, facts["step_recipe"],
                round(loan.machine_position[0], 2), round(loan.machine_position[1], 2))
-        crafts[key] = int(finished)
+        if bounded:
+            if loan.step_baseline_finished is None or loan.step_required_crafts is None:
+                continue
+            key += (loan.step_baseline_finished, loan.step_required_crafts)
+            crafts[key] = max(0, min(loan.step_required_crafts, int(finished) - loan.step_baseline_finished))
+        else:
+            crafts[key] = int(finished)
     return crafts
 
 

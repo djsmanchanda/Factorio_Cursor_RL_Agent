@@ -371,3 +371,43 @@ def test_supervisor_lock_rejects_a_second_owner(tmp_path):
     with file_lock(tmp_path / ".supervisor.lock"):
         with pytest.raises(BlockingIOError):
             batch.run()
+
+
+def test_opt_in_ops_recovery_retains_interruption_and_selects_newest_generation(tmp_path):
+    batch=_batch(tmp_path,seeds=(1,))
+    batch.cfg['ops_checkpoints']=True
+    world=tmp_path/'old-world'
+    for name,created in [('first',1),('second',2)]:
+        folder=world/'checkpoints'/name;folder.mkdir(parents=True)
+        (folder/'checkpoint.json').write_text(json.dumps({'version':'laya-ops-checkpoint-v1','created_at':created}))
+    jobs=[dict(j) for j in batch.jobs]
+    jobs[0].update(status='running',world=str(world),started=1,admission_reserved=True)
+    (tmp_path/'job-status.json').write_text(json.dumps({'jobs':jobs}))
+    batch.resume()
+    recovered=batch.jobs[0]
+    assert recovered['resume_bundle']==str(world/'checkpoints/second')
+    assert recovered['resume_mode']=='coherent_ops_generation'
+    assert recovered['previous_attempts'][0]['world']==str(world)
+    assert recovered['attempt']==1
+
+
+def test_missing_ops_generation_is_explicit_incompatible_not_a_fresh_restart(tmp_path):
+    batch=_batch(tmp_path,seeds=(1,));batch.cfg['ops_checkpoints']=True
+    jobs=[dict(j) for j in batch.jobs]
+    jobs[0].update(status='interrupted',world=str(tmp_path/'world-without-bundle'),started=1)
+    (tmp_path/'job-status.json').write_text(json.dumps({'jobs':jobs}))
+    batch.resume();batch.report()
+    assert batch.jobs[0]['status']=='incompatible_checkpoint'
+    assert batch.jobs[0]['previous_attempts'][0]['status']=='interrupted'
+    report=json.loads((tmp_path/'report.json').read_text())
+    assert report['planned_jobs']==2 and report['statuses']['incompatible_checkpoint']==1
+
+
+def test_completed_predecessors_cannot_silently_adopt_a_baseline(tmp_path):
+    batch=_batch(tmp_path);gate=tmp_path/'baseline.json'
+    batch.cfg['baseline_gate']={'path':str(gate),'revision':'incumbent'}
+    assert not batch.may_admit() and batch.admission_reason=='baseline_not_settled'
+    gate.write_text(json.dumps({'status':'ready','revision':'candidate','evidence':['final-results'],'decided_by':'owner'}))
+    assert not batch.may_admit()
+    gate.write_text(json.dumps({'status':'ready','revision':'incumbent','evidence':['final-results'],'decided_by':'owner'}))
+    assert batch.may_admit()

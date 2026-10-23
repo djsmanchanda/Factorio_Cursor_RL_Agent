@@ -76,3 +76,10 @@ in the polling shell itself: the poller can match itself and wait indefinitely.
 Long campaign supervision belongs in T3's scheduler, with a bounded status read
 on each wake, rather than a shell held open with `sleep` for hours. This frees the
 agent between checks; it does not shorten the campaign itself.
+
+The primary-domain router honors an explicitly declared primary marker and
+rejects multiple distinct primary domains. Inferred markers are a fallback.
+Research acceptance and coherent ops recovery have curated fast coverage;
+real engine save/reload and funded lab/delivery wiring remain separate,
+explicitly disposable integration evidence. A pre-supplied fixture proves
+mechanics, not factory-earned research or frontier eligibility.
