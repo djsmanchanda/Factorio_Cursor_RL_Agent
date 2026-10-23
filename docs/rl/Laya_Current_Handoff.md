@@ -330,3 +330,7 @@ The Starship review fixes run on Miniship from branch `work/miniship/laya-integr
 ## Cohort 18 complete (2026-10-23 01:50 IST)
 
 The loan-credit fix `e37464d` is adopted into the cohort base (C5 20:5, C2 13:4); see [C18 result](Laya_C18_Result_2026-10-23.md). Caution: interim C19 shows the started-foundation menu change `b372672` hurting C2/C6, and C20/C21 carry it in every arm; an analysis is under way before the next cohort.
+
+## b372672 reverted; C19–C21 stopped; C22 launched (2026-10-23 06:00 IST)
+
+The started-foundation menu change is reverted on the integrated branch (`d8a4825`) after C19 showed it harmful. C19, C20 and C21 are stopped cleanly. C22 tests the integration (`d8a4825`) and loan retention (`3d221aa`) on the adopted credit base. Next ports 38000+.
