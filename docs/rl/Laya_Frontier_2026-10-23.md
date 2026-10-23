@@ -156,3 +156,39 @@ than six of its worlds concurrently. Keep that frozen cohort limit and original
 paired order. Memory/liveness controls, 72 queued cuts, sources and deadlines
 remain as recorded; do not label the target increase as a completed comparison
 or a measured performance improvement. Sensor provenance caveat still applies.
+
+## Original screens terminal and confirmation decision, 2026-10-23 23:51 IST
+
+The user added ten host slots: target12->22, no expiry, within configured max24.
+Live target readback confirms22 with six active freshness worlds; existing
+200/210 thermal settings remain. No controller-thread notification was sent,
+per the user's follow-up. Freshness's frozen concurrency6 is unchanged.
+
+All original192 planned jobs are terminal: sampling60 completed, research12
+completed, capital48 completed/12 cancelled_queued and bottleneck60 cancelled.
+Capital control/mall-flat/foundation8/batch-free/steel30 C6-v2 counts are
+5/6/6/4/7 of12 planned, known10/10/9/9/10 respectively. Candidate-only versus
+control-only C6 pairs are2:1,3:1,2:2,3:1 with known pairs10/9/9/10. Sampling
+candidates have negative paired C6 differences; bottleneck is unexercised.
+Foundation8's+.2222 has only9 known pairs. Among candidates meeting the10-pair
+primary gate, steel30 leads (+.20,3:1), ahead of mall-flat (+.10,2:1); no tie-break
+is needed. Steel30 has actual exposure89, no observed earlier-service decline,
+zero exceptions and8 typed bug outcomes versus control76. These are exploratory
+screen results, not adoption or proof of a general speed improvement.
+
+No confirmation or A/A is launched in this window. Even ignoring the six active
+freshness worlds and any cohort ceiling,60 jobs with full6,000-second budgets
+require at least16,364 seconds on22 slots, versus14,152 seconds remaining to
+03:46:47 at decision time. Launch would rely on early terminations or leave an
+underfilled confirmation. Preserve the declared windows and03:51:47 hard end.
+Freshness continues:6 completed/6 running,3 complete pairs, C6-v2 tied2/6 each
+(3 known each); research availability1876/1876 repair vs0/1615 control. Earned
+research is unobserved, with control research acceptance unavailable. The repair
+does not enter selection among sampling/prior candidates.
+
+Remote `operator-decisions/confirmation-not-launched-20261023-v1.json` retains
+all candidate contrasts, fault/exposure facts, steel30 variant hash, full-budget
+calculation and no-launch decision. `host-target-plus10-20261023-v1.json` retains
+the exact target command, config diff and readback. Existing freshness, observer
+cadence and terminal accounting continue; no new world, freeze, unit or source
+was introduced by these decisions.

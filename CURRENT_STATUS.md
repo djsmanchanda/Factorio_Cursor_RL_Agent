@@ -562,3 +562,7 @@ Verified observer's second explicit user instruction:thermal thresholds200/210 e
 ## 2026-10-23 22:51 IST — freshness repair has live mechanism exposure
 
 Matched repair cohort6 running/6 queued,3 per arm,0 complete pairs. Post-initial availability within first500 decisions/job:repair391/391 known vs control0/358; objectives391 vs0; option offers/selections535/15 vs6/0 under existing check-in semantics. Source/freeze checks pass. These are repeated samples, not trial denominators; no demand-rung advance, earned research, paired outcome or adoption. Remote immutable observation snapshot and state now record live mechanism evidence. Lifecycle:none; current host controls, cuts, hard end and55-minute observer continue.
+
+## 2026-10-23 23:51 IST — target22 verified; original screens closed without confirmation
+
+Applied direct user request host target12->22/no expiry, exit0/readback22, within max24; no controller notification per user. Original192 jobs terminal:120 completed/72 queued cuts. Steel30 leads positive10-pair C6 candidates (+.20,3:1), not adopted. No confirmation/A/A:60 full6000s budgets require>=16,364s on22 slots even ignoring occupied worlds, versus14,152s remaining. Recorded all candidate contrasts and variant hash in remote no-launch decision. Freshness6 completed/6 running,3 pairs,C6-v2 tied2/6; usable research1876/1876 repair vs0/1615 control, no earned completion observed. Lifecycle:existing scheduler picked up target; no restart, new cohort or source/freeze change. Hard end and55-minute cadence unchanged.

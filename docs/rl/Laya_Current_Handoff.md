@@ -511,3 +511,26 @@ Remote observations/freshness-first-exposure-20261023T2251IST.json preserves
 the snapshot and hash; state.source_fix.live_validation now records mechanism
 exposure with paired outcomes pending. No lifecycle/control change. Keep current
 user-approved host settings, existing cuts, deadline and55-minute monitoring.
+
+## Original screens closed; host target22 and no confirmation (2026-10-23 23:51 IST)
+
+User directly requested ten more slots; target12->22 applied with existing
+frozen scheduler CLI, exit0 and readback22/no expiry. Six active freshness
+worlds remain; frozen freshness concurrency6 and200/210 thermal settings are
+unchanged. User explicitly said no controller notification; none was sent.
+Remote host-target-plus10-20261023-v1.json binds before/after and exact command.
+
+All original192 jobs terminal:120 completed/72 cancelled_queued. Sampling60/60,
+research12/12, capital48 completed+12 cuts, bottleneck60 cuts. Steel30 leads
+among10-known-pair positive C6 candidates (+.20,3:1 vs control,10 pairs,89
+distribution exposures, no observed earlier-service loss, zero exceptions).
+Mall-flat+.10; foundation8+.2222 has only9 known pairs. No adoption. No
+confirmation or A/A this window:60*6000/22 needs at least16,364 seconds even
+ignoring occupied slots, versus14,152 seconds to cohort end at decision time.
+Do not shorten windows, extend deadline or launch a partial confirmation.
+State.confirmation_decision links full immutable contrasts and variant hash.
+
+Freshness continues6 completed/6 running with3 complete pairs; C6-v2 tied2/6
+(known3 each), available research1876/1876 repair vs0/1615 control; no earned
+research observed and control research endpoint remains unknown. Existing
+55-minute reads and03:53 accounting remain; keep hard end03:51:47 Oct24.
