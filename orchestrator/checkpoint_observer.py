@@ -23,6 +23,7 @@ from orchestrator.bootstrap_district import (
 )
 from planners.bootstrap_smelting import direct_smelter_positions
 from planners.recipe_data import LINE_RECIPES
+from tools.rcon_client import RconError
 
 
 class ObservationUnsupported(RuntimeError):
@@ -562,7 +563,7 @@ class LiveCheckpointObservationAdapter:
                    + args + '))) else rcon.print("null") end')
         try:
             result = json.loads(client.command(command))
-        except (ValueError, TypeError, OSError):
+        except (ValueError, TypeError, OSError, RconError):
             return None
         if not isinstance(result, Mapping):
             return None

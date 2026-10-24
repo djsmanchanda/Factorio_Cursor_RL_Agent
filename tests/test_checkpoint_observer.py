@@ -366,3 +366,11 @@ def test_overlapping_district_ownership_is_unsupported(ledger):
     districts[copper.recipe] = copper
     with pytest.raises(ObservationUnsupported, match="duplicate furnace sites"):
         LiveCheckpointObservationAdapter()._foundation_survey(None, districts)
+
+
+def test_plastic_sampler_protocol_failure_is_isolated():
+    from tools.rcon_client import RconError
+    def fail(_):
+        raise RconError("bad packet")
+    adapter = LiveCheckpointObservationAdapter(bridge=SimpleNamespace(episode_id="test"))
+    assert adapter._plastic_startup(SimpleNamespace(command=fail)) is None

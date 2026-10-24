@@ -52,6 +52,7 @@ remote.add_interface("production_startup", {
       local count = counter(watch)
       assert(count ~= nil, "startup scope unavailable")
       watch.baseline_count, watch.last_count = count, count
+      if count > 0 then watch.error = "startup_armed_after_production" end
       watches()[key] = watch
     end
     watch.observed_tick = game.tick
