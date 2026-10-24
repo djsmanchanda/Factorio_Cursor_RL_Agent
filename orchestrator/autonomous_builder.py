@@ -107,6 +107,7 @@ from orchestrator.transport_energy import (
 from orchestrator.extraction_route import live_collector_link, live_route_preflight
 from orchestrator.priority_list import PriorityList
 from orchestrator.power_district import ensure_power_capacity, load_reserved_tiles
+from orchestrator import pole_obstruction
 from orchestrator.recoverable_retirement import (
     RecoverableRetirementError, retire_entities_via_bots,
 )
@@ -1638,6 +1639,7 @@ def _plate_expansion_foundation(
     *, allowed_tiles: set[tuple[int, int]] | None = None,
     own_action_positions: set[tuple[str, float, float]] | None = None,
     emit: Callable[[str], None] = lambda _message: None,
+    allow_pole_relocation: bool = True,
 ) -> dict | None:
     """Survey a refinery extension before mining and stage needed landfill."""
     if not hasattr(client, "command"):
@@ -1662,6 +1664,13 @@ def _plate_expansion_foundation(
     excusable: dict[tuple[str, float, float], bool] = {}
     collision: list[tuple[int, int]] = []
     relocate_roboports: set[Point] = set()
+    pole_owners = {owner for _, owner in suspects if owner[0] in pole_obstruction.POLE_SPECS}
+    # Occupancy has no force field. Confirm exact same-force poles before
+    # handing them to the shared, connected replacement-first operation.
+    scoped_poles = live_base.entity_signatures_at(
+        client, surface, force, [(owner[1], owner[2]) for owner in pole_owners],
+    ) if pole_owners and allow_pole_relocation else {}
+    relocate_poles = False
     for tile, owner in suspects:
         is_ours = excusable.get(owner)
         if is_ours is None:
@@ -1677,6 +1686,9 @@ def _plate_expansion_foundation(
                 )
         if owner[0] == "roboport":
             relocate_roboports.add((owner[1], owner[2]))
+        elif (allow_pole_relocation and owner[0] in pole_obstruction.POLE_SPECS
+              and scoped_poles.get((owner[1], owner[2]), {}).get("name") == owner[0]):
+            relocate_poles = True
         elif not is_ours:
             collision.append(tile)
     if collision:
@@ -1685,7 +1697,7 @@ def _plate_expansion_foundation(
             f"{collision[:3]}; refusing to expand its mine ahead of that conflict"
         )
     water = sorted(footprint & live_base.water_tiles(client, surface, minimum, maximum))
-    if not water and not relocate_roboports:
+    if not water and not relocate_roboports and not relocate_poles:
         return None
     phases = [{
         "name": f"{recipe}_smelter_landfill_foundation",
@@ -1695,11 +1707,16 @@ def _plate_expansion_foundation(
             for x, y in water
         ],
     }] if water else []
-    return {
+    preparation = {
         "phases": phases,
         "relocate_roboports": sorted(relocate_roboports),
         "reserved_tiles": sorted(footprint),
     }
+    if relocate_poles:
+        preparation["pole_plan"] = smelter_delta
+        preparation["own_action_positions"] = sorted(own)
+        preparation["allowed_tiles"] = sorted(allowed_tiles or set())
+    return preparation
 
 
 def _relocate_roboport_for_expansion(
@@ -1798,6 +1815,22 @@ def _place_plate_expansion_foundation(
 ) -> None:
     """Build solid ground before a plate-refinery ghost is submitted there."""
     reserved = {tuple(tile) for tile in foundation.get("reserved_tiles", [])}
+    pole_plan = foundation.get("pole_plan")
+    if pole_plan is not None:
+        try:
+            moved = pole_obstruction.relocate_obstructing_poles(
+                client, bridge, surface, force, pole_plan,
+                f"prepare_{recipe}_refinery_poles", emit, _submit,
+            )
+        except pole_obstruction.PoleObstruction as error:
+            raise StuckError(str(error), code="power_pole_obstruction", details=error.details) from error
+        # A failed/partial bot handoff must not release the mine expansion.
+        _plate_expansion_foundation(
+            client, surface, force, recipe, pole_plan, allow_pole_relocation=False,
+            own_action_positions={tuple(item) for item in foundation.get("own_action_positions", [])},
+            allowed_tiles={tuple(tile) for tile in foundation.get("allowed_tiles", [])},
+        )
+        emit(f"SMELTER POLE CLEARANCE: {recipe} moved/recovered {moved} blocking pole(s); footprint rechecked")
     for position in foundation.get("relocate_roboports", []):
         _relocate_roboport_for_expansion(
             client, bridge, surface, force, tuple(position), reserved, emit,
