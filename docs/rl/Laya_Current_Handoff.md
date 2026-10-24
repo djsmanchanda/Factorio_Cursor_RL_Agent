@@ -415,3 +415,11 @@ Ready-loan reconciliation is not adopted; see [C26b result](Laya_C26b_Result_202
 ## C30 strata: Miniship sidecar and Starship replication (2026-10-24 17:55 IST)
 
 At the user's request, while C30 waits on C29, two more strata of the same comparison (release `5a5ed28` against site `f765d30`) are running on fresh seeds. On Miniship, `laya-c30a-2123-miniship-20261024` has 40 jobs on seeds 83200–83219, ports 39000/32000 and no dependency; it shares the host slot budget. On Starship, `laya-s30r-2123-starship-20261024` has 48 jobs on seeds 83100–83123 and ports 39100/32100, runs at a fixed concurrency of 10, and ends hard at 2026-10-25 01:45 IST. Analyse each one as a stratum of C30, with the same conditionality on C29, and count every planned job. Next free Miniship ports are 39100+.
+
+## C31 queued: output backpressure is not a construction fault (2026-10-24 18:10 IST)
+
+C31 is built from the October 24 audit (03:27–15:27 window, `data/laya-orchestration/deep-audit-12h-20261024T095728Z/report.md`). It queues 120 jobs behind C29 and C30, on seeds 79800–79859 and ports 39200/32200, with a 7200 s wall.
+- **Control, `census` (`de40332`):** `5a5ed28` plus the structural foundation census `4a40944`. The census counts furnaces by persisted ownership and changes measurement only.
+- **Treatment, `outblock` (`7c63333`):** the only change is that `_diagnose_machines` counts `full_output` machines as a built, producing line and logs `OUTPUT BLOCKED` instead of returning them as stuck.
+
+Both arms carry the census, so their C2/C3 counts are not directly comparable with C25–C30. Primary endpoints: strict C3 attainment and time to C2/C3. Cancel C31 before it starts if C29 does not adopt release. Next free Miniship ports are 39300+.
