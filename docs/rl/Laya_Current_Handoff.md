@@ -435,3 +435,11 @@ C30a (thread 94dcfaf2's 40-job stratum of C30, seeds 83200–83219) finished 40/
 - In the 3 remaining pairs, site never reached steel at all, and that accounts for its whole C2 deficit (−3).
 
 Most of the gap therefore arises where the two arms ran the same steel-seed geometry, which points to run-to-run variance (the A/A spread on identical code is C2 5:12). It is not a fix effect, but it is not proven either. C30 (60 pairs) decides. Check for analysis: compare plan identity per pair, not only fallback logs.
+
+## C30 site deficit: a reservation hazard the fix exposes (2026-10-24 21:48 IST)
+
+At 46/120, C30 shows the same pattern as C30a: site trails release (C2 1:6, C3 2:8). `seed_plans.py` (takeover dir) puts all of the C2 deficit in pairs where release built a mined seed and site saved no seed plan. The final `conversion_steel-plate` ledger entries split those 9 losing pairs (C30 + C30a):
+- **3 C30 pairs (79740, 79750, 79757):** the site arm found a fallback site while its bill was unaffordable (e.g. inserters short 28). `assert_affordable(reserve_project=True)` declared the steel project at priority 100. It stayed in `supply_wait` holding 5–6 scarce items (electric furnaces, the drill, poles, the chest) while the iron refinery, which steel waits on, starved. In release the same moment ended in `steel_seed_site_wait` or a later belt/mined plan, with nothing reserved.
+- **6 pairs (C30 79741, 79747, 79755; C30a 83201, 83208, 83213):** the site arm's steel project is only `ready` with the 2-pole opening fence. The seed was never attempted, so those runs stalled before steel for reasons unrelated to the fix.
+
+Fix candidate (do not change C30): a steel seed whose bill is unaffordable should not keep a priority-100 partial reservation while its prerequisite iron refinery is unfunded. For example, release the project on `MaterialShortage`, or declare it only once affordable. Decide after C30 completes.
