@@ -392,3 +392,30 @@ def test_serve_mall_task_serves_medium_pole_when_steel_already_flowing(monkeypat
         in m for m in messages
     )
 
+
+
+def test_mined_seed_tries_further_ore_sites_when_the_nearest_collides(monkeypatch):
+    """C25-C29: the starter survey's nearest site often cannot hold the longer seed footprint."""
+    from planners.steel_bootstrap import steel_seed
+    planned_footprint_tiles = builder.planned_footprint_tiles
+    sites = [builder.live_base.DirectPlateStarter((10.5, 0.5), "east", 1, ((22.5, 0.5),)),
+             builder.live_base.DirectPlateStarter((40.5, 0.5), "south", -1, ((40.5, 12.5),))]
+    asked = []
+    def site(*_a, skip=0, **_k):
+        asked.append(skip)
+        return sites[skip] if skip < len(sites) else None
+    first = planned_footprint_tiles(steel_seed((10.5, 0.5), "east", mined=True, pole_side=1)) | \
+        planned_footprint_tiles(steel_seed((10.5, 0.5), "east", mined=True, pole_side=-1))
+    monkeypatch.setattr(builder.live_base, "direct_plate_starter_site", site)
+    monkeypatch.setattr(builder.live_base, "occupied_tiles", lambda *_a: first)
+
+    plan, tried = builder._mined_steel_seed_plan(object(), "nauvis", "player", (0.0, 0.0))
+
+    assert plan == steel_seed((40.5, 0.5), "south", mined=True, pole_side=-1)
+    assert (tried, asked) == (2, [0, 1])
+
+
+def test_mined_seed_reports_sites_tried_when_none_fits(monkeypatch):
+    monkeypatch.setattr(builder.live_base, "direct_plate_starter_site", lambda *_a, skip=0, **_k: None)
+
+    assert builder._mined_steel_seed_plan(object(), "nauvis", "player", (0.0, 0.0)) == (None, 0)

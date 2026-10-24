@@ -4260,6 +4260,32 @@ def _verified_iron_pioneer_output(
     return int(contents.get("iron-plate", 0)) > 0
 
 
+_STEEL_SEED_ORE_SITES = 12
+
+
+def _mined_steel_seed_plan(client, surface, force, reference_point):
+    """First collision-free mined steel seed over the nearest legal iron starter sites.
+
+    The starter survey validates a shorter footprint than the seed (chest 6 vs 10 tiles out),
+    so its nearest site alone often collides: 2026-10-24, C25-C29 ended 15-30% of runs on
+    steel_seed_site_wait. Try further sites and both pole sides before giving up.
+    Returns (plan or None, sites surveyed).
+    """
+    from planners.steel_bootstrap import steel_seed
+    for skip in range(_STEEL_SEED_ORE_SITES):
+        site = live_base.direct_plate_starter_site(
+            client, surface, force, "iron-ore", reference_point, skip=skip,
+        )
+        if site is None:
+            return None, skip
+        for side in dict.fromkeys((site.pole_side, -site.pole_side)):
+            candidate = steel_seed(site.drill_position, site.output_direction, mined=True, pole_side=side)
+            occupied = live_base.occupied_tiles(client, surface, *_plan_area(candidate, padding=1))
+            if not planned_footprint_tiles(candidate) & occupied:
+                return candidate, skip + 1
+    return None, _STEEL_SEED_ORE_SITES
+
+
 def _build_compact_steel_seed(client, bridge, surface, force, provider, reference_point, emit):
     """Fund and remember a belt-side seed, falling back to direct mining."""
     from planners.steel_bootstrap import steel_seed, VECTORS
@@ -4334,18 +4360,14 @@ def _build_compact_steel_seed(client, bridge, surface, force, provider, referenc
                     break
             if plan is not None:
                 break
+        sites_tried = 0
         if plan is None:
-            site = live_base.direct_plate_starter_site(client, surface, force, "iron-ore", reference_point)
-            if site is not None:
-                candidate = steel_seed(site.drill_position, site.output_direction, mined=True)
-                area = _plan_area(candidate, padding=1)
-                occupied = live_base.occupied_tiles(client, surface, *area)
-                if not planned_footprint_tiles(candidate) & occupied:
-                    plan = candidate
+            plan, sites_tried = _mined_steel_seed_plan(client, surface, force, reference_point)
         if plan is None:
             raise ProductionPrerequisiteDeferred(
                 "no collision-free compact steel seed fits beside iron or on a free patch",
                 code="steel_seed_site_wait", state="planned",
+                details={"iron_belt_sources": len(sources), "ore_sites_tried": sites_tried},
             )
         plan.update(surface=surface, force=force)
         assert_affordable(client, surface, force, plan, steel_project, emit, reserve_project=True,

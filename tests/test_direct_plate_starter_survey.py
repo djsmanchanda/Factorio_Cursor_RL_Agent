@@ -98,3 +98,12 @@ def test_direct_starter_surveys_return_none_cleanly() -> None:
     assert live_base.direct_plate_starter_site(
         _Client("NONE"), "nauvis", "player", "iron-ore", (0.0, 0.0),
     ) is None
+
+
+def test_site_survey_can_skip_earlier_legal_sites() -> None:
+    client = _Client("NONE")
+
+    assert live_base.direct_plate_starter_site(client, "nauvis", "player", "iron-ore", (0.0, 0.0), skip=3) is None
+    lua = client.commands[0]
+    assert "local skip,hit=3,0;" in lua
+    assert "if hit>=skip then" in lua and "hit=hit+1" in lua

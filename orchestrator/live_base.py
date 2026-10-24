@@ -285,13 +285,15 @@ def direct_plate_starter(
 
 def direct_plate_starter_site(
     client: RconClient, surface: str, force: str, ore: str, near: Point,
-    *, search_radius: float = 400.0,
+    *, search_radius: float = 400.0, skip: int = 0,
 ) -> DirectPlateStarter | None:
     """Nearest legal direct starter site, including either pole side.
 
     Stone-brick requires two drill footprints; metal plates require one. Small
     patches are intentionally eligible. This is a temporary producer, not a
-    claim on the later managed mining district.
+    claim on the later managed mining district. ``skip`` passes over that many
+    legal sites in distance order, so a caller with a larger footprint can try
+    the next one.
     """
     min_x, min_y = near[0] - search_radius, near[1] - search_radius
     max_x, max_y = near[0] + search_radius, near[1] + search_radius
@@ -299,6 +301,7 @@ def direct_plate_starter_site(
         "local s=game.surfaces['" + surface + "'];"
         "local f=game.forces['" + force + "'];"
         "local nx,ny=" + str(near[0]) + "," + str(near[1]) + ";"
+        "local skip,hit=" + str(int(skip)) + ",0;"
         "local rs=s.find_entities_filtered{name='" + ore + "',type='resource',"
         "area={{" + str(min_x) + "," + str(min_y) + "},{" + str(max_x) + "," + str(max_y) + "}}};"
         "table.sort(rs,function(a,b) local ad=(a.position.x-nx)^2+(a.position.y-ny)^2;"
@@ -340,8 +343,9 @@ def direct_plate_starter_site(
         "and can('medium-electric-pole',{sp[1]+2*px+2*py*side,sp[2]+2*py-2*px*side},nil,0.4))) "
         "and (dual or can('medium-electric-pole',{fp[1]-4*px+3*dx,fp[2]-4*py+3*dy},nil,0.4)));"
         "if can('medium-electric-pole',pp,nil,0.4) and extra then "
+        "if hit>=skip then "
         "if two then rcon.print(p.x..' '..p.y..' '..v[1]..' '..side..' '..sp[1]..' '..sp[2]) "
-        "else rcon.print(p.x..' '..p.y..' '..v[1]..' '..side) end;return end end end end end end;"
+        "else rcon.print(p.x..' '..p.y..' '..v[1]..' '..side) end;return end;hit=hit+1 end end end end end end;"
         "rcon.print('NONE')"
     )
     raw = _sc(client, lua)
