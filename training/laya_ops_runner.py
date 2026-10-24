@@ -901,6 +901,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         summary["accepted_final"] = (None if "error" in statuses or fresh is None
                                      else sorted(c for c, status in fresh.items() if status == "passed"))
         _append(journal, {"run_id": run_id, "event": "acceptance", "at": event, "statuses": statuses,
+                          "tick": getattr(session, "acceptance_tick", None),
+                          "evidence": getattr(session, "acceptance_evidence", None),
                           "fresh": fresh, "checks": getattr(session, "acceptance_checks", None),
                           "production_service": summary.get("production_service"),
                           "foundations": getattr(session, "foundation_observations", None)})

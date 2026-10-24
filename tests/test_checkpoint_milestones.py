@@ -32,7 +32,8 @@ def _snapshot(**overrides):
 def test_default_registry_is_ordered_and_versioned_with_advanced_circuit_milestone():
     milestones = default_milestones()
     assert [item.checkpoint_id for item in milestones] == ["C0", "C1", "C2", "C3", "C4", "C5", "C6"]
-    assert all(item.predicate_version.endswith("-v1") for item in milestones)
+    assert [item.predicate_version for item in milestones] == [
+        "c0-v1", "c1-v1", "c2-v1", "c3-v1", "c4-v1", "c5-v2", "c6-v1"]
     assert milestones[-1].name == "advanced_circuit_consumption"
 
 
@@ -82,28 +83,55 @@ def test_c4_requires_new_plastic_production_and_delivery():
     assert evaluate_milestone("C4", current).unknown
 
 
-def test_c5_requires_120_seconds_and_advancing_plastic_evidence():
-    def sample(tick, craft, delivered):
-        return {"tick": tick, "production": {"plastic-bar": {"craft_count": craft}}, "providers": {"plastic-bar": {"delivered": delivered}}}
+def _startup(counts, *, start=600, baseline=100):
+    return {"tick": start + (len(counts) - 1) * 1800, "plastic_startup": {
+        "version": "production-startup-v1", "item": "plastic-bar", "run_id": "test",
+        "source": "force.get_item_production_statistics(surface).get_input_count",
+        "baseline_tick": 0, "baseline_count": baseline, "start_tick": start,
+        "observed_tick": start + (len(counts) - 1) * 1800,
+        "samples": [{"tick": start + i * 1800, "produced": count} for i, count in enumerate(counts)],
+    }}
 
-    history = [sample(0, 1, 1), sample(3600, 2, 2), sample(7200, 3, 3)]
-    assert evaluate_milestone("C5", history[-1], history=history[:-1]).passed
-    assert evaluate_milestone("C5", sample(6000, 3, 3), history=history[:-1]).failed
+
+def test_c5_stability_can_arrive_early_and_survives_full_output_or_diversion():
+    # First two intervals establish 10/s; later stock gating / gas diversion
+    # must not retract the startup proof, even in a fresh final evaluation.
+    for counts in ([102, 402, 702], [102, 402, 702, 702, 702]):
+        result = evaluate_milestone("C5", _startup(counts))
+        assert result.passed
+        assert result.predicate_version == "c5-v2"
+        assert result.evidence["qualified_tick"] == 4200
 
 
-def test_c5_ignores_preproduction_history_from_c0_lane():
-    def sample(tick, craft, delivered):
-        return {"tick": tick, "production": {"plastic-bar": {"craft_count": craft}}, "providers": {"plastic-bar": {"delivered": delivered}}}
-
-    history = [
-        {"tick": 0},
-        sample(100, 0, 0),
-        sample(200, 1, 1),
-        sample(3800, 2, 2),
-    ]
-    result = evaluate_milestone("C5", sample(7400, 3, 3), history=history)
+def test_c5_accepts_ramp_then_stability_within_first_two_minutes():
+    result = evaluate_milestone("C5", _startup([102, 132, 432, 732, 732]))
     assert result.passed
-    assert result.evidence["ignored_preproduction_samples"] == 2
+    assert result.evidence["qualified_tick"] == 6000
+
+
+def test_c5_stable_rate_tolerance_and_positive_output():
+    assert evaluate_milestone("C5", _startup([102, 402, 642])).passed  # 20% lower
+    assert evaluate_milestone("C5", _startup([102, 402, 641, 641, 641])).failed
+    assert evaluate_milestone("C5", _startup([102, 102, 102, 102, 102])).failed
+    assert evaluate_milestone("C5", _startup([102, 402, 402, 702, 702])).failed
+
+
+def test_c5_waits_for_evidence_without_fabricating_rates_from_stock():
+    assert evaluate_milestone("C5", _startup([102, 402])).unknown
+    assert evaluate_milestone("C5", {"tick": 9000, "providers": {"plastic-bar": 4800}}).unknown
+    assert evaluate_milestone("C5", {"tick": 9000, "production": {"plastic-bar": 4800}},
+                              history=[{"tick": 0, "production": {"plastic-bar": 1}}]).unknown
+
+
+def test_c5_rejects_counter_reset_gaps_and_extra_late_samples():
+    for counts in ([102, 402, 2], [102, 402, float("nan")], [102, 402, 702, 1002, 1302, 1602]):
+        assert evaluate_milestone("C5", _startup(counts)).unknown
+    snapshot = _startup([102, 402, 702])
+    snapshot["plastic_startup"]["samples"][1]["tick"] += 60
+    assert evaluate_milestone("C5", snapshot).unknown
+    snapshot = _startup([102, 402, 702])
+    snapshot["plastic_startup"]["error"] = "production_counter_reset"
+    assert evaluate_milestone("C5", snapshot).unknown
 
 
 def test_c6_proves_advanced_circuit_production_and_new_owned_consumer_output():

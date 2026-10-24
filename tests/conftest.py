@@ -53,6 +53,7 @@ _DETERMINISTIC_HINTS = (
 # highest-value safety/contracts across all domains; breadth remains in the
 # scheduled/manual full suite instead of masquerading as fast validation.
 _FAST_FILES = {
+    "test_checkpoint_milestones.py", "test_production_startup_lua.py",
     "test_laya_decision_pacing.py", "test_mall_reconciliation.py",
     "test_checkpoint_observer.py",
     "test_laya_ops_initialization.py", "test_mall_cell_release_lua.py",
@@ -93,6 +94,7 @@ _EXHAUSTIVE_NODE_FRAGMENTS = {
     *_SLOW_NODE_FRAGMENTS,
 }
 _LUA_FILES = {
+    "test_production_startup_lua.py",
     "test_atomic_removal_preflight.py", "test_logistic_sections_lua.py",
     "test_recipe_catalog_lua.py", "test_research_lua.py",
     "test_science_telemetry_lua.py", "test_training_lab_validation_lua.py",

@@ -542,8 +542,36 @@ class LiveCheckpointObservationAdapter:
             "production": production,
             "providers": providers,
             "recipes": recipes,
+            "plastic_startup": self._plastic_startup(client),
         }
         return _normalize(snapshot, source="live-rcon-structured")
+
+    def _plastic_startup(self, client: Any) -> Mapping[str, Any] | None:
+        """Arm/read the bounded game-clock sampler for this logical episode.
+
+        Missing sampler evidence affects C5 alone. Observing an old freeze
+        cannot retroactively invent its startup rates.
+        """
+        run_id = getattr(self.bridge, "episode_id", None)
+        if not run_id:
+            return None
+        args = ",".join(json.dumps(value) for value in
+                        (self.surface, self.force, "plastic-bar", run_id))
+        command = ('/sc if remote.interfaces.production_startup then '
+                   'rcon.print(helpers.table_to_json(remote.call("production_startup","read",'
+                   + args + '))) else rcon.print("null") end')
+        try:
+            result = json.loads(client.command(command))
+        except (ValueError, TypeError, OSError):
+            return None
+        if not isinstance(result, Mapping):
+            return None
+        if (result.get("surface"), result.get("force"), result.get("run_id")) != (self.surface, self.force, run_id):
+            return None
+        # Factorio encodes an empty Lua table as {}, not necessarily [].
+        if result.get("samples") == {}:
+            result["samples"] = []
+        return result
 
 
 __all__ = [

@@ -27,7 +27,7 @@ The ordered registry starts with these versioned predicates:
 | `C2` | Opening iron and copper districts produce and deliver output; their temporary starters are absent. |
 | `C3` | The opening stone-brick district produces and delivers output; its temporary starter is absent. |
 | `C4` | New plastic production and provider delivery are observed. |
-| `C5` | The same plastic producer cohort advances throughout 120 game seconds with provider delivery. |
+| `C5` | `c5-v2`: plastic starts and demonstrates two consecutive positive 30-game-second output rates within its first 120 game seconds, with the smaller rate at least 80% of the larger. Startup proof persists through later supply or stock pauses. |
 | `C6` | Advanced circuits are newly produced, then an owned recipe which consumes them records new output. |
 
 Stable checkpoint IDs are independent of display order. An inserted checkpoint
