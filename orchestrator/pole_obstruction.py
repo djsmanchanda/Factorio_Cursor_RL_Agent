@@ -139,13 +139,22 @@ def _connect(client: RconClient, surface: str, force: str, site: Point,
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
         "local function pole(x,y) for _,e in pairs(s.find_entities_filtered{position={x,y},radius=0.01,force=f}) do "
-        "if e.type=='electric-pole' or (e.type=='entity-ghost' and e.ghost_type=='electric-pole') then return e end end end;"
-        "local r=pole(" + f"{site[0]},{site[1]}" + ");if not r then return end;"
+        "if e.type=='electric-pole' then return e end end end;"
+        "local r=pole(" + f"{site[0]},{site[1]}" + ");if not r then rcon.print('replacement_not_built');return end;"
         "local rc=r.get_wire_connector(defines.wire_connector_id.pole_copper,true);"
-        "for _,t in pairs({" + targets + "}) do local n=pole(t[1],t[2]);if n then "
-        "pcall(function() rc.connect_to(n.get_wire_connector(defines.wire_connector_id.pole_copper,true),false) end) end end"
+        "for _,t in pairs({" + targets + "}) do local n=pole(t[1],t[2]);if not n then "
+        "rcon.print('wire_neighbor_missing');return end;"
+        "local nc=n.get_wire_connector(defines.wire_connector_id.pole_copper,true);"
+        "pcall(function() rc.connect_to(nc,false) end);local linked=false;"
+        "for _,connection in pairs(rc.connections) do if connection.target==nc then linked=true end end;"
+        "if not linked then rcon.print('wire_link_unverified');return end end;rcon.print('ok')"
     )
-    client.command("/sc " + lua)
+    result = client.command("/sc " + lua).strip()
+    if result != "ok":
+        raise PoleObstruction(
+            f"replacement pole at {site} has no verified live connection to every old neighbour; keeping the old pole",
+            {"position": list(site), "reason": result or "wire_verification_missing"},
+        )
 
 
 def relocate_obstructing_poles(
