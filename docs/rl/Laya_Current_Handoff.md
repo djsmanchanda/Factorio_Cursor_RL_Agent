@@ -388,10 +388,10 @@ verified source. This is a wall-budget setting, not new policy adoption.
 
 On the user's instruction ("shift 26/27 to 7200"), C26 and C27 were cancelled before any job started (60 `cancelled_queued` each; they are not results). They were refrozen as `laya-c26b-2123-miniship-20261024` (ports 38500/31500) and `laya-c27b-2123-miniship-20261024` (ports 38600/31600). Both use the same seeds, arms and code `2d9b4b5`, with `trial_wall_seconds` 7200, and both wait behind C24+C25 (60 queued each). The branch head `daefefc` changes only allowance defaults. Next free ports are 38700+.
 
-## Cohort 25 complete (2026-10-24 05:45 IST)
+## Cohort 25 complete (2026-10-24 05:18 IST)
 
 Backing `65604cd` is not adopted: new Laya C6 is level (10:12), and backing is slower to strict C3 (14:28); see [C25 result](Laya_C25_Result_2026-10-24.md). C26b/C27b now run on `2d9b4b5`. Miniship C28 (60 jobs, A/A + steel30 + feedstock16) is owned by thread 94dcfaf2 and waits behind C26b/C27b; do not edit it.
 
-## Stale mall reservations and C29 (2026-10-24 06:45 IST)
+## Stale mall reservations and C29 (2026-10-24 05:29 IST)
 
 C25's never-C2 runs end in a cycle. The iron foundation needs one passive-provider chest, and new chests need plastic, which waits on steel, which waits on the iron foundation. Meanwhile, paired mall cells that are already producing still hold chests. A cell served once while idle (the repair path) stayed `constructing` with `hold_until_producing`, because only a later `ensure_produced` for the same item could close it. Fix `5a5ed28` closes such projects after every operation once their producer has run. C29 tests it against `daefefc` (120 jobs, 7200 s, ports 38800/31800, behind C26b/C27b); strict C2 is primary. The freeze script is `data/laya-orchestration/takeover-20261021/freeze-scripts/freeze_c29.py`. Next free ports: 38900+.
