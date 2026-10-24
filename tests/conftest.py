@@ -52,6 +52,7 @@ _DETERMINISTIC_HINTS = (
 # highest-value safety/contracts across all domains; breadth remains in the
 # scheduled/manual full suite instead of masquerading as fast validation.
 _FAST_FILES = {
+    "test_checkpoint_observer.py",
     "test_laya_ops_initialization.py", "test_mall_cell_release_lua.py",
     "test_laya_batch.py", "test_laya_host_scheduler.py", "test_laya_research.py", "test_laya_ops_checkpoint.py",
     "test_laya_frontier_plan.py", "test_laya_guided_experiments.py",
@@ -96,6 +97,11 @@ _LUA_FILES = {
     "test_science_telemetry_lua.py", "test_training_lab_validation_lua.py",
 }
 _LUA_NODE_FRAGMENTS = {
+    "test_checkpoint_observer.py::test_owned_empty_furnaces",
+    "test_checkpoint_observer.py::test_missing_ghost_and_foreign_furnaces",
+    "test_checkpoint_observer.py::test_uncrafted_and_deconstructing_furnaces",
+    "test_checkpoint_observer.py::test_unavailable_entity_counter",
+    "test_checkpoint_observer.py::test_neighboring_district",
     "test_bootstrap_supply.py::test_generated_seed_lua_is_syntactically_valid",
 }
 _LOOPBACK_NODE_FRAGMENTS = {

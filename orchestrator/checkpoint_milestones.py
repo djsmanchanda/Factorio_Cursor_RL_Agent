@@ -11,7 +11,7 @@ measured negative result and makes predicates replayable in tests.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
@@ -101,17 +101,32 @@ class FoundationEvidence:
     healthy: bool | None = None
     producing: bool | None = None
     output_count: int | None = None
+    working_count: int | None = None
+    identity_source: str | None = None
+    counter_basis: str | None = None
+    district_id: str | None = None
+    district_revision: int | None = None
+    machines: tuple[Mapping[str, Any], ...] = ()
 
     @classmethod
     def from_mapping(cls, name: str, value: Mapping[str, Any] | Any) -> "FoundationEvidence":
         if not isinstance(value, Mapping):
             return cls(name=name, machine_count=_as_int(value))
+        # Legacy snapshots use a scalar `machines` as the count alias.
+        machines = value.get("machines")
+        rows = machines if isinstance(machines, (list, tuple)) else ()
         return cls(
             name=str(value.get("name", name)),
             machine_count=_as_int(value.get("machine_count", value.get("machines"))),
             healthy=_as_bool(value.get("healthy", value.get("valid"))),
             producing=_as_bool(value.get("producing", value.get("active"))),
             output_count=_item_counter(value, "output_count", "output", "produced"),
+            working_count=_as_int(value.get("working_count")),
+            identity_source=value.get("identity_source"),
+            counter_basis=value.get("counter_basis"),
+            district_id=value.get("district_id"),
+            district_revision=_as_int(value.get("district_revision")),
+            machines=tuple(dict(machine) for machine in rows if isinstance(machine, Mapping)),
         )
 
 
@@ -424,12 +439,20 @@ def _c2(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, _history: 
         "iron_starter_absent": _starter_absent(snapshot, "iron"),
         "copper_starter_absent": _starter_absent(snapshot, "copper"),
     }
-    return _all_checks("C2", "c2-v1", checks, {})
+    return _all_checks("C2", "c2-v1", checks, _foundation_evidence(snapshot, "iron", "copper"))
 
 
 def _c3(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, _history: Sequence[FactorySnapshot]) -> CheckpointResult:
     checks = {"stone_foundation_ready": _foundation_ready(snapshot, "stone"), "stone_starter_absent": _starter_absent(snapshot, "stone")}
-    return _all_checks("C3", "c3-v1", checks, {})
+    return _all_checks("C3", "c3-v1", checks, _foundation_evidence(snapshot, "stone"))
+
+
+def _foundation_evidence(snapshot: FactorySnapshot, *names: str) -> dict[str, Any]:
+    """Keep the census that produced a receipt, including on a failed check."""
+    return {"tick": snapshot.tick, "foundations": {
+        name: asdict(snapshot.foundations[name]) if name in snapshot.foundations else None
+        for name in names
+    }}
 
 
 def _new_output(snapshot: FactorySnapshot, baseline: FactorySnapshot | None, item: str) -> tuple[bool | None, dict[str, Any]]:

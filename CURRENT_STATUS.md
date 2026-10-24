@@ -618,3 +618,8 @@ target21/search/config preserved except growth_margin_ups=5; live report confirm
 growth_ups_p95=105. C29 service start, batch and freeze unchanged. No Factorio/mod,
 cohort, scheduler-timer, Starship or observer action. Initial p95=94.04/p98=93.16
 does not establish recovery or throughput improvement; existing backoff continues.
+
+## [2026-10-24 17:13 IST] Structural foundation census from the 12-hour audit
+- What: Checkpoint observations count real electric furnaces at exact episode-owned replacement sites, independent of transient inventory. Entity IDs, positions, lifetime counters, current working counts and district provenance survive normalized receipts. Unknown ownership, incomplete telemetry and duplicate sites fail closed; existing C2/C3 health/producing semantics are preserved.
+- Evidence: 81 focused checks passed, including executable Lua fixtures; final fast gate 1,379 passed / 1 skipped (exit 0). An offline fixture using the actual C26b control-s79644 replacement ledgers counts six empty furnaces per district; live entity presence was synthetic and historical outcomes were not recomputed.
+- Lifecycle: Python-only, prepared on isolated branch fix/rl-foundation-census-20261024 atop verified scheduler commit 58363db. Incorporate in a future frozen runner build after the active C29 campaign; no active runner, save, mod, scheduler or cohort was changed.

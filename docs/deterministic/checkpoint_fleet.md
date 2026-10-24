@@ -36,6 +36,25 @@ such as `C1a` creates a new registry version and explicit order
 Predicates consume structured observations and distinguish unknown evidence
 from a failed condition. Log substrings are not acceptance signals.
 
+The live foundation census uses the episode's persisted bootstrap replacement
+sites, with an exact real electric furnace, surface and force match. Empty or
+never-fed furnaces count structurally; ghosts, absent machines, pioneers and
+neighboring districts cannot fill their sites. Without episode ownership or
+its ledger directory, foundation evidence is unknown. An existing ledger with
+no district record measures no owned foundation for that recipe. Duplicate
+ownership or incomplete telemetry is an observation error, not a measured zero.
+
+Foundation observations retain district identity/revision, entity unit numbers,
+positions, statuses and `products_finished` through snapshot normalization and
+C2/C3 result evidence, including failed checks.
+`output_count` sums lifetime crafts of the **currently present owned entities**;
+removing or replacing a furnace can reduce it. It is not a rate or a monotonic
+district-wide history. `working_count` records machines working at that sample.
+The existing v1 `producing`/health predicates retain their semantics; correcting
+the census does not establish sustained service or change their versions.
+Historical aggregate receipts lack the entity data needed to reconstruct this
+census and must retain their original results.
+
 ## Run and result semantics
 
 Each suite pins its candidate commit, mission, Factorio version, registry
