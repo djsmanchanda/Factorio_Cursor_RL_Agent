@@ -704,3 +704,34 @@ new cohort, Opus notification or shared-observer change. Validation: native
 variant/catalog/Batch preflight,16/16 exposed Miniship replay distributions
 changed, fast gate1322 passed/1 skipped. Lifecycle: queued C28 auto-start only;
 no mod/Factorio/scheduler restart. Keep active batch/freeze/code unchanged.
+
+## C28 complete, accounted and cleaned (2026-10-24 15:20 IST)
+
+The [final transfer/C28 decision](Laya_Starship_Transfer_Decision_2026-10-24.md#c28-final-accounting-2026-10-24-1520-ist)
+supersedes the preceding queued/running/timer lifecycle. All 60/60 jobs completed,
+one attempt each; last cleanup October 24 at 14:29:37 IST. C6-v2 A/B/steel/grow:
+4/6/6/7 of 15 each. A/A B:A discordance 4:2; steel:A 4:2, steel:B 3:3;
+grow:A 4:1, grow:B 3:2. Keep the incumbent; neither prior is adopted.
+
+Strict C6 ever/fresh-final A/B/steel/grow: 1/0, 1/1, 1/1, 1/1 (15 known each).
+Strict final C2: 9/11/12/12; C3: 5/4/7/5. Final C5 passed/known:
+1/4, 1/7, 2/8, 0/7; unknowns 11/8/7/8 of 15 planned. Raw end-acceptance
+receipts preserve both ever/final unknowns; the unmodified checkin/batch accepted
+lists overstate C5 known denominators. Bugs events/affected jobs: 23/7, 10/9,
+7/6, 9/7; caught exceptions 0/60. Full paired service/bug/stop tables are in
+the decision and local final-accounting.json.
+
+Steel candidate exposure: 591 offered/active points, 288 selections, 13/15 jobs;
+all its extra target wins exposed. Grow: 12 points, 3 selections, 5/15 jobs;
+3/4 extra wins against A and 2/3 against B unexposed. Only winning seed82413
+had grow exposure (2 points/1 selection). No causality/generalization claim.
+
+Frozen source2d9b4b5 and all file/save hashes verified; admission ready. Exact
+C28 unit inactive/dead/collected, no owned cgroup/processes, zero reservations,
+60 cleanup receipts. Immutable main-checkout evidence:
+`data/laya-orchestration/starship-frontier-followup-20261024/terminal-20261024T094928Z/`.
+253 source hashes, all60 statuses/120 events/strict receipts and exposure counts
+reconciled. Only the two own state.schedules timers are disabled/no next wake;
+all other scheduled tasks unchanged. No runtime action remains. No SSH/wake,
+controller message, shared-observer edit, subagent or new cohort; Personal_2
+parent preserved. Documentation/results commit only, no test or runtime change.

@@ -184,3 +184,92 @@ Factorio, scheduler or existing-world restart is required. Starship needs no
 further action. No Opus notification was sent and its shared observer was not
 changed. The managed parent account is preserved; systemd bounds work
 independently of model authentication.
+
+## C28 final accounting (2026-10-24 15:20 IST)
+
+**Keep the incumbent; neither prior is adopted. C28 is complete and cleaned.** This terminal record supersedes the queued/running lifecycle and future-wake notes above. No combined variant or additional cohort is authorized.
+
+All **60/60 planned jobs completed**, with one started and one terminal attempt each (120 ledger events; no omitted, retried, interrupted or unstarted jobs). First admission was October 24 at 10:22:27 IST; final owned cleanup was **14:29:37 IST**. The unchanged admission reason is `ready`. The frozen baseline, all harness/arm/mod/variant hashes, canonical save, 7,200-second/540,000-tick windows, dependency contract and baseline gate verified. No gate or predecessor winner was transplanted.
+
+### Target and duplicate-control calibration
+
+C6-v2 is `laya-c6-choice-output-v2`, separate from strict deterministic C6. All rows retain 15 planned jobs and 15 known target endpoints. Discordance is row-only:reference-only on matched policy seeds.
+
+| Contrast | C6-v2 counts | Discordance | Difference |
+| --- | --- | ---: | ---: |
+| control_b vs control_a | 6/15 vs 4/15 | 4:2 | +13.3 percentage points |
+| steel30 vs control_a | 6/15 vs 4/15 | 4:2 | +13.3 percentage points |
+| steel30 vs control_b | 6/15 vs 6/15 | 3:3 | +0.0 percentage points |
+| feedstock16 vs control_a | 7/15 vs 4/15 | 4:1 | +20.0 percentage points |
+| feedstock16 vs control_b | 7/15 vs 6/15 | 3:2 | +6.7 percentage points |
+
+Control B differs from the identical control A by two target successes. Steel has the same net difference against A and ties B; this does not establish a target gain beyond the observed A/A variation. Grow exceeds B by one target success, with limited intervention exposure and unresolved earlier-service evidence. No arbitrary A/A acceptance threshold is applied; the controls are never pooled as 30 independent seeds.
+
+### Strict endpoints, service and failures
+
+Values are **passed / known**, followed by unknown count where nonzero; **15 planned jobs per arm** always remain the denominator for accounting. Ever is latched strict acceptance; final is the last fresh predicate.
+
+| Arm | C2 ever / final | C3 ever / final | C5 ever | C5 fresh-final | C6 ever / final | Bugs events / affected jobs |
+| --- | --- | --- | --- | --- | --- | --- |
+| control_a | 9/15 / 9/15 | 6/15 / 5/15 | 4/4; 11 unknown | 1/4; 11 unknown | 1/15 / 0/15 | 23 / 7 |
+| control_b | 11/15 / 11/15 | 4/15 / 4/15 | 7/7; 8 unknown | 1/7; 8 unknown | 1/15 / 1/15 | 10 / 9 |
+| steel30 | 12/15 / 12/15 | 9/15 / 7/15 | 8/8; 7 unknown | 2/8; 7 unknown | 1/15 / 1/15 | 7 / 6 |
+| feedstock16 | 12/15 / 12/15 | 5/15 / 5/15 | 7/7; 8 unknown | 0/7; 8 unknown | 1/15 / 1/15 | 9 / 7 |
+
+The local `checkin.py` and frozen batch report infer strict observations from accepted lists, which lose unknown predicates. This final accounting rebuilds **both ever and fresh-final** statuses from each clean journal’s `acceptance`/`at=end` receipt. In particular, C5 has 11/8/7/8 unknown jobs for A/B/steel/grow; these are not failures. The helper and frozen run were left unchanged.
+
+All 60 jobs have **zero caught exceptions**, zero malformed decision lines, and complete decision logs. Typed bug events and affected jobs remain separate. The per-arm counts below are not deduplicated across jobs.
+
+| Arm | Decisions | Typed bug codes (events) | Runner stops | Final plastic service |
+| --- | ---: | --- | --- | --- |
+| control_a | 3,300 | `untyped_stuck` 3, `power_route_unavailable` 5, `mall_loan_gate_mismatch` 15 | stalled 15 | no_output_in_window 11, stocked_plateau 3, producing 1 |
+| control_b | 4,017 | `untyped_stuck` 5, `power_route_unavailable` 5 | stalled 14, window_timeout 1 | no_output_in_window 8, stocked_plateau 6, producing 1 |
+| steel30 | 4,368 | `untyped_stuck` 4, `power_route_unavailable` 3 | stalled 15 | stocked_plateau 6, no_output_in_window 7, producing 2 |
+| feedstock16 | 4,057 | `power_route_unavailable` 5, `untyped_stuck` 2, `starter_deconstruction_failed` 1, `stage_power_connection_failed` 1 | stalled 13, window_timeout 2 | stocked_plateau 7, no_output_in_window 8 |
+
+There were 57 `stalled` and three `window_timeout` runner outcomes (completed trials, not 60 successes). The latter are recorded game-window terminations. Stocked plateaus do not establish sustained C5 service. Research was off; research acceptance remains unknown for all 60 jobs.
+
+Strict matched discordance below uses **known pairs only**, always out of 15 planned pairs. Each entry is row-only:reference-only **[known pairs]**. C5 comparisons especially retain unobserved pairs.
+
+| Contrast | C2 ever | C3 ever | C5 ever | C6 ever |
+| --- | ---: | ---: | ---: | ---: |
+| control_b vs control_a | 4:2 [15] | 3:5 [15] | 0:0 [3] | 1:1 [15] |
+| steel30 vs control_a | 5:2 [15] | 4:1 [15] | 0:0 [4] | 1:1 [15] |
+| steel30 vs control_b | 4:3 [15] | 6:1 [15] | 0:0 [4] | 1:1 [15] |
+| feedstock16 vs control_a | 4:1 [15] | 1:2 [15] | 0:0 [3] | 1:1 [15] |
+| feedstock16 vs control_b | 3:2 [15] | 3:2 [15] | 0:0 [5] | 1:1 [15] |
+
+| Contrast | C2 fresh-final | C3 fresh-final | C5 fresh-final | C6 fresh-final |
+| --- | ---: | ---: | ---: | ---: |
+| control_b vs control_a | 4:2 [15] | 3:4 [15] | 1:0 [3] | 1:0 [15] |
+| steel30 vs control_a | 5:2 [15] | 3:1 [15] | 1:0 [4] | 1:0 [15] |
+| steel30 vs control_b | 4:3 [15] | 5:2 [15] | 0:0 [4] | 1:1 [15] |
+| feedstock16 vs control_a | 4:1 [15] | 1:1 [15] | 0:0 [3] | 1:0 [15] |
+| feedstock16 vs control_b | 3:2 [15] | 3:2 [15] | 0:1 [5] | 1:1 [15] |
+
+Steel improves C2/C3 service counts against both controls and has fewer bug-affected jobs, but the long-window target gain is absent against B and C5 observations are incomplete. Grow has zero fresh-final C5 passes versus one in each control; unknowns prevent a complete paired service conclusion. Grow affected seven jobs versus seven in A and nine in B; its nine events must not be confused with affected-job counts. None of this establishes the full adoption gate.
+
+### Offered, active and selected intervention exposure
+
+Each cell lists **offered points / active-rule points / selections; exposed jobs out of 15**. Points are repeated decisions, not independent trials.
+
+| Arm | Steel family | Grow family |
+| --- | --- | --- |
+| control_a | 411 / 411 / 130; 13/15 jobs | 22 / 22 / 1; 6/15 jobs |
+| control_b | 423 / 423 / 134; 13/15 jobs | 11 / 11 / 2; 5/15 jobs |
+| steel30 | 591 / 591 / 288; 13/15 jobs | 8 / 8 / 1; 4/15 jobs |
+| feedstock16 | 298 / 298 / 105; 13/15 jobs | 12 / 12 / 3; 5/15 jobs |
+
+All steel-only target wins had changed-rule exposure: against A, seeds 82400/82405/82411/82412 had offered=active counts 4/47/155/3 and selections 2/21/72/2; against B, the wins are 82400/82405/82411 with the same receipts. Exposure proves the intervention was available, not that it caused each win.
+
+Grow-only wins against A are 82400/82410/82412/**82413**; the first three have zero grow offers, active points or selections. Against B, 82400/82404/**82413** win; the first two have zero exposure. Only **82413** was exposed: two offered/active points and one selection. Thus 3/4 and 2/3 grow-only wins respectively remain unexposed. Across the candidate arm, grow was active in just 5/15 jobs at 12 decision points with three selections.
+
+### Final evidence, cleanup and lifecycle
+
+Main-checkout evidence root: `data/laya-orchestration/starship-frontier-followup-20261024/`. Immutable collection directory: **`terminal-20261024T094928Z/`**. It preserves all 60 status records, the full 120-event attempt ledger, final batch report, freeze/config/selection, per-job clean journals/latest statuses/manifests, exposure, cleanup, timer and verification receipts. `final-accounting.json` contains all nine endpoint comparisons for the five required contrasts, every per-job strict status and 253 source-file hashes. Raw decision trajectories remain in the original frozen worlds and are hash-cited.
+
+At 2026-10-24 15:20 IST, verified the **exact** `laya-c28-2123-miniship-20261024.service` inactive/dead, main PID 0, collected (`LoadState=not-found`), with no remaining owned cgroup, world process, reservation or missing cleanup receipt. A second process check matched executable, working directory, argv and cgroup; no owned process remains. All 253 collected source hashes and every planned ID, attempt, raw acceptance receipt, decision/bug count and known/unknown denominator reconciled. This is matched-cohort/live cleanup evidence. No runtime code changed and no test suite rerun was necessary; the recorded original fast gate remains 1,322 passed/1 skipped.
+
+After cleanup and accounting, disabled **only** the two IDs in `state.schedules` (`frontier-completion-starship-monitor-20261024-v1` and `frontier-completion-starship-terminal-20261024-v1`). Readback confirms both disabled with no next run, and every other scheduled task unchanged. No further C28 check is scheduled.
+
+Lifecycle: **nothing remains to restart, redeploy or stop**. No SSH or Starship wake, sudo, new world/cohort, runtime/mod/save/frozen-source mutation, shared-observer edit, controller message or subagent was used. The requested managed Personal_2 parent is preserved. All comparisons remain exploratory on one canonical map; matched policy seeds do not establish terrain generalization.
