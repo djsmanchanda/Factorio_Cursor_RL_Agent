@@ -17,13 +17,13 @@ Time to milestone (`time_to.py`; game minutes from first decision, RMST capped a
 | Milestone | control RMST | backing RMST | paired backing faster : slower (median diff) |
 | --- | ---: | ---: | --- |
 | strict C1 | 150 (0/60) | 148 (1/60) | 1:0 |
-| strict C2 | 64 | 69 | 22:31 (+2 min) |
-| strict C3 | 104 | 119 | **14:28 (+43 min, p 0.044)** |
-| strict C5 | 113 | 115 | 22:21 (−2) |
+| strict C2 | 64 | 69 | 23:30 (+3 min) |
+| strict C3 | 104 | 117 | 16:28 (+38 min) |
+| strict C5 | 113 | 116 | 22:21 (−2) |
 | strict C6 | 142 | 143 | 8:11 (+5) |
 | Laya C6 | 118 | 121 | 20:21 (+0) |
 
-**Decision: backing not adopted.** The preregistered endpoint, new Laya C6, does not move (10:12, RMST +3). No attainment contrast leaves the A/A spread (identical code: C2 5:12). Backing is slower to strict C3: 14:28 pairs, a median of 43 minutes later. That is a single nominal p 0.044 among about a dozen speed contrasts, so it is not a confirmed harm, but it agrees with C3 attainment (11:16) and RMST (+15). Its mechanism does show: power-route refusals fall from 142 events in 21 runs to 61 in 17. Most of control's refusals sit in two seeds (79603: 58, 79563: 41), however, and no milestone gain follows. Backing also stopped more runs at the window cap (3 vs 1). C26b/C27b's base `2d9b4b5` already excludes backing, so they stay valid as frozen.
+**Decision: backing not adopted.** The preregistered endpoint, new Laya C6, does not move (10:12, RMST +3). No positive matched target gain is established. Correcting previously omitted end-only passes gives strict C3 timing 16:28 pairs, median +38 game minutes and RMST +13; the old 14:28 / p 0.044 claim is superseded. This directional contrast does not establish harm. A historical 5:12 A/A yardstick was not reproducible and is not an adoption threshold. Its mechanism does show: power-route refusals fall from 142 events in 21 runs to 61 in 17. Most of control's refusals sit in two seeds (79603: 58, 79563: 41), however, and no milestone gain follows. Backing also stopped more runs at the window cap (3 vs 1). C26b/C27b's base `2d9b4b5` already excludes backing, so they stay valid as frozen.
 
 | Failure class (events/runs) | control | backing |
 | --- | ---: | ---: |
@@ -32,6 +32,8 @@ Time to milestone (`time_to.py`; game minutes from first decision, RMST capped a
 | infrastructure collision | 0/0 | 1/1 |
 | power route refusal | 142/21 | 61/17 (40 in seed 79614) |
 | loan-release refusals (journals) | 2 in 1 world (`release_recipe_changed`) | 0 |
+| explicit release failures (runner logs, events/runs) | 3/3 | 10/8 |
+| affected worlds, union of journal/log sources | 4 | 8 |
 
 ## Where runs stop (local read of the last 25 decisions per completed run)
 
@@ -48,3 +50,5 @@ The C24 classes repeat. Never-C2 runs end in the chemical handoff (the iron foun
 - broader lender eligibility and parallel kit planning for the mall, which C26b (ready-loan reconciliation) and C27b (linear wait pacing) approach from the decision side.
 
 Evidence level: completed matched experiment cohort on one copied save; not terrain generalization. Sources: `data/laya-experiments/laya-c25-2123-miniship-20261023/{freeze.json,batch.json,job-status.json}`, journals, and `data/laya-orchestration/takeover-20261021/{status.py,failures.py,release_counts.py,time_to.py}`.
+
+Correction, 2026-10-25: corrected ledger selection finds 16 stale paired projects in never-C2 runs and 27 in C2 runs, not 16 versus zero. Control has 6/15 projects in 6/10 affected runs (never-C2/C2); backing has 10/12 projects in 9/10 affected runs. No source events are summed as independent occurrences. C5 remains c5-v1. See [the corrected audit](Laya_C32_Audit_2026-10-25.md).

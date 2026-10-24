@@ -17,22 +17,22 @@ Time to milestone (`time_to.py`; game minutes from first decision, RMST capped a
 | Milestone | control RMST | release RMST | paired release faster : slower (median diff) |
 | --- | ---: | ---: | --- |
 | strict C1 | 150 (0/60) | 143 (3/60) | 3:0 |
-| strict C2 | 68 | 55 | 35:23 (−4 min, p 0.15) |
-| strict C3 | 120 | 103 | **29:15 (−37 min, p 0.049)** |
+| strict C2 | 69 | 55 | 35:23 (−4 min, p 0.15) |
+| strict C3 | 120 | 104 | **29:15 (−37 min, p 0.049)** |
 | strict C4 | 117 | 108 | 27:19 (−4) |
-| strict C5 | 118 | 110 | 26:20 (−5) |
+| strict C5 | 118 | 110 | 26:20 (−4) |
 | strict C6 | 141 | 141 | 13:10 (−14) |
 | Laya C6 | 122 | 119 | 23:18 (−6) |
 
-**Exposure:** the release closed at least one stale project (`MATERIAL PROJECT CLOSED`) in all 60 release worlds, and never in control, which lacks the code. At run end, constructing paired-mall projects still held their bills in 17 control runs (14 of them never-C2) and 3 release runs. C25 had shown the same split (16 never-C2, 0 C2).
+**Exposure:** the release closed at least one stale project (`MATERIAL PROJECT CLOSED`) in all 60 release worlds, and never in control, which lacks the code. At run end, the corrected ledger query finds 19 stale paired projects in 16 control runs (4 projects in 3 never-C2 runs; 15 in 13 C2 runs), versus 3 projects in 3 release runs (2 never-C2, 1 C2). Across both arms this is 6 never-C2 projects and 16 C2 projects. The previous query selected the empty steel-seed side ledger for some runs. C25's corrected totals are 16 never-C2 projects and 27 C2 projects; these are projects, not run counts. Stale holds are not confined to failures to reach C2.
 
 **Decision: adopt the release (`5a5ed28`) as the Laya cohort base** (branch `work/miniship/laya-mall-integrated-20261023`; no production or real-base promotion). Per `docs/rl/laya_variants/README.md`:
-- **More long-window target completions on matched conditions:** release reaches every strict milestone in more runs. C2 is 50 vs 44 and C3 38 vs 25, with C3 at 19:6 pairs (p 0.015), outside the A/A spread (identical code: C2 5:12). C4/C5 are 38 vs 30, new Laya C6 30 vs 27 and legacy C6 15 vs 13. Strict C1, which needs four working mall assemblers, appears for the first time in three release runs. The preregistered C2 contrast (14:8) leans the same way, though not significantly on its own.
-- **Faster:** release reaches strict C2 13 minutes sooner on average (RMST 55 vs 68) and strict C3 17 minutes sooner (29:15 pairs, median 37 minutes).
+- **More long-window target completions on matched conditions:** release reaches every strict milestone in more runs. C2 is 50 vs 44 and C3 38 vs 25, with C3 at 19:6 pairs (p 0.015); this secondary nominal contrast is not a calibrated A/A adoption threshold. C4/C5 are 38 vs 30, new Laya C6 30 vs 27 and legacy C6 15 vs 13. Strict C1, which needs four working mall assemblers, appears for the first time in three release runs. The preregistered C2 contrast (14:8) leans the same way, though not significantly on its own.
+- **Faster:** release has lower capped time-to C2 (RMST 55 vs 69 game minutes) and C3 (104 vs 120; 29:15 pairs, median paired difference −37 minutes). RMST combines attainment and timing; it is not an achiever-only speed estimate. Achiever medians are C2 34 vs 36 and C3 82 vs 82 minutes. Conditioning on achievers does not invalidate the RMST benefit.
 - **No increase in safety or tool failures:** both are zero in both arms.
 - **No earlier-service regression:** final C3 36 vs 23 and final C5 5 vs 4.
 
-Untyped-stuck events rise (38 in 22 runs vs 8 in 8). Every one is `modular refinery for stone-brick built but not healthy: full_output` at the S1 stage, a backed-up stone-brick line rather than a broken build. Release reaches that stage more often. C31 tests typing it as output backpressure. Release also stopped one more run at the window cap (3 vs 1).
+Untyped-stuck events rise (38 in 22 runs vs 8 in 8). Every one is `modular refinery for stone-brick built but not healthy: full_output` at the S1 stage, a backed-up stone-brick line rather than a broken build. Release reaches that stage more often. C31 tests typing it as output backpressure. Release also stopped two more runs at the window cap (3 vs 1).
 
 C30 (release vs steel-seed site fix), its C30a and Starship S30r strata, and C31 (output backpressure) are all built on `5a5ed28`. They stay valid and proceed.
 
@@ -43,6 +43,7 @@ C30 (release vs steel-seed site fix), its C30a and Starship S30r strata, and C31
 | infrastructure collision | 0/0 | 0/0 |
 | power route refusal | 48/10 (36 in seed 79733) | 14/13 |
 | loan-release refusals (journals) | 0 | 0 |
+| explicit release failures (runner logs, events/runs) | 2/2 | 3/3 |
 
 ## Where runs stop (last 25 decisions per completed run)
 
@@ -57,3 +58,5 @@ C30 (release vs steel-seed site fix), its C30a and Starship S30r strata, and C31
 Release moves runs out of the early groups (never-C2 16 → 10, C2-no-C3 19 → 12) into the late ones. In release, `steel_seed_site_wait` is now the main C2-no-C3 stop (6 of 12); C30 tests the site fix for it. The terminal chemical handoff falls from 6 to 3 runs. `ppc3.py` finds 13 never-C2 runs still chest-short at their last iron-foundation attempt; it pools both arms. Late runs end on material shortages, `bootstrap_mall_slot_cap` and deferred production prerequisites, which mark the next capacity work.
 
 Evidence level: completed matched experiment cohort on one copied save; not terrain generalization, deployed runtime or live result. Sources: `data/laya-experiments/laya-c29-2123-miniship-20261024/{freeze.json,batch.json,job-status.json}`, journals, runner logs, reservation ledgers, and `data/laya-orchestration/takeover-20261021/{status.py,failures.py,release_counts.py,time_to.py,stops.py,ppc3.py}`.
+
+Correction, 2026-10-25: the recorded release-base decision is preserved, with its limitations explicit. The primary C2 contrast is 14:8 (p 0.29); C3 is secondary and nominal. The cited identical-code 5:12 yardstick is not reproducible: C22/C23 integrated C2 pairs are 10:7 and C28 A/A is 4:2. Neither is a fixed pass threshold. Zero classified tool errors does not mean zero caught, typed or logged bugs. The sequential stop groups above require earlier gates as well as the named milestone, so the final group is not the total C6-ever count. All C5 results here remain c5-v1. See [the corrected audit](Laya_C32_Audit_2026-10-25.md).

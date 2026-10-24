@@ -17,9 +17,9 @@ Time to milestone (`time_to.py`; game minutes from first decision, RMST capped a
 | Milestone | release RMST | site RMST | paired site faster : slower (median diff) |
 | --- | ---: | ---: | --- |
 | strict C2 | 54 | 61 | **21:35 (+3 min, preregistered)** |
-| strict C3 | 91 | 103 | 19:32 (+9) |
-| strict C4 | 115 | 109 | 30:20 (−4) |
-| strict C5 | 117 | 112 | 27:22 (−2) |
+| strict C3 | 92 | 100 | 22:31 (+8) |
+| strict C4 | 115 | 109 | 29:21 (−4) |
+| strict C5 | 117 | 111 | 29:21 (−4) |
 | strict C6 | 145 | 145 | 8:10 |
 | Laya C6 | 130 | 124 | 21:15 (−7) |
 
@@ -39,7 +39,7 @@ Time to milestone (`time_to.py`; game minutes from first decision, RMST capped a
 
 Every C2 difference sits in the pairs where only one arm built a seed, and those groups nearly cancel (−9 vs +6). In 3 of the 9 release-only pairs (79740, 79750, 79757), the site arm found a fallback site while its bill was unaffordable. Its deliberate full-bill `conversion_steel-plate` hold then sat at priority 100 in `supply_wait`, holding furnaces, the drill, poles and a chest. In the other 6, the site run never attempted the seed.
 
-**Decision: site `f83b0e8` not adopted.** The preregistered strict C2 contrast leans against it (6:9; strict C2 timing 21:35, RMST +7). C30a leans the same way more strongly (C5 0:8). S30r is mildly against. Site's later leans in C30 (C4/C5, Laya C6) are inside the A/A spread (identical code: C2 5:12) and do not replicate in C30a. Tool and safety failures are zero in both arms. Untyped stuck rises (33 in 16 runs vs 17 in 12). Site's power-route refusals (49 in 13 runs) are mostly one seed (79785: 32). No earlier-service gain offsets the C2 lean. The release base `5a5ed28` stays. A later version would declare the mined fallback's project only once its bill is allocatable, so the fallback cannot enter the deliberate full-bill hold early.
+**Decision: site `f83b0e8` not adopted.** The preregistered strict C2 contrast leans against it (6:9; strict C2 timing 21:35, RMST +7). C30a leans the same way more strongly (C5 0:8). S30r is mildly against. Site's later leans in C30 (C4/C5, Laya C6) remain uncertain and do not replicate in C30a. The previously cited 5:12 A/A yardstick is not reproducible and supplies no fixed adoption threshold. Tool and safety failures are zero in both arms. Untyped stuck rises (33 in 16 runs vs 17 in 12). Site's power-route refusals (49 in 13 runs) are mostly one seed (79785: 32). No earlier-service gain offsets the C2 lean. The release base `5a5ed28` stays. A later version would declare the mined fallback's project only once its bill is allocatable, so the fallback cannot enter the deliberate full-bill hold early.
 
 | Failure class (events/runs) | release | site |
 | --- | ---: | ---: |
@@ -48,6 +48,8 @@ Every C2 difference sits in the pairs where only one arm built a seed, and those
 | infrastructure collision | 1/1 | 0/0 |
 | power route refusal | 11/11 | 49/13 (32 in seed 79785) |
 | loan-release refusals (journals) | 0 | 1 in 1 world (`release_recipe_changed`) |
+| explicit release failures (runner logs, events/runs) | 1/1 | 4/3 |
+| affected worlds, union of journal/log sources | 1 | 3 |
 
 ## Where runs stop (last 25 decisions per completed run)
 
@@ -62,3 +64,5 @@ Every C2 difference sits in the pairs where only one arm built a seed, and those
 `steel_seed_site_wait` is the most frequent failure in the last 25 decisions of 5 release runs and of no site run, so the fix does remove that stop. Those runs move on to other limits rather than further milestones. On the release base the dominant stops are late: material shortages, temporary mall batches and `bootstrap_mall_slot_cap`, which is mall capacity. That is the next work.
 
 Evidence level: completed matched experiment cohort plus two replication strata on one copied save; not terrain generalization. Sources: `data/laya-experiments/laya-c30{,a}-2123-miniship-20261024/{freeze.json,batch.json,job-status.json}`, journals, runner logs, reservation ledgers and seed plans, `data/laya-orchestration/takeover-20261021/{status.py,failures.py,release_counts.py,time_to.py,stops.py,seed_plans.py}`, and the S30r job status on Starship.
+
+Correction, 2026-10-25: timing above includes end-only acceptance with actual observation ticks. C30a C3 is 17/20 release and 14/20 site; C5 is 20/20 and 12/20 (old timing output omitted end-only passes). S30r is locally imported; its release arm has one log-only release-failure event/world, while site has one journal refusal/world. C5 is historical c5-v1 throughout. The recorded site non-adoption is unchanged. See [the corrected audit](Laya_C32_Audit_2026-10-25.md).

@@ -124,3 +124,5 @@ C30 (queued 2026-10-24 17:12 IST, waits for C29): 120 planned = 60 seeds 79740�
 C29 final (2026-10-24 18:02 IST): 120/120 completed. C2 44/50 (14:8), C3 25/38 (19:6), C5 30/38, new Laya C6 27/30, strict C1 0/3; release faster to strict C2/C3. Release 5a5ed28 adopted as cohort base. [Result](Laya_C29_Result_2026-10-24.md). C30 admitting since; C30a (thread 94dcfaf2, user-authorized) running; C31 queued behind C30.
 
 C30 final (2026-10-25 01:24 IST): 120/120 completed. C2 50/47 (6:9), C3 40/36, C5 32/37, new Laya C6 20/25; site slower to strict C2/C3. Site f83b0e8 not adopted. Strata: C30a 40/40 (C2 0:3, C5 0:8), S30r 48/48 (C2 2:4). [Result](Laya_C30_Result_2026-10-25.md). C31 admitting since 01:25.
+
+C32 queued (2026-10-25 01:30 IST), owner94dcfaf2:120 planned=60 seeds79860–79919 × control cec3008 / clearance ab7e8d3, ports39300/32300,7200s wall,540000ticks, gated on C31. Primary strict C6 ever. Common census and C5-v2; C31 outblock excluded. [Design](Laya_C32_Design_2026-10-25.md). Historical correction: C25 strict C3 timing16:28, not14:28; C29 RMST C2 69/55 and C3 120/104; C30 C3 RMST92/100. See [audit](Laya_C32_Audit_2026-10-25.md).
