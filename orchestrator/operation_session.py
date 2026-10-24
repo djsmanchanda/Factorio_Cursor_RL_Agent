@@ -363,6 +363,8 @@ class DeterministicSession:
             self._evaluator, self._baseline, self._history = CheckpointEvaluator(), None, []
         self.acceptance_checks = None  # never journal an earlier sample's checks beside a new error
         self.acceptance_fresh = None
+        self.acceptance_tick = None
+        self.acceptance_evidence = None
         self.foundation_observations = None
         try:
             snapshot = LiveCheckpointObservationAdapter(self.client, self.bridge, surface=SURFACE, force=FORCE,
@@ -375,6 +377,7 @@ class DeterministicSession:
             "observation": asdict(snapshot.foundations[name]) if name in snapshot.foundations else None,
             "ready": _foundation_ready(snapshot, name)} for name in ("iron", "copper", "stone")}
         self._baseline = self._baseline or snapshot
+        self.acceptance_tick = snapshot.tick
         # Per-starter facts for the ops brief, from this acceptance sample (refreshed with each check).
         self.starter_facts = {name: {"present": snapshot.starters[name].present,
                                      "healthy": snapshot.starters[name].healthy,
@@ -396,6 +399,8 @@ class DeterministicSession:
                  for m in self._evaluator.milestones}
         self._evaluator.reached.update(cid for cid, r in fresh.items() if r.passed)
         self.acceptance_fresh = {cid: r.status.value for cid, r in fresh.items()}
+        self.acceptance_evidence = {"C5": {"predicate_version": fresh["C5"].predicate_version,
+                                           **fresh["C5"].evidence}}
         # Which check blocks each milestone not passing now: a bare "failed" cannot tell a missing fact from a gap.
         self.acceptance_checks = {
             cid: {"failed": sorted(k for k, v in (r.evidence.get("checks") or {}).items() if v is False),
