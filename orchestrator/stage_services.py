@@ -92,6 +92,10 @@ _DEFAULT_INSERTER = "fast-inserter"
 # are never judged on status alone -- see _diagnose_machines, which decides on
 # observed progress instead.
 _HEALTHY_STATUSES = {"working"}
+# A machine whose output is full has already crafted: the line was built and
+# ran, and its products wait on downstream delivery. That is a service
+# condition, not a construction fault.
+_OUTPUT_BLOCKED_STATUSES = {"full_output"}
 _SUPPLY_WAIT_STATUSES = {
     "no_ingredients", "item_ingredient_shortage", "fluid_ingredient_shortage",
     "waiting_for_source_items", "waiting_for_space_in_destination",
@@ -246,6 +250,11 @@ def _diagnose_machines(
         for key, value in counters.items():
             if key in baseline and value != baseline[key]:
                 progressed.add(key)
+        blocked = [
+            position for position in positions
+            if statuses.get(tuple(position)) in _OUTPUT_BLOCKED_STATUSES
+        ]
+        progressed.update(tuple(position) for position in blocked)
         producing = bool(progressed) or any(
             statuses.get(tuple(position)) in _HEALTHY_STATUSES
             for position in positions
@@ -261,6 +270,10 @@ def _diagnose_machines(
         time.sleep(poll_seconds)
 
     if producing:
+        if blocked:
+            emit(f"  OUTPUT BLOCKED: {len(blocked)}/{len(positions)} machine(s) have full output "
+                 "-- the line is built and has produced; downstream delivery is the service "
+                 "issue, not construction")
         idle = [p for p, s in stuck if s in _SUPPLY_WAIT_STATUSES]
         broken = [(p, s) for p, s in stuck if s not in _SUPPLY_WAIT_STATUSES]
         if idle:

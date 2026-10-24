@@ -54,7 +54,7 @@ _DETERMINISTIC_HINTS = (
 # scheduled/manual full suite instead of masquerading as fast validation.
 _FAST_FILES = {
     "test_laya_decision_pacing.py", "test_mall_reconciliation.py",
-    "test_checkpoint_observer.py",
+    "test_checkpoint_observer.py", "test_output_blocked_diagnosis.py",
     "test_laya_ops_initialization.py", "test_mall_cell_release_lua.py",
     "test_laya_batch.py", "test_laya_host_scheduler.py", "test_laya_research.py", "test_laya_ops_checkpoint.py",
     "test_laya_review_regressions.py", "test_laya_ops_data.py",
