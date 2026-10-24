@@ -443,3 +443,7 @@ At 46/120, C30 shows the same pattern as C30a: site trails release (C2 1:6, C3 2
 - **6 pairs (C30 79741, 79747, 79755; C30a 83201, 83208, 83213):** the site arm's steel project is only `ready` with the 2-pole opening fence. The seed was never attempted, so those runs stalled before steel for reasons unrelated to the fix.
 
 Fix candidate (do not change C30): a steel seed whose bill is unaffordable should not keep a priority-100 partial reservation while its prerequisite iron refinery is unfunded. For example, release the project on `MaterialShortage`, or declare it only once affordable. Decide after C30 completes.
+
+## Steel hold is deliberate; fix deferred (2026-10-24 23:37 IST)
+
+The `conversion_steel-plate` full-bill hold is intended. `_reserve_steel_starter_power_seed` documents that the expanded bill must never shrink and expose its stock. `assert_affordable(reserve_project=True)` reserves first and then raises `MaterialShortage`, so every accumulating project fills over time. The 3 hazard pairs show the cost of entering that hold early: the steel project held electric furnaces, the drill, poles and a chest (not inserters) while the iron refinery waited on furnaces and inserters. That the hold caused the stall is plausible but not proven. The later C30 pairs are level (41 pairs: C5 10:10, C5 final 8:5, Laya C6 10:9). Changing a deliberate reservation rule needs its own reasoning, not a rushed fix. Decide after C30: probably do not adopt `f83b0e8`, and only declare the mined fallback's project once its bill is allocatable.
