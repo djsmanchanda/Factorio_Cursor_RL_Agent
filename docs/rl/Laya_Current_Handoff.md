@@ -447,3 +447,7 @@ Fix candidate (do not change C30): a steel seed whose bill is unaffordable shoul
 ## Steel hold is deliberate; fix deferred (2026-10-24 23:37 IST)
 
 The `conversion_steel-plate` full-bill hold is intended. `_reserve_steel_starter_power_seed` documents that the expanded bill must never shrink and expose its stock. `assert_affordable(reserve_project=True)` reserves first and then raises `MaterialShortage`, so every accumulating project fills over time. The 3 hazard pairs show the cost of entering that hold early: the steel project held electric furnaces, the drill, poles and a chest (not inserters) while the iron refinery waited on furnaces and inserters. That the hold caused the stall is plausible but not proven. The later C30 pairs are level (41 pairs: C5 10:10, C5 final 8:5, Laya C6 10:9). Changing a deliberate reservation rule needs its own reasoning, not a rushed fix. Decide after C30: probably do not adopt `f83b0e8`, and only declare the mined fallback's project once its bill is allocatable.
+
+## Cohort 30 complete; site fix not adopted (2026-10-25 01:28 IST)
+
+See [C30 result](Laya_C30_Result_2026-10-25.md). The base stays `5a5ed28`. C31 (thread 94dcfaf2: census vs output backpressure) runs now. Two units `laya-c32-canonical-probe-20261025` and `laya-c32-clearance-probe-20261025` (from `/tmp/laya-c32-wt`, not this owner's) exited failed at 01:23–01:24; their owner should account for them. Next work for this owner is mall capacity (`bootstrap_mall_slot_cap`, temporary mall batches, material shortages dominate late stops). Next free ports 39300+.
