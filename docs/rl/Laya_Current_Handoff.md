@@ -403,3 +403,7 @@ Linear wait pacing (linear3) is not adopted: every later endpoint moves against 
 ## Cohort 26b complete; mall-utilization settings closed (2026-10-24 10:47 IST)
 
 Ready-loan reconciliation is not adopted; see [C26b result](Laya_C26b_Result_2026-10-24.md). Both mall-utilization settings (C26b ready loans, C27b linear waits) were exercised and neither helps, so the baseline stays `d8a4825` behaviour. The next work is on the supply side: C29 (stale-reservation release) runs now beside C28 (thread 94dcfaf2's A/A + steel30 + feedstock16); a chest-free iron completion path is the next fix candidate.
+
+## Next fix candidate: steel seed site search (2026-10-24 14:28 IST)
+
+`steel_seed_site_wait` appears in the last 25 decisions of 15–30% of completed runs in every recent cohort: C25 7/60 and 10/60, C26b 6/30 and 6/30, C27b 2/30 and 6/30, C29 (partial) 4/19 and 6/20. In C29's release arm it is now the most common terminal wait, because fewer runs die earlier on chests. The compact steel seed (`_build_compact_steel_seed` in `orchestrator/autonomous_builder.py`) tries iron-carrying belts within ±32 tiles of the provider. Its fallback is the single nearest site that `live_base.direct_plate_starter_site` returns for the starter footprint. If that one site collides with the seed's own footprint, there is no next candidate. Next step: log which branch fails, then let the fallback try further ore sites (or a wider belt radius) before raising the wait.
