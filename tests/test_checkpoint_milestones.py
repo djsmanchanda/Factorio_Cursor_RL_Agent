@@ -85,9 +85,9 @@ def test_c4_requires_new_plastic_production_and_delivery():
 
 def _startup(counts, *, start=600, baseline=0):
     return {"tick": start + (len(counts) - 1) * 1800, "plastic_startup": {
-        "version": "production-startup-v1", "item": "plastic-bar", "run_id": "test",
+        "version": "production-startup-v2", "item": "plastic-bar", "run_id": "test",
         "source": "force.get_item_production_statistics(surface).get_input_count",
-        "baseline_tick": 0, "baseline_count": baseline, "start_tick": start,
+        "armed_at_episode_start": True, "baseline_tick": 0, "baseline_count": baseline, "start_tick": start,
         "observed_tick": start + (len(counts) - 1) * 1800,
         "samples": [{"tick": start + i * 1800, "produced": count} for i, count in enumerate(counts)],
     }}
@@ -132,7 +132,10 @@ def test_c5_rejects_counter_reset_gaps_and_extra_late_samples():
     snapshot = _startup([102, 402, 702])
     snapshot["plastic_startup"]["error"] = "production_counter_reset"
     assert evaluate_milestone("C5", snapshot).passed
-    assert evaluate_milestone("C5", _startup([502, 802, 1102], baseline=500)).unknown
+    assert evaluate_milestone("C5", _startup([502, 802, 1102], baseline=500)).passed
+    late = _startup([502, 802, 1102], baseline=500)
+    del late["plastic_startup"]["armed_at_episode_start"]
+    assert evaluate_milestone("C5", late).unknown
     snapshot = _startup([102, 402])
     snapshot["plastic_startup"]["error"] = "production_counter_reset"
     assert evaluate_milestone("C5", snapshot).unknown

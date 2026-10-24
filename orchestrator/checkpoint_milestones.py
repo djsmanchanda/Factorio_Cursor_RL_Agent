@@ -563,12 +563,12 @@ def _c5(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, _history: 
     startup = snapshot.plastic_startup
     def unknown(reason: str) -> CheckpointResult:
         return _all_checks("C5", "c5-v2", {"startup_evidence_valid": None}, {"reason": reason})
-    if not isinstance(startup, Mapping) or startup.get("version") != "production-startup-v1":
+    if not isinstance(startup, Mapping) or startup.get("version") != "production-startup-v2":
         return unknown("startup_sampler_missing")
     if startup.get("item") != PLASTIC_ITEM:
         return unknown("wrong_item")
-    if startup.get("baseline_count") != 0:
-        return unknown("startup_armed_after_production")
+    if startup.get("armed_at_episode_start") is not True:
+        return unknown("startup_not_armed_at_episode_start")
     samples = startup.get("samples")
     if not isinstance(samples, (list, tuple)) or len(samples) > 5:
         return unknown("invalid_startup_samples")

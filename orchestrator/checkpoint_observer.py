@@ -547,7 +547,7 @@ class LiveCheckpointObservationAdapter:
         }
         return _normalize(snapshot, source="live-rcon-structured")
 
-    def _plastic_startup(self, client: Any) -> Mapping[str, Any] | None:
+    def _plastic_startup(self, client: Any, *, arm: bool = False) -> Mapping[str, Any] | None:
         """Arm/read the bounded game-clock sampler for this logical episode.
 
         Missing sampler evidence affects C5 alone. Observing an old freeze
@@ -558,9 +558,11 @@ class LiveCheckpointObservationAdapter:
             return None
         args = ",".join(json.dumps(value) for value in
                         (self.surface, self.force, "plastic-bar", run_id))
-        command = ('/sc if remote.interfaces.production_startup then '
-                   'rcon.print(helpers.table_to_json(remote.call("production_startup","read",'
-                   + args + '))) else rcon.print("null") end')
+        method = "arm" if arm else "read"
+        command = ('/sc if remote.interfaces.production_startup and '
+                   + 'remote.interfaces.production_startup.' + method + ' then '
+                   + 'rcon.print(helpers.table_to_json(remote.call("production_startup","'
+                   + method + '",' + args + '))) else rcon.print("null") end')
         try:
             result = json.loads(client.command(command))
         except (ValueError, TypeError, OSError, RconError):

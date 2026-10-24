@@ -105,6 +105,12 @@ class DeterministicSession:
         self.client = RconClient("127.0.0.1", manifest["rcon_port"], password)
         self.bridge = GameBridge(script_output=self.script_output, host="127.0.0.1", port=manifest["rcon_port"],
                                  password=password, command_timeout=30.0, episode_id=self.episode_id)
+        # Arm before selected operations can produce anything. Resume only reads
+        # retained evidence; a missing old watch must stay unknown, not restart.
+        if logical_episode_id is None:
+            from orchestrator.checkpoint_observer import LiveCheckpointObservationAdapter
+            LiveCheckpointObservationAdapter(self.client, self.bridge, surface=SURFACE,
+                force=FORCE)._plastic_startup(self.client, arm=True)
         construction_coverage.reset_coverage_progress()
         ab._TRANSFERABLE_WAITS.clear()
         ab._STAGE_DELIVERY_ATTEMPTS.clear()

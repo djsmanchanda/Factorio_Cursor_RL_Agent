@@ -16,8 +16,11 @@ throughput target has been requested; the receipt records the actual rates.
 
 The source is the force's cumulative **plastic item production** counter on the
 explicit surface, never inventory growth. It measures aggregate plastic output,
-not a fixed machine cohort or attribution to one recipe. Initial stock does not start the clock. A new watch armed after any recorded
-plastic production is unknown: the original startup window cannot be reconstructed. Every watch is scoped by surface, force,
+not a fixed machine cohort or attribution to one recipe. Initial stock and historical production do not start the clock. The canonical
+save has nonzero historical production. The session explicitly arms the sampler
+before selecting any operations, baselining that old output. Observation and
+resume only read an existing watch; a missing watch remains unknown rather
+than starting a late window. The receipt records this episode-start boundary. Every watch is scoped by surface, force,
 item and logical episode; a resumed episode retains its original evidence.
 Sampling stops after the first 120 seconds and stores at most five samples.
 It only starts for an explicitly observed episode and does not change factory
