@@ -376,6 +376,7 @@ def test_plate_expansion_preflight_rejects_real_infrastructure(monkeypatch) -> N
     }]}]}
     client = SimpleNamespace(command=lambda _command: "")
     monkeypatch.setattr(builder.live_base, "occupied_tile_owners", lambda *_a, **_k: {(0, 0): ("medium-electric-pole", 50.5, 50.5)})
+    monkeypatch.setattr(builder.live_base, "entity_signatures_at", lambda *_a, **_k: {})
     monkeypatch.setattr(builder.live_base, "water_tiles", lambda *_a: set())
 
     with pytest.raises(StuckError, match="intersects real infrastructure"):
