@@ -4363,6 +4363,8 @@ def _build_compact_steel_seed(client, bridge, surface, force, provider, referenc
         sites_tried = 0
         if plan is None:
             plan, sites_tried = _mined_steel_seed_plan(client, surface, force, reference_point)
+            if plan is not None:
+                emit(f"  STEEL SEED SITE: mined fallback on ore site {sites_tried} (1 = nearest)")
         if plan is None:
             raise ProductionPrerequisiteDeferred(
                 "no collision-free compact steel seed fits beside iron or on a free patch",
