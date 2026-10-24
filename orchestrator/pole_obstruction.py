@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from orchestrator import live_base
 from orchestrator.game_bridge import GameBridge
 from orchestrator.placement_clutter import _plan_tiles
-from orchestrator.recoverable_retirement import retire_entities_via_bots
+from orchestrator.recoverable_retirement import RecoverableRetirementError, retire_entities_via_bots
 from planners.infrastructure import POLE_SPECS
 from planners.infrastructure_geometry import footprint_tile_indices
 from tools.rcon_client import RconClient
@@ -160,6 +160,7 @@ def _connect(client: RconClient, surface: str, force: str, site: Point,
 def relocate_obstructing_poles(
     client: RconClient, bridge: GameBridge, surface: str, force: str, plan: dict, name: str,
     emit: Callable[[str], None], submit: Callable[..., dict],
+    *, own_action_positions: set[tuple[str, float, float]] | None = None,
 ) -> int:
     """Clear own poles from ``plan``'s footprint; returns how many were moved or recovered."""
     if name.startswith(RELOCATION_PREFIX) or not hasattr(client, "command"):
@@ -169,6 +170,7 @@ def relocate_obstructing_poles(
         return 0
     planned = {(action.get("entity"), action["position"]["x"], action["position"]["y"])
                for phase in plan["phases"] for action in phase["actions"] if "position" in action}
+    planned |= own_action_positions or set()
     margin = max(spec["wire"] for spec in POLE_SPECS.values())
     low = (min(x for x, _ in tiles) - margin, min(y for _, y in tiles) - margin)
     high = (max(x for x, _ in tiles) + 1 + margin, max(y for _, y in tiles) + 1 + margin)
@@ -179,9 +181,14 @@ def relocate_obstructing_poles(
         return 0
     blocked = set(tiles).union(*(pole.tiles for pole in in_way))
     blocked |= live_base.occupied_tiles(client, surface, low, high)
-    others = [(pole.name, pole.position) for pole in poles]
-    for pole in in_way:
-        needs = dependents((pole.name, pole.position), others, _survey_consumers(client, surface, force, pole))
+    for old in in_way:
+        # Earlier relocations may have changed this pole's neighbours and supply.
+        current = _survey_poles(client, surface, force, low, high)
+        pole = next((p for p in current if (p.name, p.position) == (old.name, old.position)), None)
+        if pole is None:
+            continue
+        others = [(p.name, p.position) for p in current if not p.ghost]
+        needs = [] if pole.ghost else dependents((pole.name, pole.position), others, _survey_consumers(client, surface, force, pole))
         neighbours = [n for n in pole.neighbours if n[1] != pole.position]
         if needs or len(neighbours) > 1:
             site = replacement_site(pole.name, pole.position, neighbours, needs, blocked)
@@ -198,15 +205,32 @@ def relocate_obstructing_poles(
                 "name": RELOCATION_PREFIX, "actions": [{"action_type": "place_entity", "entity": pole.name,
                                                          "position": {"x": site[0], "y": site[1]}}]}]},
                    f"{RELOCATION_PREFIX}_{pole.name}", emit)
-            _connect(client, surface, force, site, neighbours)
+            try:
+                _connect(client, surface, force, site, neighbours)
+            except PoleObstruction as error:
+                # Only the newly built replacement is recovered. Keep the old
+                # network intact and avoid accumulating poles on each retry.
+                try:
+                    _recover(client, bridge, surface, force, pole.name, site, emit)
+                except RecoverableRetirementError as cleanup:
+                    raise PoleObstruction(str(error), {**error.details,
+                        "replacement_cleanup_error": str(cleanup)}) from cleanup
+                raise
             blocked |= footprint_tile_indices(site, int(_spec(pole.name)["size"]))
         else:
             emit(f"  POLE RELOCATION: {pole.name} at {pole.position} blocks {name} and powers nothing; recovering it")
         if pole.ghost:
             live_base.remove_ghost_at(client, surface, force, pole.name, pole.position)
         else:
-            retire_entities_via_bots(client, bridge, surface, force, {"phases": [{
-                "name": RELOCATION_PREFIX, "actions": [{"action_type": "remove_entity", "entity": pole.name,
-                                                         "position": {"x": pole.position[0], "y": pole.position[1]}}]}]},
-                f"obstructing_{pole.name}", emit)
+            try:
+                _recover(client, bridge, surface, force, pole.name, pole.position, emit)
+            except RecoverableRetirementError as error:
+                raise PoleObstruction(str(error), {"pole": pole.name,
+                    "position": list(pole.position), "reason": "retirement_incomplete"}) from error
     return len(in_way)
+
+
+def _recover(client, bridge, surface, force, name, position, emit):
+    return retire_entities_via_bots(client, bridge, surface, force, {"phases": [{
+        "name": RELOCATION_PREFIX, "actions": [{"action_type": "remove_entity", "entity": name,
+            "position": {"x": position[0], "y": position[1]}}]}]}, f"obstructing_{name}", emit)
