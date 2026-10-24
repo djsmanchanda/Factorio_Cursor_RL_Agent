@@ -16,8 +16,8 @@ throughput target has been requested; the receipt records the actual rates.
 
 The source is the force's cumulative **plastic item production** counter on the
 explicit surface, never inventory growth. It measures aggregate plastic output,
-not a fixed machine cohort or attribution to one recipe. Initial stock and old
-production do not start the clock. Every watch is scoped by surface, force,
+not a fixed machine cohort or attribution to one recipe. Initial stock does not start the clock. A new watch armed after any recorded
+plastic production is unknown: the original startup window cannot be reconstructed. Every watch is scoped by surface, force,
 item and logical episode; a resumed episode retains its original evidence.
 Sampling stops after the first 120 seconds and stores at most five samples.
 It only starts for an explicitly observed episode and does not change factory
@@ -27,7 +27,9 @@ Once proved, startup remains proved, including fresh final C5 evaluation.
 Current production service, stock plateaus and supply interruptions remain
 separate observations. They cannot establish stability that was never measured.
 An incomplete window without a stable pair is unknown; a complete valid window
-without one fails. Missing, reset, malformed or legacy telemetry is unknown.
+without one fails. Missing, malformed or legacy telemetry is unknown. A counter reset before
+proof is unknown; an error after a valid stable pair retains the proof and is
+recorded separately.
 Delivery remains the separate C4 contract.
 
 The previous `c5-v1` predicate is retained as `_c5_v1` for historical replay.

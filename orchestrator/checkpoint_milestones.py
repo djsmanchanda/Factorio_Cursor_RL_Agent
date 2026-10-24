@@ -565,8 +565,10 @@ def _c5(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, _history: 
         return _all_checks("C5", "c5-v2", {"startup_evidence_valid": None}, {"reason": reason})
     if not isinstance(startup, Mapping) or startup.get("version") != "production-startup-v1":
         return unknown("startup_sampler_missing")
-    if startup.get("item") != PLASTIC_ITEM or startup.get("error"):
-        return unknown(str(startup.get("error") or "wrong_item"))
+    if startup.get("item") != PLASTIC_ITEM:
+        return unknown("wrong_item")
+    if startup.get("baseline_count") != 0:
+        return unknown("startup_armed_after_production")
     samples = startup.get("samples")
     if not isinstance(samples, (list, tuple)) or len(samples) > 5:
         return unknown("invalid_startup_samples")
@@ -594,6 +596,8 @@ def _c5(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, _history: 
     rates = [(b - a) / 30 for a, b in zip(counts, counts[1:])]
     stable_pair = next((i for i, (a, b) in enumerate(zip(rates, rates[1:]))
                         if min(a, b) > 0 and min(a, b) >= 0.8 * max(a, b)), None)
+    if stable_pair is None and startup.get("error"):
+        return unknown(str(startup["error"]))
     stable = True if stable_pair is not None else (False if len(samples) == 5 else None)
     evidence = {
         "startup_source": startup.get("source"), "start_tick": ticks[0],
@@ -603,6 +607,7 @@ def _c5(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, _history: 
         "qualified_tick": None if stable_pair is None else ticks[stable_pair + 2],
         "reason": "stable" if stable else ("unstable_startup" if stable is False else "observing_startup"),
         "samples": list(samples), "run_id": startup.get("run_id"),
+        "later_sampler_error": startup.get("error"),
     }
     return _all_checks("C5", "c5-v2", {"plastic_started": True,
         "stable_positive_rate_within_first_120_seconds": stable}, evidence)
