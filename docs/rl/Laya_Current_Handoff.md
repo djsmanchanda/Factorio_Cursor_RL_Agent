@@ -423,3 +423,7 @@ C31 is built from the October 24 audit (03:27–15:27 window, `data/laya-orchest
 - **Treatment, `outblock` (`7c63333`):** the only change is that `_diagnose_machines` counts `full_output` machines as a built, producing line and logs `OUTPUT BLOCKED` instead of returning them as stuck.
 
 Both arms carry the census, so their C2/C3 counts are not directly comparable with C25–C30. Primary endpoints: strict C3 attainment and time to C2/C3. Cancel C31 before it starts if C29 does not adopt release. Next free Miniship ports are 39300+.
+
+## Cohort 29 complete; release adopted (2026-10-24 18:09 IST)
+
+The stale mall-reservation release `5a5ed28` is the new Laya cohort base; see [C29 result](Laya_C29_Result_2026-10-24.md). C30 (release vs site `f765d30`) now admits, C30a and Starship S30r replicate it, and C31 (census + output backpressure, thread 94dcfaf2) waits behind C30. None needs cancelling. Next free Miniship ports: 39300+.
