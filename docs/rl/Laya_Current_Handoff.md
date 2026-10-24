@@ -395,3 +395,7 @@ Backing `65604cd` is not adopted: new Laya C6 is level (10:12), and backing is s
 ## Stale mall reservations and C29 (2026-10-24 05:29 IST)
 
 C25's never-C2 runs end in a cycle. The iron foundation needs one passive-provider chest, and new chests need plastic, which waits on steel, which waits on the iron foundation. Meanwhile, paired mall cells that are already producing still hold chests. A cell served once while idle (the repair path) stayed `constructing` with `hold_until_producing`, because only a later `ensure_produced` for the same item could close it. Fix `5a5ed28` closes such projects after every operation once their producer has run. C29 tests it against `daefefc` (120 jobs, 7200 s, ports 38800/31800, behind C26b/C27b); strict C2 is primary. The freeze script is `data/laya-orchestration/takeover-20261021/freeze-scripts/freeze_c29.py`. Next free ports: 38900+.
+
+## Cohort 27b complete (2026-10-24 09:53 IST)
+
+Linear wait pacing (linear3) is not adopted: every later endpoint moves against it; see [C27b result](Laya_C27b_Result_2026-10-24.md). C26b (ready loans) finishes next; C28 and C29 then admit. Mall-contract endpoints come from `data/laya-orchestration/takeover-20261021/mall_endpoints.py`.
