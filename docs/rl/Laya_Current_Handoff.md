@@ -399,3 +399,7 @@ C25's never-C2 runs end in a cycle. The iron foundation needs one passive-provid
 ## Cohort 27b complete (2026-10-24 09:53 IST)
 
 Linear wait pacing (linear3) is not adopted: every later endpoint moves against it; see [C27b result](Laya_C27b_Result_2026-10-24.md). C26b (ready loans) finishes next; C28 and C29 then admit. Mall-contract endpoints come from `data/laya-orchestration/takeover-20261021/mall_endpoints.py`.
+
+## Cohort 26b complete; mall-utilization settings closed (2026-10-24 10:47 IST)
+
+Ready-loan reconciliation is not adopted; see [C26b result](Laya_C26b_Result_2026-10-24.md). Both mall-utilization settings (C26b ready loans, C27b linear waits) were exercised and neither helps, so the baseline stays `d8a4825` behaviour. The next work is on the supply side: C29 (stale-reservation release) runs now beside C28 (thread 94dcfaf2's A/A + steel30 + feedstock16); a chest-free iron completion path is the next fix candidate.

@@ -116,3 +116,5 @@ C25 final (2026-10-24 04:52 IST): 120/120 completed. New Laya C6 31/29 (10:12), 
 C29 (queued 2026-10-24 05:28 IST, waits for C26b+C27b): 120 planned = 60 seeds 79680–79739 × control daefefc / release 5a5ed28 (stale paired-mall reservation release); ports 38800/31800 (C28 holds 38700); 7200 s wall. Primary: strict C2.
 
 C27b final (2026-10-24 09:04 IST): 60/60 completed. C2 24/20 (4:8), C5 20/12 (4:12), new Laya C6 16/10 (4:10); linear3 slower to strict C3–C6 and stalls sooner. Linear3 not adopted. [Result](Laya_C27b_Result_2026-10-24.md).
+
+C26b final (2026-10-24 10:22 IST): 60/60 completed. C2 22/19 (3:6), C3 18/11 (2:9), new Laya C6 17/11 (3:9); ready slower to strict C2/C3. Ready loans not adopted. [Result](Laya_C26b_Result_2026-10-24.md). C28 and C29 admitting since.
