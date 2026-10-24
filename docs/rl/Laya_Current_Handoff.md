@@ -465,3 +465,7 @@ Release arms of C29 and C30 (120 runs, `5a5ed28`), from `mall_capacity.py` and t
 - **Late shortages:** passive-provider chests (36/70 runs) and assembling-machine-1 (34/70), then long-handed inserters, inserters, engine units, sulfur and advanced circuits. Temporary mall batches are mostly pipe, assembling-machine-1 and belts.
 
 Implication: no slot-cap change is warranted. The highest-value fix is the iron-extension clearance, which is already C32's. Testing it on `5a5ed28` without the census would duplicate that owner's work; ask the user before doing so.
+
+## C33: refinery pole clearance on the release base (2026-10-25 04:57 IST)
+
+At the user's request, via thread 94dcfaf2, C31 and C32 were cancelled (census acceptance defect) and C33 replaces C32's question without the census. Branch `work/miniship/laya-clearance-20261025` (worktree `data/laya-orchestration/takeover-20261021/clearance-wt`) = `5a5ed28` + `e5471f8` (7a89997) + `ba31bec` (3a79880). It leaves out census `de40332` and c5-v2 (`1c03d47`/`515d1a5`/`ab7e8d3`). Exposure to measure: the refinery-extension refusal at (−41,−15),(−41,−14),(−40,−15), which blocks most release runs late, per arm, plus POLE RELOCATION / SMELTER POLE CLEARANCE lines in clearance. C5 here is the old c5-v1 predicate, not the user's plastic-startup definition. The freeze script is `freeze-scripts/freeze_c33.py`. Next free ports 39500+.
