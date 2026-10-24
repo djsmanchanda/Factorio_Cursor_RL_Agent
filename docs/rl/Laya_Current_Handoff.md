@@ -427,3 +427,11 @@ Both arms carry the census, so their C2/C3 counts are not directly comparable wi
 ## Cohort 29 complete; release adopted (2026-10-24 18:09 IST)
 
 The stale mall-reservation release `5a5ed28` is the new Laya cohort base; see [C29 result](Laya_C29_Result_2026-10-24.md). C30 (release vs site `f765d30`) now admits, C30a and Starship S30r replicate it, and C31 (census + output backpressure, thread 94dcfaf2) waits behind C30. None needs cancelling. Next free Miniship ports: 39300+.
+
+## C30a complete; site deficit traced (2026-10-24 20:53 IST)
+
+C30a (thread 94dcfaf2's 40-job stratum of C30, seeds 83200–83219) finished 40/40. Site trails release: C5 0:8 pairs (p 0.008), new Laya C6 2:7, C2 0:3, strict C2 timing 6:14. Comparing the persisted `*.steel-seed.json` plans shows the fix does not account for this:
+- In 17 pairs both arms built a mined seed. 12 of those plans are identical (the fix changed nothing), yet net C5 is −3. The 5 with a different site net −2.
+- In the 3 remaining pairs, site never reached steel at all, and that accounts for its whole C2 deficit (−3).
+
+Most of the gap therefore arises where the two arms ran the same steel-seed geometry, which points to run-to-run variance (the A/A spread on identical code is C2 5:12). It is not a fix effect, but it is not proven either. C30 (60 pairs) decides. Check for analysis: compare plan identity per pair, not only fallback logs.
