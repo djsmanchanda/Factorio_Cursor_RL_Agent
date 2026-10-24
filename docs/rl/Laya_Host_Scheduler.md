@@ -6,11 +6,20 @@
 `tools/run_laya_batch.py` admits worlds against its fresh gate. Performance starts
 at 24 and permits at most 30 worlds; balanced permits 26 and cool permits 20.
 `powerprofilesctl get` selects the mode automatically. Miniship's configured limits
-(`data/laya-host/config.json`, 2026-10-22) are 95 C (97 C hard) for
+(`data/laya-host/config.json`, 2026-10-24) are 95 C (97 C hard) for
 performance/balanced, 85 C for cool, and UPS floors of 100 (p95) / 90 (p98). A trial
 keeps its extra world whenever aggregate UPS does not fall (`min_total_ups_gain` 0,
 set 2026-10-22 so the count grows while there is headroom). These
 are configured ceilings, not measured sustainable capacities.
+
+Growth requires an additional `growth_margin_ups` above the p95 hold floor
+(default 5 UPS). Miniship therefore holds a safe population at p95 100 / p98 90,
+but only tries another slot at p95 >=105, with the other health/headroom checks
+still passing. A safe window below 105 reports `ups_growth_hold`; it does not
+trigger a drain. Growth also waits until actual occupied slots equal the target,
+so a population still draining cannot restart a trial. The published
+`growth_ups_p95` is the effective growth threshold. This margin reduces marginal
+retries; it cannot guarantee that a later factory/load change will preserve UPS.
 
 The scheduler reads decision-log UPS, temperature, memory and runner liveness.
 Growth compares aggregate UPS after the increased population has a complete
@@ -85,6 +94,7 @@ H=/home/miniship/.local/share/laya-host/laya_host_scheduler.py
 .venv/bin/python "$H" --root data/laya-host --registry data/laya-experiments resume
 .venv/bin/python "$H" --root data/laya-host --registry data/laya-experiments bump +2
 .venv/bin/python "$H" --root data/laya-host --registry data/laya-experiments mode auto
+.venv/bin/python "$H" --root data/laya-host --registry data/laya-experiments configure --growth-margin-ups 5
 ```
 
 `--until "2026-10-21T22:00:00+05:30"` is an alternative to `--for`.
@@ -92,6 +102,8 @@ Commands take effect on the next service cycle (up to 60 seconds); expiry also
 uses that cycle. Pause means target zero: running worlds finish, and new ones
 wait. Expiry/resume restores the saved target and automatic search. Changing
 `configure --start` alone does not reset an existing search; `reset` does.
+`--growth-margin-ups` accepts a finite nonnegative value and changes only growth
+headroom, preserving the existing hold floors and automatic search state.
 
 Two ways to change the slot count:
 
@@ -132,6 +144,24 @@ checksum 2399675684; affinity varied and samples were single runs. Another save
 gave 49.550/54.489 versus 480.379/495.873 ms. The thread's combined range mixed
 those conditions. Test `update_threads=1` cohort-wide in a recorded comparison
 before adopting it as a performance default.
+
+## Growth headroom repair, 2026-10-24
+
+The user's reported repeated overshoot was reproduced from the host history.
+Five22→23 starts in the fixed03:27–15:27 IST audit window had p95
+100.14,104.91,100.27,109.19 and101.51. The105 growth threshold holds four of
+those five inputs; the109.19 window still permits a trial. This replay verifies
+the decision change, not a counterfactual throughput result.
+
+26 focused scheduler tests and the fast gate (1366 passed,1 skipped) passed.
+At15:44:33 IST only the installed host scheduler service restarted, preserving
+its current target21 and search state. Configuration changed only by adding
+`growth_margin_ups:5`; live publication confirmed `growth_ups_p95:105`. C29's
+service start, batch and freeze stayed unchanged. No Factorio/mod restart or
+cohort source mutation occurred. The first reading (p95=94.04,p98=93.16) is
+below the hold floor; sustained recovery remains unobserved. Detailed local
+receipts are under `data/laya-orchestration/deep-audit-12h-20261024T095728Z/scheduler-fix/`
+in the main checkout.
 
 ## Review fixes prepared on Starship (2026-10-22)
 

@@ -602,3 +602,19 @@ All219 unique Starship trials completed;5,246 selected logs/evidence files (3,35
 ## 2026-10-24 15:20 IST — C28 terminal accounting and scoped cleanup
 
 All60 jobs/60 attempts complete; C6-v2 A/B/steel/grow4/6/6/7 of15, A/A4:2, steel vsA4:2/vsB3:3, grow4:1/3:2. Neither adopted. Raw strict finalC5 passed/known1/4,1/7,2/8,0/7 with11/8/7/8 unknown; bugs events/jobs23/7,10/9,7/6,9/7, caught exceptions0. Steel exposure13/15; grow5/15 and most extra wins unexposed. Verified253 source hashes,60 statuses/120 ledger events, exact inactive C28 unit/no owned cgroups or processes/zero reservations. Lifecycle:nothing to restart/redeploy/stop; disabled only both owned state.schedules timers, other schedules unchanged. No Starship SSH/wake, Opus message, shared-observer edit, subagent or new cohort. Evidence:docs/rl/Laya_Starship_Transfer_Decision_2026-10-24.md and main-checkout starship-frontier-followup-20261024/terminal-20261024T094928Z. Documentation/results only; original fast gate1322 passed/1 skipped retained.
+
+## 2026-10-24 15:45 IST — host scheduler growth headroom deployed
+
+User requested the recurring slot overshoot fixed. Growth now requires a configurable
+5 UPS margin above the p95 hold floor (Miniship: grow at105, retain100/90 hold
+floors), and actual occupancy must equal the target before a new trial. Safe
+windows below105 hold without draining. The latest22→23 retry at15:12 had
+p95=101.51; replay blocks4/5 recorded in-window22→23 starts, while the109.19
+sample still qualifies. Evidence:26 scheduler tests; fast gate1366 passed/1 skip;
+diff check; local audit scheduler-fix/replay.json and deployment.json. Installed
+script SHA25620210d5514692fe4c17c78583494ac3b71e5ebabe25371fc4410b5f0a4cb4b74
+matches source. Lifecycle:only laya-host-scheduler.service restarted at15:44:33;
+target21/search/config preserved except growth_margin_ups=5; live report confirms
+growth_ups_p95=105. C29 service start, batch and freeze unchanged. No Factorio/mod,
+cohort, scheduler-timer, Starship or observer action. Initial p95=94.04/p98=93.16
+does not establish recovery or throughput improvement; existing backoff continues.

@@ -59,6 +59,7 @@ DEFAULTS: dict[str, Any] = {
     "stale_seconds": 900,
     "min_ups_p95": 105.0,
     "min_ups_p98": 95.0,
+    "growth_margin_ups": 5.0,
     "min_total_ups_gain": 0.02,
     "temp_limit_c": 93.0,
     "temp_hard_c": 95.0,
@@ -443,6 +444,10 @@ def choose(
 
     state["healthy_windows"] = int(state.get("healthy_windows", 0)) + 1
     state["unhealthy_windows"] = 0
+    # Holding a safe population needs less headroom than trying another world.
+    growth_ready = p95 >= float(config["min_ups_p95"]) + float(config["growth_margin_ups"])
+    if not growth_ready:
+        state["healthy_windows"] = 0
     grow_after = 2 if mode == "cool" else 1
     if target > cap:
         return done(cap, cap_reason if cap_reason != mode else "mode_cap")
@@ -453,9 +458,10 @@ def choose(
     )
     if (
         headroom
+        and growth_ready
         and state["healthy_windows"] >= grow_after
         and target < cap
-        and int(metrics["active_slots"]) >= target
+        and int(metrics["active_slots"]) == target
         and int(metrics.get("ups_samples") or 0) == int(metrics["active_slots"])
         and int(metrics.get("queued") or 0) > 0
     ):
@@ -465,7 +471,9 @@ def choose(
         state["trial_ready_since"] = None
         step = int(config["cool_step"] if mode == "cool" else config["step"])
         return done(min(cap, target + step), "trial_increase")
-    return done(target, "thermal_hold" if not headroom and metrics.get("temp_c") is not None else "hold")
+    if not headroom and metrics.get("temp_c") is not None:
+        return done(target, "thermal_hold")
+    return done(target, "ups_growth_hold" if not growth_ready else "hold")
 
 
 def write_gate(registry: Path, target: int, now: float) -> None:
@@ -539,6 +547,7 @@ def cycle(
         "metrics": {key: value for key, value in metrics.items() if key != "unstable"},
         "unstable": metrics["unstable"],
         "sweet_spot": state.get("sweet_spot"),
+        "growth_ups_p95": float(config["min_ups_p95"]) + float(config["growth_margin_ups"]),
         "manual_target": config.get("manual_target"),
         "manual_target_until": config.get("manual_target_until"),
         "updated": now,
@@ -618,6 +627,8 @@ def main(argv: list[str] | None = None) -> int:
     configure.add_argument("--temp-hard", dest="temp_hard_c", type=float)
     configure.add_argument("--thermal-samples", type=int, choices=range(1, 11))
     configure.add_argument("--unhealthy-samples", type=int, choices=range(1, 11))
+    configure.add_argument("--growth-margin-ups", type=float,
+                           help="p95 UPS headroom above the hold floor required to try another slot")
 
     target = sub.add_parser("target", help="set a manual drain ceiling")
     target.add_argument("slots", type=int)
@@ -640,12 +651,17 @@ def main(argv: list[str] | None = None) -> int:
     root.mkdir(parents=True, exist_ok=True)
 
     if args.command == "configure":
+        if args.growth_margin_ups is not None and (
+            not math.isfinite(args.growth_margin_ups) or args.growth_margin_ups < 0
+        ):
+            parser.error("growth UPS margin must be finite and nonnegative")
         changes = {
             "start_slots": args.start, "max_slots": args.max_slots, "min_slots": args.min_slots,
             "step": args.step, "cool_max_slots": args.cool_max_slots, "balanced_max_slots": args.balanced_max_slots,
             "cool_temp_limit_c": args.cool_temp_limit_c, "temp_limit_c": args.temp_limit_c,
             "temp_hard_c": args.temp_hard_c,
             "thermal_samples": args.thermal_samples, "unhealthy_samples": args.unhealthy_samples,
+            "growth_margin_ups": args.growth_margin_ups,
         }
         config = _set_config(root, **{key: value for key, value in changes.items() if value is not None})
         print(json.dumps(config, indent=2, sort_keys=True))

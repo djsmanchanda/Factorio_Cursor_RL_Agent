@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from tools.laya_host_scheduler import (
     Cohort,
     DEFAULTS,
@@ -70,6 +72,54 @@ def test_target_keeps_climbing_while_total_ups_improves():
     target, reason, state = choose(config, state, _metrics(active_slots=10, total_ups=1300.0), now=340)
     assert (target, reason) == (12, "trial_increase")
     assert state["sweet_spot"] == 10
+
+
+def test_healthy_population_holds_until_it_has_growth_headroom():
+    config = _config(min_ups_p95=100, min_ups_p98=90, step=1)
+    state = {"target": 22, "mode": "performance", "sweet_spot": 22}
+    for index, p95 in enumerate((100.0, 101.507750126968, 104.999)):
+        target, reason, state = choose(config, state, _metrics(active_slots=22, ups_p95=p95, ups_p98=99),
+                                       now=100 + index * 60)
+        assert (target, reason) == (22, "ups_growth_hold")
+        assert not state.get("trial_base") and state["unhealthy_windows"] == 0
+
+    target, reason, _ = choose(config, state, _metrics(active_slots=22, ups_p95=105, ups_p98=99), now=280)
+    assert (target, reason) == (23, "trial_increase")
+
+
+def test_growth_waits_for_actual_population_to_finish_draining():
+    config = _config(min_ups_p95=100, min_ups_p98=90, step=1)
+    state = {"target": 22, "mode": "performance"}
+    target, reason, state = choose(config, state, _metrics(active_slots=23), now=100)
+    assert (target, reason) == (22, "hold")
+    assert not state.get("trial_base")
+    assert allocate(target, [Cohort("active", Path("active"), 0, 23, 10, 1)]) == {"active": 23}
+
+
+def test_accepted_trial_does_not_chain_growth_without_headroom():
+    config = _config(min_ups_p95=100, min_ups_p98=90, step=1, min_total_ups_gain=0)
+    state = {"target": 23, "mode": "performance", "trial_base": 22, "trial_total_ups": 2200,
+             "trial_started": 0, "trial_ready_since": 100}
+    target, reason, state = choose(config, state,
+                                   _metrics(active_slots=23, total_ups=2300, ups_p95=102, ups_p98=99), now=280)
+    assert (target, reason) == (23, "ups_growth_hold")
+    assert state["sweet_spot"] == 23 and state["trial_base"] is None
+
+
+@pytest.mark.parametrize("p95,p98", [(99, 95), (103, 89)])
+def test_growth_margin_preserves_both_hold_floor_backoffs(p95, p98):
+    config = _config(min_ups_p95=100, min_ups_p98=90, step=1)
+    state = {"target": 22, "mode": "performance"}
+    metrics = _metrics(active_slots=22, ups_p95=p95, ups_p98=p98)
+    assert choose(config, state, metrics, now=100)[:2] == (22, "unhealthy_pending")
+    assert choose(config, state, metrics, now=160)[:2] == (21, "unhealthy")
+
+
+@pytest.mark.parametrize("margin", ["-1", "nan", "inf"])
+def test_cli_rejects_invalid_growth_margin_without_writing_config(tmp_path, margin):
+    with pytest.raises(SystemExit, match="2"):
+        main(["--root", str(tmp_path), "configure", "--growth-margin-ups", margin])
+    assert not (tmp_path / "config.json").exists()
 
 
 def test_balanced_mode_uses_its_configured_cap():
@@ -150,12 +200,14 @@ def test_world_ups_reads_the_decision_log(tmp_path):
 def test_cli_configures_start_max_and_manual_target(tmp_path):
     root = tmp_path / "host"
 
-    main(["--root", str(root), "configure", "--start", "10", "--max", "18", "--cool-max", "8"])
+    main(["--root", str(root), "configure", "--start", "10", "--max", "18", "--cool-max", "8",
+          "--growth-margin-ups", "5"])
     main(["--root", str(root), "target", "12"])
 
     config = json.loads((root / "config.json").read_text())
     assert (config["start_slots"], config["max_slots"], config["cool_max_slots"]) == (10, 18, 8)
     assert config["manual_target"] == 12
+    assert config["growth_margin_ups"] == 5
 
     main(["--root", str(root), "clear-target"])
     assert json.loads((root / "config.json").read_text())["manual_target"] is None
