@@ -22,6 +22,7 @@ def world(tmp_path, monkeypatch):
     (server / "rcon-password").write_text("test-only")
     (root / "manifest.json").write_text(json.dumps({"rcon_port": 12345}))
     exports = []
+    startup_calls = []
     catalog_path = root / "catalog.json"
     catalog_path.write_text(json.dumps({"recipes": [], "machines": [], "stack_sizes": {}}))
 
@@ -32,9 +33,14 @@ def world(tmp_path, monkeypatch):
     def unexpected(*args, **kwargs):
         pytest.fail("Session initialization chose work or accessed an unexpected live command")
 
-    bridge = SimpleNamespace(export_recipe_catalog=export)
+    bridge = SimpleNamespace(export_recipe_catalog=export, episode_id="laya-startup")
+    def command(text):
+        if 'remote.call("production_startup","arm",' in text:
+            startup_calls.append(text)
+            return "null"
+        return unexpected(text)
     monkeypatch.setattr(laya_ops, "GameBridge", lambda **kwargs: bridge)
-    monkeypatch.setattr(laya_ops, "RconClient", lambda *args: SimpleNamespace(command=unexpected))
+    monkeypatch.setattr(laya_ops, "RconClient", lambda *args: SimpleNamespace(command=command))
     for name in ("_BOOTSTRAP_DISTRICT_LEDGER", "_MATERIAL_RESERVATION_LEDGER", "_BOOTSTRAP_WORK_LEDGER"):
         monkeypatch.setattr(builder, name, None)
     monkeypatch.setattr(material_reservations, "_ACTIVE_LEDGER", None)
@@ -45,7 +51,7 @@ def world(tmp_path, monkeypatch):
     monkeypatch.setattr(builder, "_material_sources_and_rates", lambda *args: ({}, {}))
     # These surveys are unrelated to the reservation being selected here.
     monkeypatch.setattr(laya_ops.DeterministicSession, "_maintain_mall", lambda self: None)
-    return SimpleNamespace(root=root, server=server, exports=exports, bridge=bridge, catalog_path=catalog_path)
+    return SimpleNamespace(root=root, server=server, exports=exports, startup_calls=startup_calls, bridge=bridge, catalog_path=catalog_path)
 
 
 def open_session(world, **kwargs):
@@ -58,6 +64,7 @@ def test_opening_session_loads_facts_and_clears_caches_without_reserving_stock(w
     session = open_session(world)
 
     assert world.exports == ["player"]
+    assert len(world.startup_calls) == 1
     assert not builder.UNBACKED_DRAWS and not builder._MALL_STOCK_GATE_FLOORS
     # Its only reservation is the plastic stage's output chest (user rule, 2026-10-20).
     assert set(builder._MATERIAL_RESERVATION_LEDGER.projects) == {builder._PLASTIC_OUTPUT_PACKET}
@@ -220,3 +227,8 @@ def test_reopening_restores_district_space_and_reconciles_only_measured_work(wor
 
     assert builder._REFINERY_SITE_RESERVATIONS[("nauvis", "player", "iron-plate")] == ((20, 30), (22, 31))
     assert builder._BOOTSTRAP_WORK_LEDGER.edges == {"steel-plate": {"copper-plate": "still missing"}}
+
+
+def test_resumed_session_never_rearms_missing_startup_window(world):
+    open_session(world, logical_episode_id="previous-run")
+    assert world.startup_calls == []

@@ -1,12 +1,12 @@
 -- Path: factorio_mod/production_startup.lua
 -- Purpose: Retain game-clock production startup samples for explicitly observed scopes.
 
-local VERSION = "production-startup-v1"
+local VERSION = "production-startup-v2"
 local PERIOD = 30 * 60
 local WINDOW = 120 * 60
 local function watches()
-  storage.production_startup_v1 = storage.production_startup_v1 or {}
-  return storage.production_startup_v1
+  storage.production_startup_v2 = storage.production_startup_v2 or {}
+  return storage.production_startup_v2
 end
 
 local function counter(watch)
@@ -38,7 +38,7 @@ script.on_nth_tick(60, function(event)
 end)
 
 remote.add_interface("production_startup", {
-  read = function(surface, force, item, run_id)
+  arm = function(surface, force, item, run_id)
     assert(type(run_id) == "string" and #run_id > 0, "run identity required")
     assert(type(surface) == "string" and type(force) == "string" and type(item) == "string")
     -- One bounded record per item/scope. A new logical run establishes a new
@@ -48,13 +48,20 @@ remote.add_interface("production_startup", {
     if not watch or watch.run_id ~= run_id then
       watch = {version = VERSION, surface = surface, force = force, item = item,
         run_id = run_id, baseline_tick = game.tick, samples = {}, complete = false,
+        armed_at_episode_start = true,
         source = "force.get_item_production_statistics(surface).get_input_count"}
       local count = counter(watch)
       assert(count ~= nil, "startup scope unavailable")
       watch.baseline_count, watch.last_count = count, count
-      if count > 0 then watch.error = "startup_armed_after_production" end
       watches()[key] = watch
     end
+    watch.observed_tick = game.tick
+    return watch
+  end,
+  read = function(surface, force, item, run_id)
+    -- Read/resume never creates a new window after production already ran.
+    local watch = watches()[surface .. "\0" .. force .. "\0" .. item]
+    if not watch or watch.run_id ~= run_id then return nil end
     watch.observed_tick = game.tick
     return watch
   end
