@@ -118,3 +118,5 @@ C29 (queued 2026-10-24 05:28 IST, waits for C26b+C27b): 120 planned = 60 seeds 7
 C27b final (2026-10-24 09:04 IST): 60/60 completed. C2 24/20 (4:8), C5 20/12 (4:12), new Laya C6 16/10 (4:10); linear3 slower to strict C3–C6 and stalls sooner. Linear3 not adopted. [Result](Laya_C27b_Result_2026-10-24.md).
 
 C26b final (2026-10-24 10:22 IST): 60/60 completed. C2 22/19 (3:6), C3 18/11 (2:9), new Laya C6 17/11 (3:9); ready slower to strict C2/C3. Ready loans not adopted. [Result](Laya_C26b_Result_2026-10-24.md). C28 and C29 admitting since.
+
+C30 (queued 2026-10-24 17:12 IST, waits for C29): 120 planned = 60 seeds 79740–79799 × release 5a5ed28 / site f765d30 (steel seed fallback over 12 ore sites, both pole sides); ports 38900/31900; 7200 s. Conditional on C29 adopting release.
