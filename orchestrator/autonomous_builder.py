@@ -1821,6 +1821,7 @@ def _place_plate_expansion_foundation(
             moved = pole_obstruction.relocate_obstructing_poles(
                 client, bridge, surface, force, pole_plan,
                 f"prepare_{recipe}_refinery_poles", emit, _submit,
+                own_action_positions={tuple(item) for item in foundation.get("own_action_positions", [])},
             )
         except pole_obstruction.PoleObstruction as error:
             raise StuckError(str(error), code="power_pole_obstruction", details=error.details) from error
@@ -2800,7 +2801,7 @@ def _build_initial_plate_smelter(
         preflight_only=preflight_only,
         allow_unfunded_ghosts=allow_unfunded_ghosts,
     )
-    if foundation is not None:
+    if foundation is not None and not preflight_only:
         _place_plate_expansion_foundation(
             client, bridge, surface, force, recipe, foundation, emit,
         )

@@ -29,7 +29,7 @@ def test_recorded_big_pole_is_prepared_then_cleared_without_changing_geometry(mo
     preparation = builder._plate_expansion_foundation(CLIENT, "nauvis", "player", "iron-plate", PLAN)
     assert preparation["pole_plan"] == PLAN
     calls = []
-    def relocate(*args):
+    def relocate(*args, **kwargs):
         calls.append(args[4])
         owners.clear()
         return 1
@@ -49,7 +49,7 @@ def test_foreign_force_or_unknown_pole_is_still_a_hard_refusal(monkeypatch):
 def test_unfinished_relocation_cannot_release_mine_growth(monkeypatch):
     survey(monkeypatch)
     preparation = builder._plate_expansion_foundation(CLIENT, "nauvis", "player", "iron-plate", PLAN)
-    monkeypatch.setattr(po, "relocate_obstructing_poles", lambda *_: 1)
+    monkeypatch.setattr(po, "relocate_obstructing_poles", lambda *_, **__: 1)
     with pytest.raises(StuckError, match="intersects real infrastructure"):
         builder._place_plate_expansion_foundation(CLIENT, object(), "nauvis", "player", "iron-plate", preparation, print)
 
@@ -57,7 +57,7 @@ def test_unfinished_relocation_cannot_release_mine_growth(monkeypatch):
 def test_no_safe_connected_site_remains_a_typed_refusal(monkeypatch):
     survey(monkeypatch)
     preparation = builder._plate_expansion_foundation(CLIENT, "nauvis", "player", "iron-plate", PLAN)
-    def blocked(*_):
+    def blocked(*_, **__):
         raise po.PoleObstruction("no connected site", {"reason": "blocked"})
     monkeypatch.setattr(po, "relocate_obstructing_poles", blocked)
     with pytest.raises(StuckError, match="no connected site") as caught:
@@ -73,9 +73,9 @@ def test_wire_failure_keeps_old_pole(monkeypatch):
     monkeypatch.setattr(po.live_base, "occupied_tiles", lambda *_: set())
     monkeypatch.setattr(po, "replacement_site", lambda *_: (-40., -18.))
     calls = []
-    monkeypatch.setattr(po, "retire_entities_via_bots", lambda *_: calls.append("retired"))
+    monkeypatch.setattr(po, "retire_entities_via_bots", lambda *args: calls.append(("retired", args[4]["phases"][0]["actions"][0]["position"])))
     client = SimpleNamespace(command=lambda _: "wire_link_unverified")
     with pytest.raises(po.PoleObstruction, match="keeping the old pole"):
         po.relocate_obstructing_poles(client, object(), "nauvis", "player", PLAN, "growth", print,
                                      lambda *_: calls.append("replacement"))
-    assert calls == ["replacement"]
+    assert calls == ["replacement", ("retired", {"x": -40., "y": -18.})]
