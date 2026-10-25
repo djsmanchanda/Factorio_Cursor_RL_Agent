@@ -347,3 +347,8 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - What: Starship data 401.34 → 10.41 GB, Miniship 1,299.87 → 46.02 GB; worktrees 91 → 1 and 235 → 15. Retired 20 GitHub branches with pushed recovery tags and archived 49 Starship threads; removed review-fixes.
 - Evidence: both full corpus copies verified (283,386 indexed files, zero mismatches); all 91 Miniship archives hash-checked and retired after corrected exemplar restoration (70 cohorts, 21 no-start). Retention 764ed6b passed the 1,366-case fast gate (one skip) and independent review. Details: docs/rl/Laya_Cleanup_2026-10-25.md.
 - Lifecycle: laya/measurement updated on both hosts and origin for future freezes; no deploy/restart. C35 naturally completed 120/120; C36 and scheduler continue. Historical full-world limits are recorded in the report.
+
+## [2026-10-26 02:24 IST] Cleanup dependency recovery
+- What: Restored Miniship C24's reusable source save after cleanup broke a later freeze; recorded the controller's separate C32 analysis-tool recovery and the consumer checks required before future cohort retirement.
+- Evidence: source matches C24's recorded SHA-256; both restored analysis modules match ab7e8d30; C36/C37 each passed 1,145 recorded hash checks. See docs/rl/Laya_Cleanup_2026-10-25.md and data/cleanup-20261025/dependency-recovery-20261026.json.
+- Lifecycle: none; active freezes and controller ownership unchanged. Historical retired full worlds remain unavailable.

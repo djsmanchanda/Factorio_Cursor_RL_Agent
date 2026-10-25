@@ -114,3 +114,31 @@ Origin's retired heads use `archive/20261025/origin/*`; local heads and WIP use
 host-specific archive tags and recovery bundles. Detailed evidence is under
 `docs/cleanup_helper_runs/20261025/`; deletion plans, corrected selections,
 helper backups and verification logs are under `data/cleanup-20261025/`.
+
+## Dependency recovery — 2026-10-26 02:24 IST
+
+The Laya controller reported two cleanup regressions: removing C24's reusable
+`source.zip` broke C37's first freeze attempt, and removing C32's harness broke
+the `time_to.py` and `release_counts.py` wrappers. Terminal cohort status did
+not establish that other work had stopped depending on those files.
+
+The controller restored both analysis modules outside C32's retired harness,
+under `data/laya-orchestration/takeover-20261021/tools-c32-metrics/`. This
+follow-up verified both byte-for-byte against commit `ab7e8d30`. It also restored
+C24's 3,957,377-byte source save from C36 with a Btrfs reflink, matching C24's
+recorded SHA-256 `347eba65065014f82261330d84d5ca2fa3e3427cad3ab18dcfdf496dd9c442b0`.
+Every recorded source, batch, launcher, harness and mod hash checked for C36
+and C37 matched: 1,145 hashes per cohort. Their arm revisions also matched.
+Evidence: `data/cleanup-20261025/dependency-recovery-20261026.json` on Miniship,
+mirrored under the same path on Starship.
+
+Future cohort retirement must check consumers in controller tools and freeze
+scripts, preserve shared source saves, and move reused analysis modules out of
+retired freezes before removing their paths. This is an additional manual
+cleanup requirement; the published per-run retention implementation is
+unchanged. The removed mall checkout remains recoverable from its branch; the
+audited current tools and freeze scripts do not require that checkout path.
+Previously retired full historical worlds remain unavailable.
+
+Lifecycle: nothing to restart or deploy. C36/C37 freezes, scheduler state,
+policy adoption and the controller's supervision ownership were unchanged.
