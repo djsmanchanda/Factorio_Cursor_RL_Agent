@@ -10,7 +10,7 @@ in parallel: each new line is an independent column with its own mine unit
 and haul, placed beside the previous one inside the plate's smelting strip.
 
 Each option bundles:
-* a paired mine unit (``stage_extraction.paired_mining_drill_positions``):
+* a paired mine unit (``planners.mining_geometry.paired_mining_drill_positions``):
   drills above and below one east-flowing collector belt, with a substation at
   the row end (substations are allowed in mine areas);
 * a haul: east along the collector row, one turn through the corridor, into
@@ -27,7 +27,7 @@ import math
 from collections.abc import Mapping
 
 from orchestrator.laya_operations import sha256_hash
-from orchestrator.stage_extraction import paired_mining_drill_positions
+from planners.mining_geometry import paired_mining_drill_positions
 from planners.plan_validation import validate_build_plan
 from planners.smelter_block import COLUMN_PITCH, END_DEPTH, MIDDLE_PITCH, START_DEPTH, _repeated_actions
 from training.laya_saved_world import ghost

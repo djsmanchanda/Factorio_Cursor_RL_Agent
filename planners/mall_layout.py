@@ -6,7 +6,7 @@ from __future__ import annotations
 import math
 
 from planners.recipe_data import FEED_HEADROOM, MACHINE_SPEEDS, inserter_for_demand
-from planners.stock_gating import stock_gate
+from planners.stock_gating import chest_gate, stock_gate
 
 # A requester holds this many seconds of the machine's own consumption. Sizing
 # the buffer in TIME rather than in finished goods keeps it correct as machines
@@ -180,6 +180,21 @@ def generate_mall_stock_gate_update(
         else:
             action["logistic_condition"] = stock_gate(recipe, stock_target)
     return {"phases": [{"name": f"mall_stock_gate_{recipe}", "actions": updates}]}
+
+
+def generate_mall_chest_gate_update(
+    recipe: str,
+    machines: list[tuple[str, tuple[float, float], tuple[float, float]]],
+    stock_target: int,
+) -> dict:
+    """Wire each (machine, position, own provider) pair and cap that chest at ``stock_target``."""
+    updates = [{
+        "action_type": "configure_entity",
+        "entity": machine,
+        "position": {"x": position[0], "y": position[1]},
+        "chest_gate": chest_gate(recipe, chest, stock_target),
+    } for machine, position, chest in machines]
+    return {"phases": [{"name": f"mall_chest_gate_{recipe}", "actions": updates}]}
 
 
 def generate_promoted_mall_retirement_plan(

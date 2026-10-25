@@ -1,0 +1,55 @@
+{
+  "trace": "/home/djsm/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/batch-20261017-day/arms/c4-base/code/data/laya-saved-world/batch-20261017-day/control-s76403/evidence/decision-states.jsonl",
+  "trace_sha256": "c2e6001c1259de861c7c122eef2492dc16672da013837010a8a5749f570777f1",
+  "run_id": "control-s76403-s76403-1792200557",
+  "decision": 378,
+  "phase": "C2",
+  "history_outcomes": 378,
+  "recorded_options": [
+    "op.foundation.iron-plate",
+    "op.produce.passive-provider-chest",
+    "wait.300",
+    "wait.1800"
+  ],
+  "prior_compiler_options": [
+    "op.foundation.iron-plate",
+    "op.produce.passive-provider-chest",
+    "wait.300",
+    "wait.1800"
+  ],
+  "reset_compiler_options": [
+    "op.foundation.iron-plate",
+    "op.produce.passive-provider-chest",
+    "op.produce.plastic-bar",
+    "wait.300",
+    "wait.1800"
+  ],
+  "plastic_option": {
+    "option_id": "op.produce.plastic-bar",
+    "family": "produce",
+    "product": "plastic-bar",
+    "need_id": "stock:plastic-bar",
+    "summary": "produce plastic-bar (short 0)",
+    "params": {
+      "item": "plastic-bar",
+      "stock_target": 1
+    },
+    "features": {
+      "last_code": "new",
+      "shortage": 0,
+      "prerequisite_for": [
+        "produce:passive-provider-chest"
+      ],
+      "transactions": [],
+      "waiting": false,
+      "unchanged_failure": false,
+      "batch_active": false,
+      "goal_need": true,
+      "repeat_fails": 0,
+      "after_success_same_family": false,
+      "tried": false,
+      "stuck": true
+    }
+  },
+  "limits": "Offline history/board replay. Raw prototype and machine facts were not retained in the decision record; no live legality, execution, production or delivery claim."
+}

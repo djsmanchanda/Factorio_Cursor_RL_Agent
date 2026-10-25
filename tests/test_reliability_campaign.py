@@ -111,6 +111,11 @@ CHANGE = ('CAMPAIGN_DECISION:\nstatus: change\nkind: behavior\nfiles: {files}\n'
 def run_fix(tmp_path, monkeypatch, *, fixer_outputs, review_outputs, pytest_results,
             declared_files='fix.py', dirty=()):
     """Drive one full fix cycle with mocked model/git/pytest commands."""
+    # The real milestone writer must be scoped to this disposable repository.
+    repo = tmp_path / 'repo'
+    repo.mkdir()
+    (repo / 'CURRENT_STATUS.md').write_text('test status\n')
+    monkeypatch.setattr(campaign, 'REPO_ROOT', repo)
     root = tmp_path / 'runtime'
     root.mkdir(exist_ok=True)
     cfg = review_config(root)

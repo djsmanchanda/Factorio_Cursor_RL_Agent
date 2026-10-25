@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -614,8 +615,12 @@ def entity_at(client: RconClient, surface: str, position: Point) -> dict | None:
     decide whether it's safe to auto-clear (see is_safe_to_clear)."""
     lua = (
         "local s=game.surfaces['" + surface + "'];"
-        "local e=s.find_entities_filtered{position={" + str(position[0]) + "," + str(position[1]) + "},"
-        "radius=0.4,limit=1}[1];"
+        # Flying robots can cross a pole while it is surveyed. They do not
+        # occupy its construction tile and must not hide the real entity.
+        "local e=nil;for _,candidate in pairs(s.find_entities_filtered{position={"
+        + str(position[0]) + "," + str(position[1]) + "},radius=0.4}) do "
+        "if candidate.type~='logistic-robot' and candidate.type~='construction-robot' "
+        "and candidate.type~='combat-robot' then e=candidate break end end;"
         "if not e then rcon.print('NONE') return end;"
         "local ghost=(e.type=='entity-ghost' and e.ghost_name or '-');"
         "rcon.print(e.name..' '..e.type..' '..(e.force and e.force.name or 'neutral')..' '..ghost)"
@@ -629,6 +634,30 @@ def entity_at(client: RconClient, surface: str, position: Point) -> dict | None:
     if len(parts) == 4 and parts[3] != "-":
         result["ghost_name"] = parts[3]
     return result
+
+
+def unset_assemblers_at(
+    client: RconClient, surface: str, force: str, positions: Sequence[Point],
+) -> dict[Point, str]:
+    """Real (non-ghost) assemblers of `force` at `positions` with no recipe set, by position -> name."""
+    if not positions:
+        return {}
+    literal = ",".join("{" + str(p[0]) + "," + str(p[1]) + "}" for p in positions)
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local out={};"
+        "for i,p in ipairs({" + literal + "}) do "
+        "local e=s.find_entities_filtered{position=p,radius=0.4,type='assembling-machine',force='" + force + "',limit=1}[1];"
+        "if e then local ok,r=pcall(function() return e.get_recipe() end);"
+        "if ok and not r then out[#out+1]=i..'='..e.name end end end;"
+        "rcon.print(table.concat(out,','))"
+    )
+    raw = _sc(client, lua)
+    found: dict[Point, str] = {}
+    for pair in raw.split(","):
+        index, _, name = pair.partition("=")
+        if index and name in ASSEMBLER_TIERS:
+            found[tuple(positions[int(index) - 1])] = name
+    return found
 
 
 def entity_names_at(
@@ -1536,6 +1565,18 @@ def transferable_items(
     return _parse_stock_counts(raw)
 
 
+def placed_entity_count(client: RconClient, surface: str, force: str, name: str) -> int:
+    """Built entities named ``name`` on the surface (ghosts excluded)."""
+    raw = _sc(client, (
+        "local s=game.surfaces['" + surface + "'];"
+        "rcon.print(s.count_entities_filtered{name='" + name + "',force='" + force + "'})"
+    ))
+    try:
+        return int(str(raw).strip() or 0)
+    except ValueError:
+        return 0
+
+
 def transferable_item_count(
     client: RconClient, surface: str, force: str, item: str,
 ) -> int:
@@ -1976,18 +2017,83 @@ def occupied_tile_owners(
     return owners
 
 
-def pending_construction_items(client: RconClient, surface: str, force: str) -> dict[str, int]:
-    """Remaining entity-ghost bill, independent of completed producer batches."""
+def pending_construction_items(
+    client: RconClient, surface: str, force: str, *,
+    exclude: Sequence[tuple[str, Point]] = (),
+) -> dict[str, int]:
+    """Remaining entity-ghost bill, optionally excluding an exact retried plan."""
+    exclusions = ""
+    if exclude:
+        payload = json.dumps([[name, *position] for name, position in exclude])
+        exclusions = (
+            "local excluded={};local function key(name,p) return name..':'.."
+            "string.format('%.6f:%.6f',p.x,p.y) end;"
+            "for _,p in pairs(helpers.json_to_table(" + json.dumps(payload) + ")) do "
+            "excluded[key(p[1],{x=p[2],y=p[3]})]=true end;"
+        )
     lua = (
         "local s=game.surfaces['" + surface + "'];local counts={};"
+        + exclusions +
         "for _,g in pairs(s.find_entities_filtered{type='entity-ghost',force='" + force + "'}) do "
+        + ("if not excluded[key(g.ghost_name,g.position)] then " if exclude else "") +
         "local items=g.ghost_prototype.items_to_place_this;local item=items and items[1];"
-        "if item then counts[item.name]=(counts[item.name] or 0)+(item.count or 1) end end;"
+        "if item then counts[item.name]=(counts[item.name] or 0)+(item.count or 1) end "
+        + ("end " if exclude else "") + "end;"
         "local out={};for name,count in pairs(counts) do out[#out+1]=name..'='..count end;"
         "rcon.print(table.concat(out,','))"
     )
     raw = _sc(client, lua)
     return {name: int(count) for name, count in (part.split('=') for part in raw.split(',') if part)}
+
+
+def plan_construction_status(
+    client: RconClient, surface: str, force: str, plan: Mapping,
+) -> dict[str, dict[str, int]]:
+    """Exact selected-plan placements: installed material, pending ghosts and unplaced work.
+
+    Adapted from the queue branch's unbuilt_plan_items observation (0a50565), with tile support,
+    duplicate-placement reconciliation and strict reply validation. A ghost is never delivered credit.
+    """
+    placements = {}
+    for phase in plan.get("phases", ()):
+        for action in phase.get("actions", ()):
+            kind = action.get("action_type")
+            if kind not in {"place_entity", "place_ghost", "place_tile_ghost"}:
+                continue
+            tile = kind == "place_tile_ghost"
+            name = action["tile" if tile else "entity"]
+            x, y = action["position"]["x"], action["position"]["y"]
+            placements[(tile, name, x, y)] = {"tile": tile, "name": name, "x": x, "y": y}
+    if not placements:
+        return {key: {} for key in ("required", "installed", "pending", "unplaced", "remaining")}
+    payload = json.dumps(list(placements.values()), separators=(",", ":"), allow_nan=False)
+    lua = (
+        f"local s=game.surfaces[{json.dumps(surface)}];local f=game.forces[{json.dumps(force)}];"
+        "local out={};for _,a in ipairs(helpers.json_to_table(" + json.dumps(payload) + ")) do "
+        "local p={x=a.x,y=a.y};local state='unplaced';"
+        "if a.tile then if s.get_tile(p).name==a.name then state='installed' "
+        "elseif #s.find_entities_filtered{type='tile-ghost',ghost_name=a.name,position=p,force=f}>0 "
+        "then state='pending' end else "
+        "for _,e in pairs(s.find_entities_filtered{name=a.name,position=p,radius=0.05,force=f}) do "
+        "if e.type~='entity-ghost' and math.abs(e.position.x-a.x)<0.01 "
+        "and math.abs(e.position.y-a.y)<0.01 then state='installed';break end end;"
+        "if state~='installed' and #s.find_entities_filtered{type='entity-ghost',ghost_name=a.name,"
+        "position=p,radius=0.05,force=f}>0 then state='pending' end end;"
+        "out[#out+1]=state end;rcon.print(helpers.table_to_json(out))"
+    )
+    try:
+        states = json.loads(_sc(client, lua))
+    except (ValueError, TypeError) as error:
+        raise TelemetryError("unreadable selected-plan construction survey") from error
+    if (not isinstance(states, list) or len(states) != len(placements)
+            or any(state not in {"installed", "pending", "unplaced"} for state in states)):
+        raise TelemetryError("incomplete selected-plan construction survey")
+    result = {key: {} for key in ("required", "installed", "pending", "unplaced", "remaining")}
+    for action, state in zip(placements.values(), states, strict=True):
+        name = action["name"]
+        for key in ("required", state) + (() if state == "installed" else ("remaining",)):
+            result[key][name] = result[key].get(name, 0) + 1
+    return result
 
 
 def stock_capped_mall_positions(client: RconClient, surface: str, force: str, recipe: str) -> list[Point]:
@@ -2281,6 +2387,45 @@ def chest_contents(client: RconClient, surface: str, position: Point) -> dict[st
     if raw in ("NONE", ""):
         return {}
     return {pair.split("=")[0]: int(pair.split("=")[1]) for pair in raw.split(",") if pair}
+
+
+def loan_cell_item_count(
+    client: RconClient, surface: str, requester_position: Point, machine_position: Point, item: str,
+) -> int:
+    """`item` physically inside one mall cell: its requester chest, its assembler's input slots and the
+    hands of inserters feeding that assembler. None of these are logistic-network stock."""
+    def at(point: Point, kind: str) -> str:
+        return (f"s.find_entities_filtered{{position={{{point[0]},{point[1]}}},radius=0.5,"
+                f"type='{kind}',limit=1}}[1]")
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local n=0;"
+        "local c=" + at(requester_position, "logistic-container") + ";"
+        "if c then n=n+c.get_inventory(defines.inventory.chest).get_item_count('" + item + "') end;"
+        "local m=" + at(machine_position, "assembling-machine") + ";"
+        "if m then local inv=m.get_inventory(defines.inventory.crafter_input or defines.inventory.assembling_machine_input);"
+        "if inv then n=n+inv.get_item_count('" + item + "') end;"
+        "for _,i in pairs(s.find_entities_filtered{position=m.position,radius=4,type='inserter'}) do "
+        "local h=i.held_stack;if i.drop_target==m and h and h.valid_for_read and h.name=='" + item + "' then "
+        "n=n+h.count end end end;"
+        "rcon.print(n)"
+    )
+    raw = _sc(client, lua)
+    if not raw.isdigit():
+        raise RuntimeError(f"loan cell query returned {raw[:80]!r}")
+    return int(raw)
+
+
+def built_network_count(client: RconClient, surface: str, force: str) -> int:
+    """Built (not ghost) electric poles and roboports of `force` on the whole surface: the power and
+    coverage chains the tooling builds toward distant sites, which no machine count sees."""
+    lua = (
+        "rcon.print(game.surfaces['" + surface + "'].count_entities_filtered{force='" + force + "',"
+        "type={'electric-pole','roboport'}})"
+    )
+    raw = _sc(client, lua)
+    if not raw.isdigit():
+        raise RuntimeError(f"network count query returned {raw[:80]!r}")
+    return int(raw)
 
 
 def bot_and_power_summary(client: RconClient, surface: str, force: str) -> dict:
@@ -2593,6 +2738,25 @@ def network_item_count(
     return count
 
 
+def logistic_networks_covering(client: RconClient, surface: str, force: str, positions: Sequence[Point]) -> tuple[str | None, ...]:
+    """Exact source/destination network identities; missing coverage is unknown, never one synthetic pool."""
+    if not positions:
+        return ()
+    payload = json.dumps(list(positions), separators=(",", ":"))
+    raw = _sc(client, f"local s=game.surfaces[{json.dumps(surface)}];local f=game.forces[{json.dumps(force)}];"
+              "local out={};for _,p in ipairs(helpers.json_to_table(" + json.dumps(payload) + ")) do "
+              "local n=s.find_logistic_network_by_position({x=p[1],y=p[2]},f);"
+              "out[#out+1]=n and tostring(n.network_id) or false end;rcon.print(helpers.table_to_json(out))")
+    try:
+        ids = json.loads(raw)
+    except (ValueError, TypeError) as error:
+        raise TelemetryError("unreadable logistic network identities") from error
+    if not isinstance(ids, list) or len(ids) != len(positions) or any(
+            value is not False and (not isinstance(value, str) or not value) for value in ids):
+        raise TelemetryError("incomplete logistic network identities")
+    return tuple(None if value is False else value for value in ids)
+
+
 def transfer_stock(
     client: RconClient, surface: str, item: str, count: int, to_position: Point,
 ) -> int:
@@ -2605,7 +2769,7 @@ def transfer_stock(
         "local f=game.forces['player'];"
         "local dst=s.find_entities_filtered{position={"
         + str(to_position[0]) + "," + str(to_position[1]) + "},radius=0.4,"
-        "type='logistic-container',limit=1}[1];"
+        "type='logistic-container',force=f,limit=1}[1];"
         "if not dst then rcon.print('NODST') return end;"
         "local remaining=" + str(count) + ";"
         "for _,c in pairs(s.find_entities_filtered{type={'container','logistic-container'},force=f}) do "
@@ -2616,8 +2780,11 @@ def transfer_stock(
         "pcall(function() local i=c.get_inventory(defines.inventory.chest);"
         "local n=i.get_item_count('" + item + "');"
         "if n>0 then local take=math.min(n,remaining);"
-        "local got=i.remove({name='" + item + "',count=take});"
-        "if got>0 then dst.insert({name='" + item + "',count=got});"
+        "local inserted=dst.insert({name='" + item + "',count=take});"
+        "if inserted>0 then local removed_ok,got=pcall(function() return i.remove({name='" + item + "',count=inserted}) end);"
+        "got=removed_ok and (tonumber(got) or 0) or 0;"
+        "if got<inserted then local undone=dst.get_inventory(defines.inventory.chest).remove({name='" + item + "',count=inserted-got});"
+        "assert(undone==inserted-got,'transfer rollback failed') end;"
         "remaining=remaining-got end end end) end end end;"
         "rcon.print(tostring(" + str(count) + "-remaining))"
     )
@@ -2678,3 +2845,42 @@ def requester_logistic_groups(
     if raw in {"", "NONE"}:
         return ()
     return tuple(group for group in raw.split("|") if group)
+
+
+def mall_gate_survey(client: RconClient, surface: str, force: str) -> list[dict]:
+    """Read real assembler identity and simple logistic gates; never configure.
+
+    Compound, quality-specific and circuit-controlled conditions are ineligible
+    for the stock-control slice. Missing/unsupported telemetry fails closed.
+    """
+    lua = (
+        'local s=game.surfaces[' + json.dumps(surface) + '];local out={};'
+        'for _,e in pairs(s.find_entities_filtered{type="assembling-machine",force='
+        + json.dumps(force) + '}) do '
+        'local r=e.get_recipe();local b=e.get_control_behavior();'
+        'if r then local row={entity=e.name,unit_number=e.unit_number,recipe=r.name,'
+        'surface=s.name,force=e.force.name,position={e.position.x,e.position.y},circuit_enabled=true};'
+        'if b then local ok,v=pcall(function() return b.circuit_enable_disable end);'
+        'if ok and type(v)=="boolean" then row.circuit_enabled=v end;'
+        'local c=b.logistic_condition;c=c and (c.condition or c);'
+        'if b.connect_to_logistic_network and c and c.first_signal and '
+        '(not c.first_signal.type or c.first_signal.type=="item") and '
+        '(not c.first_signal.quality or c.first_signal.quality=="normal") and '
+        'not c.second_signal and c.constant then '
+        'row.gate={signal=c.first_signal.name,comparator=c.comparator,constant=c.constant} end end;'
+        'row.requesters={};for _,dx in ipairs({-3,3}) do '
+        'local p={e.position.x+dx,e.position.y};'
+        'local chest=s.find_entities_filtered{position=p,radius=0.01,name="requester-chest",limit=1}[1];'
+        'if chest then local groups={};local sections=chest.get_logistic_sections();'
+        'if sections then for _,section in pairs(sections.sections) do '
+        'if section.valid and section.group and section.group~="" then groups[#groups+1]=section.group end end end;'
+        'table.sort(groups);row.requesters[#row.requesters+1]={position=p,unit_number=chest.unit_number,'
+        'force=chest.force.name,groups=groups} end end;'
+        'out[#out+1]=row end end;rcon.print(helpers.table_to_json(out))'
+    )
+    result = json.loads(_sc(client, lua))
+    if result == {}:  # Factorio serializes an empty Lua table as an object.
+        return []
+    if not isinstance(result, list):
+        raise ValueError('Mall gate survey did not return a list')
+    return result

@@ -511,6 +511,13 @@ def append_plan_reservation(
         "name": name,
         "registered_at": datetime.now(timezone.utc).isoformat(),
         "tiles": sorted(plan_footprint_tiles(plan)),
+        # A settings receipt touches tiles but does not transfer their placement ownership.
+        "configuration_only": not plan.get("reserved_tiles") and any(
+            phase.get("actions") for phase in plan.get("phases", [])
+        ) and all(
+            action.get("action_type") == "configure_entity"
+            for phase in plan.get("phases", []) for action in phase.get("actions", [])
+        ),
     }
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(entry, separators=(",", ":")) + "\n")

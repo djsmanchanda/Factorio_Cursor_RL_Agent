@@ -19,12 +19,57 @@
     "production": {"$ref": "#/definitions/stock"},
     "consumption": {"$ref": "#/definitions/stock"},
     "researched": {"type": "object", "additionalProperties": {"const": true}},
+    "enabled_recipes": {"type": "object", "additionalProperties": {"const": true}},
     "pending_ghosts": {"type": "integer", "minimum": 0},
     "quad_centers": {"type": "array", "items": {"$ref": "#/definitions/position"}},
     "infrastructure_counts": {"$ref": "#/definitions/stock"},
+    "recipe_observations": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/definitions/recipe_observation"}
+    },
     "recipes": {"type": "object", "additionalProperties": {"type": "object", "required": ["ingredients", "product_amount", "energy_ticks"], "properties": {"ingredients": {"type": "array", "items": {"type": "object", "required": ["name", "amount"], "properties": {"name": {"type": "string"}, "amount": {"type": "number", "exclusiveMinimum": 0}}}}, "product_amount": {"type": "number", "exclusiveMinimum": 0}, "energy_ticks": {"type": "integer", "minimum": 1}}}}
   },
   "definitions": {
+    "recipe_observation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["enabled", "ingredients", "products", "categories", "machine_speeds", "energy_ticks"],
+      "properties": {
+        "enabled": {"type": ["boolean", "null"]},
+        "ingredients": {"$ref": "#/definitions/recipe_parts"},
+        "products": {"$ref": "#/definitions/recipe_parts"},
+        "category": {"type": "string"},
+        "categories": {"oneOf": [{"type": "array", "items": {"type": "string"}}, {"type": "object", "maxProperties": 0}]},
+        "machine_speeds": {"type": "object", "additionalProperties": {"type": "number", "exclusiveMinimum": 0}},
+        "energy_ticks": {"type": "number", "exclusiveMinimum": 0},
+        "productivity_bonus": {"type": "number", "minimum": 0}
+      }
+    },
+    "recipe_parts": {
+      "oneOf": [
+        {"type": "array", "items": {
+          "type": "object", "additionalProperties": false, "required": ["name", "type"],
+          "properties": {
+            "name": {"type": "string", "minLength": 1},
+            "type": {"enum": ["item", "fluid"]},
+            "amount": {"type": "number", "minimum": 0},
+            "amount_min": {"type": "number", "minimum": 0},
+            "amount_max": {"type": "number", "minimum": 0},
+            "ignored_by_productivity": {"type": "number", "minimum": 0},
+            "probability": {"type": "number", "minimum": 0, "maximum": 1},
+            "independent_probability": {"type": "number", "minimum": 0, "maximum": 1},
+            "shared_probability": {
+              "type": "object", "additionalProperties": false, "required": ["min", "max"],
+              "properties": {
+                "min": {"type": "number", "minimum": 0, "maximum": 1},
+                "max": {"type": "number", "minimum": 0, "maximum": 1}
+              }
+            },
+            "extra_count_fraction": {"type": "number", "minimum": 0, "maximum": 1}
+          }
+        }},
+        {"type": "object", "maxProperties": 0}
+      ]
+    },
     "count": {"type": "number", "minimum": 0},
     "stock": {"type": "object", "additionalProperties": {"$ref": "#/definitions/count"}},
     "position": {"type": "object", "additionalProperties": false, "required": ["x", "y"], "properties": {"x": {"type": "number"}, "y": {"type": "number"}}},

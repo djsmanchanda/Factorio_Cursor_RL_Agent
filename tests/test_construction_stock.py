@@ -4379,3 +4379,405 @@ def test_verdict_distinguishes_reserved_partial_and_unreadable_stock(
         assert "have=?" in messages[0]
     if contents is None:
         assert "splitter@(3.0,0.0){?}" in messages[0]
+
+
+@pytest.mark.parametrize("circuits,target,expected", [(0, 4, ("advanced-circuit",)),
+                                                      (1, 4, ("advanced-circuit",)),
+                                                      (4, 4, ())])
+def test_chest_seed_requires_delivered_circuits_for_the_whole_bill(monkeypatch, circuits, target, expected):
+    monkeypatch.setitem(builder.LINE_RECIPES, "passive-provider-chest", {
+        "machine": "assembling-machine-2", "ingredients": ["steel-chest", "advanced-circuit"],
+        "amounts": [1, 1], "product_amount": 1, "craft_time": 0.5,
+    })
+    monkeypatch.setattr(builder, "_production_started", lambda _c, _s, _f, item: item == "steel-chest")
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: {"advanced-circuit": circuits})
+    assert builder._core_mall_prerequisites(object(), "nauvis", "player", "passive-provider-chest", target) == expected
+
+
+def test_advanced_seed_borrows_only_the_requested_bill(monkeypatch):
+    client = SimpleNamespace(command=lambda *_a: "")
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: [])
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: {})
+    calls = []
+    monkeypatch.setattr(builder, "_start_bootstrap_loan", lambda *a, **k: calls.append((a[4:6], k)) or "batch started")
+    with pytest.raises(builder.ProductionPrerequisiteDeferred) as caught:
+        builder._bootstrap_advanced_circuit_batch(client, object(), "nauvis", "player", 4, (0, 0), print)
+    assert caught.value.code == "temporary_mall_batch"
+    assert caught.value.details["available_stock"] == 0
+    assert calls == [(("advanced-circuit", 4), {"spare_target_count": 4})]
+
+
+C11_FIXTURES = Path(__file__).parent / "fixtures" / "c11"
+# Real recipe bills (2.x catalog): passive provider = steel chest + 3 green + 1 advanced circuit.
+C11_RECIPES = {
+    "passive-provider-chest": {"machine": "assembling-machine-2", "craft_time": 0.5, "product_amount": 1,
+                               "ingredients": ["steel-chest", "electronic-circuit", "advanced-circuit"],
+                               "amounts": [1, 3, 1]},
+    "electric-furnace": {"machine": "assembling-machine-2", "craft_time": 5.0, "product_amount": 1,
+                         "ingredients": ["steel-plate", "advanced-circuit", "stone-brick"], "amounts": [10, 5, 10]},
+}
+
+
+def _c11_ledger(tmp_path, episode):
+    from orchestrator.material_reservations import MaterialReservationLedger
+    target = tmp_path / "logs" / "deterministic-material-reservations"
+    target.mkdir(parents=True)
+    (target / f"{episode}.json").write_text((C11_FIXTURES / f"{episode}.json").read_text())
+    return MaterialReservationLedger(tmp_path / "script-output", episode_id=episode,
+                                     surface="nauvis", force="player")
+
+
+@pytest.mark.parametrize("episode,stock,expected", [
+    # ready-s79402: circuit cell, long-inserter cell and a held inserter cell need 3 chests, 1 stocked.
+    ("laya-ready-s79402", {"passive-provider-chest": 1, "advanced-circuit": 1, "electric-furnace": 29}, 2),
+    # reconcile-s79411: six open bills need a chest each, 1 stocked ("need 6, short 5"); its stone
+    # refinery's 6 electric furnaces are covered by the 35 in stock.
+    ("laya-reconcile-s79411", {"passive-provider-chest": 1, "advanced-circuit": 1, "electric-furnace": 35}, 5),
+    # Without those furnaces the refinery bill is circuit-blocked too: bounded.
+    ("laya-reconcile-s79411", {"passive-provider-chest": 1}, builder.ADVANCED_CIRCUIT_SEED_MAX),
+    # Chests delivered: nothing is blocked on circuits, the requested seed stands.
+    ("laya-reconcile-s79411", {"passive-provider-chest": 6, "electric-furnace": 35}, 1),
+])
+def test_advanced_seed_is_sized_from_the_blocked_chest_bills(monkeypatch, tmp_path, episode, stock, expected):
+    for item, spec in C11_RECIPES.items():
+        monkeypatch.setitem(builder.LINE_RECIPES, item, spec)
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", _c11_ledger(tmp_path, episode))
+    assert builder._advanced_circuit_seed_target(stock, 1) == expected
+
+
+def test_advanced_seed_borrows_the_sized_bill(monkeypatch, tmp_path):
+    for item, spec in C11_RECIPES.items():
+        monkeypatch.setitem(builder.LINE_RECIPES, item, spec)
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", _c11_ledger(tmp_path, "laya-reconcile-s79411"))
+    client = SimpleNamespace(command=lambda *_a: "")
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: [])
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+    monkeypatch.setattr(builder, "_transferable_or_available_stock",
+                        lambda *_a: {"passive-provider-chest": 1, "advanced-circuit": 1, "electric-furnace": 35})
+    calls = []
+    monkeypatch.setattr(builder, "_start_bootstrap_loan", lambda *a, **k: calls.append((a[4:6], k)) or "batch")
+    with pytest.raises(builder.ProductionPrerequisiteDeferred) as caught:
+        builder._bootstrap_advanced_circuit_batch(client, object(), "nauvis", "player", 1, (0, 0), print)
+    assert caught.value.details["target"] == 5
+    assert calls == [(("advanced-circuit", 5), {"spare_target_count": 5})]
+
+
+@pytest.mark.parametrize("reserved,expected", [(0, True), (25, False)])
+def test_stocked_furnaces_cover_growth_respects_other_owners(monkeypatch, tmp_path, reserved, expected):
+    # copper-s79405 (cluster A): 30 electric furnaces in stock, copper 6 -> 12.
+    ledger = _c11_ledger(tmp_path, "laya-copper-s79405")
+    stock = {"electric-furnace": 30}
+    if reserved:
+        ledger.declare("another_refinery", {"electric-furnace": reserved}, stock, priority=99)
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", ledger)
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: stock)
+    client = SimpleNamespace(command=lambda *_a: "")
+    assert builder._stocked_furnaces_cover_growth(client, "nauvis", "player", "copper-plate", 12, 6) is expected
+    assert builder._stocked_furnaces_cover_growth(client, "nauvis", "player", "copper-plate", 40, 6) is False
+    assert builder._stocked_furnaces_cover_growth(object(), "nauvis", "player", "copper-plate", 12, 6) is False
+
+
+def test_advanced_seed_restores_only_after_delivered_stock(monkeypatch):
+    client = SimpleNamespace(command=lambda *_a: "")
+    loan = SimpleNamespace(target_item="advanced-circuit")
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: [loan])
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: {"advanced-circuit": 4})
+    restored = []
+    monkeypatch.setattr(builder, "_restore_bootstrap_loan", lambda *a, **k: restored.append(a[4]))
+    monkeypatch.setattr(builder, "_start_bootstrap_loan", lambda *_a, **_k: pytest.fail("delivered batch must restore"))
+    builder._bootstrap_advanced_circuit_batch(client, object(), "nauvis", "player", 4, (0, 0), print)
+    assert restored == [loan]
+
+
+def test_advanced_seed_waits_safely_without_a_lender(monkeypatch):
+    client = SimpleNamespace(command=lambda *_a: "")
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: [])
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: {})
+    monkeypatch.setattr(builder, "_start_bootstrap_loan", lambda *_a, **_k: None)
+    with pytest.raises(builder.ProductionPrerequisiteDeferred) as caught:
+        builder._bootstrap_advanced_circuit_batch(client, object(), "nauvis", "player", 4, (0, 0), print)
+    assert caught.value.code == "rationed_mall_borrow_deferred"
+
+
+def test_advanced_seed_checks_chemical_ladder_before_borrowing(monkeypatch):
+    def blocked(*_a, **_k):
+        raise builder.ProductionPrerequisiteDeferred("plastic not ready", code="chemical_capability_wait")
+    monkeypatch.setattr(builder, "_ensure_chemical_ladder_predecessor", blocked)
+    monkeypatch.setattr(builder, "_bootstrap_advanced_circuit_batch", lambda *_a: pytest.fail("ladder gate bypassed"))
+    with pytest.raises(builder.ProductionPrerequisiteDeferred, match="plastic not ready"):
+        builder.ensure_produced(SimpleNamespace(command=lambda *_a: ""), object(), "nauvis", "player",
+                                "advanced-circuit", (0, 0), print, stock_target=4)
+
+
+@pytest.mark.parametrize("count,borrowable", [(1, False), (2, True)])
+def test_loan_preserves_last_electronic_circuit_ingredient_source(monkeypatch, count, borrowable):
+    # The electronic-circuit cell used to be lent to a circuit-consuming rung.
+    positions = [(36.5 + i * 6, 32.5) for i in range(count)]
+    line = SimpleNamespace(machine_count=count, machine_positions=positions)
+    monkeypatch.setattr(builder.live_base, "find_line", lambda _c, _s, _f, item, _m, **_k:
+                        line if item == "electronic-circuit" else None)
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {"electronic-circuit": 100})
+    monkeypatch.setattr(builder, "locate_mall_cell", lambda *_a: ((35, 31), "left"))
+    monkeypatch.setattr(builder, "mall_slot_uses_shared_provider", lambda *_a: False)
+    def entity(_c, _s, pos):
+        return {"name": {(39.5, 32.5): "requester-chest", (39.5, 31.5): "passive-provider-chest"}.get(pos, "assembling-machine-1")}
+    monkeypatch.setattr(builder.live_base, "entity_at", entity)
+    borrowed = builder._borrow_free_mall_cell(object(), "nauvis", "player", "advanced-circuit", (0, 0),
+                                             allowed_original_recipes=None, allow_shared_provider=False,
+                                             require_stocked_original=False, excluded_origins=set())
+    assert (borrowed is not None) == borrowable
+
+
+def _vacancy_world(monkeypatch, *, groups=(), provider="passive-provider-chest", unset=True):
+    # Live C14 steelbill-s79400: one gear, one cable, one circuit cell (each the sole source of a drill/AM1
+    # input) and a released belt half at (61.5, 33.5) with its recipe cleared. Nothing could lend.
+    circuit = SimpleNamespace(machine_count=1, machine_positions=[(45.5, 38.5)])
+    monkeypatch.setattr(builder.live_base, "find_line", lambda _c, _s, _f, item, _m, **_k:
+                        circuit if item == "electronic-circuit" else None)
+    monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {"electronic-circuit": 36})
+    monkeypatch.setattr(builder, "locate_mall_cell", lambda *_a: ((41, 37), "right"))
+    monkeypatch.setattr(builder, "mall_slot_uses_shared_provider", lambda *_a: False)
+    halves = [((60, 32), "left", (61.5, 33.5)), ((60, 32), "right", (67.5, 33.5)), ((66, 37), "left", (67.5, 38.5))]
+    monkeypatch.setattr(builder, "mall_slot_positions", lambda _ref: halves)
+    monkeypatch.setattr(builder.live_base, "unset_assemblers_at",
+                        lambda _c, _s, _f, positions: {(61.5, 33.5): "assembling-machine-1"} if unset else {})
+    chests = {(64.5, 33.5): "requester-chest", (64.5, 32.5): provider}
+    def entity(_c, _s, pos):
+        name = chests.get(tuple(pos), "assembling-machine-1")
+        return name and {"name": name, "type": "container", "force": "player"}
+    monkeypatch.setattr(builder.live_base, "entity_at", entity)
+    monkeypatch.setattr(builder.live_base, "requester_logistic_groups", lambda *_a: tuple(groups))
+
+
+def _borrow_for(target, excluded=frozenset(), allowed=None):
+    return builder._borrow_free_mall_cell(SimpleNamespace(command=lambda *_a: ""), "nauvis", "player", target, (0, 0),
+                                         allowed_original_recipes=allowed, allow_shared_provider=False,
+                                         require_stocked_original=False, excluded_origins=set(excluded))
+
+
+def test_a_released_finite_half_is_borrowed_as_a_finite_cell_when_no_configured_cell_may_lend(monkeypatch):
+    _vacancy_world(monkeypatch)
+    # The sole circuit producer still never lends to a circuit consumer; the idle released half does.
+    assert _borrow_for("electric-mining-drill") == (
+        "electric-mining-drill", (61.5, 33.5), (60, 32), "left", "assembling-machine-1")
+    assert _borrow_for("electric-mining-drill", excluded={(60, 32)}) is None  # that cell hosts a loan
+    assert _borrow_for("electric-mining-drill", allowed=frozenset({"copper-cable"})) is None
+
+
+@pytest.mark.parametrize("world", [{"groups": ("mall:iron-gear-wheel:left",)}, {"groups": ("mall:iron-gear-wheel",)},
+                                   {"provider": None}, {"unset": False}])
+def test_only_an_unowned_complete_recipe_less_half_counts_as_vacant(monkeypatch, world):
+    _vacancy_world(monkeypatch, **world)
+    assert _borrow_for("assembling-machine-1") is None
+
+
+def test_a_vacant_half_beside_an_active_companion_stays_reusable(monkeypatch):
+    _vacancy_world(monkeypatch, groups=("mall:copper-cable:right",))
+    assert _borrow_for("splitter")[1] == (61.5, 33.5)
+
+
+def test_advanced_seed_craft_counter_alone_does_not_fulfill_delivery():
+    from orchestrator.mall_bootstrap import MallBootstrapLoan
+    loan = MallBootstrapLoan("transport-belt", "advanced-circuit", 4, "left", (39.5, 32.5),
+                             "advanced-circuit", step_recipe="advanced-circuit",
+                             step_baseline_finished=10, step_minimum_crafts=4)
+    assert not builder._bootstrap_loan_minimum_fulfilled(loan, {}, 14)
+    assert builder._bootstrap_loan_minimum_fulfilled(loan, {"advanced-circuit": 4}, 14)
+
+
+def test_advanced_seed_is_not_standing_production(monkeypatch):
+    client = SimpleNamespace(command=lambda *_a: "")
+    line = SimpleNamespace(working_count=1, produced_count=4000, machine_positions=((1.5, 2.5),))
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: line)
+    loan = SimpleNamespace(machine_position=(1.5, 2.5))
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: [loan])
+    assert not builder._production_started(client, "nauvis", "player", "advanced-circuit")
+
+
+@pytest.mark.parametrize("circuits,blocked", [(1, "advanced-circuit"), (2, None)])
+def test_finite_consumer_can_spend_the_complete_delivered_seed_bill(monkeypatch, circuits, blocked):
+    monkeypatch.setitem(builder.LINE_RECIPES, "passive-provider-chest", {
+        "ingredients": ["advanced-circuit", "steel-chest"], "amounts": [1, 1], "product_amount": 1,
+    })
+    monkeypatch.setattr(builder, "_chemical_capability_started", lambda _c, _s, _f, item: item != "advanced-circuit")
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: {"advanced-circuit": circuits, "passive-provider-chest": 2})
+    assert builder._unfunded_ladder_ingredient(object(), "nauvis", "player", "passive-provider-chest", 4) == blocked
+
+
+@pytest.mark.parametrize("item,prerequisite,amount", [
+    ("medium-electric-pole", "iron-stick", 4),
+    ("fast-inserter", "inserter", 1),
+    ("splitter", "transport-belt", 4),
+])
+@pytest.mark.parametrize("completion", ["stock", "crafts"])
+def test_rationed_parent_finishes_its_durable_prerequisite_before_reclaiming(
+    monkeypatch, item, prerequisite, amount, completion,
+) -> None:
+    from dataclasses import replace
+    from orchestrator.mall_bootstrap import parse_bootstrap_loan_group
+
+    # Use the reported recipe pairs; other inputs are already funded so the
+    # only decision is whether to finish this cell's rotating prerequisite.
+    monkeypatch.setitem(builder.LINE_RECIPES, item, {
+        "machine": "assembling-machine-2", "ingredients": [prerequisite],
+        "amounts": [amount], "product_amount": 1, "craft_time": 0.5,
+    })
+    target = 2
+    required = target * amount
+    product_amount = int(builder.LINE_RECIPES[prerequisite]["product_amount"])
+    crafts = required // product_amount
+    stock = {
+        name: 100 for name in builder.LINE_RECIPES[prerequisite]["ingredients"]
+    }
+    stock[prerequisite] = 0
+    client = SimpleNamespace(command=lambda *_a: pytest.fail("unexpected RCON"))
+    finished = [101]
+    loans = [builder.MallBootstrapLoan(
+        original_recipe="underground-belt", target_item=item,
+        target_count=target, spare_target_count=target, side="left",
+        requester_position=(39.5, 32.5), current_recipe=prerequisite,
+        step_recipe=prerequisite, step_target_count=required,
+        step_baseline_finished=100, step_required_crafts=crafts,
+        step_minimum_crafts=crafts,
+    )]
+    monkeypatch.setattr(builder, "_BLOCKING_MALL_ITEMS", set())
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: tuple(loans))
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(builder, "_unfunded_ladder_ingredient", lambda *_a: None)
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: dict(stock))
+    monkeypatch.setattr(builder, "_bootstrap_loan_stock", lambda *_a: (dict(stock), dict(stock)))
+    monkeypatch.setattr(builder.live_base, "transferable_items", lambda *_a: dict(stock))
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a: None)
+    # A freshly configured or idle batch need not have standing-production
+    # evidence; this must not let its parent restore it before its first bill.
+    monkeypatch.setattr(builder, "_production_started", lambda *a: a[3] != prerequisite)
+    monkeypatch.setattr(builder, "_bootstrap_loan_products_finished", lambda *_a: finished[0])
+    monkeypatch.setattr(builder, "_rationed_mall_completion_target", lambda *a: a[4])
+    monkeypatch.setattr(builder, "_rationed_mall_spare_target", lambda *a: a[4])
+    monkeypatch.setattr(builder, "_missing_chemical_ladder_predecessor", lambda *_a: None)
+    monkeypatch.setattr(builder, "_deliver_cell_ingredients", lambda *_a: None)
+    monkeypatch.setattr(builder, "_emit_loan_cell_telemetry", lambda *_a, **_k: None)
+    monkeypatch.setattr(builder, "consume_wait", lambda *_a: None)
+    monkeypatch.setattr(builder.time, "sleep", lambda *_a: None)
+    monkeypatch.setattr(builder.live_base, "entity_status_name", lambda *_a: "working")
+    restored = []
+    def restore(*args, **_kwargs):
+        assert stock.get(item, 0) >= target, "parent restored its unfinished loan"
+        restored.append(args[4])
+
+    monkeypatch.setattr(builder, "_restore_bootstrap_loan", restore)
+    submitted = []
+
+    def submit(_c, _b, _s, plan, _name, _emit):
+        submitted.append(plan)
+        actions = plan["phases"][0]["actions"]
+        requester = next(a for a in actions if a["entity"] == "requester-chest")
+        parsed = parse_bootstrap_loan_group(requester["logistic_sections"][0]["group"])
+        assert parsed is not None
+        loans[0] = replace(
+            loans[0].starting_step(*parsed[5:10]),
+            completed_step_targets=parsed[10],
+        )
+
+    monkeypatch.setattr(builder, "_submit", submit)
+
+    def parent_pass():
+        return builder._rationed_mall_batch(
+            client, object(), "nauvis", "player", item, target,
+            (0.0, 0.0), lambda _message: None,
+        )
+
+    # Even repeated parent requests retain the finite, unfinished step.
+    for _ in range(2):
+        assert parent_pass()
+        assert restored == []
+        assert submitted == []
+        assert loans[0].step_recipe == prerequisite
+
+    if completion == "stock":
+        stock[prerequisite] = required
+    else:
+        finished[0] = 100 + crafts
+    assert parent_pass()
+    assert loans[0].step_recipe == item
+    assert dict(loans[0].completed_step_targets)[prerequisite] == required
+    assert len(submitted) == 1
+    assert restored == []
+
+    # Bots may spend all prerequisite output after the switch. The durable
+    # credit must survive the wrapper as well as the underlying loan executor.
+    stock[prerequisite] = 0
+    assert parent_pass()
+    assert len(submitted) == 1
+    assert restored == []
+
+    stock[item] = target
+    builder._release_completed_construction_loans(
+        client, object(), "nauvis", "player", (0.0, 0.0), lambda _m: None,
+    )
+    assert restored == [loans[0]]
+
+
+def test_unset_assembler_survey_reports_only_real_recipe_less_assemblers():
+    sent = []
+    client = SimpleNamespace(command=lambda lua: sent.append(lua) or "1=assembling-machine-2,3=stone-furnace")
+    found = builder.live_base.unset_assemblers_at(client, "nauvis", "player", [(1.5, 1.5), (7.5, 1.5), (13.5, 1.5)])
+    assert found == {(1.5, 1.5): "assembling-machine-2"}  # non-assembler names are discarded
+    assert "type='assembling-machine',force='player'" in sent[0] and "get_recipe" in sent[0]
+    assert builder.live_base.unset_assemblers_at(client, "nauvis", "player", []) == {}
+
+
+def test_restoring_a_never_configured_loan_submits_nothing(monkeypatch):
+    # C13: 98 release_owner_missing refusals came from releasing a donor chosen by _start_bootstrap_loan but never
+    # configured (missing chemical predecessor, or the bill already met during donor discovery).
+    submitted, said = [], []
+    monkeypatch.setattr(builder, "_submit", lambda *a, **k: submitted.append(a[4]) or {})
+    client = SimpleNamespace(command=lambda *_a: "")
+    proposed = _craft_loan(original_recipe="advanced-circuit", target_item="passive-provider-chest",
+                           current_recipe="advanced-circuit", proposed=True)
+    builder._restore_bootstrap_loan(client, object(), "nauvis", "player", proposed, said.append,
+                                    reason="chemical handoff to missing chemical-plant")
+    assert submitted == [] and "NOT STARTED" in said[0]
+    # A configured loan still releases through the normal recovery path.
+    monkeypatch.setattr(builder, "mall_slot_uses_shared_provider", lambda *_a: False)
+    try:
+        builder._restore_bootstrap_loan(client, object(), "nauvis", "player", _craft_loan(), said.append,
+                                        reason="done")
+    except Exception:
+        pass  # later restore steps need a richer fake; only the first submission matters here
+    assert submitted and submitted[0].startswith("release_bootstrap_loan_")
+
+
+def test_the_borrower_marks_a_new_donor_as_proposed_until_configured(monkeypatch):
+    seen = []
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: [])
+    monkeypatch.setattr(builder, "_borrow_free_mall_cell", lambda *a, **k: (
+        "advanced-circuit", (33.5, 33.5), (32, 32), "left", "assembling-machine-1"))
+    monkeypatch.setattr(builder, "_submit_bootstrap_loan", lambda *a, **k: seen.append(a[4]) or "remedy")
+    assert builder._start_bootstrap_loan(SimpleNamespace(command=lambda *_a: ""), object(), "nauvis", "player",
+                                         "passive-provider-chest", 9, (0, 0), print) == "remedy"
+    assert seen[0].proposed is True
+    assert seen[0].group == seen[0].live_group  # proposed-ness never changes the tag it would install
+
+
+def test_a_refused_mall_cell_release_is_a_lifecycle_conflict_not_a_collision(monkeypatch):
+    import orchestrator.construction_coverage as ss
+    plan = {"phases": [{"actions": [{"action_type": "configure_entity", "entity": "assembling-machine-1",
+                                     "position": {"x": 33.5, "y": 33.5}}]}], "force": "player"}
+
+    class FakeBridge:
+        def build_layout(self, authorization, plan_dict):
+            return {"ok": False, "failed_placements": 1, "placement_failures": [
+                {"reason": "release_owner_missing", "position": {"x": 33.5, "y": 33.5}}]}
+
+    monkeypatch.setattr(ss, "load_json", lambda r: r)
+    monkeypatch.setattr(ss, "clear_plan_clutter", lambda *_a: None)
+    monkeypatch.setattr(ss, "assert_affordable", lambda *_a: None)
+    monkeypatch.setattr(ss, "build_layout_authorization", lambda *_a: object())
+    with pytest.raises(ss.StuckError) as refused:
+        ss._submit(object(), FakeBridge(), "nauvis", plan, "release_bootstrap_loan_passive-provider-chest",
+                   lambda _m: None)
+    assert refused.value.code == "mall_cell_lifecycle_conflict"
+    assert refused.value.details["reasons"] == ["release_owner_missing"]

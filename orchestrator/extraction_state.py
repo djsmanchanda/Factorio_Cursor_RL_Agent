@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from tools.rcon_client import RconClient
 
@@ -43,6 +43,68 @@ class ResourceMine:
     @property
     def shared_belt_y(self) -> float:
         return self.output[1] if self.belt_y is None else self.belt_y
+
+
+# Westmost verified column x (and why growth stops there) per direct collector,
+# keyed by its fixed east haul head.  Live classification cannot see how far a
+# corridor was verified, so without this every mine claimed ten spare columns
+# and an exhausted corridor was re-surveyed on every extend.
+_GROWTH_LIMITS: dict[tuple, tuple[float, str]] = {}
+
+
+def _growth_key(
+    client: RconClient, surface: str, resource: str, belt_y: float,
+    haul_head: Point,
+) -> tuple:
+    return (id(client), surface, resource, float(belt_y),
+            (float(haul_head[0]), float(haul_head[1])))
+
+
+def record_growth_limit(
+    client: RconClient, surface: str, resource: str, belt_y: float,
+    haul_head: Point, limit_x: float, cause: str,
+) -> None:
+    """Remember the verified westward end of one collector's corridor."""
+    _GROWTH_LIMITS[_growth_key(client, surface, resource, belt_y, haul_head)] = (
+        float(limit_x), cause,
+    )
+
+
+def clear_growth_limits() -> None:
+    _GROWTH_LIMITS.clear()
+
+
+def growth_limit_cause(
+    client: RconClient, surface: str, resource: str, mine: ResourceMine,
+) -> str | None:
+    """Why a recorded corridor stops, or None when it was never verified."""
+    if mine.haul_head is None:
+        return None
+    entry = _GROWTH_LIMITS.get(_growth_key(
+        client, surface, resource, mine.shared_belt_y, mine.haul_head,
+    ))
+    return entry[1] if entry is not None else None
+
+
+def apply_growth_limits(
+    client: RconClient, surface: str, resource: str,
+    mines: list[ResourceMine],
+) -> list[ResourceMine]:
+    """Replace the default spare-column claim with each verified reserve."""
+    limited = []
+    for mine in mines:
+        entry = (
+            _GROWTH_LIMITS.get(_growth_key(
+                client, surface, resource, mine.shared_belt_y, mine.haul_head,
+            ))
+            if mine.first_column_x is not None and mine.haul_head is not None
+            else None
+        )
+        if entry is not None:
+            spare = max(0, round((mine.first_column_x - entry[0]) / 3))
+            mine = replace(mine, row_capacity=mine.drill_count + spare)
+        limited.append(mine)
+    return limited
 
 
 @dataclass(frozen=True)
@@ -260,6 +322,8 @@ def _classify_direct_mines(
                     int(value.split("=")[1]) for value in ghosts
                 ),
                 expansion_step=1,
+                # Unverified default; plan_local_extraction replaces it with
+                # the surveyed reserve through apply_growth_limits.
                 row_capacity=len(drill_xs) + RESERVED_PAIR_COLUMNS,
                 belt_y=belt_y, first_column_x=min(drill_xs),
                 haul_head=(collector_end, belt_y), growth_direction=-1,

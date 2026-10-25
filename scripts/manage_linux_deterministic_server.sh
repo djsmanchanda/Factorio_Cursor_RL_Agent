@@ -10,7 +10,7 @@ usage: manage_linux_deterministic_server.sh {bootstrap|deploy|deploy-if-required
 
 Options:
   --root PATH           Dedicated server state (default: ~/.local/share/factorio-rl/deterministic).
-  --runtime-root PATH   Private Factorio runtime (default: ~/.local/share/factorio-rl/runtime/factorio-2.1.21).
+  --runtime-root PATH   Private Factorio runtime (default: ~/.local/share/factorio-rl/runtime/factorio-2.1.23).
   --factorio-bin PATH   Factorio executable (defaults below --runtime-root).
   --read-data PATH      Factorio read-data directory (defaults below --runtime-root).
   --source-save PATH    Required for bootstrap; copied once into the dedicated root.
@@ -21,6 +21,10 @@ Options:
   --gui-mods PATH       Linux GUI Factorio mods directory (default: ~/.factorio/mods).
   --game-port PORT      Game port (default: 34199).
   --rcon-port PORT      Loopback RCON port (default: 27017).
+  --update-threads N    Factorio update-runner thread count per world
+                        (engine default when omitted; 1 = single update thread).
+  --cpu-affinity LIST   Pin Factorio to a taskset CPU list (for example 0-3,8).
+  --nice N              Lower this server's CPU priority by N (0..19).
   --fleet-mode          Headless lane mode; never sync GUI mods or snapshot
                         a lane save into the repository saves directory.
 
@@ -53,7 +57,7 @@ fi
 shift || true
 
 STATE_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/deterministic"
-RUNTIME_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/runtime/factorio-2.1.21"
+RUNTIME_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/runtime/factorio-2.1.23"
 FACTORIO_BIN=""
 READ_DATA=""
 SOURCE_SAVE=""
@@ -63,6 +67,9 @@ BOOTSTRAP_PROFILE="reduced-v1"
 GUI_MODS_PATH="$HOME/.factorio/mods"
 GAME_PORT=34199
 RCON_PORT=27017
+UPDATE_THREADS=""
+CPU_AFFINITY=""
+NICE_LEVEL=0
 FLEET_MODE=0
 
 while (($#)); do
@@ -78,6 +85,9 @@ while (($#)); do
     --gui-mods) GUI_MODS_PATH="${2:?missing --gui-mods value}"; shift 2 ;;
     --game-port) GAME_PORT="${2:?missing --game-port value}"; shift 2 ;;
     --rcon-port) RCON_PORT="${2:?missing --rcon-port value}"; shift 2 ;;
+    --update-threads) UPDATE_THREADS="${2:?missing --update-threads value}"; shift 2 ;;
+    --cpu-affinity) CPU_AFFINITY="${2:?missing --cpu-affinity value}"; shift 2 ;;
+    --nice) NICE_LEVEL="${2:?missing --nice value}"; shift 2 ;;
     --fleet-mode) FLEET_MODE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option: $1" ;;
@@ -94,6 +104,17 @@ require_port "RCON port" "$RCON_PORT"
 [[ "$GAME_PORT" != "$RCON_PORT" ]] || die "game port and RCON port must differ"
 [[ "$BOOTSTRAP_PROFILE" == "reduced-v1" || "$BOOTSTRAP_PROFILE" == "supplied-v1" ]] \
   || die "bootstrap profile must be reduced-v1 or supplied-v1"
+if [[ -n "$UPDATE_THREADS" ]]; then
+  [[ "$UPDATE_THREADS" =~ ^[0-9]+$ ]] && (( 10#$UPDATE_THREADS >= 1 && 10#$UPDATE_THREADS <= 64 )) \
+    || die "update threads must be between 1 and 64"
+fi
+if [[ -n "$CPU_AFFINITY" ]]; then
+  command -v taskset >/dev/null 2>&1 || die "taskset is required for --cpu-affinity"
+  taskset -c "$CPU_AFFINITY" true >/dev/null 2>&1 \
+    || die "invalid or unavailable CPU affinity list: $CPU_AFFINITY"
+fi
+[[ "$NICE_LEVEL" =~ ^[0-9]+$ ]] && (( 10#$NICE_LEVEL <= 19 )) \
+  || die "nice must be an integer between 0 and 19"
 
 FACTORIO_BIN="${FACTORIO_BIN:-$RUNTIME_ROOT/bin/x64/factorio}"
 READ_DATA="${READ_DATA:-$RUNTIME_ROOT/data}"
@@ -154,7 +175,7 @@ assert_stopped() {
 
 write_server_files() {
   mkdir -p "$MODS_PATH" "$DATA_ROOT/saves" "$DATA_ROOT/logs" "$DATA_ROOT/script-output"
-  write_factorio_runtime_config "$CONFIG_PATH" "$READ_DATA" "$DATA_ROOT"
+  write_factorio_runtime_config "$CONFIG_PATH" "$READ_DATA" "$DATA_ROOT" "$UPDATE_THREADS"
   if [[ ! -f "$SERVER_SETTINGS" ]]; then
     cat > "$SERVER_SETTINGS" <<'EOF'
 {
@@ -179,6 +200,16 @@ EOF
   {"name":"factorio_laya_agent","enabled":true},
   {"name":"factorio_training_lab","enabled":true}
 ]}
+EOF
+  local threads_json="null" affinity_json="null"
+  [[ -n "$UPDATE_THREADS" ]] && threads_json="$UPDATE_THREADS"
+  [[ -n "$CPU_AFFINITY" ]] && affinity_json="\"$CPU_AFFINITY\""
+  cat > "$DATA_ROOT/runtime-settings.json" <<EOF
+{
+  "factorio_update_threads": $threads_json,
+  "cpu_affinity": $affinity_json,
+  "nice": $NICE_LEVEL
+}
 EOF
 }
 
@@ -392,13 +423,13 @@ start_server() {
   # Fleet lanes are materialized without the normal bootstrap path.  Refresh
   # only lane-local config; write_server_files never touches GUI or repository
   # state, and FLEET_MODE keeps mod synchronization local.
-  if (( FLEET_MODE )); then
+  if (( FLEET_MODE )) || [[ -n "$UPDATE_THREADS" || -n "$CPU_AFFINITY" ]] || (( 10#$NICE_LEVEL > 0 )); then
     write_server_files
   fi
   [[ -f "$CONFIG_PATH" && -f "$SERVER_SETTINGS" ]] || die "server configuration is missing; run bootstrap first"
   # A runtime upgrade must move read-data with the executable, including worlds
   # configured by an older manager. Keep every other server setting intact.
-  write_factorio_runtime_config "$CONFIG_PATH" "$READ_DATA" "$DATA_ROOT"
+  write_factorio_runtime_config "$CONFIG_PATH" "$READ_DATA" "$DATA_ROOT" "$UPDATE_THREADS"
   port_available "$GAME_PORT" || die "game port $GAME_PORT is already in use"
   port_available "$RCON_PORT" || die "RCON port $RCON_PORT is already in use"
   if (( ! FLEET_MODE )); then
@@ -413,10 +444,17 @@ start_server() {
   # callers blocked until the keeper is stopped, even after Factorio is ready.
   tail -f /dev/null > "$STDIN_PATH" 2>"$DATA_ROOT/logs/factorio-stdin-keeper.log" &
   echo $! > "$STDIN_KEEPER_PID_PATH"
-  setsid "$FACTORIO_BIN" --config "$CONFIG_PATH" --mod-directory "$MODS_PATH" \
+  local launch=("$FACTORIO_BIN" --config "$CONFIG_PATH" --mod-directory "$MODS_PATH" \
     --start-server "$SAVE_PATH" --server-settings "$SERVER_SETTINGS" \
     --bind "127.0.0.1:$GAME_PORT" --rcon-bind "127.0.0.1:$RCON_PORT" \
-    --rcon-password "$(<"$SECRET_PATH")" --console-log "$DATA_ROOT/logs/factorio-console.log" \
+    --rcon-password "$(<"$SECRET_PATH")" --console-log "$DATA_ROOT/logs/factorio-console.log")
+  if (( 10#$NICE_LEVEL > 0 )); then
+    launch=(nice -n "$NICE_LEVEL" "${launch[@]}")
+  fi
+  if [[ -n "$CPU_AFFINITY" ]]; then
+    launch=(taskset -c "$CPU_AFFINITY" "${launch[@]}")
+  fi
+  setsid "${launch[@]}" \
     >"$DATA_ROOT/logs/factorio-stdout.log" 2>"$DATA_ROOT/logs/factorio-stderr.log" < "$STDIN_PATH" &
   echo $! > "$PID_PATH"
   for _ in $(seq 1 240); do

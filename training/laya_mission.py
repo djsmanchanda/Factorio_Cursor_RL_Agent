@@ -7,8 +7,9 @@ Each phase names the deterministic checkpoint it corresponds to
 (`orchestrator/checkpoint_milestones.py`), the sustained item rates that
 define it for the status board, and the guideline scopes that apply.  Rates
 are editable mission data, not decision rules: Laya still chooses what to
-build to reach them.  A phase is reached when every target is measured as
-satisfied; mapping onto the deterministic C-predicates is separate evidence.
+build to reach them.  Geometry phases use measured target rates. Ops C6 instead requires an explicit
+advanced-circuit mall choice followed by attributable output (see its acceptance version);
+other ops phases use the rate proxy. Mapping onto the deterministic C-predicates is separate evidence.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ PHASES: tuple[dict, ...] = (
     {"phase_id": "C4", "name": "first_plastic", "targets": {"plastic-bar": 0.5},
      "scopes": ("mission.goal", "mission.decide", "mission.power", "mission.build", "mission.transport")},
     {"phase_id": "C6", "name": "advanced_circuits", "targets": {"advanced-circuit": 0.25},
+     "ops_acceptance": "laya-c6-choice-output-v2",
      "scopes": ("mission.goal", "mission.decide", "mission.power", "mission.build", "mission.assemble", "mission.transport")},
     {"phase_id": "S1", "name": "science_packs",
      "targets": {"automation-science-pack": 0.5, "logistic-science-pack": 0.5,
@@ -51,6 +53,16 @@ def phase(phase_id: str) -> dict:
 def current_phase(reached: Sequence[str]) -> dict | None:
     """First phase not yet reached; ``None`` once the ladder is complete."""
     return next((p for p in PHASES if p["phase_id"] not in reached), None)
+
+
+def research_phase(reached: Sequence[str], targets: Mapping[str, float]) -> dict:
+    """A versioned research objective retains science readiness as a separate stage."""
+    current = current_phase(reached)
+    if current and current["phase_id"] != "S1":
+        return current
+    science = phase("S1")
+    return {**science, "targets": dict(targets) or dict(science["targets"]),
+            **({"phase_id": "R1", "name": "research_completion"} if current is None else {})}
 
 
 def phase_reached(board: Mapping) -> bool:

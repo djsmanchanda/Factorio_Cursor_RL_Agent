@@ -14,6 +14,21 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 
 - 2026-09-25: Migrated the isolated deterministic server and four disposable native RL workers to private Factorio 2.1.20 headless runtime (`build 87512`). Managers, campaign/dashboard defaults, current docs, active fixture versions, and persisted read-data configs now agree. The 2.1.20 changelog removals are guarded: the training Lua does not read `LuaPlayer.spectator` or `fuel_category`; spectator-controller assignment remains in use. Evidence: 33 focused tests, Python/shell/Lua syntax checks, matching deployed mod trees, 2.1.20 launch banners for all five instances, and read-only RCON tick probes (deterministic `2075404`; workers 01–04 `6468928`, `749758`, `751062`, `750269`). GUI mod copies were synchronized; deterministic server and all four workers are running, while the deterministic Python runner remains stopped.
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ## [2026-09-25] Laya L0 exploration loop live on 2.1.20
 - Commits: 64ff454, 7b83d6e, c2735f1, 3bc5f1b, 1f1a4dc, b2ebbb6, 0910a72.
 - What: separate `laya-exploration-disposable` gate (untrained base checkpoint drives, seeded epsilon, no capability manifest, never comparison/label evidence); laya pinned 0.3.20; live-found fixes for ready->running staleness, reselect recovery, remaining-budget pruning, reversed furnace inserters and infeasible furnace targets.
@@ -43,6 +58,12 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - Parallel batches at 8x (32 episodes/115 s), deeper build-variant layer, counterfactual labels (398 faithful, noise ~180 ticks), 2048-context training, held-out evaluation.
 - Held-out (32 seeds): features-only policy trained on counterfactual labels beats the rollout on 30/32 (median cost 5,806 vs 7,751); Laya v1 26/32, median 14,279 (wait.1s loop; needs policy iteration + decision cost).
 - Lifecycle: training lab redeployed to workers 01-03 (and GUI profile); workers 01-03 running at speed 1.
+
+
+
+
+
+
 
 ## [2026-09-29] Stepped policy iteration beats the scripted rollout (overnight)
 - Commits: c8b5b8f (16-slot, policy-iteration labels, decision cost), 7f51f6b (stepped paused-clock episodes), 7fbdcad (demand-scaling level 2), 2ed47e6/e72468c (demand + time features, phase-independent rate windows, overnight driver).
@@ -261,6 +282,12 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - Evidence: 63 focused manager/dashboard tests, shell syntax and whitespace checks pass. Read-only live RCON confirms deterministic Nauvis/player with both project mods on 2.1.21; installed GUI is also 2.1.21 and all 21 persisted worker read-data configs match. Disposable mall smoke on loopback 34221/27221 verified exact kit/50+50 bots, bot-funded gear production (13 gears), zero pending ghosts, request multipliers 1/4/15 and unchanged source hash. Evidence: data/laya-saved-world/factorio-2.1.21-smoke-20261009/upgrade-validation.json.
 - Lifecycle: test host stopped; existing deterministic server preserved and standard workers remain stopped. No mod deployment or further Factorio/GUI restart required; future manager launches use 2.1.21. The private 2.1.20 runtime remains available; rollback also requires a compatible pre-upgrade save copy. No policy-performance claim or experiment adoption.
 
+
+
+
+
+
+
 ## [2026-10-09] AGENTS.md modernized; docs archived
 - What: AGENTS.md reframed around deterministic showcase, Laya focus and RL test bed, with experiment/adoption rules and subagent log reading. Rotated status entries before 2026-09-25 into docs/archive/status/. Archived 33 superseded handoffs, finished experiment reports, multi-model plans and point-in-time reviews to docs/archive/{rl,deterministic}/ with retargeted links; replaced the August roadmap. Open leads are listed in docs/archive/README.md.
 - Evidence: status rotation lost no lines; no new broken relative links in docs; 402 doc-referencing tests pass. The fast gate cannot collect because untracked tests import missing in-progress modules (training.laya_control, training.laya_mall_growth).
@@ -331,3 +358,269 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - What: Preserve partial timeout transcripts and session identity before continuing; stop rather than create an untracked replacement session. Requests review one bounded checkpoint and return. Separate helper code can inspect an explicitly pinned actor checkout.
 - Evidence: 13 focused helper tests pass, including binary/string timeout output, retry exhaustion and identity-less failure. Existing live helper session/report identified for recovery; no actor or mod change.
 - Lifecycle: Only the failed private Muse observer needs restart from this worktree; running deterministic/Laya actors remain pinned to their original commits.
+
+
+- 2026-10-13 10:02 IST — Fixed deterministic construction reservation leaks exposed by `solo-20261013T034945Z`: repeated transient submissions renew their bill; funding subtracts other unbuilt ghosts while excluding exact retries; additive ghosts cannot consume foreign reserved stock. Evidence: 122 focused tests passed, including native Lua and pre-fix failures; fast gate 952 passed/3 skipped/1 pre-existing import-firewall failure reproduced from HEAD. Lifecycle: Python controller restart/new frozen validation episode required; no mod deployment or Factorio restart, active campaigns untouched; no live rerun yet.
+
+## [2026-10-15 13:47 IST] T3 Code harness delegation instructions
+- What: AGENTS.md routes delegation through the active harness; T3 Code inherits model/provider defaults without model or effort overrides, and falls back to direct evidence reading when delegation is unsupported.
+- Evidence: reviewed instruction diff and git diff --check pass. Required fast gate stopped with 285 collection errors, including duplicate saved-run test modules under data/; no subagent launch was exercised. Log: /tmp/factorio-t3-agents-fast-20261015.log.
+- Lifecycle: instructions only; no runner, mod or Factorio restart/deployment required. New sessions load the updated charter.
+
+
+## [2026-10-15 14:19 IST] Explicit T3 delegation tool contract
+- What: AGENTS.md names T3 MCP delegate_task/task_status, requires discovering both before delegation, prohibits native collaboration tools in T3 and falls back to direct reading when tools are missing.
+- Evidence: reviewed documentation diff and whitespace checks pass. Isolated managed Codex 0.162.0 requests confirmed the upstream two flags retain native tools while adding agents.enabled=false removes them; normal inference completed in both arms. Required fast gate again stopped with 285 collection errors, including saved-run import collisions under data/; log: /tmp/factorio-t3-explicit-tools-fast-20261015.log. T3-owned delegation remains untested because its tools are unavailable here.
+- Lifecycle: instructions only; new sessions load the charter. No T3 runtime patch, runner restart, mod deployment or Factorio restart performed or required for this documentation change.
+
+## [2026-10-17 09:37 IST] Reset: prerequisite choices and demand-driven observations
+- What: Named prerequisite handoffs become selectable outside the proxy phase and shortage menu cap; current parent outcomes retire old handoffs. Enabled goal production and recipe/item counters follow live demand and its ingredient closure. No rule weights changed.
+- Evidence: 66 focused tests pass, including Lua observation behavior; fast gate 963 pass / 1 skip / 1 inherited import-firewall failure. Offline only.
+- Lifecycle: use the reset branch for new disposable runners; observation Lua travels through the adapter. No deployment, restart or campaign modification performed. Earlier recovered mod changes still require staging from frozen code before live evaluation.
+
+## [2026-10-17 09:45 IST] Reset: selected oil remaining bill drives choices and retries
+- What: Exact installed/pending/unplaced material facts retain immutable transaction identity. Selected missing items become choices before repeated failures; parent options carry current owned bills. Retries charge only uninstalled placements, and paid construction reservations release. Installation high-water marks count delivery progress while bounding rebuild cycles.
+- Evidence: 388 focused checks pass; a regression requests 10 rather than 2 pipes with the prior affordability function. Recorded decision 378 of control-s76403 replays its original four options and gains plastic with the correct goal dependency. Fast gate 964 pass / 1 skip / unchanged inherited import-firewall failure. No live success claimed.
+- Lifecycle: start successor disposable runners from the reset commit after campaign ownership/deadline checks, using committed mod_playground and mods staged from frozen code. No campaign edit, deployment, restart or production action performed. Finite-cell WIP/slot release, network delivery and fresh strict C4/C5 remain open.
+
+## [2026-10-17 10:03 IST] Reset: finite-cell release and durable WIP recovery
+- What: Standing finite cells share persisted loan identity and vacate after completion. Borrowed cells keep their identity through verified restoration. Exact machine refunds, held hands and requester excess recover without spills or overwriting companion requests; full providers retain pending ownership across restart. Gear/cable anchors and capability requests are preserved.
+- Evidence: 298 focused checks; fast gate 973 pass / 1 skip / unchanged inherited import-firewall failure. Luna medium identified and reviewed the restart/spill fixes. Engine API smoke remains required.
+- Lifecycle: stage changed Lua/schema from a frozen commit and start fresh disposable instances. Completed day campaign 64/64, unit inactive. No existing runtime or installed mods changed.
+
+## [2026-10-17 10:07 IST] Reset: reachable, conserved material delivery
+- What: Validate provider/consumer network identity before cell/stage delivery; zero moved is not progress. Transfer only accepted destination stock with rollback on source refusal, and scope destination to player force.
+- Evidence: 378 focused checks, including Lua conservation and disconnected-network cases; fast gate 973 pass / 1 skip / same inherited import-firewall failure.
+- Lifecycle: fresh frozen lifecycle smoke `a93ee97` is running on ports 35440/28440 under a bounded user unit. Network change requires new frozen Python consumers. No active day campaign remains; no deployed installed mod/GUI copy was changed.
+
+## [2026-10-17 10:17 IST] Reset: engine verification and heavy matched testing
+- What: Verified actual finite-cell refunds, full-provider conservation and two save/load acknowledgement boundaries on an isolated API fixture. Fixed atomic Lua test module lookup and catalog state leaking across offline tests.
+- Evidence: 146 affected checks pass; fast gate 973 pass / 1 skip / unchanged firewall failure. Original full suite: 3840 passing cases, 18 failures, 39 skips; nine loader failures corrected, six catalog-order failures reproduced on predecessor and corrected; two other fake-client failures plus firewall reproduce on predecessor. Full confirmation follows this test-only commit. Smoke ended after 772s / 119 decisions at game-tick cap: proxy C0/C1, strict C0, two real cell restorations; no C4/C5 claim.
+- Lifecycle: 32 planned fresh trials (16 matched seed pairs), 8 concurrent, lifecycle `a93ee97` versus network `76d24cb`, under `laya-reset-paired-20261017.service`, October 17 deadline 16:30 IST. Frozen cohort unchanged by test fixes; per-minute offline metrics retain all jobs. Separate fixtures/smoke stopped their servers. Installed GUI/server mods and production untouched.
+
+## [2026-10-18 01:38 IST] Bound pytest discovery to current source
+- What: default pytest discovery targets tests/; frozen campaign copies remain independently verifiable from their own code roots.
+- Evidence: root discovery previously entered data/ and produced import/collection collisions; bounded fast gate collected the current suite. One preexisting import-firewall test still fails; committed HEAD independently reproduces the same four violations in laya_lines.py/laya_ops.py. No safety rule was relaxed.
+- Lifecycle: none; test configuration only.
+
+## [2026-10-18 01:38 IST] Two-machine task workspaces
+- What: added local-only task_workspace.py status/create commands and documented one explicit base SHA, branch and worktree per task. Parent work and machine-local runtime state stay separate; all synchronization/integration is explicit.
+- Evidence: nine disposable-Git integration tests pass, including dirty/staged parent preservation, collisions, literal shell characters in paths, upstream counts and hook suppression. Current host is miniship; other laptop checkout has not been inspected or configured.
+- Lifecycle: none; no remote push, machine provisioning or runtime action performed.
+
+## [2026-10-18 01:41 IST] Expose blocked mall demand and terminal acceptance
+- What: rejected slot claims retain owned material bills, network/allocatable snapshots and reservation owners; existing produce menus request fixed network targets for those blockers. Unchanged claim stock sets the existing retry fact. Runner/batch reporting separates ever-passed from final predicates, preserves unknown observations and discloses observed denominators.
+- Evidence: 49 focused tests pass (ops, claim-demand, batch, acceptance and disposable Git workspace checks). Required fast gate: 967 passed, 1 skipped, 1 preexisting import-firewall failure; committed 690983f reproduces the same four forbidden imports. Evidence remains offline tests; no replay, live run, matched improvement or adoption. Logs: /tmp/laya-resume-all-focused-20261018.log and /tmp/laya-resume-final-fast-20261018.log.
+- Lifecycle: all laya units were absent at resumption; no runtime action performed. Future runners need a fresh frozen copy of these Python changes; no Lua deployment required.
+
+## [2026-10-18 01:46 IST] Typed service blocker receipts
+- What: unsafe power routes return power_route_unavailable with endpoints/pole/blocked-count/reason; collisions with real infrastructure return infrastructure_collision with plan and occupant evidence. Failure classification and placement/clearing behavior are preserved.
+- Evidence: 28 service/economy tests and 74 collision/ghost/quad regressions pass. Required fast gate: 968 passed, 1 skipped, 1 preexisting import-firewall failure. No routing improvement or live recovery claimed; this fixes failure evidence only. Logs: /tmp/laya-service-{typed,regressions,fast}-20261018.log.
+- Lifecycle: no runtime action; future Python runners need fresh frozen source. No Lua deployment required.
+
+## [2026-10-18 01:52 IST] Mall capacity and loan economics observations
+- What: integrated Sol worktree's read-only economics projection: committed slot headroom, reservation owners including fully allocated bills, logistic-network plate stock, loan identity/targets/measured crafts and durable prerequisite credits. Decision digest and bounded brief retain unknown observations and distinguish headroom from affordability/borrowability.
+- Evidence: 67 focused policy/runner/economics/budget checks pass. Required fast gate: 968 passed, 1 skipped, 1 preexisting import-firewall failure. Evidence is unit and mocked runner integration only; no replay, live result or policy adoption. Logs: /tmp/laya-economics-{integrated,fast}-20261018.log.
+- Lifecycle: no runtime action; fresh frozen Python source is required in future runners. No mod redeployment or Factorio restart required for this slice.
+
+## [2026-10-18 01:59 IST] Fluid-aware recipe observations and status
+- What: optional typed recipe_observations preserves enabled/disabled state, item/fluid ingredients and observed yields/categories/speeds while retaining the solid-only operation catalog. V2 status distinguishes missing/disabled/unsupported metadata, shows fluid demand leaves and nominal chemical-item capacity. Exporter indexes crafting prototypes once per survey; unknown fluid supply does not erase known recipe availability.
+- Evidence: 126 focused integration/consumer tests pass, including mocked Lua-to-schema-to-board checks and three enabled-state regressions from independent Sol review. Lua syntax and scoped whitespace checks pass. Required fast gate: 989 passed, 1 skipped, 1 preexisting import-firewall failure. Actual Factorio execution and effective fluid delivery remain unverified; no policy or checkpoint adoption.
+- Lifecycle: no live action. Future runs must freeze Python, schema and training/laya_saved_world.lua together and start a fresh runner. This helper is sent by the adapter, not an installed mod; no installed-mod deployment or Factorio restart required solely for this change. Logs: /tmp/laya-fluid-{integrated,fast}-20261018.log.
+
+## Guarded standing-cell stock gates (2026-10-18, 02:35 IST)
+
+Laya can explicitly raise an owned paired mall cell's stock gate against an active
+material bill. Versioned executor guards recheck identity, recipe, prior gate and
+requester before writing; readback and submission evidence remain distinct.
+Configuration receipts preserve placement ownership, including legacy batched
+refreshes and loan restoration. Final review found no remaining scoped blockers.
+239 focused checks pass in both the working tree and an exact staged-source
+export. The export fast gate has 1,094 passes, three skips and the known
+four-violation import-firewall failure (working tree: 1,104 passes). Offline evidence only. Activation needs
+deliberate executor-mod deployment, Factorio reload and a fresh matching runner;
+no live lifecycle action was performed.
+
+## Starship fixes integrated and verified (2026-10-18, 02:36 IST)
+
+Gate source e7be89e is combined with Starship's bootstrap-cycle repair
+(f7916e4 -> 1b8b2cb) and unchanged shared mining geometry
+(405fe98 -> 8df965a). The bootstrap uses the recipe dependency graph and actual
+support bill; geometry preserves deterministic exports and training coordinates.
+358 focused checks pass in a committed-source export, independent of local edits.
+Combined fast gate: 1,107 passed, three skipped, one existing firewall failure
+(two laya_ops imports remain; both laya_lines violations are removed). Evidence:
+/tmp/laya-combined-{focused,fast}-20261018.log. No live result is claimed.
+Unrelated tracked changes remain intact. Bootstrap/geometry need fresh frozen
+Python in the next runner; guarded gates additionally need deliberate mod
+deployment and Factorio reload. No runtime, installed mod, service or save changed.
+
+## Laya startup no longer runs the deterministic opener (2026-10-18, 03:05 IST)
+
+Ops sessions now call `initialize_operation_runtime` (ledgers, recipe catalog,
+caches) instead of `_open_the_run`; Laya chooses `reserve_steel_seed` itself.
+The selected fence verifies funding against current stock and stays retryable
+when underfunded. A planned/submitted/producing seed reports `seed_committed` or
+`seed_producing` without re-running the two-pole fence, so the belt-side seed's
+one-pole plan bill is never dropped (Opus review P2, reproduced and fixed).
+Evidence: 46 focused tests; exact staged-source export fast gate 1,121 passed,
+3 skipped, 1 known firewall failure (same two laya_ops imports). Unit level
+only. Lifecycle: fresh frozen Python for the next runner; nothing deployed.
+
+## Ten-hour Opus testing window (2026-10-18, 02:50-12:50 IST)
+
+What: Claude Opus 5.5 orchestrated disposable-world testing of the integrated
+fixes. Live smoke and cohort 1 showed every stock-gate raise rejected: Factorio
+2.1.21 reads item signals back without `type`, the executor guard required it
+(fixed 8a3bcc8). The cohort-tested reset line (laya/reset-20261017, f1469e1)
+was not in this branch; merged it (dbd385f, 88093ab), added the chemical-ladder
+embodied-rung credit (09c093a) and the review's two cross-line fixes (dabdfd5).
+The d0851ec status entry above says 03:05 IST; the commit was 02:56 IST.
+
+Evidence (frozen worktrees, Factorio 2.1.21, save 347eba650650, guided, speed 2,
+360,000-tick window, seeds disjoint from earlier cohorts):
+- Cohort 1 `opus-10h-20261018` (base eeb3900 -> gate e7be89e -> starship c4745ce
+  -> startup d0851ec): 128 planned, 103 completed, 8 interrupted, 17 not started
+  (truncated by a decision recorded before reading outcomes). 24 matched seeds:
+  proxy C3 16/19/14/19, C4 0 everywhere; strict final C2 14/15/14/12. No
+  significant factor effect. 0 tool failures. Raises 202/202 rejected (guard
+  defect). Steel fence 27/27 `reserved`.
+- Cohort 2 `opus-10h-c2-20261018` (rung f1469e1 / merged 88093ab / ladder
+  09c093a): 108 planned, 72 completed, 36 not started at the deadline; 24 matched
+  seeds. Proxy C2 13/13/15, C3 9/12/13, C4 2/0/1. Strict ever C2 8/6/11, C3 2/2/4
+  (rung final acceptance unknown: older runner). Pipe-rung regressions 38/39/25.
+  0 tool errors. Raises 35/35 `stock_gate_verified`. Steel fence 72/72 `reserved`.
+  Paired merged->ladder strict C2 +9/-4, rung->merged +6/-8: not significant.
+- Offline: full suite on dabdfd5 4,074 passed, 39 skipped, 3 failed (two also
+  fail on both parents, plus the known two-import firewall).
+
+Decision: no adoption claim. The merged line is a regression-free integration
+(no tool errors, no proxy/strict loss beyond noise); the ladder credit reduces
+but does not remove pipe regressions. The guard fix is verified at deployed-
+runtime level. Lifecycle: no units or worlds left running; future runners need a
+fresh frozen copy of dabdfd5 with its mods staged into each disposable world.
+
+- 2026-10-18 20:51 IST: Starship cohort 4 started at 20:38:51 IST, deadline October 19 03:38:51 IST (unit cap 03:48:51), 96 planned jobs on 48 matched seeds, concurrency 8. Frozen review 421e3de vs cell 5271f7f; source save/harness/mod hashes verified. First four-minute snapshot: all eight jobs deciding, zero actual tool/runner errors; no adoption claim. Terminal accounting scheduled 03:50 IST. Existing servers/GUI/mods untouched.
+- 2026-10-18 20:51 IST: Construction coverage now owns its real funded submission, power bridge, roboport and run-state definitions; 33 moved definitions remain AST-identical and stage exports/state keep identity. Focused: 347 passed plus one clean-base pole-shortage fixture failure; fast: 1150 passed, 3 skipped, only the deferred autonomous_builder firewall violation. Lifecycle: source-only; future runners require fresh frozen code. Active cohort arms were not changed.
+
+- 2026-10-19 08:50 IST: Cohorts 3 and 5 complete on miniship (disposable worlds, frozen arms, Factorio 2.1.21). Cohort 3 (09c093a vs 421e3de, 39 matched of 96 planned; 8 interrupted + 9 unstarted by host resets; attempt 1 lost entirely): no factor effect (strict C2 18/17 paired +10/-11, C3 7/3 +2/-6, C4 0). Cohort 5 (421e3de vs 37dc304, 95 matched across batch parts a/c/d/e; part c lost to a reboot): exact parity (strict C2 41/41 +24/-24, C3 12/12 +9/-9, C1 3/3; proxy C4 1/0). The 37dc304 loan-cell pipe credit never applied live: 104/104 queries failed on Factorio 2.1's renamed crafter_input inventory (fixed fba641b). The stale loan-tag release loop fixed in 37dc304 also hit the reference arm (review-s77583, 56 release_owner_missing). C1 blockers (next arm): fewer than four working mall assemblers 2047 samples, starter not ready ~600-800 each. Stock-gate raises 127/127 verified; 0 tool errors. Adaptive slot harness (910f579) ran live: 6-18 slots, UPS 103-118. Post-review fixes 90284f6 (C1 status/starter evidence) and 5d1d866 (capacity/starter/no-progress decision facts) are pushed but not yet cohort-tested. No adoption. Lifecycle: no units left running; future runs need a fresh frozen copy of 5d1d866.
+
+- 2026-10-19 12:30 IST: Cohort 6 complete on miniship (prev 37dc304 vs facts 5d1d866, 48/48 matched seeds, 96/96 jobs, adaptive slots 15-19). The loan-cell pipe credit is now live (facts arm: 0 unreadable queries vs 48 on prev) and pipe-rung reopenings fell 41 -> 24. Strict C2 21 vs 17 (paired +10/-6), proxy C2 29 vs 24 (+13/-8), strict C3 2 vs 4 (+2/-4), C4 0/0: not significant, no adoption. 0 tool errors, 0 release failures, 60/60 raises verified. New C1 evidence (1,059 samples): mall machines were disabled_by_control_behavior 1,800, working 961, ingredient shortage 654; starters ready ~70% of samples and absent (retired) ~30%. Strict C1 therefore fails mostly on stock-gated idle cells and retired starters, a predicate-intent question pending the user. Lifecycle: no units running; data/laya-experiments/laya-c6-20261019/analysis.txt.
+
+- 2026-10-20 05:16 IST: Fixed the C7 s78026 robot/pole survey race: stationary-entity lookup ignores flying bots, so a bot cannot hide the power endpoint. 49 ghost/service tests pass (three execute the Lua query against robot-before-pole fixtures); fast gate: 1150 pass, one skip, existing laya_ops/autonomous_builder import-firewall failure. No campaign mutation. Fresh frozen runners pick up Python query changes; no mod deployment.
+
+- 2026-10-20 05:20 IST: Added a bill-sized first advanced-circuit batch in an existing mall cell, transferable-output completion, restoration and ingredient-source protection. Chest consumers accept delivered seeds without pretending they are permanent production. 298 focused checks pass; 10/11 new regressions fail against the parent source (duplicate-source positive control passes). Fast gate: 1161 pass, one skip, existing import-firewall failure. Fresh frozen disposable runners required; no installed mod or real-save action.
+
+- 2026-10-20 05:22 IST: Finite consumers now accept a complete transferable ingredient seed bill without claiming permanent upstream capacity. 300 focused checks pass; fast gate 1163 pass, one skip, only the existing import-firewall failure. Earned-C5 replay already delivered four circuits and restored its lender; consumer replay follows on a fresh frozen copy. C7 full accounting is recorded (396/396 jobs, no adoption). New frozen runners only; no installed mods or real save changed.
+
+- 2026-10-20 05:24 IST: Started C9 `laya-c9-miniship-20261020`: 48 seeds × five cumulative arms, 240 planned jobs, common save/mod hashes and fresh final acceptance, C5/C6 endpoints. Seed admission ends 19:20 (21:00 budget), hard cap 23:00; adaptive 18 (6–25). Raw-start smoke 2/2 × eight decisions, zero failures; earned replay delivered four circuits, then actual two-chest crafts consumed two circuits, both lenders restored. Mechanics evidence only; no adoption. New frozen disposable runners active; no production/mod/GUI/Starship lifecycle action. Claude continuation scheduled 06:15 IST.
+
+- 2026-10-20 13:35 IST: C9 complete, 240/240 planned jobs (239 stalled, 1 window_timeout). C5 ever/final ref 8/7, plastic 12/12, rung 14/13, extend 10/10, batch 15/11; C6 0 everywhere; batch vs ref C5 +10/-3 (p=0.09), no endpoint contrast significant; tool errors 0; batch has the most collision/untyped_stuck runs (11/5 of 48). No adoption. `docs/rl/Laya_C9_Result_2026-10-20.md`. C10 running, C11 queued behind it.
+
+- 2026-10-20 19:05 IST: C10 complete, 144/144. Full stack on new seeds: C5 14/48 ever, 11/48 final (C9: 15/11), C6 0, no tool errors. Copper and norung arms invalidated by the 05952ad link TelemetryError (91/61 tool errors, 14/11 safety stops); fixed in 030f8de, 0 errors in C11's first 47 live second-collector surveys. No adoption. `docs/rl/Laya_C10_Result_2026-10-20.md`. C11 running.
+
+- 2026-10-21 00:17 IST: Starship menu worktree removes top-four shortage truncation so small rejected mall-cell construction bills remain selectable; recipe/plate checks and exploration remain. New 1/2-assembler regressions reproduce the omission before the fix; 55 focused tests pass. Fast gate: 1172 passed, one skipped, existing autonomous_builder import-firewall failure reproduced on HEAD. Coverage is deferred pending an exact shared plan/coverage preview; local handoff records evidence/API, no order workaround. Lifecycle: source-only; future fresh frozen runners, no mod/server action. No live result.
+
+- 2026-10-21 00:53 IST: Takeover verified menu/C6 choice-output/loan lifecycle fixes (433 focused tests) and fleet 2.1.23 defaults (49 tests); fast gate 1179 pass/1 skip, only preexisting import firewall failure. C11 complete 144/144: C5 ever/final copper16/14, ready17/15, reconcile16/15; no adoption, legacy C6 exploratory. Initial 2.1.22 C12/C13 stopped for user-requested upgrade and fully accounted separately. Fresh C12 (192 jobs, initial12 slots) and C13 (144, initial6) now run solely on miniship, 2.1.23 build87750; no starship game runs after02:30, already zero. New Opus5.5 high owner scheduled03:32 IST with55-minute checks. Lifecycle: new frozen runners active; both headless engines/GUI launch targets updated, older runtimes retained; no real-save action. See docs/rl/Laya_Cohort_Ledger_2026-10-21.md and Laya_C11_Result_2026-10-21.md.
+
+- 2026-10-21 02:28 IST: First observed Laya C6 choice/output-v2 achievements in the live 2.1.23 cohorts: C12 2/21 completed (ref-s79400, seed-s79401), C13 4/19 (ref-s79401, menu-s79400/s79403, loan-s79402); each stored receipt has explicit produce.advanced-circuit plus a scoped engine item delta of 1–2 after choice, with recycler absent. Deterministic legacy C6 remains separate (C12 0 ever/final, C13 2/0). C5 ever/final 3/3 and 4/1; no adoption from partial cohorts. 21+11+160=192 C12, 19+7+118=144 C13; zero tool errors/safety stops, typed failures remain. Evidence: data/laya-orchestration/takeover-20261021/checkin_helper_runs/20261021-0227.md and each world's latest-status receipt. Lifecycle: none; both frozen miniship campaigns continue, starship excluded, Opus handoff 03:32 IST.
+
+- 2026-10-21 05:05 IST: Steel-seed bill facts (`934f9cb`): the parameterless steel operation gains `unchanged_failure`, and its bill items count as goal-serving. 19/79 completed C12/C13 runs had retried an unchanged drill/inserter-short steel seed ≥3 times (max 77). Focused runner tests pass 38/38; the new regression fails on the parent; smoke was 8 decisions with 0 failures. Shared host slot budget in `tools/run_laya_batch.py` (`57feb31`): slots are a host-wide total and older cohorts get first claim; admission is memory-headroom-gated and paced (47 batch/scheduler tests). C14 `laya-c14-2123-miniship-20261021` launched on miniship: 150 jobs = seeds 79400–79474 × ref c1b8680 / steelbill 934f9cb. Host total starts at 20 and may grow to 30 (min 10), UPS floors p95 105 / p98 95; admission until 2026-10-22 02:00 IST, cap 83000 s. Fast gate: 1179 passed, 1 skipped, only the known firewall failure. C12/C13 are unchanged. No mod, server or real-save action.
+
+- 2026-10-21 05:25 IST: Stopped C14 attempt 1 at 05:18. Its shared admission ignored host health, so C12/C13 shed slots (C13 7→4, C12 7→6) while C14 grew: older-first priority was inverted. Attempt 1 accounting: 150 planned = 1 completed, 4 interrupted, 1 shutdown runner_error, 144 not started; it is excluded from results. Fix `28a2bb8`: a shared batch admits at most one trial per 5-minute window, only after a measured window that did not shrink the host total, and only with ≥4.5 GiB free (47 batch/scheduler tests). Relaunched as `laya-c14b-2123-miniship-20261021`: same arms/seeds/settings, 150 jobs, until 2026-10-22 02:00 IST, cap 82000 s. C12/C13 unchanged.
+
+- 2026-10-21 09:45 IST: Vacant mall-half reuse (`ef38247`). A released finite cell keeps its assembler and chests but loses its recipe, so it was invisible to lenders and to slot allocation. That caused the top no-C5 stall ("no borrowable assembler", 13/58 C12/C13 runs; root cause in local `checkin_helper_runs/bclass-borrow-20261021.md`). The borrower now reuses a complete, owned, recipe-less half as a finite cell when nothing else may lend; last-producer protection is unchanged. 8 new and existing borrow tests pass; wide mall/Laya/bootstrap suites 891 passed (only the 2 known acceptance-reporting failures); fast gate 1186 passed + the known firewall failure. A disposable 2.1.23 world confirmed the survey finds a recipe-less assembler and ignores it once configured. Not yet in any cohort: queued as the next matched arm after C12 completes. No mod, server or real-save action.
+
+- 2026-10-21 12:00 IST: Accidental A/A test. C12 `seed` and C13 `ref` are byte-identical frozen code (same save, seeds and engine, run concurrently). On 33 common completed seeds: C2 6 vs 13 (discordant 5:12), C4/C5 4 vs 8 (2:6), C3 7 vs 6. Per-seed outcomes are strongly stochastic, so matched seeds control little, and arm differences of roughly ±7/33 are within run-to-run noise. On the common seeds 79400–79432, reference arms show no C2 decline (C10 full 12, C11 11–12, C12 ref/raw 14, C13 ref 13); the lower pooled C2 in C12/C13 comes from newer arms (furnace 9, seed 6, menu 8), which are not distinguishable from noise either. C2 has plateaued at ~35–45% since C3. Implication: future adoption needs larger effects or more seeds per arm; read single-cohort contrasts against this A/A spread.
+
+- 2026-10-21 13:45 IST: C12 admission closed at 13:05 (last block whose 6000 s window fits before 14:45): 157 completed, 3 running, 32 not_started_deadline (seeds 79440–79447). Result follows completion. At the user's request, C15 is queued behind C14b: steelbill 934f9cb vs vacancy ef38247 × seeds 79400–79474 = 150 jobs, until 2026-10-22 18:00 IST. Attempt 1 (`laya-c15-2123-miniship-20261021`) was stopped after 2 minutes (1 interrupted, 149 not started; excluded) because a newer shared cohort was not bounded by the older shared C14b's host total. Fixed in `1e8428f` (admission uses min(own slots, older shared slots); 47 tests). Relaunched as `laya-c15b-2123-miniship-20261021`, which waits behind C12/C13/C14b.
+
+- 2026-10-21 14:30 IST: C12 complete: 192 planned = 160 completed (40/arm, seeds 79400–79439) + 32 not_started_deadline, with no errors. C2 ref/raw/furnace/seed 15/16/11/7; C5 ever/final 14/5, 11/9, 10/8, 6/1; new Laya C6 12/7/8/6 (33/160). No adoption: no target improvement; furnace and seed lower C2; seed-vs-furnace C5 final 1:8 (p=0.039) is a single nominal hit within the A/A spread. tool_error and safety stops 0. [Result](docs/rl/Laya_C12_Result_2026-10-21.md). Stop-class analysis is running; C15b (vacancy) is already queued, so no new launch is needed.
+
+- 2026-10-21 14:50 IST: More Miniship slots at user request (laptop now in performance mode). Harness `e2bb022` adds `--resume` (finished jobs kept; interrupted work rerun in fresh `<id>-r<attempt>` worlds with history) and `adaptive.grow_step`; 49 batch/scheduler tests pass, and a dry run on C14b's status kept 15 completed and requeued 5 in flight. C14b and C15b were stopped gracefully and restarted with `--resume`: host start 20, grow 2 per healthy window, admission every 120 s, UPS floors unchanged at 105/95. Two C14b runs that failed with RconError at the stop are relabelled interrupted (raw status kept) and rerun. The pre-resume status is preserved as `job-status.before-resume-1445.json`. C13 is unchanged (frozen cap 8).
+
+- 2026-10-21 15:10 IST: Observed-foundation fact (`d8e3f7c`): an acceptance sample's foundation-ready predicate advances the plate stage, so a starter whose foundation bots finished after a wait outcome is offered for retirement. C12 analysis: 30/111 never-C2 runs had both foundations ready but a starter present, and 24 had no retirement option. Runner tests 39/39, Laya suites 671 passed (only the 2 known acceptance-reporting failures), fast gate 1186 + the known firewall failure. At the user's request, C15b (0 jobs ever started) is superseded by `laya-c15c-2123-miniship-20261021`: cumulative steelbill 934f9cb → vacancy ef38247 → foundation d8e3f7c × seeds 79400–79449 = 150 jobs, harness d8e3f7c, same shared-budget settings, until 2026-10-22 18:00 IST, queued behind C14b. [C12 result](docs/rl/Laya_C12_Result_2026-10-21.md) now includes the stop-class analysis.
+
+- 2026-10-21 16:50 IST: C13 complete: 144/144 completed (48/arm), no errors. C2 ref/menu/loan 18/14/18; C5 ever/final 12/3, 19/2, 19/2; new Laya C6 10/18/17 (45/144). Menu vs ref C5 13:6, new C6 14:6 (p 0.17/0.12), the largest positive signal so far, but menu lowers C2 (6:10) and loan lowers C3 (2:7). No adoption. Collisions 17/43/41 events. [Result](docs/rl/Laya_C13_Result_2026-10-21.md). The stop-class analysis is running. A host scheduler service (`laya-host-scheduler`, started 16:29 outside this thread) now publishes a host gate (target 12) that C14b/C15c follow.
+
+- 2026-10-21 17:15 IST: Moved Miniship cohorts onto the audited host scheduler (docs/rl/Laya_Host_Scheduler.md, Starship commit `4f7a88b`).
+  - The installed `laya-host-scheduler` was updated to the audited script (hash verified; config and the previous copy kept) and restarted.
+  - Harness fix `81f0735` on `work/miniship/host-scheduler-harness-20261021`: the locked occupancy count crashed on the registry's legacy bare-list status (`ten-hour-20261015`), so no gated cohort could admit. Its 29 scheduler and batch tests pass.
+  - C15c (0 started) is replaced by `laya-c15d-2123-miniship-20261021`: same arms and seeds (steelbill/vacancy/foundation × 79400–79449), fixed pool 30, gate-locked admissions. Its first attempt on 4f7a88b admitted nothing and is preserved.
+  - C14b is drained, not killed: a `_legacy-drain-gate` record (unit `laya-legacy-drain-gate`) caps only legacy supervisors at 0, so its in-flight runs finish. Its remaining seeds 79435–79474 continue as `laya-c14c-2123-miniship-20261021` (80 jobs, ports 37200+).
+  - All future cohorts use harness 81f0735+ with `{"concurrency": 30, "adaptive": false, "host_budget": {"registry": ..., "stale_seconds": 180, "admit_interval_seconds": 10, "admit_min_available_gb": 4.5}}`. It has no --resume.
+
+- 2026-10-21 22:20 IST: The steel-bill fact (`934f9cb`) looks harmful to C2. C14 steelbill vs ref C2 discordance is 4:5 (C14b) + 1:9 (C14c, n=20, p≈0.02), 5:14 combined (p≈0.06). In seeds where ref reached C2 and steelbill did not, steelbill chose op.steel 4–5× less often (8 vs 36; 12 vs 64), extend ~2.5× less and retire_starter ~2× less. The unchanged-failure penalty suppresses steel-seed retries even after the missing items were produced and consumed elsewhere (the test is stock-based, not production-based), so steel, and with it poles for extension and retirement, arrives late. C15d's vacancy/foundation arms inherit steelbill (adjacent contrasts stay valid). Prepared `work/miniship/laya-nosteelbill-20261021`: c1b8680 → vacancy `0bf1bdc` → foundation `7fd2320` (cherry-picks of ef38247/d8e3f7c; 217 focused tests pass; fast gate 1186 + the known firewall failure). It will be queued as the next cohort when C14c completes. No adoption or removal decision until C14 completes.
+
+- 2026-10-22 02:55 IST: Miniship hard-stopped at ~02:39 IST (the journal ends mid-stream, with no shutdown; it rebooted at 02:44). The CPU had run at 87–93 °C for hours, the user later confirmed an accidental power cut (not thermal). Only the enabled host scheduler came back; the transient cohort units did not. The jobs left "running" (C14c 4, C15d 8) had dead worlds and stale reservations that blocked admissions. Harness `65d5613` (branch work/miniship/host-scheduler-harness-20261021; 31 tests) adds `--resume` for scheduler-gated cohorts: terminal jobs are kept, unfinished work reruns in fresh `<id>-r<attempt>` worlds with the dead attempt recorded and its reservation released. C14c (76 completed kept, 4 rerun) and C15d (108 kept, 8 rerun, 34 queued) were restarted under it; pre-resume statuses are kept as `job-status.before-reboot-resume.json`.
+
+- 2026-10-22 04:45 IST: C14 complete (C14b 71 completed + C14c 80/80). 75 matched pairs. C2 ref 26 / steelbill 18 (discordant 10:18, p=0.19); C5 ever/final 25/11 vs 20/5; new Laya C6 21 vs 17. No adoption; steelbill (`934f9cb`) is dropped from future bases. No errors or safety stops. [Result](docs/rl/Laya_C14_Result_2026-10-22.md).
+
+- 2026-10-22 04:50 IST: Launched C16 `laya-c16-2123-miniship-20261022`, a cumulative cohort without steelbill: ref `c1b8680` → vacancy `0bf1bdc` → foundation `7fd2320` × seeds 79400–79449 = 150 jobs. Harness `65d5613` (scheduler-gated; `bash run.sh --resume` after any host stop), ports 37300–37329/30300–30329, admission until 2026-10-23 06:00 IST, cap 100000 s. A first launch failed on a run.sh argument bug before any job and is preserved as run.attempt0-argerror.out.
+
+- 2026-10-22 06:00 IST: Loan-release fix `d39b6c7` (branch work/miniship/laya-nosteelbill-20261021, on top of foundation 7fd2320). Root cause (local read-only codex study `checkin_helper_runs/release-owner-missing-20261022.md`): `_submit_bootstrap_loan` restored loans that `_start_bootstrap_loan` had only proposed, before their requester tag existed (missing chemical predecessor, or bill already met). C13 shows 98 `release_owner_missing` refusals, all labelled infrastructure_collision and retried. A new donor is now `proposed` until configured, and restoring a proposed loan is a no-op. Refused mall-cell releases now raise a typed `mall_cell_lifecycle_conflict`; the Lua ownership check is unchanged. 3 new regressions pass; wide mall/Laya/bootstrap suites 1154 passed (only the 2 known acceptance-reporting failures); fast gate 1189 passed + the known firewall failure. Not yet in a cohort: next cohort C17 = foundation 7fd2320 vs release d39b6c7 when C15d completes.
+
+- 2026-10-22 06:35 IST: C15d complete: 150/150, no errors. C2 steelbill/vacancy/foundation 21/25/27; C5 ever/final 21/2, 24/3, 21/3; new Laya C6 21/21/18. vacancy vs steelbill C2 12:8, C3 13:7; foundation vs vacancy C2 13:11, new C6 10:13. Everything is within the A/A spread, so no adoption; all arms carry the dropped steelbill. [Result](docs/rl/Laya_C15_Result_2026-10-22.md).
+
+- 2026-10-22 06:40 IST: Launched C17 `laya-c17-2123-miniship-20261022`: foundation `7fd2320` vs release `d39b6c7` × seeds 79400–79474 = 150 jobs. Harness 65d5613 (scheduler-gated; `bash run.sh --resume` after a host stop), ports 37400–37429/30400–30429, admission until 2026-10-23 10:00 IST, cap 110000 s. It shares host slots with C16. Mechanism check: release_owner_missing/collision counts should fall in the release arm.
+
+- 2026-10-22 15:05 IST: Loan-credit fix `e37464d` (branch work/miniship/laya-nosteelbill-20261021, on top of release d39b6c7). Root cause (local read-only codex studies `checkin_helper_runs/c16-stop-classes-20261022.md`, `c16-starved-loan-20261022.md`): a bootstrap loan's prerequisite credit (`completed_step_targets`) never decreased, so after the final recipe consumed the credited items a renewed batch looked funded and starved. C16 ended with 12 ingredient-starved pole loans on zero network iron-stick, 8 still carrying credit. Renewing a finished final batch now charges its crafts against the credits of that recipe's ingredients and replans on what is left. 2 new regressions; fast gate 1191 passed + the firewall failure present since c1b8680. A second fault (the rotating-mall whole-bill check restores a live pole batch during delivery, 2 runs) is not addressed.
+
+- 2026-10-22 15:09 IST: Launched C18 `laya-c18-2123-miniship-20261022`: release `d39b6c7` vs credit `e37464d` × seeds 79400–79474 = 150 jobs. Harness 65d5613 (scheduler-gated; `bash run.sh --resume` after a host stop), ports 37500–37529/30500–30529, admission until 2026-10-24 06:00 IST, cap 150000 s. Shares host slots with C17. Mechanism check: final starved loans with zero stock of a credited prerequisite should fall in the credit arm.
+
+- 2026-10-22 16:40 IST: C16 complete: 150/150, no errors. C2 ref/vacancy/foundation 15/25/35; C3 6/22/22; C5 ever/final 13/3, 24/4, 25/4; new Laya C6 11/21/22. vacancy vs ref C2 16:6, C3 18:2 (p=0.0004), C5 14:3, new C6 13:3; foundation vs vacancy C2 13:3 (p=0.021), later milestones level. **Adopted per docs/rl/laya_variants/README.md as the Laya cohort base:** vacancy `0bf1bdc` and foundation `7fd2320` on branch work/miniship/laya-nosteelbill-20261021 (cohort experiments only; no production promotion). C5 final remains the plastic-plateau caveat. [Result](docs/rl/Laya_C16_Result_2026-10-22.md).
+
+- 2026-10-22 20:20 IST: C17 complete: 150/150, no errors. C2 foundation/release 60/59; C3 39/39; C5 ever/final 47/12, 45/7; new Laya C6 40/41. Pairs: C2 11:12, C3 18:18, C5 16:18, C5 final 7:12, new C6 19:18. Loan-release refusals 169 in 30 worlds → 1 (typed) in 1; collisions 171 → 0; untyped 50 → 24. **Not adopted by the endpoint rule** (no target completion gain); kept in the experimental line as a lifecycle correctness fix, and both C18 arms carry it. [Result](docs/rl/Laya_C17_Result_2026-10-22.md).
+
+- 2026-10-22 20:30 IST: Started-foundation fix `b372672` (branch work/miniship/laya-nosteelbill-20261021, on top of credit e37464d). C17 stop classes (local `checkin_helper_runs/c17-stop-classes-20261022.md`, verified in `c17-stone-c3-verify-20261022.md`): once a plate's product stopped being short, the menu kept only its starter retirement, so a foundation left at a coverage wait or a failed retirement was never offered again (7 release C2-but-never-C3 runs; 3 with only the stone starter built). A foundation the world observes not ready now stays selectable after its plate is satisfied; nothing past it is invented. 10 further C3 failures (six furnaces built, some idle) remain unexplained because the journals do not persist the foundation survey tuple. Tests: test_laya_ops_runner 39 passed; fast gate passed apart from the known firewall test.
+
+- 2026-10-22 20:31 IST: Launched C19 `laya-c19-2123-miniship-20261022`: credit `e37464d` vs started `b372672` × seeds 79400–79474 = 150 jobs. Harness 65d5613 (scheduler-gated; `bash run.sh --resume` after a host stop), ports 37600–37629/30600–30629, admission until 2026-10-25 06:00 IST, cap 190000 s. Queued behind C18.
+
+- 2026-10-22 20:43 IST: Prepared Starship integration of current no-steel runtime, shared scheduler and owner C17/C19 records, preserving b372672. Added stock/flow and exact foundation evidence, next-craft loan/WIP checks, persistent scheduler soft limits, separate C6/fault accounting and outcome export; extracted the selected-operation session to restore the import boundary and isolated mocked status writes. Evidence: 383 focused passes; required fast gate 1238 passed/3 skipped (no firewall deselection). Lifecycle: handler activation and isolated fresh cohorts only after active ownership; no remote deployment, server restart or 55-minute-loop change. See docs/rl/Laya_Review_Fixes_2026-10-22.md.
+
+## 2026-10-23 14:22 IST — shared steel dependency admission
+
+The compact steel seed can use a healthy owned iron starter before replacement submission when the exact outstanding iron-refinery bill has a steel-dependent live recipe closure. Canonical seed funding, foreign reservations, site checks and measured retirement requirements remain in force. Evidence: 55 steel/bootstrap regressions passed; curated fast gate passed (1,236 collected, one skipped). This is offline behavior evidence, not cohort adoption. Lifecycle: new frozen disposable runners only; active C22/C23 unchanged.
+
+## 2026-10-23 14:29 IST — durable cohort controls
+
+New frozen batch supervisors support idempotent run/drain/queued cuts, immutable original plans and append-only attempt records, predecessor admission without reserved slots, a single-owner lock, live reports and cleanup-failure reservation retention. Interrupted queue retries preserve full attempt evidence and refuse live owned processes. Evidence: 38 batch/scheduler checks including a real child-process boundary passed; fast gate 1,241 passed/one skipped. Runtime performance/adoption is unmeasured. Lifecycle: freeze new supervisors; no installed scheduler or active C22/C23 changes.
+
+## 2026-10-23 14:38 IST — unfinished-loan credit backing
+
+Starved unfinished final batches now replan unsupported direct ingredients against current allocatable supply, owned cell WIP and assigned cargo. Fed/unknown cells keep their receipts; reduced credit persists through the existing tag/transaction path. Evidence: 283 stock/loan checks passed, then all90 material-reservation checks including full partial-batch reconfiguration passed; fast gate1,248 passed/one skipped. No live/cohort benefit claimed. Lifecycle: new frozen disposable Python runners; no installed mod change.
+
+## 2026-10-23 15:39 IST — research objective and coherent ops recovery
+
+Added opt-in level-aware mining-productivity-4 completion, funded bot-built lab/requester operations, explicit guarded research selection, selected production scaling and a measured 0.25→0.5→1→2+ science-demand curriculum. Coherent ops bundles bind paused save, controller/ledger/RNG/research state, source/mod/engine identity and cumulative budgets; legacy science-readiness stays separate. Evidence: 92 focused tests passed; fast gate 1,281 passed/one skipped. Disposable r5 mechanics observed one working lab, delivery and consumption of all four packs; immutable-bundle review verified tick241561 and all three remaining choices after actual reload. The original validation assertion failed because its caller mutated the recovery prefix; retain it and the correcting recovery-review.json. This pre-supplied fixture is not earned research completion, corpus eligibility or adoption. Lifecycle: freeze new disposable Python runners; no mod redeploy, scheduler change or active C22/C23 restart.
+
+## 2026-10-23 15:41 IST — C24/C25 dependency-gated queues
+
+Started bounded disposable C24/C25 waiting supervisors on frozen verified harness1b2b7da, each120 jobs and zero admitted/reserved worlds at verification. Separate steel/credit-only arms preserve legacy540000-tick/6000-second windows, rotated seeds and distinct ports. They wait for predecessors plus explicit evidence-backed baseline settlement; no candidate is auto-adopted. Main-repository freeze.json files bind source/mod/harness hashes and the isolated C25 patch. Fresh heartbeats, reports and four-day/four-hour systemd limits verified. Lifecycle: automated owner closes C22/C23 and releases a matching baseline gate, or preserves/cancels these plans and creates new freezes if the base changes; no active-arm edit, installed scheduler change or mod redeploy.
+
+## 2026-10-23 21:31 IST — mall reconciliation and linear wait candidates verified
+
+Added opt-in selected reconciliation of measured finished loan prerequisites through the shared transaction, linear3 wait pacing capped at4x, actual decision rates and explicit assembler status samples. Defaults and geometry unchanged. Evidence:246 focused checks and fast gate1,401 passed/three skipped, exit0; coherent recovery retains timing and loan receipts survive export. No live speed/utilization benefit or adoption established. Two separate30-seed paired comparisons total120 planned jobs, reserved by the main owner after C24/C25; include time-to-milestone and window-censored comparisons. Lifecycle: cherry-pick only this feature into the chosen main baseline, validate and freeze new Python runners; no mod redeploy, Factorio restart, active campaign or55-minute cadence change. See docs/rl/Laya_Mall_Utilization_2026-10-23.md.
+
+## 2026-10-24 00:17 IST —7200-second ordinary trial allowance
+
+Set shared new-cohort default7200 and updated generators; longer15000-second research windows retained. C26/C27 safely drained/stopped before any admission, original records archived, both arms amended7200 and wrappers resumed behind C25; verified60 queued each, hashes intact, original unit horizon preserved. C25 and Starship live attempts keep6000 because no safe hot extension exists. Evidence:frontier37 focused/1358 fast+3 skips; Miniship36/1326+3 skips, all exit0; live waiting-supervisor readback verified. Lifecycle:new Python freezes for future defaults; no Factorio/mod restart or controller message. See docs/rl/Laya_Wall_Allowance_2026-10-24.md and data/laya-orchestration/wall-allowance-7200-20261024/.
+
+## [2026-10-25 22:31 IST] Verified automatic Laya run retention
+- What: keep the newest 300 host runs and each cohort's best/median; condense only older terminal runs. Hardened legacy status parsing, canonical run paths, strict final-acceptance ranking, durable corpus/index/pointer writes, retry verification and resume locking.
+- Evidence: independent review found no serious remaining issue; 1,366 fast cases passed their gate (one skipped). A read-only Miniship pass selected no C35/C36 world. Added a real lock-contention regression for resume publication.
+- Lifecycle: freeze future cohorts from the updated laya/measurement base. Existing frozen C35/C36 harnesses, host scheduler, mods and servers were not changed or restarted.
+
+
+## [2026-10-26 05:15 IST] Main and Laya measurement converged
+- What: one main integration reconciles `23bc988` with measurement `764ed6b`, preserving runtime isolation and research goals while adding census evidence, shared operation execution, coherent recovery, complete job accounting and verified retention. README shows measured progress and negative results. Original heads have recovery tags; the dirty root and frozen campaigns remain intact.
+- Decisions: DeepSeek 4.1 Flash max / OpenCode Go log reviews support no C35 adoption (strict C6 8→6/60). C36 remains experimental: C6 5→15/60, `untyped_stuck` 12→36 and final C5 17→7. C29 remains the policy reference; C1 versions remain distinct.
+- Validation: final full suite **4,666 passed + 38 skipped** (4,704 total), exit 0, `/tmp/laya-converge-full-20261026-r3.log`; fast **1,550 passed + 1 skipped**; focused goal/recovery/evidence regressions 108 passed + 1 skipped. C38 preflights pass 74/74 and 82/82, including both runtime mods. Shell syntax and current entry-point links pass. Skips do not establish platform/live acceptance.
+- C38: compare clearance with robot exclusion common to both arms on converged source; 60 fresh pairs, seeds 80160–80219, ports 39900/32900, 540,000 ticks / 7,200 seconds, shared host gate, no C37 dependency, fixed deadline 2026-10-27 18:00 IST. The freeze records complete candidate diffs and source/mod hashes; scheduling grants no adoption. Check `data/laya-experiments/laya-c38-2123-miniship-20261026/{freeze.json,job-status.json}` for execution state.
+- Lifecycle: future runners use new immutable freezes. Active C37, installed scheduler, real base and GUI are unchanged. Lua use outside C38 requires separately authorized deployment/restarts. Main is canonical; unbound measurement/records refs follow it while controller/experiment branches retain provenance.
+
+
+## [2026-10-26 05:23 IST] Clean CI environment dependencies repaired
+- What: declare NumPy and psutil in base requirements; both are imported while collecting repository tests. Document the base installation command. No test is hidden or removed.
+- Evidence: GitHub push run40246519233 failed collection with missing NumPy/psutil while Lua syntax passed. A fresh Python3.13 environment installed only the corrected requirements:29/29 affected tests and the fast gate1,550 passed+1 skipped, exit0.
+- Lifecycle: dependency installation applies to fresh local/CI environments; no Factorio, campaign, mod or scheduler action. C38 remains pinned to9764fb6.

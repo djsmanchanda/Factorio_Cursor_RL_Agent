@@ -32,6 +32,16 @@ def stock_gate(item: str, target: int) -> dict:
     return {"signal": item, "comparator": BELOW, "constant": int(target)}
 
 
+def chest_gate(item: str, chest: tuple[float, float], target: int) -> dict:
+    """Craft only while ONE chest holds fewer than `target`, read over a green wire.
+
+    The logistic gate above caps the whole network; this caps a single output
+    chest, so a feedstock cell keeps a bounded buffer of its own instead of
+    filling all 48 slots (user request 2026-10-15, gear and cable cells).
+    """
+    return {"chest": {"x": chest[0], "y": chest[1]}, **stock_gate(item, target)}
+
+
 def gate_matches(condition: dict | None, item: str, target: int) -> bool:
     """Whether a stored condition already says what we would set.
 

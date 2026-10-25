@@ -3,7 +3,11 @@
 
 from __future__ import annotations
 
-from training.laya_workflow import LayaWorkflowDirector, LayaWorkflowError, coach_record_to_case
+import json
+
+import pytest
+
+from training.laya_workflow import LayaWorkflowDirector, LayaWorkflowError, coach_record_to_case, iter_coach_cases
 
 
 def _record(**overrides):
@@ -77,3 +81,50 @@ def test_workflow_director_uses_typed_boundary_without_fallback() -> None:
         "choose_operation", case["state"], case["state"]["options"]
     )
     assert result["selected_option"]["option_id"] == "research.red-science"
+
+
+def _area(**overrides):
+    area = {
+        "left_top": {"x": -10.5, "y": 4},
+        "right_bottom": {"x": 22, "y": 30.25},
+        "surface": "training/coach",
+        "tick": 10,
+        "selection_mode": "alt_select",
+        "entity_count": 2,
+        "entities": [{"name": "stone-furnace", "type": "furnace", "position": {"x": 1, "y": 5}}],
+        "resources": {"iron-ore": 120000, "coal": 300},
+        "resource_entity_count": 40,
+        "truncated": False,
+    }
+    area.update(overrides)
+    return area
+
+
+def test_coach_area_passes_through_to_case_digest() -> None:
+    case = coach_record_to_case(_record(area=_area()))
+    area = case["state"]["observation_digest"]["area"]
+    assert area["left_top"] == {"x": -10.5, "y": 4}
+    assert area["selection_mode"] == "alt_select"
+    assert area["resources"] == {"iron-ore": 120000.0, "coal": 300.0}
+    assert area["entities"] == [{"name": "stone-furnace", "position": {"x": 1, "y": 5}}]
+
+
+@pytest.mark.parametrize("area", [
+    _area(right_bottom={"x": -20, "y": 30}),
+    _area(entities=[{"name": "tree", "position": {"x": 0, "y": 0}}] * 161),
+    _area(resources={"iron-ore": -1}),
+    {key: value for key, value in _area().items() if key != "selection_mode"},
+])
+def test_invalid_coach_area_is_rejected(area) -> None:
+    with pytest.raises(LayaWorkflowError, match="area"):
+        coach_record_to_case(_record(area=area))
+
+
+def test_iter_coach_cases_keeps_area_and_skips_bad_area(tmp_path) -> None:
+    path = tmp_path / "coach.jsonl"
+    rows = [_record(), _record(record_id="coach-2", area=_area()), _record(record_id="coach-3", area=_area(entity_count=-1))]
+    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+    cases = list(iter_coach_cases(path))
+    assert "area" not in cases[0]["state"].get("observation_digest", {})
+    assert cases[1]["state"]["observation_digest"]["area"]["entity_count"] == 2
+    assert cases[2]["_skipped"] and "area" in cases[2]["reason"]

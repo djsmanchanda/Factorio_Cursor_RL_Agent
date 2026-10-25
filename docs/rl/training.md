@@ -505,7 +505,7 @@ Use seeded elitist selection with diversity protection. Preserve champions, muta
 ### Native Linux workers
 
 On native Linux, workers use the private headless runtime at
-`~/.local/share/factorio-rl/runtime/factorio-2.1.21` with its matching
+`~/.local/share/factorio-rl/runtime/factorio-2.1.22` with its matching
 read-data root and isolated writable roots. They do not use `wsl.exe`, Windows
 bridge directories, or a real-base save. Start with one disposable worker and
 one logical slot; increase capacity only after the documented five-minute UPS
@@ -682,6 +682,29 @@ Then train an external checkpoint after at least 32 terminal transitions:
 ```
 
 The workstation has 8 GB VRAM, so do not run the surrogate, a local LLM, and other GPU-heavy work concurrently. Run it between Factorio collection stages and require CUDA for experiments intended to inform policy research. If CUDA is unavailable, the training controller remains unaffected.
+
+### Optional cloud GPU (Google Colab), not yet used
+
+Assessed 2026-10-19: the user has about 200 Colab compute units through their
+Google AI plan. Units typically expire about 90 days after grant, so check the
+balance before planning. Rough rates: L4 ~5 units/hr (~40 h), A100 ~10–13
+units/hr (~15–20 h).
+
+- **Do not** run Factorio fleets or campaigns on Colab. They are CPU-bound, and
+  the local workstation (20 cores, 38 GB) beats a Colab VM. Colab sessions are
+  also ephemeral (12–24 h cap, idle disconnects, no persistent disk).
+- **Good fit:** the Laya fine-tune (`tools/train_laya_4060.py` /
+  `training/laya_finetune.py`) and `tools/evaluate_laya.py`. On an A100, drop
+  the 8 GiB workarounds (larger `LAYA_MICRO_BATCH`, less accumulation,
+  `LAYA_GRADIENT_CHECKPOINTING=0`) and run a small hyperparameter sweep.
+- **Precondition:** fresh, sufficient data. At assessment time
+  `data/training/experience.db` was ~10 MB from 2026-08-13, which predates the
+  mall/fleet work. First build train/calibration/held-out cases locally with
+  `tools/build_laya_dataset.py` from current counterfactual-labelled runs.
+- **Flow:** build cases locally → upload cases + base model to Drive → notebook
+  installs the optional deps, runs a VRAM smoke test, then fine-tune + held-out
+  eval → checkpoint and report come back to Drive. The output is disposable-
+  shadow evidence only. Real-Nauvis promotion stays a separate gate.
 
 ## Observatory and guidance
 

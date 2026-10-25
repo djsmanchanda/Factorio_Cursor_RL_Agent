@@ -1,6 +1,7 @@
 # Path: tests/test_test_taxonomy.py | Purpose: Protect pytest marker and state-isolation rules.
 
 from types import SimpleNamespace
+from dataclasses import dataclass, field
 
 from tests import conftest as taxonomy
 
@@ -61,3 +62,20 @@ def test_mutable_state_restore_preserves_container_identity():
     assert module.cache == {"clean": 2}
     assert module.seen == {"clean"}
     assert module.order == ["clean"]
+
+
+def test_mutable_state_restore_preserves_shared_dataclass_identity():
+    @dataclass
+    class State:
+        revision: int = 0
+        frontiers: dict = field(default_factory=dict)
+
+    shared = State(3, {"dirty": 10})
+    frontiers = shared.frontiers
+    module = SimpleNamespace(state=shared)
+    taxonomy._restore_mutable_value(module, "state", State(1, {"clean": 2}))
+
+    assert module.state is shared
+    assert module.state.frontiers is frontiers
+    assert shared.revision == 1
+    assert shared.frontiers == {"clean": 2}

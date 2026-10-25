@@ -11,7 +11,7 @@ import pytest
 from jsonschema import Draft7Validator
 
 from orchestrator import autonomous_builder as builder
-from orchestrator import stage_services
+from orchestrator import construction_coverage
 from orchestrator.mall_builder import compact_mall_project_bill
 from orchestrator.material_reservations import (
     MaterialReservationLedger, set_active_material_ledger,
@@ -122,14 +122,14 @@ def test_affordability_cannot_spend_stock_reserved_by_another_project(
         hold_until_producing=True,
     )
     set_active_material_ledger(ledger)
-    monkeypatch.setattr(stage_services.live_base, "available_items", lambda *_a: stock)
-    monkeypatch.setattr(stage_services.live_base, "transferable_items", lambda *_a: stock)
+    monkeypatch.setattr(construction_coverage.live_base, "available_items", lambda *_a: stock)
+    monkeypatch.setattr(construction_coverage.live_base, "transferable_items", lambda *_a: stock)
     plan = {"phases": [{"actions": [{
         "action_type": "place_ghost", "entity": "passive-provider-chest",
     }]}]}
     try:
         with pytest.raises(MaterialShortage) as raised:
-            stage_services.assert_affordable(
+            construction_coverage.assert_affordable(
                 object(), "nauvis", "player", plan, "unrelated", lambda _m: None,
             )
     finally:
@@ -154,14 +154,14 @@ def test_critical_prerequisite_keeps_its_stock_when_total_is_one_short(
     )
     set_active_material_ledger(ledger)
     monkeypatch.setattr(
-        stage_services.live_base, "transferable_items", lambda *_a: stock,
+        construction_coverage.live_base, "transferable_items", lambda *_a: stock,
     )
     plan = {"phases": [{"actions": [
         {"action_type": "place_ghost", "entity": "medium-electric-pole"}
         for _ in range(3)
     ]}]}
     try:
-        stage_services.assert_affordable(
+        construction_coverage.assert_affordable(
             object(), "nauvis", "player", plan, "conversion_steel-plate",
             lambda _m: None, True, reservation_priority=100,
         )
@@ -196,7 +196,7 @@ def test_parent_preflight_can_claim_its_child_packet_reservations(
         {"transport-belt": 115, "splitter": 3}, stock,
     )
     set_active_material_ledger(ledger)
-    monkeypatch.setattr(stage_services.live_base, "transferable_items", lambda *_a: stock)
+    monkeypatch.setattr(construction_coverage.live_base, "transferable_items", lambda *_a: stock)
     plan = {"phases": [{"actions": [
         *[
             {"action_type": "place_ghost", "entity": "transport-belt"}
@@ -210,7 +210,7 @@ def test_parent_preflight_can_claim_its_child_packet_reservations(
     ]}]}
     messages: list[str] = []
     try:
-        stage_services.assert_affordable(
+        construction_coverage.assert_affordable(
             object(), "nauvis", "player", plan, "initial_iron-plate_system",
             messages.append,
             reservation_claimants=(
@@ -229,18 +229,18 @@ def test_reused_submission_name_gets_a_fresh_transient_reservation(
     ledger = _ledger(tmp_path)
     stock = {"substation": 2}
     set_active_material_ledger(ledger)
-    monkeypatch.setattr(stage_services.live_base, "available_items", lambda *_a: stock)
-    monkeypatch.setattr(stage_services.live_base, "transferable_items", lambda *_a: stock)
+    monkeypatch.setattr(construction_coverage.live_base, "available_items", lambda *_a: stock)
+    monkeypatch.setattr(construction_coverage.live_base, "transferable_items", lambda *_a: stock)
     plan = {"phases": [{"actions": [{
         "action_type": "place_ghost", "entity": "substation",
     }]}]}
     try:
-        stage_services.assert_affordable(
+        construction_coverage.assert_affordable(
             object(), "nauvis", "player", plan, "power_bridge", lambda _m: None,
             True,
         )
         ledger.mark_constructing("power_bridge", stock)
-        stage_services.assert_affordable(
+        construction_coverage.assert_affordable(
             object(), "nauvis", "player", plan, "power_bridge", lambda _m: None,
             True,
         )
@@ -248,6 +248,213 @@ def test_reused_submission_name_gets_a_fresh_transient_reservation(
         set_active_material_ledger(None)
 
     assert ledger.projects["power_bridge"].revision == 3
+
+
+@pytest.mark.parametrize("second_stock", [4, 6])
+def test_repeated_funded_bridge_cannot_consume_the_steel_seed(
+    tmp_path: Path, monkeypatch, second_stock: int,
+) -> None:
+    """A later four-pole bridge is a new bill, even under the same stage name."""
+    ledger = _ledger(tmp_path)
+    stock = {"medium-electric-pole": 6}
+    ledger.declare(
+        "conversion_steel-plate", {"medium-electric-pole": 2}, stock,
+        priority=100,
+    )
+    monkeypatch.setattr(construction_coverage, "active_material_ledger", lambda: ledger)
+    monkeypatch.setattr(construction_coverage.live_base, "transferable_items", lambda *_a: stock)
+    monkeypatch.setattr(construction_coverage.live_base, "available_items", lambda *_a: stock)
+    monkeypatch.setattr(construction_coverage, "clear_plan_clutter", lambda *_a: None)
+    monkeypatch.setattr(construction_coverage, "_reservation_supply_estimates", lambda *_a: ({}, {}))
+    monkeypatch.setattr(construction_coverage, "load_json", lambda report: report)
+    submitted = []
+
+    def build_layout(_authorization, plan):
+        bill = len(plan["phases"][0]["actions"])
+        submitted.append(plan)
+        stock["medium-electric-pole"] -= bill
+        return {
+            "ok": True, "attempted_placements": bill,
+            "succeeded_placements": bill, "placed_ghosts": bill,
+            "placed_entities": 0,
+        }
+
+    bridge = SimpleNamespace(build_layout=build_layout)
+
+    def pole_plan(count, offset):
+        return {"force": "player", "phases": [{"actions": [
+            {"action_type": "place_ghost", "entity": "medium-electric-pole",
+             "position": {"x": offset + index + 0.5, "y": 0.5}}
+            for index in range(count)
+        ]}]}
+
+    construction_coverage._submit(
+        object(), bridge, "nauvis", pole_plan(4, 0), "power_bridge",
+        lambda _m: None, require_funded=True,
+    )
+    assert stock["medium-electric-pole"] == 2
+    # Resume after the first bridge, then try a different route with the same
+    # name and pole count. Only two of four remaining poles are spendable.
+    ledger = _ledger(tmp_path)
+    stock["medium-electric-pole"] = second_stock
+    if second_stock == 4:
+        with pytest.raises(MaterialShortage) as error:
+            construction_coverage._submit(
+                object(), bridge, "nauvis", pole_plan(4, 10), "power_bridge",
+                lambda _m: None, require_funded=True,
+            )
+        assert error.value.required == {"medium-electric-pole": 6}
+        assert len(submitted) == 1
+    else:
+        construction_coverage._submit(
+            object(), bridge, "nauvis", pole_plan(4, 10), "power_bridge",
+            lambda _m: None, require_funded=True,
+        )
+        assert len(submitted) == 2
+        assert stock["medium-electric-pole"] == 2
+    assert ledger.projects["conversion_steel-plate"].reserved == {
+        "medium-electric-pole": 2,
+    }
+    construction_coverage._submit(
+        object(), bridge, "nauvis", pole_plan(2, 20), "conversion_steel-plate",
+        lambda _m: None, require_funded=True, reservation_priority=100,
+    )
+    assert stock["medium-electric-pole"] == (2 if second_stock == 4 else 0)
+
+
+def test_redeclaration_preserves_a_producer_held_until_output(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path)
+    stock = {"passive-provider-chest": 2}
+    ledger.declare(
+        "chest-producer", stock, stock, hold_until_producing=True,
+    )
+    ledger.mark_constructing("chest-producer", stock)
+    project = ledger.declare("chest-producer", stock, stock)
+
+    assert project.state == "constructing"
+    assert project.hold_until_producing
+    assert project.reserved == stock
+
+
+def test_additive_ghosts_cannot_bypass_another_projects_reserve(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ledger = _ledger(tmp_path)
+    stock = {"medium-electric-pole": 2}
+    ledger.declare("steel-seed", stock, stock, priority=100)
+    monkeypatch.setattr(construction_coverage, "active_material_ledger", lambda: ledger)
+    monkeypatch.setattr(construction_coverage.live_base, "transferable_items", lambda *_a: stock)
+    monkeypatch.setattr(construction_coverage, "_reservation_supply_estimates", lambda *_a: ({}, {}))
+    monkeypatch.setattr(construction_coverage, "clear_plan_clutter", lambda *_a: None)
+    bridge = SimpleNamespace(build_layout=lambda *_a: pytest.fail("reserved poles were exposed to bots"))
+    plan = {"phases": [{"actions": [{
+        "action_type": "place_ghost", "entity": "medium-electric-pole",
+        "position": {"x": 10.5, "y": 0.5},
+    }]}]}
+
+    with pytest.raises(MaterialShortage):
+        construction_coverage._submit(
+            object(), bridge, "nauvis", plan, "foundation", lambda _m: None,
+            allow_unfunded_ghosts=True,
+        )
+
+
+def test_funded_bridge_accounts_for_another_packets_unbuilt_poles(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """The live refinery and bridge were submitted one second apart."""
+    ledger = _ledger(tmp_path)
+    stock = {"medium-electric-pole": 8}
+    ledger.declare(
+        "conversion_steel-plate", {"medium-electric-pole": 2}, stock,
+        priority=100,
+    )
+    monkeypatch.setattr(construction_coverage, "active_material_ledger", lambda: ledger)
+    monkeypatch.setattr(construction_coverage.live_base, "transferable_items", lambda *_a: stock)
+    monkeypatch.setattr(construction_coverage, "_reservation_supply_estimates", lambda *_a: ({}, {}))
+    monkeypatch.setattr(construction_coverage.live_base, "plan_construction_status",
+                        lambda *_a: {"remaining": {"medium-electric-pole": 4}})
+    client = SimpleNamespace(command=lambda *_a: "")
+    pending = {("medium-electric-pole", (0.5, 0.5)),
+               ("medium-electric-pole", (1.5, 0.5)),
+               ("medium-electric-pole", (2.5, 0.5)),
+               ("medium-electric-pole", (3.5, 0.5))}
+    monkeypatch.setattr(
+        construction_coverage.live_base, "pending_construction_items",
+        lambda *_a, exclude=(): {"medium-electric-pole": len(pending - set(exclude))},
+    )
+
+    def plan(offset):
+        return {"phases": [{"actions": [
+            {"action_type": "place_ghost", "entity": "medium-electric-pole",
+             "position": {"x": offset + index + 0.5, "y": 0.5}}
+            for index in range(4)
+        ]}]}
+
+    ledger.declare("iron_refinery", {"medium-electric-pole": 4}, stock)
+    ledger.mark_constructing("iron_refinery", stock)
+    # Bots have not collected the refinery's four poles yet. An exact retry
+    # owns those ghosts; a new bridge must count them as committed stock.
+    construction_coverage.assert_affordable(
+        client, "nauvis", "player", plan(0), "iron_refinery", lambda _m: None, True,
+    )
+    ledger.mark_constructing("iron_refinery", stock)
+    with pytest.raises(MaterialShortage) as error:
+        construction_coverage.assert_affordable(
+            client, "nauvis", "player", plan(10), "power_bridge", lambda _m: None, True,
+        )
+    assert error.value.required == {"medium-electric-pole": 10}
+    assert error.value.available == stock
+    assert ledger.projects["conversion_steel-plate"].reserved == {
+        "medium-electric-pole": 2,
+    }
+    pending.clear()
+    stock["medium-electric-pole"] = 6
+    construction_coverage.assert_affordable(
+        client, "nauvis", "player", plan(10), "power_bridge", lambda _m: None, True,
+    )
+
+
+@pytest.mark.lua
+def test_pending_construction_query_excludes_only_exact_owned_ghosts() -> None:
+    from orchestrator import live_base
+
+    import shutil
+    import subprocess
+
+    binary = shutil.which("lua")
+    if binary is None:
+        pytest.skip("Lua interpreter is unavailable")
+    payload = json.dumps([["medium-electric-pole", 0.5, -0.5]])
+    stub = "helpers={json_to_table=function(payload) assert(payload==" + json.dumps(payload) + ") return {{'medium-electric-pole',0.5,-0.5}} end}\n"
+    stub += """
+        local function ghost(name,x,y)
+            return {ghost_name=name,position={x=x,y=y},
+                    ghost_prototype={items_to_place_this={{name=name,count=1}}}}
+        end
+        game={surfaces={nauvis={find_entities_filtered=function(filter)
+            assert(filter.force=='player' and filter.type=='entity-ghost')
+            return {ghost('medium-electric-pole',0.5,-0.5),
+                    ghost('medium-electric-pole',1.5,-0.5),
+                    ghost('transport-belt',0.5,-0.5)}
+        end}}}
+        rcon={print=print}
+    """
+
+    def command(text):
+        assert text.startswith("/sc ")
+        return subprocess.run(
+            [binary, "-"], input=stub + text[4:], text=True,
+            capture_output=True, check=True,
+        ).stdout.strip()
+
+    client = SimpleNamespace(command=command)
+    assert live_base.pending_construction_items(client, "nauvis", "player") == {
+        "medium-electric-pole": 2, "transport-belt": 1,
+    }
+    assert live_base.pending_construction_items(
+        client, "nauvis", "player", exclude=(("medium-electric-pole", (0.5, -0.5)),),
+    ) == {"medium-electric-pole": 1, "transport-belt": 1}
 
 
 def test_compact_bill_includes_cell_entities_and_first_recipe_craft(
@@ -1170,6 +1377,7 @@ def test_logistic_chest_core_waits_for_advanced_circuit_ladder(
         builder, "_production_started",
         lambda _c, _s, _f, item: item in started,
     )
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: {})
     calls: list[str] = []
 
     def defer(*args, **_kwargs):
@@ -1533,7 +1741,8 @@ def test_spendable_loan_still_restores_on_true_completion(monkeypatch) -> None:
     )
 
     assert result == "restored borrowed iron-gear-wheel producer after seed completion"
-    assert submitted == ["restore_bootstrap_loan_transport-belt"]
+    assert submitted == ["release_bootstrap_loan_transport-belt", "restore_bootstrap_loan_transport-belt",
+                         "acknowledge_loan_restore_transport-belt"]
 
 
 def test_reserved_but_flowing_input_funds_another_mall_cell(monkeypatch) -> None:
@@ -1858,6 +2067,76 @@ def test_started_parent_step_does_not_regress_when_stock_is_consumed(
 
     assert "temporary electric-mining-drill" in result
     assert submitted == []
+
+
+def test_a_renewed_final_batch_does_not_reuse_credit_its_crafts_consumed(
+    monkeypatch,
+) -> None:
+    monkeypatch.setitem(builder.LINE_RECIPES, "electric-mining-drill", {
+        "machine": "assembling-machine-2",
+        "ingredients": ["electronic-circuit", "iron-gear-wheel", "iron-plate"],
+        "amounts": [3, 5, 10], "product_amount": 1, "craft_time": 2.0,
+    })
+    monkeypatch.setitem(builder.LINE_RECIPES, "iron-gear-wheel", {
+        "machine": "assembling-machine-2", "ingredients": ["iron-plate"],
+        "amounts": [2], "product_amount": 1, "craft_time": 0.5,
+    })
+    monkeypatch.setattr(builder, "_BLOCKING_MALL_ITEMS", set())
+    # Five drills crafted on the 25 credited gears; construction took them all.
+    loan = builder.MallBootstrapLoan(
+        original_recipe="electronic-circuit", target_item="electric-mining-drill",
+        target_count=6, spare_target_count=8, side="right",
+        requester_position=(50.5, 32.5), current_recipe="electric-mining-drill",
+        step_recipe="electric-mining-drill", step_target_count=6,
+        step_baseline_finished=356, step_required_crafts=5,
+        step_minimum_crafts=5,
+        completed_step_targets=(("iron-gear-wheel", 25),),
+    )
+    stock = {
+        "electric-mining-drill": 0, "electronic-circuit": 30,
+        "iron-gear-wheel": 0, "iron-plate": 100,
+    }
+    submitted: list[dict] = []
+    monkeypatch.setattr(builder, "_bootstrap_loan_stock", lambda *_a: (stock, stock))
+    monkeypatch.setattr(builder, "_bootstrap_loan_products_finished", lambda *_a: 361)
+    monkeypatch.setattr(builder.live_base, "transferable_items", lambda *_a: {})
+    monkeypatch.setattr(builder, "_missing_chemical_ladder_predecessor", lambda *_a: None)
+    monkeypatch.setattr(
+        builder, "_submit",
+        lambda _c, _b, _s, plan, _name, _e: submitted.append(plan),
+    )
+
+    builder._submit_bootstrap_loan(
+        SimpleNamespace(command=None), object(), "nauvis", "player", loan,
+        lambda _message: None,
+    )
+
+    actions = submitted[0]["phases"][0]["actions"]
+    machine = next(a for a in actions if a["entity"] == loan.machine_name)
+    requester = next(a for a in actions if a["entity"] == "requester-chest")
+    assert machine["recipe"] == "iron-gear-wheel"
+    assert "iron-gear-wheel=25" not in requester["logistic_sections"][0]["group"]
+    assert loan.group in requester["clear_logistic_groups"]
+
+
+def test_spending_credit_charges_only_the_final_recipes_ingredients(monkeypatch) -> None:
+    monkeypatch.setitem(builder.LINE_RECIPES, "medium-electric-pole", {
+        "machine": "assembling-machine-1",
+        "ingredients": ["copper-cable", "iron-stick", "steel-plate"],
+        "amounts": [2, 4, 2], "product_amount": 1, "craft_time": 0.5,
+    })
+    loan = builder.MallBootstrapLoan(
+        original_recipe="inserter", target_item="medium-electric-pole",
+        target_count=22, side="left", requester_position=(58.5, 33.5),
+        current_recipe="medium-electric-pole",
+        completed_step_targets=(("iron-gear-wheel", 10), ("iron-stick", 32)),
+    )
+
+    assert builder._bootstrap_loan_spend_credits(loan, 3).completed_step_targets == (
+        ("iron-gear-wheel", 10), ("iron-stick", 20))
+    spent = builder._bootstrap_loan_spend_credits(loan, 8)
+    assert spent.completed_step_targets == (("iron-gear-wheel", 10),)
+    assert spent.live_group == loan.live_group
 
 
 def test_rotating_loan_restores_and_defers_before_missing_chemical_rung(
@@ -2537,6 +2816,97 @@ def test_binding_loan_short_of_bill_shields_against_stockpile_preempt(
     assert "SUBMIT" not in messages
 
 
+@pytest.mark.parametrize("release_when_met", [False, True])
+def test_a_stocked_loan_hands_its_cell_back_when_nothing_asks_for_more(monkeypatch, release_when_met) -> None:
+    """Live 2026-10-15: a finished drill loan idled on an inserter cell, still requesting drill inputs,
+    because nothing serviced it again. Released, it restores instead of making spares."""
+    messages = _mock_binding_serve(monkeypatch, transferable=6)
+    monkeypatch.setattr(builder, "_BLOCKING_MALL_ITEMS", set())  # no binding bill forces the handoff
+    monkeypatch.setattr(builder, "_restore_bootstrap_loan", lambda *_a, **_k: messages.append("RESTORED"))
+    builder._submit_bootstrap_loan(
+        SimpleNamespace(command=lambda *_a: ""), object(), "nauvis", "player", _binding_drill_loan(),
+        messages.append, release_when_met=release_when_met,
+    )
+    assert ("RESTORED" in messages) is release_when_met
+    assert any("no further demand" in m for m in messages) is release_when_met
+
+
+def test_the_loan_sweep_releases_only_stocked_loans(monkeypatch) -> None:
+    stocked, short = _binding_drill_loan(), builder.MallBootstrapLoan(
+        original_recipe="copper-cable", target_item="inserter", target_count=20, side="right",
+        requester_position=(42.5, 38.5), current_recipe="inserter")
+    released = []
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: [stocked, short])
+    monkeypatch.setattr(builder.live_base, "transferable_items",
+                        lambda *_a: {"electric-mining-drill": 6, "inserter": 3})
+    monkeypatch.setattr(builder, "_submit_bootstrap_loan",
+                        lambda *a, **k: released.append((a[4].target_item, k["release_when_met"])))
+    builder.release_finished_bootstrap_loans(
+        SimpleNamespace(command=lambda *_a: ""), object(), "nauvis", "player", (0.0, 0.0), lambda _m: None)
+    assert released == [("electric-mining-drill", True)]
+
+
+def test_recovery_survives_consumed_output_and_an_interrupted_restore(monkeypatch):
+    from dataclasses import replace
+    loan = _binding_drill_loan()
+    monkeypatch.setattr(builder, "mall_slot_uses_shared_provider", lambda *_a: True)
+    calls = []
+    def submit(*args, **_kw):
+        calls.append((args[4], args[3]))
+        if args[4].startswith("restore_bootstrap_loan"):
+            raise builder.StuckError("interrupted before restore acknowledgement")
+    monkeypatch.setattr(builder, "_submit", submit)
+    client = SimpleNamespace(command=lambda _c: "")
+    with pytest.raises(builder.StuckError):
+        builder._restore_bootstrap_loan(client, object(), "nauvis", "player", loan, lambda _m: None, reason="done")
+    assert len(calls) == 2 and not any(n.startswith("acknowledge") for n, _p in calls)
+    requester = next(a for a in calls[1][1]["phases"][0]["actions"] if a["entity"] == "requester-chest")
+    assert "clear_logistic_groups" not in requester  # durable identity remains even if recipe restoration fails
+    assert not list(Draft7Validator(json.loads((ROOT / "schemas/build_plan.schema.json").read_text())).iter_errors(calls[1][1]))
+    resumed = replace(loan, releasing=True, current_recipe=loan.original_recipe)
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: (resumed,))
+    monkeypatch.setattr(builder.live_base, "transferable_items", lambda *_a: {})
+    calls.clear()
+    monkeypatch.setattr(builder, "_submit", lambda *a, **_k: calls.append((a[4], a[3])))
+    builder.release_finished_bootstrap_loans(client, object(), "nauvis", "player", (0, 0), lambda _m: None)
+    assert [n for n, _p in calls] == [f"restore_bootstrap_loan_{loan.target_item}",
+                                     f"acknowledge_loan_restore_{loan.target_item}"]
+
+
+def test_completed_standing_finite_cell_is_vacated_instead_of_restoring_its_requests(monkeypatch):
+    loan = builder.MallBootstrapLoan("inserter", "inserter", 3, "right", (4.5, 1.5), "inserter")
+    calls = []
+    monkeypatch.setattr(builder, "_submit", lambda *a, **_k: calls.append(a[4]))
+    monkeypatch.setitem(builder.MANAGED_INTERMEDIATE_SOURCES, "inserter", loan.provider_position)
+    builder._restore_bootstrap_loan(SimpleNamespace(command=lambda _c: ""), object(), "nauvis", "player", loan,
+                                    lambda _m: None, reason="finite bill met")
+    assert calls == ["release_bootstrap_loan_inserter", "vacate_finite_cell_inserter"]
+    assert "inserter" not in builder.MANAGED_INTERMEDIATE_SOURCES
+
+
+def test_standing_finite_cell_uses_the_same_durable_loan_and_actual_machine_tier(monkeypatch):
+    monkeypatch.setitem(builder.LINE_RECIPES, "inserter", {
+        "machine": "assembling-machine-1", "ingredients": ["iron-plate"], "amounts": [1],
+        "product_amount": 1, "craft_time": .5})
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a, **_k: SimpleNamespace(machine_positions=[(7.5, 1.5)]))
+    monkeypatch.setattr(builder, "locate_mall_cell", lambda *_a: ((0, 0), "right"))
+    monkeypatch.setattr(builder.live_base, "requester_logistic_groups", lambda *_a: ("mall:inserter:right",))
+    monkeypatch.setattr(builder.live_base, "entity_at", lambda *_a: {"name": "assembling-machine-2"})
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
+    monkeypatch.setattr(builder.live_base, "transferable_items", lambda *_a: {"inserter": 4})
+    monkeypatch.setattr(builder, "_bootstrap_loan_products_finished", lambda *_a: 100)
+    plans = []
+    monkeypatch.setattr(builder, "_submit", lambda *a, **_k: plans.append(a[3]))
+    builder._tag_finite_mall_cells(object(), object(), "nauvis", "player", "inserter", 6, (0, 0), lambda _m: None)
+    requester = next(a for a in plans[0]["phases"][0]["actions"] if a["entity"] == "requester-chest")
+    tag = requester["logistic_sections"][0]["group"]
+    from orchestrator.mall_bootstrap import parse_bootstrap_loan_group
+    parsed = parse_bootstrap_loan_group(tag)
+    assert parsed[:3] == ("inserter", "inserter", 6)
+    assert requester["logistic_sections"][0]["multiplier"] == 3  # two remaining crafts + bounded headroom
+    assert next(a for a in plans[0]["phases"][0]["actions"] if a.get("recipe"))["entity"] == "assembling-machine-2"
+
+
 def test_binding_loan_at_bill_yields_to_preempt(monkeypatch) -> None:
     """Once the blocking bill is spendable, spares yield normally."""
     messages = _mock_binding_serve(monkeypatch, transferable=6)
@@ -2588,3 +2958,54 @@ def test_a_higher_priority_fundable_bill_still_wins_scarce_stock(tmp_path: Path)
 
     assert high.state == "ready"
     assert ledger.projects["low"].state == "supply_wait"
+
+def test_retry_reserves_only_uninstalled_material_and_releases_a_paid_bill(monkeypatch, tmp_path):
+    ledger = _ledger(tmp_path)
+    ledger.declare("packet", {"pipe": 10}, {})
+    monkeypatch.setattr(construction_coverage, "active_material_ledger", lambda: ledger)
+    remaining, stock = {"pipe": 2}, {"pipe": 1}
+    monkeypatch.setattr(construction_coverage.live_base, "plan_construction_status", lambda *_a: {"remaining": dict(remaining)})
+    monkeypatch.setattr(construction_coverage.live_base, "transferable_items", lambda *_a: dict(stock))
+    monkeypatch.setattr(construction_coverage.live_base, "available_items", lambda *_a: {"pipe": 999})  # Other requester WIP.
+    monkeypatch.setattr(construction_coverage.live_base, "pending_construction_items", lambda *_a, **_k: {})
+    monkeypatch.setattr(construction_coverage, "_reservation_supply_estimates", lambda *_a: ({}, {}))
+    plan = {"phases": [{"actions": [{"action_type": "place_ghost", "entity": "pipe",
+                                      "position": {"x": n + .5, "y": .5}} for n in range(10)]}]}
+    client = SimpleNamespace(command=lambda _c: pytest.fail("unexpected extra survey"))
+    with pytest.raises(MaterialShortage) as error:
+        construction_coverage.assert_affordable(client, "nauvis", "player", plan, "packet", lambda _m: None, True)
+    assert error.value.required == {"pipe": 2} and error.value.available == {"pipe": 1}
+    assert ledger.projects["packet"].required == {"pipe": 2}
+    stock["pipe"] = 2
+    construction_coverage.assert_affordable(client, "nauvis", "player", plan, "packet", lambda _m: None, True)
+    assert ledger.projects["packet"].reserved == {"pipe": 2}
+    remaining.clear()
+    stock.clear()  # Bots consumed it; replay cannot demand a second copy.
+    construction_coverage.assert_affordable(client, "nauvis", "player", plan, "packet", lambda _m: None, True)
+    assert ledger.projects["packet"].state == "completed" and not ledger.stock_targets()
+
+
+def test_producing_mall_cell_releases_its_constructing_reservation(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """A cell served once while idle and never re-served must not hold its bill after it runs (C25)."""
+    ledger = _ledger(tmp_path)
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", ledger)
+    stock = {"passive-provider-chest": 1, "inserter": 2}
+    for item in ("electronic-circuit", "transport-belt"):
+        ledger.declare(f"paired_mall_{item}", {"passive-provider-chest": 1}, stock,
+                       target_item=item, priority=100, hold_until_producing=True)
+        ledger.mark_constructing(f"paired_mall_{item}", stock)
+    working = {"electronic-circuit": 1, "transport-belt": 0}
+    monkeypatch.setattr(
+        builder.live_base, "find_line",
+        lambda _c, _s, _f, recipe, _m, **_k: builder.live_base.LineState(
+            recipe=recipe, machine_count=1, working_count=working[recipe], output_position=None),
+    )
+
+    builder.complete_producing_material_projects(object(), "nauvis", "player", lambda _m: None)
+
+    assert ledger.projects["paired_mall_electronic-circuit"].state == "completed"
+    # An idle, never-run cell keeps holding its bill until it produces.
+    assert ledger.projects["paired_mall_transport-belt"].state == "constructing"
+    assert ledger.allocatable_stock(stock, claimant="foundation")["passive-provider-chest"] == 0

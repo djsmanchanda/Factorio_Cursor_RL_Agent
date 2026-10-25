@@ -358,7 +358,8 @@ class SavedWorldAdapter:
         verify_instance(self.root, runtime=self.runtime)
         centers = self.quad_centers()
         name = f"laya_saved_world/{uuid.uuid4().hex}.json"
-        request = json.dumps({"bounds": BOUNDS, "candidates": candidates, "inspect": inspect}, separators=(",", ":"))
+        request = json.dumps({"bounds": BOUNDS, "candidates": candidates, "inspect": inspect,
+                              "extra_recipes": list(getattr(self, "extra_recipes", ()))}, separators=(",", ":"))
         source = self.lua_source
         # JSON is a Lua string via a long-bracket delimiter absent from JSON.
         delimiter = "="

@@ -11,7 +11,7 @@ measured negative result and makes predicates replayable in tests.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
@@ -112,17 +112,35 @@ class FoundationEvidence:
     healthy: bool | None = None
     producing: bool | None = None
     output_count: int | None = None
+    working_count: int | None = None
+    identity_source: str | None = None
+    counter_basis: str | None = None
+    district_id: str | None = None
+    district_revision: int | None = None
+    machines: tuple[Mapping[str, Any], ...] = ()
+    # Why the census could not measure this foundation (counts are then unknown).
+    census_error: str | None = None
 
     @classmethod
     def from_mapping(cls, name: str, value: Mapping[str, Any] | Any) -> "FoundationEvidence":
         if not isinstance(value, Mapping):
             return cls(name=name, machine_count=_as_int(value))
+        # Legacy snapshots use a scalar `machines` as the count alias.
+        machines = value.get("machines")
+        rows = machines if isinstance(machines, (list, tuple)) else ()
         return cls(
             name=str(value.get("name", name)),
             machine_count=_as_int(value.get("machine_count", value.get("machines"))),
             healthy=_as_bool(value.get("healthy", value.get("valid"))),
             producing=_as_bool(value.get("producing", value.get("active"))),
             output_count=_item_counter(value, "output_count", "output", "produced"),
+            working_count=_as_int(value.get("working_count")),
+            identity_source=value.get("identity_source"),
+            counter_basis=value.get("counter_basis"),
+            district_id=value.get("district_id"),
+            district_revision=_as_int(value.get("district_revision")),
+            machines=tuple(dict(machine) for machine in rows if isinstance(machine, Mapping)),
+            census_error=value.get("census_error"),
         )
 
 
@@ -370,6 +388,17 @@ C1_CRAFT_WINDOW_TICKS = 120 * 60
 C1_FULL_OUTPUT_STATUS = "full_output"
 
 
+def starter_blocker(snapshot: FactorySnapshot, name: str) -> str:
+    """First failing starter fact, for evidence only; readiness is still decided by _starter_ready."""
+    starter = snapshot.starters.get(name)
+    if starter is None:
+        return "unobserved"
+    for fact, label in (("present", "absent"), ("healthy", "unhealthy"), ("producing", "not_producing")):
+        if getattr(starter, fact) is False:
+            return label
+    return "ready" if _starter_ready(snapshot, name) else "unknown"
+
+
 def _c1_result(
     snapshot: FactorySnapshot,
     counted: Sequence[MachineEvidence],
@@ -382,10 +411,21 @@ def _c1_result(
         "copper_starter_ready": _starter_ready(snapshot, "copper"),
         "stone_starter_ready": _starter_ready(snapshot, "stone"),
         "at_least_four_working_mall_assemblers": count_ok,
-        "iron_gear_producer_working": has_recipe[IRON_GEAR_RECIPE] if counted else None,
-        "copper_cable_producer_working": has_recipe[COPPER_CABLE_RECIPE] if counted else None,
+        "iron_gear_producer_working": has_recipe[IRON_GEAR_RECIPE] if snapshot.mall_assemblers else None,
+        "copper_cable_producer_working": has_recipe[COPPER_CABLE_RECIPE] if snapshot.mall_assemblers else None,
     }
-    return _all_checks("C1", version, checks, {"working_mall_count": len(counted), "recipes": has_recipe})
+    status_counts: dict[str, int] = {}
+    for machine in snapshot.mall_assemblers:
+        key = machine.status or "unreported"
+        status_counts[key] = status_counts.get(key, 0) + 1
+    return _all_checks("C1", version, checks, {
+        "working_mall_count": len(counted), "recipes": has_recipe,
+        "observed_mall_count": len(snapshot.mall_assemblers),
+        "recipes_present": {recipe: any(m.recipe == recipe for m in snapshot.mall_assemblers)
+                            for recipe in (IRON_GEAR_RECIPE, COPPER_CABLE_RECIPE)},
+        "mall_status_counts": dict(sorted(status_counts.items())),
+        "starter_blockers": {name: starter_blocker(snapshot, name) for name in ("iron", "copper", "stone")},
+    })
 
 
 def _c1_v1(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, _history: Sequence[FactorySnapshot]) -> CheckpointResult:
@@ -459,12 +499,20 @@ def _c2(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, _history: 
         "iron_starter_absent": _starter_absent(snapshot, "iron"),
         "copper_starter_absent": _starter_absent(snapshot, "copper"),
     }
-    return _all_checks("C2", "c2-v1", checks, {})
+    return _all_checks("C2", "c2-v1", checks, _foundation_evidence(snapshot, "iron", "copper"))
 
 
 def _c3(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, _history: Sequence[FactorySnapshot]) -> CheckpointResult:
     checks = {"stone_foundation_ready": _foundation_ready(snapshot, "stone"), "stone_starter_absent": _starter_absent(snapshot, "stone")}
-    return _all_checks("C3", "c3-v1", checks, {})
+    return _all_checks("C3", "c3-v1", checks, _foundation_evidence(snapshot, "stone"))
+
+
+def _foundation_evidence(snapshot: FactorySnapshot, *names: str) -> dict[str, Any]:
+    """Keep the census that produced a receipt, including on a failed check."""
+    return {"tick": snapshot.tick, "foundations": {
+        name: asdict(snapshot.foundations[name]) if name in snapshot.foundations else None
+        for name in names
+    }}
 
 
 def _new_output(snapshot: FactorySnapshot, baseline: FactorySnapshot | None, item: str) -> tuple[bool | None, dict[str, Any]]:
