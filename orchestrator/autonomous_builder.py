@@ -9700,8 +9700,8 @@ def _ensure_mall_item(
             client, surface, force,
         ).get(item, 0) <= 0:
             # Dense admission is already gated on existing long-handed stock.
-            # Seed the recipe in the ordinary paired cell, restoring any gear
-            # loan first so the compact producer has its real ingredient.
+            # Restore any gear loan first so the producer has its real
+            # ingredient, then make a finite batch like the other kit items.
             for loan in active_bootstrap_loans(client, surface, force):
                 if loan.original_recipe != "iron-gear-wheel":
                     continue
@@ -9715,12 +9715,10 @@ def _ensure_mall_item(
                     code="long_handed_gear_anchor_restore",
                     state="supply_wait",
                 )
-            rationed = False
-        else:
-            rationed = _rationed_mall_batch(
-                client, bridge, surface, force, item, target, reference_point,
-                emit, force_temporary=force_temporary,
-            )
+        rationed = _rationed_mall_batch(
+            client, bridge, surface, force, item, target, reference_point,
+            emit, force_temporary=force_temporary,
+        )
     except ProductionPrerequisiteDeferred as deferred:
         # The batch's prerequisite chain (e.g. a plate whose own foundation
         # bill is not yet affordable) is someone else's pass. Defer like the

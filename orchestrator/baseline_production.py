@@ -103,6 +103,11 @@ RATIONED_MALL_BATCH_ITEMS = frozenset({
     # is full; it must not become a permanent one-recipe cell and consume the
     # slot needed to make the core mall self-sufficient.
     "assembling-machine-1",
+    # Every quad science/circuit cell's kit needs two long-handed inserters.
+    # A dedicated paired cell needs passive-provider chests, which wait on
+    # advanced circuits, so a permanent-only producer left 48/110 C5-not-C6
+    # runs (C29/C30/C33) with zero long-handed stock. Its inputs are basic.
+    "long-handed-inserter",
     "electronic-circuit",
     "iron-stick",
     "transport-belt",

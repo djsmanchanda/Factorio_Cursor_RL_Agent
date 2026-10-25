@@ -2974,3 +2974,38 @@ def test_producing_mall_cell_releases_its_constructing_reservation(
     # An idle, never-run cell keeps holding its bill until it produces.
     assert ledger.projects["paired_mall_transport-belt"].state == "constructing"
     assert ledger.allocatable_stock(stock, claimant="foundation")["passive-provider-chest"] == 0
+
+
+def test_long_handed_inserter_borrows_a_cell_when_none_are_stocked(monkeypatch) -> None:
+    """Quad kits need long-handed inserters before chests can fund their own cell."""
+    assert "long-handed-inserter" in builder.RATIONED_MALL_BATCH_ITEMS
+    monkeypatch.setitem(builder.LINE_RECIPES, "long-handed-inserter", {
+        "machine": "assembling-machine-1",
+        "ingredients": ["inserter", "iron-gear-wheel", "iron-plate"],
+        "amounts": [1, 1, 1], "product_amount": 1, "craft_time": 0.5,
+    })
+    monkeypatch.setattr(builder, "_core_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(
+        builder.live_base, "available_items", lambda *_a: {
+            "long-handed-inserter": 0, "inserter": 16,
+            "iron-gear-wheel": 1087, "iron-plate": 4849,
+        },
+    )
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: ())
+    monkeypatch.setattr(builder.live_base, "find_line", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        builder, "_bootstrap_demand_cell_affordable", lambda *_a: (False, {}),
+    )
+    monkeypatch.setattr(builder, "_rationed_mall_spare_target", lambda *_a: 4)
+    borrowed: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        builder, "_start_bootstrap_loan",
+        lambda *_a, **_k: borrowed.append((_a[4], _a[5])) or "borrowed inserter cell",
+    )
+
+    assert builder._rationed_mall_batch(
+        object(), object(), "nauvis", "player", "long-handed-inserter", 4,
+        (0.0, 0.0), lambda _message: None,
+    )
+    assert borrowed == [("long-handed-inserter", 4)]
