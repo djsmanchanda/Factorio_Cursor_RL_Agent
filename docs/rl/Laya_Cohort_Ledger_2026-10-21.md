@@ -128,3 +128,5 @@ C30 final (2026-10-25 01:24 IST): 120/120 completed. C2 50/47 (6:9), C3 40/36, C
 C31 (2026-10-25 04:35–04:40 IST, thread 94dcfaf2): census acceptance defect, every completed run strict C0 only; 35 queued cancelled; 65 completed + 20 running finish; not an adoption result. C32: 120 cancelled_queued before any start; superseded. C33 (launched 04:57 IST): 120 planned = 60 seeds 79860–79919 × control 5a5ed28 / clearance ba31bec; ports 39400/32400; 7200 s; no dependency. Primary strict C6 ever.
 
 C33 final (2026-10-25 12:19 IST): 120/120 completed. Strict C6 10/11 (11:10), C2 50/52, C3 44/37 (7:14), C5 35/38, C5 final 6/12, new Laya C6 26/29. Clearance not adopted (C3 regression; C6 level). [Result](Laya_C33_Result_2026-10-25.md). Running beside it: C34 and C35 (thread 94dcfaf2; census 9d9b279 controls; ports 39500 and 39600).
+
+C36 (queued 2026-10-25 13:27 IST, waits for C34+C35): 120 planned = 60 seeds 80040–80099 × control d9402da / clearance cdb16a2 (both with refinery-extension blocker names); ports 39700/32700; 7200 s. Primary strict C6 and C3 (C33 replication).

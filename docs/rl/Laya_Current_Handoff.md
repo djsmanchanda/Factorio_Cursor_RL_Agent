@@ -493,3 +493,7 @@ C33 observation (read-only; the cohort is owned by the check-in thread): clearan
 ## Cohort 33 complete; clearance not adopted (2026-10-25 12:30 IST)
 
 See [C33 result](Laya_C33_Result_2026-10-25.md). The clearance mechanism removes the known blocker in every exposed run, but the extension often meets the next obstruction, and strict C3 regresses. The base stays `5a5ed28`. Thread 94dcfaf2 now runs C34 (census vs outblock, ports 39500) and C35 (census vs lhi `2c5dfbc`, seeds 79980–80039, ports 39600). Both have working census acceptance. Next free Miniship ports: 39700+.
+
+## C36: C33 replication with blocker names (2026-10-25 13:27 IST)
+
+The refusal now reports `blockers` (entity, position, tile), so C36 can classify what the iron extension meets after a relocation, in both arms. C36 is queued behind C34/C35 and expected to start around 2026-10-26 midday. The freeze script is `freeze-scripts/freeze_c36.py`; the branches are `work/miniship/laya-names-base-20261025` (`d9402da`, worktree `names-wt`) and `work/miniship/laya-clearance-20261025` (`cdb16a2`). Next free ports: 39800+.
