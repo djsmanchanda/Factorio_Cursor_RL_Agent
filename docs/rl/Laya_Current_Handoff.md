@@ -40,3 +40,14 @@ The former September 21 stopped-state handoff is preserved in the
 [archive](../archive/rl/Laya_Current_Handoff_2026-09-21.md). Dated handoffs and
 reports remain evidence; do not treat old start/stop instructions as current
 service ownership or reset authority.
+
+## Cleanup and retention verified — 2026-10-25 22:35 IST
+
+See [the cleanup and convergence record](Laya_Cleanup_2026-10-25.md). Adopted
+policy remains `laya/release` at `5a5ed28`; `laya/measurement` is now `764ed6b`
+on both hosts and origin, adding verified automatic retention for future
+freezes. C35 naturally completed all 120 jobs during cleanup; its adoption
+decision is pending. C36 and the host scheduler remain active. Existing frozen
+harnesses were preserved; no deploy or restart was performed. Corpus copies
+and available best/median worlds were verified before remaining archives were
+removed. Historical full-world losses and recovery refs are listed in the report.
