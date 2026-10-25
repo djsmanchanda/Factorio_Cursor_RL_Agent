@@ -489,3 +489,7 @@ The 110 release-line runs that reached strict C5 but not C6 (C29, C30 and C33) e
 Fix `2c5dfbc` (on `9d9b279`) makes long-handed inserters a rationed borrowed-cell batch. C35 (`laya-c35-2123-miniship-20261025`) compares census `9d9b279` with lhi `2c5dfbc`: 120 jobs on seeds 79980–80039, ports 39600/32600, a 7200 s wall, the host budget and no dependency. Primary endpoints are strict C6 ever and time to C5/C6.
 
 C33 observation (read-only; the cohort is owned by the check-in thread): clearance removes most iron-extension refusals but does not raise C5 or C6. Next free ports are 39700+.
+
+## Cohort 33 complete; clearance not adopted (2026-10-25 12:30 IST)
+
+See [C33 result](Laya_C33_Result_2026-10-25.md). The clearance mechanism removes the known blocker in every exposed run, but the extension often meets the next obstruction, and strict C3 regresses. The base stays `5a5ed28`. Thread 94dcfaf2 now runs C34 (census vs outblock, ports 39500) and C35 (census vs lhi `2c5dfbc`, seeds 79980–80039, ports 39600). Both have working census acceptance. Next free Miniship ports: 39700+.
