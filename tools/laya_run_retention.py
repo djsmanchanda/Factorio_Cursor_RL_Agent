@@ -6,7 +6,7 @@ on the host stay whole, as do each cohort's best and median runs. Every other
 run of a terminal cohort is condensed: its decision records, evidence and
 outcomes are copied, zstd-compressed and hash-verified, into the fine-tuning
 corpus, then the world directory is replaced by a CONDENSED.json pointer.
-Cohorts with queued, preparing, running or reserved jobs are never touched.
+Cohorts with queued, running, reserved or resumable (interrupted) jobs are never touched.
 """
 
 from __future__ import annotations
@@ -27,7 +27,8 @@ from pathlib import Path
 
 DEFAULT_KEEP_RECENT_RUNS = 300
 MARKER = "CONDENSED.json"
-ACTIVE = {"queued", "preparing", "running"}
+# A cohort holding any of these can still run or be resumed in place (superset of Batch.RERUN).
+ACTIVE = {"queued", "preparing", "running", "interrupted", "not_started_interrupted"}
 COMPRESS_OVER = 16 * 1024
 KEEP_NAMES = {
     "decision-states.jsonl", "clean-decisions.jsonl", "decisions.jsonl", "latest-status.json", "site-plan.json",
@@ -150,11 +151,13 @@ def condense(world: Path, data_root: Path, corpus: Path) -> dict:
                "bytes": sum(r["bytes"] for r in rows),
                "decision_records": sum(r["lines"] or 0 for r in rows if r["path"].endswith("decision-states.jsonl")),
                "condensed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
-    _rmtree(world)
-    world.mkdir(parents=True)
+    # Pointer first: a deletion interrupted after this point is never condensed again from partial files.
     (world / MARKER).write_text(json.dumps(pointer, indent=1) + "\n")
     with (corpus / "sources.jsonl").open("a") as ledger:
         ledger.write(json.dumps({"source": str(world), "kind": "run", **pointer}) + "\n")
+    for child in world.iterdir():
+        if child.name != MARKER:
+            _rmtree(child) if child.is_dir() and not child.is_symlink() else child.unlink()
     return pointer
 
 

@@ -2,8 +2,11 @@
 
 import json
 import subprocess
+from pathlib import Path
 
-from tools.laya_run_retention import MARKER, apply, condense, exemplars, plan
+import pytest
+
+from tools.laya_run_retention import ACTIVE, MARKER, apply, condense, exemplars, plan
 
 
 def _job(job_id, cohort, *, finished, final=(), phases=(), c_seconds=None, status="completed"):
@@ -42,6 +45,7 @@ def test_plan_spares_recent_runs_exemplars_and_active_cohorts(tmp_path):
     old = _cohort(registry, "old", [(f"r{i}", {"finished": 10 + i, "final": ["C0"] * (i % 3 + 1),
                                                "phases": [f"C{i}"], "c_seconds": 50}) for i in range(5)])
     _cohort(registry, "live", [("done", {"finished": 1}), ("running", {"finished": 2, "status": "running"})])
+    _cohort(registry, "resumable", [("done", {"finished": 3}), ("cut", {"finished": 4, "status": "interrupted"})])
     _cohort(registry, "new", [("n1", {"finished": 100}), ("n2", {"finished": 101})])
 
     selected = {r["job"]["id"] for r in plan(registry, keep_recent_runs=2)}
@@ -104,3 +108,26 @@ def test_cohort_controller_runs_retention_only_with_a_host_budget_and_never_fail
     Batch(root / "batch.json").retain()
     events = [json.loads(line) for line in (root / "batch-events.jsonl").read_text().splitlines()]
     assert events[-1]["event"] == "retention_error" and "disk full" in events[-1]["error"]
+
+
+def test_an_interrupted_deletion_is_never_condensed_again(tmp_path, monkeypatch):
+    registry = tmp_path / "experiments"
+    _cohort(registry, "old", [(f"r{i}", {"finished": i, "final": ["C0"], "phases": ["C1"]}) for i in range(3)])
+    target = plan(registry, keep_recent_runs=0)[0]
+    world = Path(target["job"]["world"])
+    (world / "saves").mkdir()
+
+    def crash(_path):
+        raise OSError("power loss")
+
+    monkeypatch.setattr("tools.laya_run_retention._rmtree", crash)
+    with pytest.raises(OSError):
+        condense(world, registry.parent, tmp_path / "corpus")
+    assert (world / MARKER).exists()
+    assert world not in {Path(r["job"]["world"]) for r in plan(registry, keep_recent_runs=0)}
+
+
+def test_resumable_statuses_cover_the_controller_rerun_set():
+    from tools.run_laya_batch import Batch
+
+    assert set(Batch.RERUN) <= ACTIVE
