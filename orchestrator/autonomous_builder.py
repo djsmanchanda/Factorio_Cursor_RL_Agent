@@ -1661,6 +1661,7 @@ def _plate_expansion_foundation(
     )
     excusable: dict[tuple[str, float, float], bool] = {}
     collision: list[tuple[int, int]] = []
+    blockers: dict[tuple[str, float, float], tuple[int, int]] = {}
     relocate_roboports: set[Point] = set()
     for tile, owner in suspects:
         is_ours = excusable.get(owner)
@@ -1679,10 +1680,16 @@ def _plate_expansion_foundation(
             relocate_roboports.add((owner[1], owner[2]))
         elif not is_ours:
             collision.append(tile)
+            blockers.setdefault(owner, tile)
     if collision:
+        # Name what is in the way: the tile list alone cannot say whether the
+        # next blocker is a pole, a belt or another district's machine.
+        named = [f"{name}@({x}, {y})" for name, x, y in list(blockers)[:3]]
         raise StuckError(
             f"{recipe} refinery extension intersects real infrastructure at "
-            f"{collision[:3]}; refusing to expand its mine ahead of that conflict"
+            f"{collision[:3]} ({', '.join(named)}); refusing to expand its mine ahead of that conflict",
+            details={"blockers": [{"entity": name, "position": [x, y], "tile": list(tile)}
+                                  for (name, x, y), tile in blockers.items()]},
         )
     water = sorted(footprint & live_base.water_tiles(client, surface, minimum, maximum))
     if not water and not relocate_roboports:
