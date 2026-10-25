@@ -107,6 +107,8 @@ class FoundationEvidence:
     district_id: str | None = None
     district_revision: int | None = None
     machines: tuple[Mapping[str, Any], ...] = ()
+    # Why the census could not measure this foundation (counts are then unknown).
+    census_error: str | None = None
 
     @classmethod
     def from_mapping(cls, name: str, value: Mapping[str, Any] | Any) -> "FoundationEvidence":
@@ -127,6 +129,7 @@ class FoundationEvidence:
             district_id=value.get("district_id"),
             district_revision=_as_int(value.get("district_revision")),
             machines=tuple(dict(machine) for machine in rows if isinstance(machine, Mapping)),
+            census_error=value.get("census_error"),
         )
 
 

@@ -174,6 +174,9 @@ class _LuaClient:
                 e.get_inventory=function() error('census must not depend on inventory') end
             end
             local surface={find_entities_filtered=function(filter)
+                -- Factorio 2.1 rejects a position table with extra fields
+                -- (live C31: 'position: too many arguments').
+                if filter.position[3] ~= nil then error('position: too many arguments') end
                 local out={}
                 for _,e in ipairs(entities) do
                     if e.surface=='nauvis' and e.force==filter.force and e.name==filter.name
@@ -366,3 +369,18 @@ def test_overlapping_district_ownership_is_unsupported(ledger):
     districts[copper.recipe] = copper
     with pytest.raises(ObservationUnsupported, match="duplicate furnace sites"):
         LiveCheckpointObservationAdapter()._foundation_survey(None, districts)
+
+
+# Exact live C31 response: the survey Lua passed {x, y, name} as a position.
+_LIVE_POSITION_ERROR = "Cannot execute command. Error: position: too many arguments."
+
+
+def test_failed_census_leaves_foundations_unknown_with_the_raw_response(ledger):
+    districts = _stone_district(ledger, _furnaces()[:2])
+    client = SimpleNamespace(command=lambda _: _LIVE_POSITION_ERROR)
+    foundations = LiveCheckpointObservationAdapter()._foundations_or_unknown(client, districts)
+    stone = FoundationEvidence.from_mapping("stone", foundations["stone"])
+    assert stone.machine_count is None and stone.identity_source == "census-failed"
+    assert "too many arguments" in stone.census_error
+    result = evaluate_milestone("C3", {"foundations": foundations, "starters": {"stone": {"present": False}}})
+    assert result.status.value == "unknown"

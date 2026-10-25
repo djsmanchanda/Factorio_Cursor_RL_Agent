@@ -231,6 +231,29 @@ class LiveCheckpointObservationAdapter:
             )
         return self.client
 
+    def _foundations_or_unknown(
+        self, client: Any, districts: Mapping[str, BootstrapDistrictState] | None,
+    ) -> dict[str, dict[str, Any]]:
+        """Foundation census, or unknown foundations when the census itself fails.
+
+        A failed furnace survey says nothing about the other checkpoints, so it
+        must not void the whole observation; its evidence (including the raw
+        response) stays attached so the failure remains diagnosable.
+        """
+        try:
+            return self._foundation_survey(client, districts)
+        except ObservationUnsupported as error:
+            return {
+                name: {
+                    "machine_count": None, "healthy": None, "producing": None,
+                    "output_count": None, "working_count": None,
+                    "identity_source": "census-failed", "counter_basis": None,
+                    "machines": [],
+                    "census_error": f"{error}: {json.dumps(error.evidence, sort_keys=True)[:400]}",
+                }
+                for name in self._FOUNDATION_ORES
+            }
+
     def _foundation_survey(
         self, client: Any, districts: Mapping[str, BootstrapDistrictState] | None,
     ) -> dict[str, dict[str, Any]]:
@@ -292,7 +315,7 @@ class LiveCheckpointObservationAdapter:
             "local f=game.forces['" + force + "'];local names={};"
             "for k,v in pairs(defines.entity_status) do names[v]=k end;local out={};"
             "for i,p in ipairs({" + positions + "}) do local found=nil;"
-            "for _,e in pairs(s.find_entities_filtered{position=p,radius=0.4,"
+            "for _,e in pairs(s.find_entities_filtered{position={p[1],p[2]},radius=0.4,"
             "name=p[3],force=f}) do "
             "if e.type~='entity-ghost' and math.abs(e.position.x-p[1])<0.01 and "
             "math.abs(e.position.y-p[2])<0.01 then found=e break end end;"
@@ -538,7 +561,7 @@ class LiveCheckpointObservationAdapter:
             "base_valid": True,
             "starters": starters,
             "mall_assemblers": mall,
-            "foundations": self._foundation_survey(client, district_states),
+            "foundations": self._foundations_or_unknown(client, district_states),
             "production": production,
             "providers": providers,
             "recipes": recipes,
