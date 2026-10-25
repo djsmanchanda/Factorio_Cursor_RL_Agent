@@ -497,3 +497,9 @@ See [C33 result](Laya_C33_Result_2026-10-25.md). The clearance mechanism removes
 ## C36: C33 replication with blocker names (2026-10-25 13:27 IST)
 
 The refusal now reports `blockers` (entity, position, tile), so C36 can classify what the iron extension meets after a relocation, in both arms. C36 is queued behind C34/C35 and expected to start around 2026-10-26 midday. The freeze script is `freeze-scripts/freeze_c36.py`; the branches are `work/miniship/laya-names-base-20261025` (`d9402da`, worktree `names-wt`) and `work/miniship/laya-clearance-20261025` (`cdb16a2`). Next free ports: 39800+.
+
+## C34 complete: census verified, outblock not adopted (2026-10-25 19:20 IST)
+
+See [C34 result](Laya_C34_Result_2026-10-25.md). The cohort finished 120/120, with all 4,323 acceptance checks evaluated and zero evidence errors, so census `9d9b279` is verified and is the measurement base for new freezes. Outblock `9d8216d` removes all 48 untyped-stuck events (all were full-output lines), but attainment is level (primary strict C3 45 vs 47, 8:10). Not adopted. The release decision base stays `5a5ed28`.
+
+Branch cleanup (2026-10-25): 40 stale local branches were tagged `archive/20261025/<branch>` and deleted, and their worktrees were detached in place. The mapping is in `data/branch-cleanup-20261025.tsv`. Restore one with `git branch <name> archive/20261025/<name>`.
