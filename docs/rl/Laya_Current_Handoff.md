@@ -481,3 +481,11 @@ C34 (`laya-c34-2123-miniship-20261025`) reruns C31's comparison with readable mi
 - **outblock** `9d8216d`: the same plus the full-output change `7c63333`.
 
 It has 120 jobs on seeds 79920–79979 and ports 39500/32500, a 7200 s wall, the host budget and no dependency. The primary endpoint is strict C3. The C5 startup definition (c5-v2) is not yet on the release line. Next free Miniship ports are 39600+.
+
+## C35 queued: long-handed inserters get a finite batch path (2026-10-25 12:30 IST)
+
+The 110 release-line runs that reached strict C5 but not C6 (C29, C30 and C33) end while building quad science, advanced-circuit and furnace cells. Each cell's kit needs 2 assembling-machine-1, 2 inserters, 2 long-handed inserters and 1 passive-provider chest. 48 of those runs end with zero long-handed stock, even though gears, plates and inserters are plentiful. Long-handed inserters were the only kit item without a finite-batch path. With none in stock, the builder forced a permanent paired cell, and that cell's own bill needs chests, which wait on advanced circuits.
+
+Fix `2c5dfbc` (on `9d9b279`) makes long-handed inserters a rationed borrowed-cell batch. C35 (`laya-c35-2123-miniship-20261025`) compares census `9d9b279` with lhi `2c5dfbc`: 120 jobs on seeds 79980–80039, ports 39600/32600, a 7200 s wall, the host budget and no dependency. Primary endpoints are strict C6 ever and time to C5/C6.
+
+C33 observation (read-only; the cohort is owned by the check-in thread): clearance removes most iron-extension refusals but does not raise C5 or C6. Next free ports are 39700+.
