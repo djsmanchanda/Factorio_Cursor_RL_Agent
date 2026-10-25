@@ -1464,3 +1464,21 @@ def test_partial_conversion_failure_bridges_its_scaffold(monkeypatch) -> None:
     )
 
     assert calls and calls[0][4] == (75.0, -14.5)
+
+
+def test_plate_expansion_refusal_names_the_blocking_entity(monkeypatch) -> None:
+    """C33: the refusal must say what blocks the extension, not only which tiles."""
+    plan = {"phases": [{"actions": [{
+        "action_type": "place_ghost", "entity": "electric-furnace",
+        "position": {"x": 1.5, "y": 1.5},
+    }]}]}
+    client = SimpleNamespace(command=lambda _command: "")
+    monkeypatch.setattr(builder.live_base, "occupied_tile_owners",
+                        lambda *_a, **_k: {(0, 0): ("transport-belt", 0.5, 0.5)})
+    monkeypatch.setattr(builder.live_base, "entity_signatures_at", lambda *_a, **_k: {})
+    monkeypatch.setattr(builder.live_base, "water_tiles", lambda *_a: set())
+
+    with pytest.raises(StuckError, match=r"at \[\(0, 0\)\] \(transport-belt@\(0.5, 0.5\)\)") as raised:
+        builder._plate_expansion_foundation(client, "nauvis", "player", "iron-plate", plan)
+    assert raised.value.details["blockers"] == [
+        {"entity": "transport-belt", "position": [0.5, 0.5], "tile": [0, 0]}]
