@@ -503,3 +503,10 @@ The refusal now reports `blockers` (entity, position, tile), so C36 can classify
 See [C34 result](Laya_C34_Result_2026-10-25.md). The cohort finished 120/120, with all 4,323 acceptance checks evaluated and zero evidence errors, so census `9d9b279` is verified and is the measurement base for new freezes. Outblock `9d8216d` removes all 48 untyped-stuck events (all were full-output lines), but attainment is level (primary strict C3 45 vs 47, 8:10). Not adopted. The release decision base stays `5a5ed28`.
 
 Branch cleanup (2026-10-25): 40 stale local branches were tagged `archive/20261025/<branch>` and deleted, and their worktrees were detached in place. The mapping is in `data/branch-cleanup-20261025.tsv`. Restore one with `git branch <name> archive/20261025/<name>`.
+
+## Robots counted as obstructions; C37 queued (2026-10-26 02:11 IST)
+
+C36's typed blockers revealed that placement surveys counted flying logistic and construction robots as occupants. Many of the "next blocker" refusals after a pole relocation in C33 were probably robots overhead. `32c1ef5` (names branch) and `8f17890` (clearance branch) exclude them. C37 tests the fix alone against `d9402da`, behind C36; its exposure is refusals naming a robot, per arm. Housekeeping:
+- A 2026-10-25 cleanup (`data/laya-experiments/laya-c24-*/README.cleanup.md`) retired old cohort directories and removed `takeover-20261021/mall-wt`. The branch still exists. Freezes now copy the save from C36 and keep C24's recorded hash check.
+- Older cohort worlds (C29/C30/C33) may no longer be available for re-analysis; results already written stand.
+Next free ports: 39900+.
