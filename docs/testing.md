@@ -31,6 +31,9 @@ current suite. Explicit paths still work for deliberate replay verification.
 Use compact commands:
 
 ```bash
+# Install the base dependencies, including NumPy and psutil needed at collection.
+python -m pip install -r requirements.txt
+
 # Per-change safety gate used by pull requests and pushes.
 python -m pytest -m fast
 

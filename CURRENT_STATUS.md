@@ -618,3 +618,9 @@ Set shared new-cohort default7200 and updated generators; longer15000-second res
 - Validation: final full suite **4,666 passed + 38 skipped** (4,704 total), exit 0, `/tmp/laya-converge-full-20261026-r3.log`; fast **1,550 passed + 1 skipped**; focused goal/recovery/evidence regressions 108 passed + 1 skipped. C38 preflights pass 74/74 and 82/82, including both runtime mods. Shell syntax and current entry-point links pass. Skips do not establish platform/live acceptance.
 - C38: compare clearance with robot exclusion common to both arms on converged source; 60 fresh pairs, seeds 80160–80219, ports 39900/32900, 540,000 ticks / 7,200 seconds, shared host gate, no C37 dependency, fixed deadline 2026-10-27 18:00 IST. The freeze records complete candidate diffs and source/mod hashes; scheduling grants no adoption. Check `data/laya-experiments/laya-c38-2123-miniship-20261026/{freeze.json,job-status.json}` for execution state.
 - Lifecycle: future runners use new immutable freezes. Active C37, installed scheduler, real base and GUI are unchanged. Lua use outside C38 requires separately authorized deployment/restarts. Main is canonical; unbound measurement/records refs follow it while controller/experiment branches retain provenance.
+
+
+## [2026-10-26 05:23 IST] Clean CI environment dependencies repaired
+- What: declare NumPy and psutil in base requirements; both are imported while collecting repository tests. Document the base installation command. No test is hidden or removed.
+- Evidence: GitHub push run40246519233 failed collection with missing NumPy/psutil while Lua syntax passed. A fresh Python3.13 environment installed only the corrected requirements:29/29 affected tests and the fast gate1,550 passed+1 skipped, exit0.
+- Lifecycle: dependency installation applies to fresh local/CI environments; no Factorio, campaign, mod or scheduler action. C38 remains pinned to9764fb6.
