@@ -535,3 +535,8 @@ Added opt-in selected reconciliation of measured finished loan prerequisites thr
 ## 2026-10-24 00:17 IST —7200-second ordinary trial allowance
 
 Set shared new-cohort default7200 and updated generators; longer15000-second research windows retained. C26/C27 safely drained/stopped before any admission, original records archived, both arms amended7200 and wrappers resumed behind C25; verified60 queued each, hashes intact, original unit horizon preserved. C25 and Starship live attempts keep6000 because no safe hot extension exists. Evidence:frontier37 focused/1358 fast+3 skips; Miniship36/1326+3 skips, all exit0; live waiting-supervisor readback verified. Lifecycle:new Python freezes for future defaults; no Factorio/mod restart or controller message. See docs/rl/Laya_Wall_Allowance_2026-10-24.md and data/laya-orchestration/wall-allowance-7200-20261024/.
+
+## [2026-10-25 22:31 IST] Verified automatic Laya run retention
+- What: keep the newest 300 host runs and each cohort's best/median; condense only older terminal runs. Hardened legacy status parsing, canonical run paths, strict final-acceptance ranking, durable corpus/index/pointer writes, retry verification and resume locking.
+- Evidence: independent review found no serious remaining issue; 1,366 fast cases passed their gate (one skipped). A read-only Miniship pass selected no C35/C36 world. Added a real lock-contention regression for resume publication.
+- Lifecycle: freeze future cohorts from the updated laya/measurement base. Existing frozen C35/C36 harnesses, host scheduler, mods and servers were not changed or restarted.

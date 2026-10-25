@@ -388,8 +388,15 @@ class Batch:
 
         Terminal outcomes (completed, errors, wall caps, deadline censoring) are evidence and never rerun. A job left
         preparing/running/interrupted records its dead attempt and reruns in a fresh world; its stale reservation is
-        released. Only call this when the previous supervisor and its worlds are gone.
+        released. Only call this when the previous supervisor and its worlds are gone. Host cohorts share the
+        retention lock through publishing the resumed status, so a pass can never condense a run being revived.
         """
+        lock = file_lock(self.host.registry / ".retention.lock") if self.host else nullcontext()
+        with lock:
+            self._resume()
+            self.save()
+
+    def _resume(self) -> None:
         previous = {job["id"]: job for job in json.loads((self.root / "job-status.json").read_text())["jobs"]}
         for index, planned in enumerate(self.jobs):
             job = previous.get(planned["id"])

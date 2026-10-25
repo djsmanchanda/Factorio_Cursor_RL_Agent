@@ -53,9 +53,20 @@ milestones, then proxy phases, then game time to the top phase). Older runs
 of terminal cohorts keep only their fine-tuning data (`evidence/`, decision
 records, outcomes and manifests), zstd-compressed and hash-verified, in
 `data/laya-finetune-corpus/<hostname>/`; the world directory becomes a
-`CONDENSED.json` pointer. Cohorts with active jobs are never touched. Override
+`CONDENSED.json` pointer. Cohorts with active or resumable (interrupted) jobs
+are never touched, so their checkpoints survive. The `zstd` CLI must be on
+`PATH` (the Python 3.11 campaign venv has no `compression.zstd`); retention
+preflights it and refuses to copy or delete anything when it is missing. Override
 with batch `"retention": {"keep_recent_runs": N}` or `{"enabled": false}`, and
 preview with `--dry-run`.
+
+Per-file index rows retain the corpus's byte counts and SHA-256 format. The
+source ledger may contain archive summaries from the initial cleanup and
+per-run records from retention (`files`, `bytes`, `index`, `condensed_at`).
+Refresh mirror-comparison manifests after adding runs; an old snapshot
+manifest intentionally rejects new rows. If a run fails verification, the pass
+stops before deleting it and the controller logs `retention_error`; repair the
+reported data before retrying.
 
 Before comparing, inspect effective option weights: every matching preference
 multiplies, including overlapping entries in one rule. Change only the intended
