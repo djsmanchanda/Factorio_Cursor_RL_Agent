@@ -352,3 +352,8 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - What: Restored Miniship C24's reusable source save after cleanup broke a later freeze; recorded the controller's separate C32 analysis-tool recovery and the consumer checks required before future cohort retirement.
 - Evidence: source matches C24's recorded SHA-256; both restored analysis modules match ab7e8d30; C36/C37 each passed 1,145 recorded hash checks. See docs/rl/Laya_Cleanup_2026-10-25.md and data/cleanup-20261025/dependency-recovery-20261026.json.
 - Lifecycle: none; active freezes and controller ownership unchanged. Historical retired full worlds remain unavailable.
+
+## [2026-10-26 03:21 IST] Development cache cleanup
+- What: Pruned 41 old Starship package archives, two old Factorio downloads across hosts, and unused Miniship uv cache entries; retained installed/recent packages, source mirrors and live runtime cache paths.
+- Evidence: available filesystem space increased 26.30 GB on Starship and 8.11 GB on Miniship. Both Python import checks passed; C36/C37 each passed 1,145 frozen-file hashes. Records: data/cleanup-20261025/cache-cleanup-20261026/.
+- Lifecycle: none; packages, active cohorts and scheduler were not installed, edited or restarted.

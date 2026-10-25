@@ -142,3 +142,30 @@ Previously retired full historical worlds remain unavailable.
 
 Lifecycle: nothing to restart or deploy. C36/C37 freezes, scheduler state,
 policy adoption and the controller's supervision ownership were unchanged.
+
+## Development cache cleanup — 2026-10-26 03:21 IST
+
+An additional cache pass increased available filesystem space by 26.30 GB on
+Starship and 8.11 GB on Miniship (34.41 GB combined, decimal). These are measured
+filesystem changes, not summed file sizes; Miniship campaigns continued writing.
+
+Starship's AUR cache lost 41 obsolete package archives (24,815,932,288 source
+bytes), while retaining two newest cached versions and protecting every cached
+installed version. Miniship already had at most two versions per package.
+Two old Factorio source downloads were removed (1,472,273,960 Starship bytes,
+4,379,587,400 Miniship bytes); their same-version binary packages and the latest
+2.1.23 source download remain cached. Source repositories were preserved.
+
+Miniship's `uv cache prune --ci` removed 97,905 cache files (8.4 GiB reported).
+Starship's uv cache was preserved because the live `codex-lb` runtime uses it.
+Bun cache paths referenced by launcher links and OpenCode Git mirrors with
+unique objects were preserved. An unreadable Starship Factorio build directory
+was left untouched; its directory-size measurement remains a lower bound.
+
+Both project Python environments imported NumPy and pytest successfully.
+C36/C37 each again passed all 1,145 frozen-file hash checks; both cohort units
+and the scheduler remained active. No package installation, deployment or
+restart was performed. Plans, retained-package inventories, command logs and
+before/after filesystem measurements are under
+`data/cleanup-20261025/cache-cleanup-20261026/` on each host, with Miniship's
+records mirrored in the Starship directory's `miniship/` subdirectory.
