@@ -469,3 +469,15 @@ Implication: no slot-cap change is warranted. The highest-value fix is the iron-
 ## C33: refinery pole clearance on the release base (2026-10-25 04:57 IST)
 
 At the user's request, via thread 94dcfaf2, C31 and C32 were cancelled (census acceptance defect) and C33 replaces C32's question without the census. Branch `work/miniship/laya-clearance-20261025` (worktree `data/laya-orchestration/takeover-20261021/clearance-wt`) = `5a5ed28` + `e5471f8` (7a89997) + `ba31bec` (3a79880). It leaves out census `de40332` and c5-v2 (`1c03d47`/`515d1a5`/`ab7e8d3`). Exposure to measure: the refinery-extension refusal at (−41,−15),(−41,−14),(−40,−15), which blocks most release runs late, per arm, plus POLE RELOCATION / SMELTER POLE CLEARANCE lines in clearance. C5 here is the old c5-v1 predicate, not the user's plastic-startup definition. The freeze script is `freeze-scripts/freeze_c33.py`. Next free ports 39500+.
+
+## Census fixed live; C34 queued (2026-10-25 09:50 IST)
+
+The structural foundation census (`de40332`) failed every live check in C31 because its Lua passed a three-field position (`{x, y, machine}`) to `find_entities_filtered`. Factorio 2.1 rejects that with "position: too many arguments". As a result, C31's strict milestones are unreadable (85 completed, 35 cancelled) and C32 was cancelled before it started.
+
+Fix `9d9b279` (branch `fix/rl-census-position-20261025`) passes `{p[1], p[2]}`. A census failure now leaves only the foundations unknown, with the raw response kept in `census_error`. It passed a live probe on a disposable world restored from a C31 autosave: 6 owned furnaces per foundation, and C2/C3 evaluated instead of erroring.
+
+C34 (`laya-c34-2123-miniship-20261025`) reruns C31's comparison with readable milestones:
+- **census** `9d9b279`: the release line plus the fixed census.
+- **outblock** `9d8216d`: the same plus the full-output change `7c63333`.
+
+It has 120 jobs on seeds 79920–79979 and ports 39500/32500, a 7200 s wall, the host budget and no dependency. The primary endpoint is strict C3. The C5 startup definition (c5-v2) is not yet on the release line. Next free Miniship ports are 39600+.
