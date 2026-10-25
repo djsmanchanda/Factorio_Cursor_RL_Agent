@@ -46,6 +46,17 @@ unknown. `failures` is a caught-exception count; typed outcome codes and bug
 classifications are separate evidence. Archived independent per-cohort scaling
 is under `experimental/old_workflows/per_cohort_adaptive_batch/`.
 
+Run retention: when a host-budget cohort finishes, its controller runs
+`tools/laya_run_retention.py` over the registry. The newest 300 runs on the
+host stay whole, as do each cohort's best and median runs (strict final
+milestones, then proxy phases, then game time to the top phase). Older runs
+of terminal cohorts keep only their fine-tuning data (`evidence/`, decision
+records, outcomes and manifests), zstd-compressed and hash-verified, in
+`data/laya-finetune-corpus/<hostname>/`; the world directory becomes a
+`CONDENSED.json` pointer. Cohorts with active jobs are never touched. Override
+with batch `"retention": {"keep_recent_runs": N}` or `{"enabled": false}`, and
+preview with `--dry-run`.
+
 Before comparing, inspect effective option weights: every matching preference
 multiplies, including overlapping entries in one rule. Change only the intended
 factor, or declare all affected groups. Current other-slots-1 arms also reduce

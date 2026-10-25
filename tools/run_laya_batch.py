@@ -16,6 +16,8 @@ batch.json:
                              "admit_interval_seconds": 10, "admit_min_available_gb": 4.5},
    "runtime": optional {"update_threads": 1..64, "cpu_affinity": "slot" | taskset list,
                         "nice": 0..19, "python_nice": 0..19},
+   "retention": optional {"enabled": true, "keep_recent_runs": 300, "corpus": path}; with a host budget,
+                a finished cohort condenses older host runs (tools/laya_run_retention.py),
    "arms": [{"id": str, "code": frozen worktree, "mods": staged mods dir, "revision": sha,
              "change": str, "variant": optional path, "extra_args": optional [str],
              "runtime": optional arm override of the batch runtime}]}
@@ -40,6 +42,7 @@ from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from tools.laya_batch_defaults import DEFAULT_TRIAL_WALL_SECONDS
 from tools.laya_batch_state import CohortLedger, dependencies_ready, file_lock, read_records, request_admission
+from tools.laya_run_retention import DEFAULT_KEEP_RECENT_RUNS, apply as apply_retention
 
 PHASE = re.compile(r"^\+(\d+)s PHASE REACHED: (C\d) .* at tick (\d+)")
 SUMMARY = re.compile(r"SUMMARY: stop=(\S+) decisions=(\d+) failures=(\d+) phases=(\S*) accepted=(\S*)")
@@ -484,6 +487,22 @@ class Batch:
                 self.report()
         self.save()
         self.report()
+        if not self.stopping.is_set():
+            self.retain()
+
+    def retain(self) -> None:
+        """Condense older host runs once this cohort ends; retention never fails the cohort."""
+        options = self.cfg.get("retention") or {}
+        if not self.host or options.get("enabled") is False:
+            return
+        try:
+            result = apply_retention(self.host.registry,
+                                     keep_recent_runs=int(options.get("keep_recent_runs", DEFAULT_KEEP_RECENT_RUNS)),
+                                     corpus=Path(options["corpus"]) if options.get("corpus") else None)
+            self.ledger.append(f"retention:{time.time_ns()}", "retention", at=time.time(), **result)
+        except Exception as error:
+            self.ledger.append(f"retention:{time.time_ns()}", "retention_error", at=time.time(),
+                               error=f"{type(error).__name__}: {error}")
 
     def report(self) -> None:
         rows = defaultdict(list)
