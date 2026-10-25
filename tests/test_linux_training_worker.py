@@ -28,7 +28,7 @@ def test_linux_worker_uses_isolated_direct_paths_without_windows_bridge() -> Non
     source = MANAGER.read_text(encoding="utf-8")
 
     assert 'STATE_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/training"' in source
-    assert 'RUNTIME_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/runtime/factorio-2.1.21"' in source
+    assert 'RUNTIME_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/factorio-rl/runtime/factorio-2.1.23"' in source
     assert 'FACTORIO_BIN="${FACTORIO_BIN:-$RUNTIME_ROOT/bin/x64/factorio}"' in source
     assert 'READ_DATA="${READ_DATA:-$RUNTIME_ROOT/data}"' in source
     assert 'write_factorio_runtime_config "$CONFIG_PATH" "$READ_DATA" "$DATA_ROOT"' in source
@@ -55,6 +55,18 @@ def test_linux_worker_keeps_rcon_loopback_and_generates_a_local_secret() -> None
     assert 'rm -rf "$MODS_PATH/factorio_training_lab" "$MODS_PATH/factorio_cursor_rl_agent"' in source
     assert 'GUI_MODS_PATH="$HOME/.factorio/mods"' in source
     assert 'scripts/sync_linux_gui_mods.sh" --mods-dir "$GUI_MODS_PATH"' in source
+
+
+def test_linux_worker_can_bound_update_threads_and_assign_affinity() -> None:
+    source = MANAGER.read_text(encoding="utf-8")
+
+    assert '--update-threads) UPDATE_THREADS="${2:?missing --update-threads value}"' in source
+    assert 'write_factorio_runtime_config "$CONFIG_PATH" "$READ_DATA" "$DATA_ROOT" "$UPDATE_THREADS"' in source
+    assert 'worker_affinity()' in source
+    assert 'printf \'%d\' "$(( ($1 - 1) % $(nproc) ))"' in source
+    assert 'taskset -c "$affinity" "${launch[@]}"' in source
+    assert '"factorio_update_threads": $threads_json' in source
+    assert 'runtime-settings.json' in source
 
 
 def test_linux_worker_example_requires_local_path_materialization() -> None:

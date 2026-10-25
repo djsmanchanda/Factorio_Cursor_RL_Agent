@@ -339,6 +339,9 @@ def test_priority_wait_sleeps_to_due_tick_without_busy_polling(
 
 def _core_mall_wait_case(monkeypatch, code: str):
     """Run one core-mall prerequisite pass whose ladder defers with `code`."""
+    monkeypatch.setitem(autonomous_builder.LINE_RECIPES, "passive-provider-chest", {
+        "ingredients": ["advanced-circuit"], "amounts": [1], "product_amount": 1,
+    })
     monkeypatch.setattr(
         autonomous_builder, "_core_mall_prerequisites",
         lambda *_args: ("advanced-circuit",),

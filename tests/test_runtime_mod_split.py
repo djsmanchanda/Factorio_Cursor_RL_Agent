@@ -36,7 +36,7 @@ _BASE_COMMANDS = frozenset({
     "build_layout_plan", "verify_electronics_execution", "set_research",
     "research_status", "research_options", "science_status", "logistic_inventory",
     "create_planner_world", "apply_ghost_plan", "activate_runtime", "deactivate_runtime",
-    "spawn_construction_spidertron",
+    "spawn_construction_spidertron", "layout_executor_capabilities",
 })
 
 _LUA_HARNESS = r"""

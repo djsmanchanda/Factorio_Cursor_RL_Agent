@@ -16,19 +16,20 @@ HELPER = ROOT / "scripts/factorio_runtime_config.sh"
 PWSH = os.environ.get("FACTORIO_PWSH_TEST_BIN") or shutil.which("pwsh")
 
 
-@pytest.mark.parametrize("version", ["2.1.21", "2.1.20"])
-def test_runtime_config_moves_both_paths_and_preserves_other_settings(tmp_path, version):
+@pytest.mark.parametrize("version", ["2.1.23", "2.1.21"])
+@pytest.mark.parametrize("threads", ["", "3"])
+def test_runtime_config_moves_both_paths_and_preserves_other_settings(tmp_path, version, threads):
     config = tmp_path / "config.ini"
     config.write_text(
         "; operator settings\n[path]\nread-data=/old/data\nwrite-data=/old/world\n"
         "cache-data=/custom/cache\n[network]\nmax-heartbeats-per-second=120\n"
-        "[other]\nread-data=unrelated-value\n"
+        "[other]\nread-data=unrelated-value\nupdate-runner-threads-count=2\n"
     )
     runtime = tmp_path / f"factorio-{version}" / "data"
     state = tmp_path / "world with spaces"
     subprocess.run([
-        "bash", "-c", 'source "$1"; write_factorio_runtime_config "$2" "$3" "$4"',
-        "runtime-config", str(HELPER), str(config), str(runtime), str(state),
+        "bash", "-c", 'source "$1"; write_factorio_runtime_config "$2" "$3" "$4" "$5"',
+        "runtime-config", str(HELPER), str(config), str(runtime), str(state), threads,
     ], check=True, capture_output=True, text=True)
 
     result = configparser.ConfigParser()
@@ -38,6 +39,7 @@ def test_runtime_config_moves_both_paths_and_preserves_other_settings(tmp_path, 
     assert result["path"]["cache-data"] == "/custom/cache"
     assert result["network"]["max-heartbeats-per-second"] == "120"
     assert result["other"]["read-data"] == "unrelated-value"
+    assert result["other"]["update-runner-threads-count"] == (threads or "2")
     assert config.read_text().startswith("; operator settings\n")
 
 
@@ -51,6 +53,9 @@ def test_stopped_mod_deployment_preserves_operator_settings(tmp_path, manager_na
     scripts.mkdir(parents=True)
     for name in (manager_name, "factorio_runtime_config.sh", "sync_linux_gui_mods.sh"):
         shutil.copy2(ROOT / "scripts" / name, scripts / name)
+    (repo / "tools").mkdir()
+    for tool in ("build_runtime_mods.py", "runtime_namespace.py"):
+        shutil.copy2(ROOT / "tools" / tool, repo / "tools" / tool)
     for name in ("factorio_mod", "factorio_training_lab"):
         mod = repo / name
         mod.mkdir()
@@ -126,7 +131,7 @@ def test_windows_config_upgrade_preserves_operator_settings(tmp_path):
     state = tmp_path / "worker"
     state.mkdir()
     config = state / "config.ini"
-    config.write_text("; operator settings\n[path]\nread-data=/old/data\nwrite-data=/old/world\ncache-data=/cache\n[network]\nmax-heartbeats-per-second=120\n[other]\nread-data=unrelated-value\n")
+    config.write_text("; operator settings\n[path]\nread-data=/old/data\nwrite-data=/old/world\ncache-data=/cache\n[network]\nmax-heartbeats-per-second=120\n[other]\nread-data=unrelated-value\nupdate-runner-threads-count=2\n")
     source = (ROOT / "scripts/manage_windows_training_worker.ps1").read_text()
     functions = source[source.index("function Write-Utf8NoBom"):source.index("switch ($Action)")]
     harness = tmp_path / "windows-config-test.ps1"
@@ -142,6 +147,7 @@ def test_windows_config_upgrade_preserves_operator_settings(tmp_path):
     assert result["path"]["cache-data"] == "/cache"
     assert result["network"]["max-heartbeats-per-second"] == "120"
     assert result["other"]["read-data"] == "unrelated-value"
+    assert result["other"]["update-runner-threads-count"] == "2"
     assert config.read_text().startswith("; operator settings\n")
 
 
@@ -152,14 +158,14 @@ def test_saved_world_freezes_a_self_contained_manager(monkeypatch, tmp_path):
     source = tmp_path / "source.zip"
     source.write_bytes(b"immutable test input")
     mods = tmp_path / "mods"
-    for name in ("factorio_cursor_rl_agent", "factorio_training_lab"):
+    for name in ("factorio_cursor_rl_agent", "factorio_laya_agent", "factorio_training_lab"):
         directory = mods / name
         directory.mkdir(parents=True)
         (directory / "control.lua").write_text("-- test mod\n")
     root = tmp_path / "disposable-host"
     monkeypatch.setattr(run_laya_saved_world, "owned_root", lambda _: root)
 
-    def lifecycle(host, action):
+    def lifecycle(host, action, runtime_args=()):
         # Exercise dependency loading from the actual frozen manager without
         # launching Factorio or using an installed server/root.
         if action == "bootstrap":

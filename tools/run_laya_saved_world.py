@@ -21,13 +21,13 @@ from training.laya_saved_world import (
 from training.laya_starter_kit import verify_starter_kit
 
 
-def manager(root, action):
+def manager(root, action, extra=()):
     manifest = json.loads((root / "manifest.json").read_text())
     return subprocess.run([
         "bash", str(root / "frozen/scripts/manage_linux_deterministic_server.sh"), action,
         "--root", str(root / "server"), "--fleet-mode", "--bootstrap-profile", "supplied-v1",
         "--game-port", str(manifest["game_port"]), "--rcon-port", str(manifest["rcon_port"]),
-        "--source-save", str(root / "baseline.zip"),
+        "--source-save", str(root / "baseline.zip"), *extra,
     ], check=True, capture_output=True, text=True).stdout.strip()
 
 
@@ -35,6 +35,20 @@ def prepare(args):
     runtime = getattr(args, "runtime", "disposable_saved_world")
     if runtime not in {"disposable_saved_world", "disposable_mall"}:
         raise SavedWorldError("unsupported disposable runtime")
+    update_threads = getattr(args, "update_threads", None)
+    cpu_affinity = getattr(args, "cpu_affinity", None)
+    nice_level = getattr(args, "nice", 0)
+    if update_threads is not None and not 1 <= update_threads <= 64:
+        raise SavedWorldError("update threads must be between 1 and 64")
+    if not 0 <= nice_level <= 19:
+        raise SavedWorldError("nice must be between 0 and 19")
+    runtime_args = []
+    if update_threads is not None:
+        runtime_args += ["--update-threads", str(update_threads)]
+    if cpu_affinity:
+        runtime_args += ["--cpu-affinity", str(cpu_affinity)]
+    if nice_level:
+        runtime_args += ["--nice", str(nice_level)]
     root = owned_root(args.root)
     source = args.source_save.resolve()
     if root.exists():
@@ -59,7 +73,9 @@ def prepare(args):
         shutil.copytree(args.mods_source / source_name, frozen / folder)
     manifest = {"version": PROFILE, "runtime": runtime, "production_authority": False,
                 "comparison_eligible": False, "source_save": str(source), "source_sha256": file_hash(source),
-                "game_port": args.game_port, "rcon_port": args.rcon_port, "mod_hashes": {}}
+                "game_port": args.game_port, "rcon_port": args.rcon_port, "mod_hashes": {},
+                "runtime_settings": {"factorio_update_threads": update_threads,
+                                     "cpu_affinity": cpu_affinity, "nice": nice_level}}
     ancestor = getattr(args, "ancestor_source_sha256", None)
     if ancestor is not None:
         if len(ancestor) != 64 or any(c not in "0123456789abcdef" for c in ancestor):
@@ -70,7 +86,7 @@ def prepare(args):
         manifest["version"] = args.mall["version"]
         manifest["mall"] = args.mall
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    print(manager(root, "bootstrap"))
+    print(manager(root, "bootstrap", runtime_args))
     manifest["initial_copy_sha256"] = file_hash(root / "server/saves/mod_playground.zip")
     if manifest["initial_copy_sha256"] != manifest["source_sha256"]:
         raise SavedWorldError("initial save copy mismatch")
@@ -81,7 +97,7 @@ def prepare(args):
     manifest["repository_revision"] = (json.loads(frozen_identity.read_text())["revision"] if frozen_identity.exists() else
                                       subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip())
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    print(manager(root, "start"))
+    print(manager(root, "start", runtime_args))
     if runtime == "disposable_mall":
         if file_hash(source) != manifest["source_sha256"]:
             raise SavedWorldError("source save changed during preparation")
@@ -120,6 +136,9 @@ def parser():
     p.add_argument("--decisions", type=int, default=10)
     p.add_argument("--measure-ticks", type=int, default=1800)
     p.add_argument("--objective", default="Establish and sustain iron plates and transport-belt production from actual resources.")
+    p.add_argument("--update-threads", type=int, help="Factorio update-runner threads for this world (1..64)")
+    p.add_argument("--cpu-affinity", help="taskset CPU list for this world (for example 0-3,8)")
+    p.add_argument("--nice", type=int, default=0, help="Lower this server's CPU priority by 0..19")
     return p
 
 

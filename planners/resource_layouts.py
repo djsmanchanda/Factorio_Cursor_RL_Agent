@@ -16,7 +16,8 @@ _DIRECTION_VECTORS = {
 }
 
 # The pipe stands immediately outside the 3x3 pumpjack footprint. The
-# graphical connector is on the machine edge, but placing a pipe on that edge
+# Source pumpjacks are mirrored; these offsets describe that explicit setting.
+# The graphical connector is on the machine edge, but placing a pipe on that edge
 # tile collides with the pumpjack (live run 2026-08-26 04:43).
 _PUMPJACK_OUTPUT_OFFSETS = {
     "north": (-1, -2), "east": (2, -1),
@@ -313,11 +314,14 @@ def generate_direct_mining_to_chest(
         ] if output_pole is not None else [])},
         {"name": "direct_mine_output", "actions": mine_actions},
     ]}
-    if output_side == "east" and continuation_tiles:
+    if output_side == "east":
         future_first_x = first_x - 3 * reserved_pair_columns
         # Keep future drill bodies, their shared belt, and local pole clearance
         # unavailable to unrelated power/coverage work.  This is metadata, not
         # a ghost: the mine grows only when its next six-drill module is needed.
+        # It is reserved with or without a paved continuation; the default
+        # continuation is zero, which once left the verified corridor open to
+        # a later power bridge (cohort 7 copper: pole inside the corridor).
         plan["reserved_tiles"] = [
             [tile_x, tile_y]
             for tile_x in range(
@@ -682,7 +686,12 @@ def _fluid_resource_plan(
 
 
 def generate_pumpjack_source(sites: list[dict], pipe_tiles: list[tuple[float, float]]) -> dict:
-    return _fluid_resource_plan("crude_oil", "pumpjack", sites, pipe_tiles)
+    plan = _fluid_resource_plan("crude_oil", "pumpjack", sites, pipe_tiles)
+    for phase in plan['phases']:
+        for action in phase['actions']:
+            if action.get('entity') == 'pumpjack':
+                action['mirroring'] = True
+    return plan
 
 
 def generate_offshore_pump_source(sites: list[dict], pipe_tiles: list[tuple[float, float]]) -> dict:

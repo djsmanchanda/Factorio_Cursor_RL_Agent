@@ -309,6 +309,23 @@
       ]
     },
     {
+      "rule_id": "mission.ops-grow-feedstock",
+      "kind": "soft",
+      "scopes": [
+        "mission.decide"
+      ],
+      "source": "docs/rl/Laya_Strategy_Guidelines.md",
+      "quote": "Add a gear or cable producer when every existing one runs flat out while other mall cells starve for its output.",
+      "prefer": [
+        {
+          "when": {
+            "family": "grow"
+          },
+          "weight": 4.0
+        }
+      ]
+    },
+    {
       "rule_id": "mission.ops-wait",
       "kind": "soft",
       "scopes": [

@@ -1,0 +1,13 @@
+# Path: systemd/laya-host-scheduler.service | Purpose: Run the explicitly installed host slot scheduler independently of frozen cohorts.
+[Unit]
+Description=Laya host-wide slot scheduler
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Github_Desktop/Factorio_Cursor_RL_Agent
+ExecStart=%h/Github_Desktop/Factorio_Cursor_RL_Agent/.venv/bin/python %h/.local/share/laya-host/laya_host_scheduler.py --root %h/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-host --registry %h/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments run --interval 60
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

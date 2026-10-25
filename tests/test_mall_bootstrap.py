@@ -20,6 +20,7 @@ from orchestrator.mall_bootstrap import (
     restore_bootstrap_loan_plan,
 )
 from planners.recipe_data import LINE_RECIPES
+from planners.stock_gating import chest_gate, stock_gate
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -181,6 +182,27 @@ def test_restore_clears_only_unique_loan_group(monkeypatch) -> None:
     )
     assert provider["clear_inventory_limit"] is True
     assert not list(SCHEMA.iter_errors(plan))
+
+
+def test_empty_loan_tag_is_discovered_during_recovery_and_after_restore():
+    from orchestrator.mall_bootstrap import active_bootstrap_loans
+    from types import SimpleNamespace
+    group = _loan().group
+    for recipe in ("-", _loan().original_recipe):
+        client = SimpleNamespace(command=lambda _c: f"{group}|4.5|1.5|assembling-machine-1,-|assembling-machine-2,{recipe}|releasing")
+        (loan,) = active_bootstrap_loans(client, "nauvis", "player")
+        assert loan.releasing and loan.current_recipe == recipe
+
+
+def test_release_plan_is_configuration_only_and_preserves_tag_until_acknowledgement():
+    from orchestrator.mall_bootstrap import release_bootstrap_loan_plan
+    plan = release_bootstrap_loan_plan(_loan())
+    action = plan["phases"][0]["actions"][0]
+    assert action["action_type"] == "configure_entity" and action["release_cell"]["group"] == _loan().group
+    assert not action["release_cell"]["acknowledge"]
+    assert not list(SCHEMA.iter_errors(plan))
+    action["action_type"] = "place_ghost"
+    assert list(SCHEMA.iter_errors(plan))  # release settings never authorize construction
 
 
 def test_promotion_reuses_the_borrowed_cell_as_permanent_pipe_mall() -> None:
@@ -419,6 +441,28 @@ def test_seventh_assembler_is_a_mall_batch_on_seed_stock(monkeypatch) -> None:
     assert step is not None
     assert step.recipe == "assembling-machine-1"
     assert external == ()
+
+
+def test_restore_reinstates_the_original_stock_gate(monkeypatch) -> None:
+    _install_seed_recipes(monkeypatch)
+    plan = restore_bootstrap_loan_plan(_loan("requester-chest"), stock_gate_target=12)
+    machine = next(a for a in plan["phases"][0]["actions"] if a["entity"] == "assembling-machine-1")
+    # Mall providers are unbounded; without its gate a restored cell crafts forever.
+    assert "clear_logistic_condition" not in machine
+    assert machine["logistic_condition"] == stock_gate("copper-cable", 12)
+    assert not list(SCHEMA.iter_errors(plan))
+
+
+def test_a_borrowed_feedstock_cell_drops_its_chest_cap_and_gets_it_back(monkeypatch) -> None:
+    _install_seed_recipes(monkeypatch)
+    loan = _loan()
+    borrowed = bootstrap_loan_plan(loan, MallBootstrapStep("advanced-circuit", 2, 2))
+    restored = restore_bootstrap_loan_plan(_loan("requester-chest"), chest_gate_target=800)
+    machine = lambda plan: next(a for a in plan["phases"][0]["actions"] if a["entity"] == "assembling-machine-1")
+    # Left on, a full cable chest would hold the loan's machine off.
+    assert machine(borrowed)["clear_chest_gate"] is True
+    assert machine(restored)["chest_gate"] == chest_gate("copper-cable", loan.provider_position, 800)
+    assert not list(SCHEMA.iter_errors(borrowed)) and not list(SCHEMA.iter_errors(restored))
 
 
 def _restore_plan(provider_fill_chest: bool) -> dict:
@@ -720,3 +764,27 @@ def test_loan_facts_are_generic_and_report_only_real_deficits() -> None:
     unknown = bootstrap_loan_facts(loan)
     assert unknown["counter"] is None and unknown["remaining_bill"] is None
     assert unknown["missing_inputs"] is None and unknown["producer_status"] is None
+
+
+
+def test_a_step_credited_in_memory_still_releases_the_requesters_tag():
+    # cohort 4 cell-s77403: belts finished, the step was credited and the loan preempted in one pass;
+    # the release named the credited tag the chest never carried, 21 release_owner_missing retries.
+    from types import SimpleNamespace
+
+    from orchestrator.mall_bootstrap import promote_bootstrap_loan_plan, release_bootstrap_loan_plan, restore_bootstrap_loan_plan
+
+    observed = "mall-bootstrap:v4:electronic-circuit:splitter:3:3:right:transport-belt:202:89:2:2:-"
+    client = SimpleNamespace(command=lambda _c: f"{observed}|42.5|38.5|assembling-machine-1,-|assembling-machine-1,transport-belt")
+    (loan,) = active_bootstrap_loans(client, "nauvis", "player")
+    credited = loan.credit_completed_step("transport-belt", 202)
+    assert credited.group != observed and credited.live_group == observed
+
+    release = release_bootstrap_loan_plan(credited)["phases"][0]["actions"][0]["release_cell"]
+    assert release["group"] == observed
+    restore = restore_bootstrap_loan_plan(credited)["phases"][0]["actions"][0]
+    assert restore["clear_logistic_groups"] == [observed]
+    from dataclasses import replace
+    promotable = replace(credited, target_item="transport-belt")  # promotion needs a line recipe
+    promote = json.dumps(promote_bootstrap_loan_plan(promotable, stock_target=10))
+    assert observed in promote and promotable.group not in promote

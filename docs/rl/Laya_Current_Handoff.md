@@ -1,120 +1,30 @@
-<!-- Path: docs/rl/Laya_Current_Handoff.md | Purpose: Route resumption to the latest dated evidence for each Laya runtime without stale lifecycle instructions. -->
+<!-- Path: docs/rl/Laya_Current_Handoff.md | Purpose: Current Laya convergence, cohort evidence and lifecycle index. -->
 
-# Laya current evidence index
+# Laya current evidence
 
-Updated 2026-10-10 05:26 IST. Start with [the runner contract](Laya_Clean_Runner.md)
-and [strategy rules](Laya_Strategy_Guidelines.md); read the relevant dated record
-below for evidence. Architecture/ownership remain in [architecture](../architecture.md).
+Updated 2026-10-26 IST during branch convergence. Read the [runner contract](Laya_Clean_Runner.md), [strategy rules](Laya_Strategy_Guidelines.md), [variant adoption rules](laya_variants/README.md), and [system invariants](../system_invariants.md).
 
-Several dated handoffs and the October 8 audit are local uncommitted records
-in the operator's main checkout; a clean branch/worktree may omit those linked
-files. They are preserved there without adding them to this implementation
-commit. The October 9 verification and current runner contract are tracked.
+The decision-policy release is `5a5ed28`, adopted in [C29](Laya_C29_Result_2026-10-24.md). The fixed foundation census (`9d9b279`) passed all 4,323 acceptance checks in [C34](Laya_C34_Result_2026-10-25.md). It changes observation, not policy. Measurement, crash-safe run retention and named obstruction evidence are being integrated with main's independent runtime isolation and research-goal work. Integration tests do not establish a matched live improvement.
 
-| Runtime | Latest referenced evidence | Interpretation |
-| --- | --- | --- |
-| Ops over deterministic tooling | [October 9 lifecycle verification](Laya_Lifecycle_Verification_2026-10-09.md), [October 8 session](../handoffs/Laya_Session_Handoff_2026-10-08.md), [pre-cleanup audit](Laya_System_Audit_2026-10-08.md) | Completed 320-trial review, persistent lifecycle menu repair and bounded 2.1.21 mechanics evidence. |
-| Geometry and earned-world continuations | [October 5 variety campaign](../archive/rl/Laya_Seven_Hour_Variety_2026-10-05.md), [land model](Laya_Land_Grid.md) | Guided geometry/component cohorts; not raw-start ops wins or unseen-terrain proof. |
-| L1–L3 learned lab workflow | [October 3 background result](../archive/rl/Laya_Background_Run_2026-10-03.md) | Separate trained profile, dataset and measured evaluation. |
-| Supplied-input mall | [Mall supply](Laya_Mall_Supply.md), [October 3 coordination](../handoffs/Laya_Mall_Training_Active_Handoff_2026-10-03.md) | Separate economy and ownership record; its age does not prove current process state. |
+| Cohort | Result and decision |
+|---|---|
+| C29 | Stale mall-reservation release adopted; [result](Laya_C29_Result_2026-10-24.md). |
+| C30 / C30a / S30r | Steel-site candidate not adopted; [result](Laya_C30_Result_2026-10-25.md). |
+| C31 / C32 | Census survey defect: C31 85 completed + 35 cancelled; C32 120 cancelled before admission. Strict endpoints invalid. |
+| C33 | Pole clearance removed its named obstruction but regressed strict C3; not adopted. [Result](Laya_C33_Result_2026-10-25.md). |
+| C34 | Census verified, output-backpressure candidate not adopted. [Result](Laya_C34_Result_2026-10-25.md). |
+| C35 | 120/120 complete; not adopted (strict C6 8→6). [Result](Laya_C35_Result_2026-10-26.md). |
+| C36 | 120/120 complete; C6 5→15, but faults/final C5 guard prevent default adoption. [Result](Laya_C36_Result_2026-10-26.md). |
+| C37 | Flying-robot exclusion alone; running under controller `94f918da-f279-4342-bc00-c5d125c67e16`. Do not edit or restart its freeze. |
 
-The `next-20261008` cohort finished all 320 trials on Factorio 2.1.21. Baseline
-recorded real C1/C2 in 25/160 and 12/160 trials; reducing only non-core mall
-slots to x1 recorded 16/160 and 9/160. Retain baseline weights: the comparison
-does not establish a reliable winner. Earlier loan-campaign interventions and
-power-loss results are separate evidence, including the confounded core weights.
+Every planned job counts. Strict ever/final, proxy phases and Laya circuit-choice/output acceptance are separate. C29-C37 use Factorio 2.1.23 with c5-v1; the requested plastic-startup C5-v2 is not implemented on that release line. Main's c1-v2 and historical c1-v1 must be reported separately after convergence.
 
-Review found 101 failed trials with ready metal foundations and unfinished
-starter retirement. The isolated `codex/laya-lifecycle-obligations` branch now
-preserves that option across satisfied rates and proxy phases using scoped
-submission facts. Terminal menu replay restored every needed retirement in
-101/101 cases. Two copied failure worlds reached unchanged `c2-v1` after
-scripted recovery, including a safe deferred attempt. This is mechanics
-verification, not a fresh policy success-rate comparison. Both cohort campaigns
-and verification worlds are stopped. The cap remains 40 for future admission;
-it does not mean 40 worlds are running. Check processes before resuming.
+C36 clearance and C37 robot exclusion are separate interventions; their combination has no matched validation. No prepared C2 migration is authorized here. No real-base policy promotion is established.
 
-Next: matched fresh-save evaluation, then diagnose C1's missing capacity,
-input starvation and stock-gating split. Full transaction/economic facts,
-compatible policy training and later goal actions remain required.
-[Variant rules](laya_variants/README.md) govern adoption. No real-base promotion
-or additional large campaign is authorized by these records.
+Cohort roots and scheduler registry: `data/laya-experiments/`. The shared deadline is **2026-10-27 18:00 IST**; a 7,200-second trial must fit before it. New freezes require hash-recorded committed code, the integrated retention harness, distinct ports and explicit dependencies. C37 currently owns game/RCON bases 39800/32800; 39900/32900 is the next unallocated pair, subject to a fresh runtime check.
 
-The former September 21 stopped-state handoff is preserved in the
-[archive](../archive/rl/Laya_Current_Handoff_2026-09-21.md). Dated handoffs and
-reports remain evidence; do not treat old start/stop instructions as current
-service ownership or reset authority.
+The canonical shared source save is hash-verified at SHA-256 `347eba65065014f82261330d84d5ca2fa3e3427cad3ab18dcfdf496dd9c442b0`. Preserve it independently of historical cohort retention. The restored analysis tools are in `data/laya-orchestration/takeover-20261021/tools-c32-metrics/`.
 
-## October 10 queued fix round and campaign
+The [cohort ledger](Laya_Cohort_Ledger_2026-10-21.md) and result documents carry denominators and predicate details. Historical indexes are preserved for provenance: [main](../archive/rl/Laya_Current_Handoff_Main_2026-10-26.md), [controller](../archive/rl/Laya_Current_Handoff_Controller_2026-10-26.md). Dated evidence does not grant current lifecycle authority.
 
-The integration branch claude/live-fixes-integration contains the verified queued
-repairs and [Laya campaign loop](Laya_Campaign_Loop.md). The selected fast gate
-has 994 passes, one skip and the pre-existing import-firewall failure. This is
-unit/fake integration evidence. The first eight-hour exploratory loop started October10 at05:29IST
-on branch codex/laya-loop-20261010 from physical frozen sources, speed 2, natural episode
-stops, one report-only Muse xhigh and one focused DeepSeek high repair per cycle.
-No main merge, push, adoption or production-server promotion is implied.
-Campaign deadline: October 10 at 13:27:33 IST (original deadline retained).
-Owned unit: laya-loop-20261010.service; confirmed requested=observed speed 2;
-private game/RCON ports 34986/27986. First live episode c61abd5.
-Campaign evidence: data/laya-experiments/laya-loop-20261010; two-hour checks
-append there and to the local data/live-run-kit/next-round.md.
-
-## October 10 natural goal intent (cx-natural-target worktree)
-
-Latest explicit user intent: the goal is a **completed** `mining-productivity-4`
-research target. A goal run ends only on a verified `target_completed`, a hard
-failure, or a measured complete stall over the declared observation window.
-Automatic C6/proxy mission completion and the 12-decision stall cutoff no longer
-end a goal run; science rates and a *queued* research are observations, not
-success. Natural campaign episodes set no default total game/wall cap and no 6h
-episode wall assumption (`tools/campaign_runtime.py`, `Config`); explicit
-`--until-accepted`/`--max-game-ticks`/`--run-wall-seconds` remain experiment
-options. The 8h campaign deadline only prohibits new episodes/fixes; an active
-natural run and its terminal evidence may finish beyond it. Goal produce
-options for plastic/advanced-circuit/science and authorized research/lab options
-now come from the shared toolkit (`training/laya_ops_runner.compile_options`,
-`training/laya_ops.DeterministicSession`). Contract and evidence:
-`training/laya_goal.py` (`laya-goal-v1`, `useful-state-window-v1`), summarized in
-the run summary `goal`/`stall` fields. Seeded weights are unchanged.
-
-## October10 completed loop and repairs
-
-The first loop ended13:38:40IST after35 naturally stalled runs,2866 decisions,
-maximum realC3 in9/35 and noC4–C6. All35 Muse completions failed because installed
-OpenCode uses worktree-relative edit requests while the policy supplied absolute
-paths. No DeepSeek fix or commit occurred. Placeholder reports fooled oversight.
-Read the preserved final audit and Luna plan under the main checkout's
-data/laya-experiments/laya-loop-20261010/. These repeats are exploratory evidence.
-
-Round2 repairs now publish strictly read-only Muse responses through the wrapper,
-fix relative-path source permissions, stop observer failure churn, validate
-machine completion and separate gameplay from improvement stages, carry shared
-mall reservations into initial starter coverage, measure mission output counters,
-and expose loan/bill/craft progress with claimant-safe material availability.
-The active target is verified mining-productivity-4. C6/science-rate proxies and
-queued research do not end a natural goal run; there are no default total tick,
-wall or12-decision cuts. Actual hard failures and measured unchanged useful state
-do. A fresh separate campaign is authorized by the user's October10 direction;
-never resume or extend the expired campaign. Its new launch identity is recorded
-in data/laya-experiments/laya-loop-20261010b/ when it starts.
-
-## 2026-10-10 16:09 IST — fresh loop active, complete improvement cycle proven
-
-Unit laya-loop-20261010b.service, branch codex/laya-loop-20261010b, root in the
-main checkout data/laya-experiments/laya-loop-20261010b. Initial frozen source
-ed909b7; first game started15:42:47IST with requested=observed2, research
-goal=mining-productivity-4 and no total tick/wall/decision budget. Deadline
-23:42:41IST applies to new cycles/fixes; active natural episodes may finish
-afterward. Checks17:42/19:42/21:42/23:42 inspect validated stages and safe resumption.
-
-The first episode hard-failed at4wall seconds on unsupported raw-ore crafting.
-Muse published its complete report; DeepSeek corrected generic raw-resource
-produce eligibility using existing classification; its regression failed on
-committed HEAD and passed in the candidate; gate had only known firewall
-failure; review approved; controller committed8c0dab7 at15:58:42 and launched
-a new physical freeze. The rerun got past that failure and hard-failed at45wall
-seconds on a copper-pioneer lifecycle contradiction. Its second Muse report
-is complete and the next synthesis/fix cycle is active. No gameplay milestone
-improvement or adoption claim follows from these two early failures. Main
-production/server untouched; neither push nor merge into main occurred.
+C38's planned comparison is converged source + common experimental robots, varying only clearance (60 pairs, fresh seeds80160–80219, ports39900/32900). It may run alongside C37 under the same global gate; no frozen C37 artifact changes. See the [convergence record](Laya_Branch_Convergence_2026-10-26.md) and check its actual freeze/job status before lifecycle actions. Clearance and robot exclusion remain experimental.

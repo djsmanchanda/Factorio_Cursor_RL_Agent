@@ -1,0 +1,19 @@
+{
+  "$comment": "Path: schemas/laya_ops_checkpoint.schema.json | Purpose: Bind one coherent disposable ops generation to its save, controller and runtime provenance.",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["version", "production_authority", "logical_run_id", "logical_episode_id", "tick", "engine_sha256", "source_hashes", "mod_hashes", "files", "capture_seconds", "lineage"],
+  "properties": {
+    "version": {"const": "laya-ops-checkpoint-v1"},
+    "production_authority": {"const": false},
+    "logical_run_id": {"type": "string", "minLength": 1},
+    "logical_episode_id": {"type": "string", "minLength": 1},
+    "tick": {"type": "integer", "minimum": 0},
+    "engine_sha256": {"type": "string", "minLength": 1},
+    "source_hashes": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string"}},
+    "mod_hashes": {"type": "object", "additionalProperties": {"type": "string"}},
+    "files": {"type": "object", "required": ["source.zip", "controller.json", "engine-state.json"], "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+    "capture_seconds": {"type": "number", "minimum": 0},
+    "lineage": {"type": "object", "required": ["fixture_assisted", "comparison_eligible"], "properties": {"fixture_assisted": {"type": "boolean"}, "comparison_eligible": {"type": "boolean"}}}
+  }
+}

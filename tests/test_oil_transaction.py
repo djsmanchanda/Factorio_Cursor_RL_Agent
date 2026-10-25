@@ -67,7 +67,7 @@ def test_partial_submit_restart_reuses_layout_and_live_validator(monkeypatch, tm
     real_submit = stage_chemical._submit_oil_cell_packets
     _oil_cell_world(monkeypatch, [])
     monkeypatch.setattr(stage_chemical, "_submit_oil_cell_packets", real_submit)
-    monkeypatch.setattr(stage_chemical.live_base, "available_items", lambda *_a: {})
+    monkeypatch.setattr(stage_chemical.live_base, "transferable_items", lambda *_a: {})
     monkeypatch.setattr(stage_chemical, "construction_supply_chain_is_scheduled", lambda *_a: True)
     monkeypatch.setattr(stage_chemical, "_connect_oil_cell_power", lambda *_a, **_k: None)
     attempts = []
@@ -135,3 +135,118 @@ def test_plastic_transaction_does_not_release_deferred_sulfur_power(monkeypatch)
                 for phase in dict(intent["packets"])["chemical_power_backbone"]["phases"]
                 for action in phase["actions"]}
     assert deferred.isdisjoint(released)
+
+
+def test_selected_bill_credits_installation_and_preserves_other_claims(monkeypatch, tmp_path):
+    from orchestrator import live_base
+    from orchestrator.material_reservations import MaterialReservationLedger
+
+    store = OilTransactionStore.for_bridge(_bridge(tmp_path), "nauvis", "player")
+    intent = _intent()
+    intent["packets"][0][1]["phases"][0]["actions"] = [
+        {"action_type": "place_ghost", "entity": "pipe", "position": {"x": n + .5, "y": .5}}
+        for n in range(10)]
+    store.save(intent, complete=False)
+    frozen = store.path.read_bytes()
+    ledger = MaterialReservationLedger(tmp_path / "script-output", episode_id="episode-a",
+                                       surface="nauvis", force="player")
+    ledger.declare("other", {"pipe": 2}, {"pipe": 3}, priority=100)
+    ledger.declare("chemical_test", {"pipe": 10}, {"pipe": 3})
+    observation = {"required": {"pipe": 10}, "installed": {"pipe": 6}, "pending": {"pipe": 2},
+                   "unplaced": {"pipe": 2}, "remaining": {"pipe": 4}}
+    monkeypatch.setattr(live_base, "plan_construction_status", lambda *_a: copy.deepcopy(observation))
+    monkeypatch.setattr(live_base, "transferable_items", lambda *_a: {"pipe": 3})
+    monkeypatch.setattr(live_base, "available_items", lambda *_a: pytest.fail("requester WIP used to pay bill"))
+    def pending(*_a, exclude):
+        assert len(exclude) == 10  # Its own ghosts are not charged as another consumer.
+        return {"pipe": 1}
+    monkeypatch.setattr(live_base, "pending_construction_items", pending)
+    facts = store.material_facts(object(), ledger)
+    assert facts["remaining"] == {"pipe": 4}  # Ghosts do not count as installed material.
+    assert facts["available_to_owner"] == {"pipe": 0}  # Foreign pending work + foreign reservation.
+    assert facts["missing"] == {"pipe": 4} and facts["stock_levels"] == {"pipe": 7}
+    assert facts["identity"]["episode_id"] == "episode-a"
+    observation.update(installed={"pipe": 8}, remaining={"pipe": 2})
+    assert store.material_facts(object(), ledger)["stock_levels"] == {"pipe": 5}
+    observation.update(installed={"pipe": 10}, remaining={})
+    done = store.material_facts(object(), ledger)
+    assert done["missing"] == {} and not done["complete"]  # Material delivery is not operating service.
+    assert store.path.read_bytes() == frozen  # No replanning or lifecycle mutation from observation.
+
+
+@pytest.mark.lua
+def test_construction_observation_counts_exact_real_placements_and_tiles():
+    import shutil
+    import subprocess
+    import re
+    from orchestrator import live_base
+
+    lua = shutil.which("lua")
+    if lua is None:
+        pytest.skip("Lua interpreter required for construction observation")
+    class Client:
+        def command(self, command):
+            encoded = re.search(r'helpers.json_to_table\(("(?:\\.|[^"\\])*")\)', command).group(1)
+            placements = json.loads(json.loads(encoded))
+            literal = "{" + ",".join("{tile=" + str(a["tile"]).lower() + ",name=" + json.dumps(a["name"]) +
+                                      f",x={a['x']},y={a['y']}" + "}" for a in placements) + "}"
+            fixture = """
+local owner={name='player'}
+local surface={get_tile=function(p) return {name=p.x==5 and 'landfill' or 'water'} end,
+ find_entities_filtered=function(o)
+   assert(o.force==owner, 'force scope lost')
+   if o.type=='entity-ghost' then return o.position.x==2.5 and {{}} or {} end
+   if o.type=='tile-ghost' then return o.position.x==6 and {{}} or {} end
+   assert(o.name=='pipe')
+   return o.position.x==1.5 and {{type='pipe',position={x=1.5,y=.5}}} or {}
+ end}
+game={surfaces={nauvis=surface},forces={player=owner}}
+rcon={print=print}
+helpers={table_to_json=function(out)
+ local encoded={};for _,v in ipairs(out) do encoded[#encoded+1]='"'..v..'"' end
+ return '['..table.concat(encoded,',')..']' end}
+"""
+            fixture += "\nhelpers.json_to_table=function() return " + literal + " end\n"
+            result = subprocess.run([lua, "-"], input=fixture + command.removeprefix("/sc "),
+                                    capture_output=True, text=True)
+            assert result.returncode == 0, result.stderr
+            return result.stdout
+    actions = [{"action_type": "place_ghost", "entity": "pipe", "position": {"x": n + .5, "y": .5}}
+               for n in (1, 2, 3)]
+    actions += [copy.deepcopy(actions[0]), {"action_type": "configure_entity", "entity": "pipe"}]
+    actions += [{"action_type": "place_tile_ghost", "tile": "landfill", "position": {"x": n, "y": 0}}
+                for n in (5, 6)]
+    status = live_base.plan_construction_status(Client(), "nauvis", "player", {"phases": [{"actions": actions}]})
+    assert status == {"required": {"pipe": 3, "landfill": 2}, "installed": {"pipe": 1, "landfill": 1},
+                      "pending": {"pipe": 1, "landfill": 1}, "unplaced": {"pipe": 1},
+                      "remaining": {"pipe": 2, "landfill": 1}}
+
+
+@pytest.mark.parametrize("reply", ["", "[]", '["installed","other"]', '["other"]'])
+def test_incomplete_construction_observation_is_unknown(reply):
+    from orchestrator import live_base
+    with pytest.raises(live_base.TelemetryError):
+        live_base.plan_construction_status(SimpleNamespace(command=lambda _c: reply), "nauvis", "player",
+                                           _intent()["packets"][0][1])
+
+
+def test_oil_packet_retry_asks_only_for_remaining_transferable_items(monkeypatch):
+    from orchestrator import live_base
+    plan = _intent()["packets"][0][1]
+    monkeypatch.setattr(live_base, "plan_construction_status", lambda *_a: {"remaining": {}})
+    monkeypatch.setattr(live_base, "transferable_items", lambda *_a: {})
+    monkeypatch.setattr(live_base, "available_items", lambda *_a: pytest.fail("requester WIP counted"))
+    monkeypatch.setattr(stage_chemical, "construction_supply_chain_is_scheduled", lambda *_a: False)
+    submitted = []
+    monkeypatch.setattr(stage_chemical, "_submit", lambda *_a, **_kw: submitted.append(_a[4]))
+    stage_chemical._submit_oil_cell_packets(SimpleNamespace(command=lambda _c: ""), object(),
+                                            "nauvis", "player", [("chemical_test", plan)], lambda _m: None)
+    assert submitted == ["chemical_test"]  # Existing plan still goes through normal submission/validation.
+
+
+def test_session_retains_an_unreadable_transaction_as_unknown(monkeypatch, tmp_path):
+    from training.laya_ops import DeterministicSession
+    session = object.__new__(DeterministicSession)
+    session.bridge, session.client = _bridge(tmp_path), object()
+    monkeypatch.setattr(OilTransactionStore, "material_facts", lambda *_a: (_ for _ in ()).throw(ValueError("unreadable")))
+    assert session.material_transactions()["opening_oil"]["error"] == "ValueError: unreadable"

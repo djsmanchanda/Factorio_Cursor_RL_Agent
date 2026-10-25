@@ -202,6 +202,10 @@ def laya_entry(index: dict) -> dict:
     goal = summary.get("goal") or {}
     if stop == "goal_completed":
         outcome = "completed" if goal.get("verified") is True else "error"
+
+    research = summary.get("research_acceptance")
+    if stop == "research_complete":
+        outcome = "completed" if isinstance(research, dict) and research.get("earned") is True else "error"
     last = done[-1] if done else {}
     bottleneck = " | ".join((last.get("board") or {}).get("bottleneck") or []) or None
     # The run's own log is exact; index end times are a fallback (backfilled ones may be guesses).
@@ -226,7 +230,8 @@ def laya_entry(index: dict) -> dict:
             "log_file": str(root / "logs/laya-runner.log"), "root": str(root),
             "variant_id": index.get("variant_id", "baseline"), "variant_hash": index.get("variant_hash"),
             "experiment": index.get("experiment"), "seed": index.get("seed"),
-            "phase_ticks": summary.get("phase_ticks", {}), "stop": stop}
+            "phase_ticks": summary.get("phase_ticks", {}), "stop": stop,
+            "objective_version": summary.get("objective_version"), "research_acceptance": research}
 
 
 def record_laya_run(index: dict) -> dict:

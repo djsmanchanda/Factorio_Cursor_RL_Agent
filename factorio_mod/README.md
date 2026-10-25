@@ -35,8 +35,11 @@ Python callers select the namespace with `tools/runtime_namespace.py` and pass
 - `namespace.lua` / `namespace_override.lua`: runtime identity and wrappers.
 - `settings.lua`: the runtime activation setting.
 
+- `control.lua`: Loads the modules that register the mod's console-command surface.
+- `data.lua`: Declares the read-only Laya Coach area selection tool.
+
 ## Assumptions / Constraints
-- Targets **Factorio 2.1** (`factorio_version: 2.1`, `base >= 2.1.0`); the current runtime is **2.1.21**. Uses the 2.1 API (`storage`, `helpers.*`, `event.entity`, `minable_flag`).
+- Targets **Factorio 2.1** (`factorio_version: 2.1`, `base >= 2.1.0`); the current runtime is **2.1.23**. Uses the 2.1 API (`storage`, `helpers.*`, `event.entity`, `minable_flag`).
 - Lua remains "dumb" and only exports raw state.
 - All persistent state lives in the engine-provided `storage` table.
 - Snapshot output is written via `helpers.write_file` to Factorio's `script-output` directory.
@@ -55,6 +58,20 @@ discovered mods on next launch.
    - `script-output/factorio_mod/snapshots/snapshot_<tick>.json`
 
 For a dedicated server, send `/snapshot` over RCON and read that server's own `script-output`, not a client-side directory. A snapshot is read-only, but raw `/sc` Lua and many other registered commands can mutate state.
+
+## Laya Coach area tool
+
+The **Laya Coach** window (top-left button) has **Select area**, which puts the
+read-only `laya-coach-area-tool` (declared in `data.lua`) in your cursor.
+Drag a box over an ore patch, mall cell or place to avoid. Shift-drag records
+`alt_select` instead of `select`. While you drag, the status line shows a
+throttled preview: box size, entity count and ore totals. When you release, the
+area is attached to the next **Capture observation** or **Save guidance** record
+as `area`, with bounds, `selection_mode`, entity count, up to 160 sampled
+entities and the ore totals. **Clear area** drops it. The tool never builds,
+mines or changes entities. `training/laya_workflow.py` validates `area` against
+`schemas/laya_coach_record.schema.json` and copies a digest of it into
+`state.observation_digest.area`.
 
 ## Recipe knowledge export
 

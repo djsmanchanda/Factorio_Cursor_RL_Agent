@@ -4,7 +4,7 @@ import json
 
 from training.laya_clean_runner import Settings
 from training.laya_goal import (
-    DEFAULT_TECHNOLOGY, funded_signature, goal_evidence, loan_signature, research_goal_satisfied, useful_state,
+    DEFAULT_TECHNOLOGY, GOAL_VERSION, funded_signature, goal_evidence, loan_signature, research_goal_satisfied, useful_state,
 )
 from training.laya_ops_runner import run
 
@@ -122,7 +122,7 @@ class _StepPolicy:
 
 def test_goal_run_does_not_end_on_the_rate_ladder(tmp_path, monkeypatch):
     from training import laya_ops_runner as ops
-    monkeypatch.setattr(ops, "phase_reached", lambda _: True)  # Every rate proxy is "reached" (C6 included).
+    monkeypatch.setattr(ops, "ops_phase_reached", lambda *_: True)  # Every rate proxy is "reached" (C6 included).
     world = _World()
     summary = run(world, _StepPolicy("op.reserve_steel_seed"), journal=tmp_path / "j.jsonl", decisions=5,
                   measure_ticks=600, seed=1, run_id="proxy", session=_AdvancingSession(world),
@@ -165,6 +165,7 @@ def test_verified_target_completed_ends_the_run(tmp_path):
                   measure_ticks=600, seed=1, run_id="done", session=session,
                   settings=Settings(goal_technology="mining-productivity-4"))
     assert summary["stop"] == "goal_completed"
+    assert summary["objective_version"] == GOAL_VERSION
     assert summary["goal"]["verified"] is True and summary["goal"]["technology"] == "mining-productivity-4"
     assert session.status_calls == 1
 

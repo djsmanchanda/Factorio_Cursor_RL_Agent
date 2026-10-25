@@ -178,3 +178,30 @@ def test_evaluator_keeps_passed_checkpoint_monotonic():
     later = evaluator.evaluate("C0", {"tick": 4})
     assert later.passed
     assert later.evidence["monotonic_reached"] is True
+
+
+def test_c1_evidence_counts_mall_statuses_and_reads_idle_producers_as_failed():
+    idle = [{"recipe": "iron-gear-wheel", "working": False, "status": "output_full"},
+            {"recipe": "copper-cable", "working": False, "status": "no_ingredients"},
+            {"recipe": "electronic-circuit", "working": True, "status": "working"},
+            {"recipe": "transport-belt", "working": False}]
+    starters = {"iron": {"present": True, "healthy": True, "producing": True},
+                "copper": {"present": True, "healthy": True, "producing": False},
+                "stone": {"present": False}}
+    result = evaluate_milestone("C1", _snapshot(mall_assemblers=idle, starters=starters))
+    assert result.failed
+    assert result.evidence["mall_status_counts"] == {"no_ingredients": 1, "output_full": 1, "unreported": 1, "working": 1}
+    assert result.evidence["recipes_present"] == {"iron-gear-wheel": True, "copper-cable": True}
+    assert result.evidence["checks"]["iron_gear_producer_working"] is False
+    assert result.evidence["starter_blockers"] == {"iron": "ready", "copper": "not_producing", "stone": "absent"}
+
+
+def test_c1_idle_survey_now_reads_producers_false_without_changing_status():
+    # c1-v1 change: an observed survey with no working machine used to report the producer checks unknown;
+    # they are now measured False. The count check already failed it, so the status is unchanged.
+    idle = [{"recipe": "iron-gear-wheel", "working": False, "status": "no_power"}] * 4
+    result = evaluate_milestone("C1", _snapshot(mall_assemblers=idle))
+    assert result.failed and result.evidence["checks"]["copper_cable_producer_working"] is False
+    empty = evaluate_milestone("C1", _snapshot(mall_assemblers=[]))
+    assert empty.unknown and empty.evidence["checks"]["iron_gear_producer_working"] is None
+    assert empty.evidence["mall_status_counts"] == {}

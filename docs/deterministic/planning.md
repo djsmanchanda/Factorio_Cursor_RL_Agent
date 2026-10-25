@@ -228,6 +228,15 @@ gated separately and is not changed by the release.
   Producer reservations remain held through construction and release only
   after measured output; an impossible self-seed is a typed supply wait rather
   than a generic no-progress failure.
+  Reusing a transient submission name renews its construction bill, even when
+  its item counts match the previous build. Funding also subtracts the live
+  bill of other unbuilt entity ghosts: submission does not make their stock
+  free before bots collect it. Exact same-prototype ghosts at the current
+  plan's positions are excluded so retries do not pay twice. Shortage targets
+  include both the new bill and those pending commitments. This protects the
+  steel seed's pole reserve while independent foundations build concurrently.
+  Additive ghosts may wait for future production, but cannot bypass another
+  active project's reservation for a missing construction item.
 - A compact producer that needs its own requester chest may borrow one duplicate
   copper-cable or gear assembler long enough to make the aggregate requester
   seed reserved by the ledger. The borrowed cell recursively makes missing
@@ -472,6 +481,10 @@ gated separately and is not changed by the release.
   first makes any missing gears, then switches to belts, while the two baseline
   gear assemblers and one cable assembler remain assigned. The loan restores
   the cable recipe when its reserve is full or another batch needs the slot.
+  Each built gear/cable assembler reads its own provider over a green wire and
+  stops at min(10 stacks, 1000 items) there (user 2026-10-15: the chest is
+  shared, so it must not hold more than 1k gear or cable). A loan clears that
+  circuit gate on the borrowed machine and its restore reapplies it.
 - A collision-checked additive blueprint does not wait for every construction
   item to have a producer. Stage its reachable construction coverage, submit
   the ghosts, and promote the persisted exact shortfall as binding mall work;

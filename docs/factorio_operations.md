@@ -18,9 +18,9 @@ Current paths:
 
 Never infer the server or port from a default. Confirm the process, listening game/RCON ports, save, loaded mod version, surface, force, and server-owned `script-output` path.
 
-The current runtime target is **Factorio 2.1.21**, with the executable and all
-bundled mods from that same release. Upgrade verification and rollback are in
-the [2.1.21 handoff](Factorio_2.1.21_Upgrade.md). Historical 2.1.20 experiments
+The current runtime target is **Factorio 2.1.23**, with the executable and all
+bundled mods from that same release. The [2.1.21 handoff](Factorio_2.1.21_Upgrade.md)
+remains historical rollback evidence. Historical 2.1.20/2.1.21 experiments
 retain their runtime identity; do not rewrite their manifests or pool them with
 new-version results.
 
@@ -56,12 +56,13 @@ Repository, dedicated-server, GUI-client, and WSL mod copies are distinct. Compa
 
 ### Engine version and rollback
 
-Native manager and dashboard defaults target Factorio **2.1.21** (build 87673).
+Native manager and dashboard defaults target Factorio **2.1.23** (build 87750).
 Pair the executable with the same runtime's `data` directory and use a matching
 GUI client for multiplayer. Existing frozen experiments retain their recorded
 engine version; do not merge their results with new-version runs as matched evidence.
 
-Keep the private `factorio-2.1.20` runtime and pre-upgrade save copies for rollback.
+Keep the private `factorio-2.1.22` runtime (build 87719), older 2.1.21 runtime, and pre-upgrade save
+copies for rollback.
 Use `--runtime-root` to select the older engine, restore the appropriate copied
 save and matching `read-data` configuration while stopped, then restart only
 the affected runtime and consumer. Merely changing the executable does not
@@ -72,7 +73,7 @@ establish that an upgraded save can be loaded by the older engine.
 `scripts/manage_linux_training_worker.sh` creates only disposable worker state
 below `~/.local/share/factorio-rl/training/<index>/worker`. It uses a separate
 Factorio `write-data` root plus the private headless runtime at
-`~/.local/share/factorio-rl/runtime/factorio-2.1.21`, local RCON port,
+`~/.local/share/factorio-rl/runtime/factorio-2.1.23`, local RCON port,
 worker-local `script-output`, save, mods, logs, and mode-600 RCON-secret file.
 On a stopped worker's next `start`, the manager refreshes only its managed
 `read-data`/`write-data` paths; other configuration and server settings survive.
@@ -84,7 +85,7 @@ Its default ports are game
 
 `scripts/manage_linux_deterministic_server.sh` owns the isolated deterministic
 root at `~/.local/share/factorio-rl/deterministic`, using the private
-`factorio-2.1.21` runtime.  Its `bootstrap` action requires an explicit source
+`factorio-2.1.23` runtime.  Its `bootstrap` action requires an explicit source
 save and copies it once to the isolated root; it never writes to
 `~/.factorio/saves`.  The default game/RCON endpoints are loopback-only
 `34199/27017`, and the RCON secret is a mode-600 file under the server root.
@@ -122,7 +123,7 @@ uv run --with-requirements requirements.txt python tools/dashboard_server.py \
   --server-manager scripts/manage_linux_deterministic_server.sh \
   --runner-manager scripts/manage_linux_deterministic_runner.sh \
   --campaign-manager scripts/manage_linux_deterministic_campaign.sh \
-  --runtime-root ~/.local/share/factorio-rl/runtime/factorio-2.1.21 \
+  --runtime-root ~/.local/share/factorio-rl/runtime/factorio-2.1.23 \
   --gui-mods ~/.factorio/mods
 ```
 
@@ -250,6 +251,11 @@ or has been completed.
 - A live mission request means launch and observe the mission, not merely plan it or run tests.
 
 ## Training observation
+
+For shared Laya campaign slots, use the [host scheduler runbook](rl/Laya_Host_Scheduler.md).
+Its repository changes require deploying/restarting the installed scheduler and
+freezing future cohorts with the gate-aware batch harness. Active frozen cohorts
+remain separate; legacy admission controllers do not acquire the new shared lock.
 
 Training multiplayer viewing is observational. The Observatory's **View in Factorio** control targets only the active owned training surface and spectator. Client and server training-mod scripts must match exactly before joining.
 
