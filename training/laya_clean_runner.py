@@ -83,6 +83,20 @@ class Settings:
     mall_buildable_multiplier: int = 5
     context_view: str = 'full'
     reservation_mode: str = 'strict'
+    research_target: str | None = None
+    research_progressive: bool = True
+    research_sustain_ticks: int = 18000
+    max_wall_seconds: float | None = None
+    mall_loan_reconciliation: bool = False
+    decision_wait_schedule: str = "off"
+    decision_wait_growth_per_minute: float = 0.03
+    decision_wait_sqrt_minutes: float = 20.0
+    decision_wait_max_multiplier: float = 4.0
+    decision_wait_min_ticks: int = 60
+
+    def __post_init__(self):
+        from training.laya_decision_pacing import validate
+        validate(self)
 WAIT_TICKS = (300, 1800)
 MAX_MENU = 20  # laya_state schema: options maxItems
 EXPLORATION_MODEL = {"model_id": "laya-exploration-v1", "model_hash": "sha256:" + "0" * 64}
@@ -133,6 +147,7 @@ class LiveWorld(SavedWorldAdapter):
         observed_items = dict.fromkeys((*EXTRA_RECIPES, *(item for phase in PHASES for item in phase["targets"])))
         extra = "".join(f',"{name}"' for name in observed_items)
         self.lua_source = self.lua_source.replace(RECIPE_LIST_END, RECIPE_LIST_END[:-1] + extra + "}")
+        self.extra_recipes: tuple[str, ...] = ()
         if RECIPE_LINE not in self.lua_source:
             raise SavedWorldError("saved-world helper changed; machine recipe line not found")
         self.lua_source = self.lua_source.replace(RECIPE_LINE, RECIPE_LINE_LIVE)
@@ -321,7 +336,9 @@ def _need_key(facts: Mapping, candidate: dict, unmet: set[str]) -> str:
 
 def _compile(facts: Mapping, products: set[str], seed: int, request_multiplier: int | None = None) -> list[dict]:
     """Generator candidates for only the products a need can use (speed, not a choice)."""
-    recipes = {k: v for k, v in facts["recipes"].items() if k in products}
+    recipes = {k: v for k, v in facts["recipes"].items() if k in products
+               and v.get("enabled", True)
+               and all(part.get("type", "item") == "item" for part in v.get("ingredients", []))}
     candidates = compile_candidates({**facts, "recipes": recipes}, seed)
     if request_multiplier is not None:
         from training.laya_experiment_context import with_request_multiplier
@@ -344,7 +361,8 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     rng = random.Random(seed)
     from training.laya_experiment_context import reservation_view
     land_plan = reservation_view(site_plan, reservation_mode)
-    unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
+    unmet = {n["item"] for n in board["needs"]
+             if n["condition"] != "satisfied" and n.get("material_type", "item") == "item"}
     proposed = _compile(facts, unmet, seed, request_multiplier)
     # Iron, copper and stone start with direct starters (drills feeding furnaces); the
     # generator's single-drill-into-chest mines and requester-fed furnaces are not offered.
@@ -452,11 +470,11 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     for need, counts in pre_rejected.items():
         reasons[need].update(counts)
         rejected.update({r.split(":", 1)[0]: c for r, c in counts.items()})
-    conditions = {f"item:{n['item']}": n["condition"] for n in board["needs"]}
+    conditions = {n["need_id"]: n["condition"] for n in board["needs"]}
     # The decision state holds at most MAX_MENU options (waits included). Order needs by the
     # board's goal-tree order (not by gap), then stock and coverage; shrink to one option per
     # need when crowded, and journal what did not fit.
-    board_order = [f"item:{n['item']}" for n in board["needs"]]
+    board_order = [n["need_id"] for n in board["needs"]]
     ordered = sorted(legal, key=lambda n: (board_order.index(n) if n in board_order else len(board_order),
                                            n.startswith("coverage"), n))
     room = MAX_MENU - len(WAIT_TICKS)

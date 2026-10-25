@@ -12,6 +12,7 @@ from typing import Mapping
 
 from orchestrator import demand_siting, extraction_capacity, extraction_state, live_base, resource_patches
 from orchestrator.work_state import WorkStateSignal
+from planners.mining_geometry import mining_drill_positions, paired_mining_drill_positions
 from planners.plan_validation import ENTITY_FOOTPRINTS, actions
 from planners.smelter_block import (
     FURNACES_PER_MODULE, REFINERY_GENERATION_1_CAPACITIES,
@@ -86,6 +87,11 @@ class LocalExtractionRouteAssessment:
 RoutePreflight = Callable[
     [Point, Point, LocalExtractionRouteBudget], LocalExtractionRouteAssessment
 ]
+# (collector head, destination tile, tiles to avoid) -> route actions, or a
+# rejection reason.  The destination is entered heading east.
+CollectorLink = Callable[
+    [Point, Point, frozenset[tuple[int, int]]], "tuple[dict, ...] | str"
+]
 
 
 def route_assessment_from_actions(
@@ -159,6 +165,7 @@ _NEW_DIRECT_MINE_CACHE: dict[tuple[object, ...], tuple[Point, int, dict, Point]]
 def clear_new_mine_cache() -> None:
     """Forget read-only site surveys at the start of an episode controller."""
     _NEW_DIRECT_MINE_CACHE.clear()
+    extraction_state.clear_growth_limits()
 
 
 def invalidate_new_mine_cache(
@@ -195,13 +202,32 @@ class DistrictExpansionUnbuildable(WorkStateSignal):
     Nothing is under construction, so waiting cannot change the outcome; the
     state is terminal for this checkpoint and must not be treated as in progress."""
 
-    def __init__(self, message: str) -> None:
+    def __init__(
+        self, message: str, *, cause: str | None = None,
+        details: Mapping[str, object] | None = None,
+    ) -> None:
+        if cause is not None and cause not in EXPANSION_CAUSES:
+            raise ValueError(f"Unknown district expansion cause {cause!r}")
         super().__init__(
             message,
             code="district_expansion_unbuildable",
             classification="intended_difficulty",
             state="failed",
+            details={**(details or {}), **({"cause": cause} if cause else {})},
         )
+
+
+# Typed reasons a district cannot add its next module.  ``arith_prefix``: a
+# buildable prefix shorter than one six-drill module; ``off_patch``: the next
+# column leaves the ore (or reaches a foreign ore); ``corridor_blocked``:
+# standing infrastructure; ``merge_reach``: the belt tier cannot tunnel into a
+# parallel band's splitter; ``no_second_site``: no clear second collector on
+# the patch; ``link_unroutable``: a second site exists but its ore cannot reach
+# the owned collector.
+EXPANSION_CAUSES = frozenset({
+    "arith_prefix", "off_patch", "corridor_blocked", "merge_reach",
+    "no_second_site", "link_unroutable",
+})
 
 
 @dataclass(frozen=True)
@@ -224,18 +250,6 @@ class LocalExtractionPlan:
     smelter_vertical_mirror: bool = False
     first_column_x: float | None = None
     smelter_reserved_area: tuple[Point, Point] | None = None
-
-
-def mining_drill_positions(origin: Point, machine_count: int) -> list[Point]:
-    """Centres for a south-facing drill row whose output is a local belt."""
-    ox, oy = origin
-    return [(ox + 1.5 + (3 * index), oy - 1.5) for index in range(machine_count)]
-
-def paired_mining_drill_positions(origin: Point, machine_count: int) -> list[Point]:
-    """Three-above/belt/three-below geometry for a complete mine unit."""
-    upper = mining_drill_positions(origin, machine_count)
-    belt_y = origin[1] + 0.5
-    return upper + [(x, belt_y + 2) for x, _ in upper]
 
 
 def existing_mine_service_geometry(
@@ -386,8 +400,13 @@ def choose_mining_origin_with_reserve(
     footprint_has_resource: Callable[[list[Point]], bool],
     *,
     max_candidates: int = 300,
+    excluded_box: Callable[[Point, Point], bool] | None = None,
 ) -> tuple[Point, int] | None:
     """Choose the nearest row with the largest supported future reserve.
+
+    ``excluded_box`` rejects known-owned land without a live probe and
+    without spending the candidate budget, so a second site is not starved
+    by the 300 candidates nearest an owned district.
 
     Each candidate origin is visited once. The previous descending reserve
     loop restarted the same 300-candidate live survey for every reserve size;
@@ -395,12 +414,18 @@ def choose_mining_origin_with_reserve(
     identical RCON probes before reaching the same six-drill row.
     """
     best: tuple[Point, int] | None = None
-    for probes, origin in enumerate(candidate_mining_origins(
+    probes = 0
+    for origin in candidate_mining_origins(
         preferred, patch_min, patch_max, machine_count,
-    ), start=1):
+    ):
+        ox, oy = origin
+        if excluded_box is not None and excluded_box(
+            (ox - 6, oy - 5), (ox + machine_count * 3 + 4, oy + 7),
+        ):
+            continue
+        probes += 1
         if probes > max_candidates:
             break
-        ox, oy = origin
         if not area_is_clear(
             (ox - 6, oy - 5), (ox + machine_count * 3 + 4, oy + 7),
         ):
@@ -492,8 +517,16 @@ def _new_direct_mine(
     client: RconClient, surface: str, ore: str, nearest_tile: Point,
     patch_min: Point, patch_max: Point, machine_count: int,
     belt_type: str, inserter_type: str, belt_stock: int,
+    blocked_tiles: frozenset[tuple[int, int]] = frozenset(),
+    preferred: Point | None = None,
 ) -> tuple[Point, int, dict, Point]:
-    """Choose the next clear independent row on the same resource patch."""
+    """Choose the next clear independent row on the same resource patch.
+
+    ``blocked_tiles`` are owned or reserved tiles that a live clear-area probe
+    cannot see (an unbuilt growth corridor, a pending plan); ``preferred``
+    replaces the live staging-box search when the caller already knows where
+    the remaining ore lies.
+    """
     patch_columns = max(0, math.floor((patch_max[0] - patch_min[0]) / 3) + 1)
     row_drill_count = min(machine_count, patch_columns)
     if row_drill_count < 1:
@@ -501,20 +534,26 @@ def _new_direct_mine(
     maximum_reserve = min(
         RESERVED_PAIR_COLUMNS, patch_columns - row_drill_count,
     )
-    preferred_box = live_base.find_clear_area(
-        client, surface, (nearest_tile[0] - 5, nearest_tile[1] - 5),
-        row_drill_count * 3 + 10, 12,
-    )
-    if preferred_box is None:
-        # Geography, not a bug: standing infrastructure owns every staging
-        # strip. Defer (PendingSystemDeferred) so background gates such as the
-        # fast-belt capacity ladder pause instead of killing the run.
-        raise PendingSystemDeferred(
-            f"No clear staging area found near the {ore} patch at {nearest_tile}"
+    if preferred is None:
+        preferred_box = live_base.find_clear_area(
+            client, surface, (nearest_tile[0] - 5, nearest_tile[1] - 5),
+            row_drill_count * 3 + 10, 12,
         )
-    preferred = (round(preferred_box[0]), round(preferred_box[1] + 5))
-    area_is_clear = lambda lower, upper: live_base.area_clear(
-        client, surface, lower, upper
+        if preferred_box is None:
+            # Geography, not a bug: standing infrastructure owns every staging
+            # strip. Defer (PendingSystemDeferred) so background gates such as the
+            # fast-belt capacity ladder pause instead of killing the run.
+            raise PendingSystemDeferred(
+                f"No clear staging area found near the {ore} patch at {nearest_tile}"
+            )
+        preferred = (round(preferred_box[0]), round(preferred_box[1] + 5))
+    excluded_box = (
+        (lambda lower, upper: box_touches_tiles(blocked_tiles, lower, upper))
+        if blocked_tiles else None
+    )
+    area_is_clear = lambda lower, upper: (
+        (excluded_box is None or not excluded_box(lower, upper))
+        and live_base.area_clear(client, surface, lower, upper)
     )
     footprint_has_resource = lambda centres: live_base.drill_footprints_have_resource(
         client, surface, ore, centres
@@ -524,7 +563,7 @@ def _new_direct_mine(
     # first outbound belt tile (live iron mine: x=25.5).
     selected = choose_mining_origin_with_reserve(
         preferred, patch_min, patch_max, row_drill_count, maximum_reserve,
-        area_is_clear, footprint_has_resource,
+        area_is_clear, footprint_has_resource, excluded_box=excluded_box,
     )
     if selected is None:
         raise PendingSystemDeferred(
@@ -544,6 +583,7 @@ def _new_direct_mine(
         reserved_pair_columns=reserved_columns,
         output_side="east",
     )
+    plan["verified_reserve_columns"] = reserved_columns
     return origin, row_drill_count * 2, plan, output
 
 
@@ -551,6 +591,8 @@ def _cached_new_direct_mine(
     client: RconClient, surface: str, ore: str, nearest_tile: Point,
     patch_min: Point, patch_max: Point, machine_count: int,
     belt_type: str, inserter_type: str, belt_stock: int,
+    blocked_tiles: frozenset[tuple[int, int]] = frozenset(),
+    preferred: Point | None = None,
 ) -> tuple[Point, int, dict, Point]:
     """Reuse an unchanged read-only site survey until a mine is submitted.
 
@@ -559,21 +601,141 @@ def _cached_new_direct_mine(
     """
     key = (
         id(client), surface, ore, nearest_tile, patch_min, patch_max,
-        machine_count, belt_type, inserter_type,
+        machine_count, belt_type, inserter_type, blocked_tiles, preferred,
     )
     cached = _NEW_DIRECT_MINE_CACHE.get(key)
     if cached is None:
         cached = _new_direct_mine(
             client, surface, ore, nearest_tile, patch_min, patch_max,
             machine_count, belt_type, inserter_type, belt_stock,
+            blocked_tiles=blocked_tiles, preferred=preferred,
         )
         _NEW_DIRECT_MINE_CACHE[key] = deepcopy(cached)
     return deepcopy(cached)
 
 
+def owned_collector_tiles(mine: extraction_state.ResourceMine) -> frozenset[tuple[int, int]]:
+    """Drill rows, belt, remaining verified corridor and head of one collector."""
+    spare = max(0, mine.row_capacity - mine.drill_count)
+    first_x = mine.first_column_x if mine.first_column_x is not None else mine.output[0]
+    head_x = mine.haul_head[0] if mine.haul_head is not None else mine.output[0]
+    west = min(mine.output[0], first_x - 1.5 - 3 * spare)
+    belt_y = mine.shared_belt_y
+    return frozenset(
+        (x, y)
+        for x in range(math.floor(west), math.floor(head_x) + 1)
+        for y in range(math.floor(belt_y - 4.5), math.floor(belt_y + 4.5))
+    )
+
+
+def _second_collector(
+    client: RconClient, surface: str, ore: str,
+    owned: extraction_state.ResourceMine,
+    patch: resource_patches.ResourcePatch, requested: int, *,
+    belt_type: str, inserter_type: str, belt_stock: int,
+    reserved_tiles: frozenset[tuple[int, int]],
+    link_route: CollectorLink | None, causes: dict[str, str],
+) -> tuple[Point, int, dict, Point, float]:
+    """Open a second collector on the owned patch that feeds the owned tail.
+
+    The fresh-site planner chooses the row (its live clear-area probe already
+    rejects standing drills, belts and ghosts; the owned corridor and recorded
+    reservations are excluded explicitly because they are not entities). The
+    link enters the owned collector's west tail heading east, so the new ore
+    rides the owned collector and haul into the owned refinery, which grows
+    on the ordinary cohesive refinery path.
+    """
+    def unbuildable(cause: str, reason: str, **extra: object) -> DistrictExpansionUnbuildable:
+        return DistrictExpansionUnbuildable(
+            f"The owned {ore} resource district at {owned.output} has no "
+            "buildable straight, parallel or second collector for the next "
+            f"six-drill checkpoint: {reason}",
+            cause=cause,
+            details={"causes": {**causes, "second": cause}, **extra},
+        )
+
+    if owned.first_column_x is None or owned.haul_head is None:
+        raise unbuildable(
+            "no_second_site", "only an east-flow collector can take a tail link",
+        )
+    if link_route is None:
+        raise unbuildable("no_second_site", "no live link planner was supplied")
+    owned_tiles = owned_collector_tiles(owned)
+    blocked = frozenset(reserved_tiles) | owned_tiles
+    # Start where the patch is deepest, not beside the exhausted owned edge.
+    centre = (
+        round((patch.minimum[0] + patch.maximum[0]) / 2),
+        round((patch.minimum[1] + patch.maximum[1]) / 2),
+    )
+    try:
+        origin, drill_count, plan, head = _cached_new_direct_mine(
+            client, surface, ore, patch.nearest, patch.minimum, patch.maximum,
+            max(1, requested // 2), belt_type, inserter_type, belt_stock,
+            blocked_tiles=blocked, preferred=centre,
+        )
+    except (PendingSystemDeferred, ValueError) as error:
+        raise unbuildable("no_second_site", str(error)) from error
+    if drill_count < requested:
+        raise unbuildable(
+            "no_second_site",
+            f"the best second row holds {drill_count} of {requested} drills",
+        )
+    tail = (owned.output[0] - 1, owned.shared_belt_y)
+    # The owned corridor is dead once this runs, so the link may use it; the
+    # new row, its verified corridor and every other reservation may not.
+    avoid = (
+        (frozenset(reserved_tiles) - owned_tiles)
+        | frozenset(tuple(tile) for tile in plan.get("reserved_tiles", ()))
+        | frozenset(_plan_tiles(plan))
+    )
+    route = link_route(head, tail, avoid)
+    if isinstance(route, str):
+        raise unbuildable(
+            "link_unroutable", route, second_site=origin, link_from=head, link_to=tail,
+        )
+    plan = deepcopy(plan)
+    plan["phases"].append({"name": "second_collector_link", "actions": list(route)})
+    plan["second_collector"] = {
+        "owned_tail": tail, "collector_head": head, "owned_head": owned.haul_head,
+    }
+    return origin, drill_count, plan, owned.haul_head, origin[1] + 0.5
+
+
+def _plan_tiles(plan: dict) -> set[tuple[int, int]]:
+    tiles: set[tuple[int, int]] = set()
+    for action in actions(plan):
+        x, y = action["position"]["x"], action["position"]["y"]
+        size = ENTITY_FOOTPRINTS.get(action.get("entity", ""), 1)
+        half = size / 2
+        tiles.update(
+            (tx, ty)
+            for tx in range(math.floor(x - half), math.ceil(x + half))
+            for ty in range(math.floor(y - half), math.ceil(y + half))
+        )
+    return tiles
+
+
 def buildable_batch_prefix(
     client: RconClient, surface: str, ore: str, positions: tuple[Point, ...],
 ) -> tuple[Point, ...]:
+    """Compatibility view of ``buildable_batch_prefix_with_cause``."""
+    return buildable_batch_prefix_with_cause(client, surface, ore, positions)[0]
+
+
+def box_touches_tiles(
+    tiles: frozenset[tuple[int, int]], lower: Point, upper: Point,
+) -> bool:
+    """Whether any integer tile lies inside the half-open box."""
+    for x in range(math.floor(lower[0]), math.ceil(upper[0])):
+        for y in range(math.floor(lower[1]), math.ceil(upper[1])):
+            if (x, y) in tiles:
+                return True
+    return False
+
+
+def buildable_batch_prefix_with_cause(
+    client: RconClient, surface: str, ore: str, positions: tuple[Point, ...],
+) -> tuple[tuple[Point, ...], str | None]:
     """The leading run of reserved columns that can actually be built today.
 
     A reserved corridor is checked outward from the mine, and the answer stops
@@ -592,7 +754,7 @@ def buildable_batch_prefix(
         for index in range(0, len(positions) - 1, 2)
     ]
     if not columns:
-        return ()
+        return (), None
     conflicted = {
         centre for centre, _reason in live_base.drill_siting_conflicts(
             client, surface, ore, list(positions),
@@ -600,16 +762,18 @@ def buildable_batch_prefix(
     }
     buildable: list[Point] = []
     for pair in columns:
+        if any(site in conflicted for site in pair):
+            return tuple(buildable), "off_patch"
         if any(
-            site in conflicted or not live_base.area_clear(
+            not live_base.area_clear(
                 client, surface,
                 (site[0] - 1.5, site[1] - 1.5), (site[0] + 1.5, site[1] + 1.5),
             )
             for site in pair
         ):
-            break
+            return tuple(buildable), "corridor_blocked"
         buildable.extend(pair)
-    return tuple(buildable)
+    return tuple(buildable), None
 
 
 def complete_six_drill_prefix(positions: tuple[Point, ...]) -> tuple[Point, ...]:
@@ -908,6 +1072,8 @@ def plan_local_extraction(
     route_budget: LocalExtractionRouteBudget = DEFAULT_LOCAL_EXTRACTION_ROUTE_BUDGET,
     route_preflight: RoutePreflight | None = None,
     observe: Callable[[str], None] | None = None,
+    reserved_tiles: frozenset[tuple[int, int]] = frozenset(),
+    link_route: CollectorLink | None = None,
 ) -> LocalExtractionPlan:
     """Reconcile mining, then reserve an exact, bounded, off-ore smelter.
 
@@ -916,6 +1082,11 @@ def plan_local_extraction(
     it can win siting.  Without it, siting deliberately does not pretend that a
     Manhattan distance is a legal belt route; the build-stage preflight remains
     responsible for rejecting the plan before submission.
+
+    When an owned district can neither grow straight nor add a parallel band,
+    ``link_route`` lets a second collector on the same patch feed the owned
+    collector's tail; ``reserved_tiles`` are recorded plan reservations that
+    the second site and its link must avoid.
     """
     if not isinstance(route_budget, LocalExtractionRouteBudget):
         raise TypeError("route_budget must be a LocalExtractionRouteBudget")
@@ -954,6 +1125,9 @@ def plan_local_extraction(
             excluded_drill_positions,
         ),
     )
+    # Each collector claims only the corridor this run verified, not ten
+    # assumed spare columns; an exhausted one is not re-surveyed.
+    mines = extraction_state.apply_growth_limits(client, surface, ore, mines)
     observed = mines[0] if mines else None
     if (
         observed is not None
@@ -1011,6 +1185,7 @@ def plan_local_extraction(
     row_drill_count = 0
     expansion_step = -1
     first_column_x: float | None = None
+    second_belt_y: float | None = None
     if existing is not None:
         expansion_step = existing.growth_direction if existing.first_column_x is not None else existing.expansion_step
         first_column_x = existing.first_column_x
@@ -1041,13 +1216,33 @@ def plan_local_extraction(
     elif mines:
         requested = phase_target - system_before
         requested += requested % 2
-        positions = (
-            extraction_capacity.phase_batch_positions(active, requested)
-            if active is not None else ()
-        )
-        positions = complete_six_drill_prefix(
-            buildable_batch_prefix(client, surface, ore, positions),
-        )
+        causes: dict[str, str] = {}
+        positions: tuple[Point, ...] = ()
+        # Grow the first collector whose verified corridor still builds a
+        # whole module; an exhausted one records its limit and cause.
+        for candidate in [mine for mine in mines if mine.row_capacity > mine.drill_count]:
+            prefix, stop = buildable_batch_prefix_with_cause(
+                client, surface, ore,
+                extraction_capacity.phase_batch_positions(candidate, requested),
+            )
+            positions = complete_six_drill_prefix(prefix)
+            if positions:
+                active = candidate
+                break
+            causes.setdefault("straight", "arith_prefix" if prefix else (stop or "off_patch"))
+            if candidate.first_column_x is not None and candidate.haul_head is not None:
+                extraction_state.record_growth_limit(
+                    client, surface, ore, candidate.shared_belt_y,
+                    candidate.haul_head,
+                    min(x for x, _y in prefix) if prefix else candidate.first_column_x,
+                    causes["straight"],
+                )
+        if not positions:
+            for mine in mines:
+                recorded = extraction_state.growth_limit_cause(client, surface, ore, mine)
+                if recorded is not None:
+                    causes.setdefault("straight", recorded)
+            causes.setdefault("straight", "off_patch")
         if positions:
             drill_xs = sorted({x for x, _y in positions})
             mine_origin = (drill_xs[0] - 1.5, active.shared_belt_y + 3.5)
@@ -1071,22 +1266,25 @@ def plan_local_extraction(
             # collector is full or physically blocked. Survey both bands in
             # the declared district envelope before refusing growth; each
             # still has to pass live ore and occupancy checks.
-            parallel_source = active or observed
+            parallel_source = extraction_state.apply_growth_limits(
+                client, surface, ore, [active or observed],
+            )[0]
             selected_parallel: tuple[tuple[Point, ...], dict, float] | None = None
             merge_failures: list[str] = []
-            for band_order in extraction_capacity.owned_parallel_band_orders(
+            band_orders = extraction_capacity.owned_parallel_band_orders(
                 parallel_source, requested, (patch_min[0], patch_min[1]),
                 (patch_max[0], patch_max[1]),
-            ):
+            ) if extraction_capacity.parallel_band_merge_reachable(belt_type) else ()
+            for band_order in band_orders:
                 candidate_positions = extraction_capacity.parallel_phase_batch_positions(
                     parallel_source, requested, band_order=band_order,
                 )
-                candidate_positions = complete_six_drill_prefix(
-                    buildable_batch_prefix(
-                        client, surface, ore, candidate_positions,
-                    ),
+                prefix, stop = buildable_batch_prefix_with_cause(
+                    client, surface, ore, candidate_positions,
                 )
+                candidate_positions = complete_six_drill_prefix(prefix)
                 if not candidate_positions:
+                    causes["parallel"] = "arith_prefix" if prefix else (stop or "off_patch")
                     continue
                 drill_xs = sorted({x for x, _y in candidate_positions})
                 parallel_belt_y = parallel_source.shared_belt_y + (
@@ -1099,6 +1297,7 @@ def plan_local_extraction(
                     )
                 except ValueError as error:
                     merge_failures.append(f"band {band_order}: {error}")
+                    causes["parallel"] = "merge_reach"
                     continue
                 selected_parallel = (
                     candidate_positions, candidate_plan, parallel_belt_y,
@@ -1115,17 +1314,23 @@ def plan_local_extraction(
                 first_column_x = min(drill_xs)
                 expansion_positions = parallel_positions
             else:
-                merge_note = (
-                    " Merge geometry rejected: " + "; ".join(merge_failures)
-                    if merge_failures else ""
+                if not extraction_capacity.parallel_band_merge_reachable(belt_type):
+                    causes["parallel"] = "merge_reach"
+                causes.setdefault("parallel", "off_patch")
+                second = surveyed(
+                    "second_collector_site",
+                    lambda: _second_collector(
+                        client, surface, ore, parallel_source, found, requested,
+                        belt_type=belt_type, inserter_type=inserter_type,
+                        belt_stock=belt_stock, reserved_tiles=reserved_tiles,
+                        link_route=link_route, causes=causes,
+                    ),
                 )
-                raise DistrictExpansionUnbuildable(
-                    f"The owned {ore} resource district at {parallel_source.output} "
-                    "has no buildable straight or reserved parallel collector batch for "
-                    "the next six-drill checkpoint. Expansion stays in this "
-                    "district instead of opening a duplicate mine or refinery."
-                    f"{merge_note}"
-                )
+                (mine_origin, drill_count, build_plan, ore_output,
+                 second_belt_y) = second
+                row_drill_count = drill_count // 2
+                expansion_step = -1
+                first_column_x = mine_origin[0] + 1.5
     else:
         mine_origin, drill_count, build_plan, ore_output = surveyed(
             "new_mine_site",
@@ -1137,6 +1342,15 @@ def plan_local_extraction(
         row_drill_count = drill_count // 2
         expansion_step = -1
         first_column_x = mine_origin[0] + 1.5
+    if build_plan is not None and "verified_reserve_columns" in build_plan:
+        # A fresh row claims exactly the corridor its site survey verified.
+        new_belt_y = mine_origin[1] + 0.5
+        extraction_state.record_growth_limit(
+            client, surface, ore, new_belt_y,
+            (first_column_x + 3 * (row_drill_count - 1) + 2, new_belt_y),
+            first_column_x - 3 * build_plan["verified_reserve_columns"],
+            "off_patch",
+        )
     furnace_count = planned_smelter_count_for_drills(
         recipe, drill_count, productivity,
     )
@@ -1305,7 +1519,8 @@ def plan_local_extraction(
         smelter_vertical_mirror=smelter_vertical_mirror,
         first_column_x=first_column_x,
         shared_belt_y=(
-            (existing or active).shared_belt_y if (existing or active) is not None
+            second_belt_y if second_belt_y is not None
+            else (existing or active).shared_belt_y if (existing or active) is not None
             else ore_output[1]
         ),
         system_drill_target=(

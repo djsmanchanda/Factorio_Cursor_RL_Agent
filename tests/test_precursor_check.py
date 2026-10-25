@@ -132,7 +132,7 @@ def test_a_draw_stops_being_unbacked_once_a_line_exists() -> None:
 
 
 def test_the_record_does_not_leak_between_runs() -> None:
-    assert "UNBACKED_DRAWS.clear()" in inspect.getsource(builder._open_the_run)
+    assert "UNBACKED_DRAWS.clear()" in inspect.getsource(builder.initialize_operation_runtime)
 
 
 def test_the_essentials_the_player_named_are_in_the_prep_set() -> None:

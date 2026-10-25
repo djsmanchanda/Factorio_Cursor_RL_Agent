@@ -27,7 +27,7 @@ The ordered registry starts with these versioned predicates:
 | `C2` | Opening iron and copper districts produce and deliver output; their temporary starters are absent. |
 | `C3` | The opening stone-brick district produces and delivers output; its temporary starter is absent. |
 | `C4` | New plastic production and provider delivery are observed. |
-| `C5` | The same plastic producer cohort advances throughout 120 game seconds with provider delivery. |
+| `C5` | C5-v2: new plastic output reaches two adjacent positive 30-second rates within 80% of each other during its first 120 game seconds; retained episode-start sampler required. Live deterministic replay currently reports unknown (`deterministic_startup_capture_unavailable`) until an attempt-scoped arm protocol exists. |
 | `C6` | Advanced circuits are newly produced, then an owned recipe which consumes them records new output. |
 
 Stable checkpoint IDs are independent of display order. An inserted checkpoint
@@ -35,6 +35,25 @@ such as `C1a` creates a new registry version and explicit order
 `C1 -> C1a -> C2`; it does not rename bundles or rewrite historical results.
 Predicates consume structured observations and distinguish unknown evidence
 from a failed condition. Log substrings are not acceptance signals.
+
+The live foundation census uses the episode's persisted bootstrap replacement
+sites, with an exact real electric furnace, surface and force match. Empty or
+never-fed furnaces count structurally; ghosts, absent machines, pioneers and
+neighboring districts cannot fill their sites. Without episode ownership or
+its ledger directory, foundation evidence is unknown. An existing ledger with
+no district record measures no owned foundation for that recipe. Duplicate
+ownership or incomplete telemetry is an observation error, not a measured zero.
+
+Foundation observations retain district identity/revision, entity unit numbers,
+positions, statuses and `products_finished` through snapshot normalization and
+C2/C3 result evidence, including failed checks.
+`output_count` sums lifetime crafts of the **currently present owned entities**;
+removing or replacing a furnace can reduce it. It is not a rate or a monotonic
+district-wide history. `working_count` records machines working at that sample.
+The existing v1 `producing`/health predicates retain their semantics; correcting
+the census does not establish sustained service or change their versions.
+Historical aggregate receipts lack the entity data needed to reconstruct this
+census and must retain their original results.
 
 ## Run and result semantics
 

@@ -1,8 +1,12 @@
 # Path: tests/test_mall_cell_reservation.py | Purpose: Protect the reservation of future mall cell sites from power and coverage routing.
 
 import itertools
+import math
 
-from orchestrator.mall_builder import _cell_footprint_tiles, _cell_origins, planned_cell_reserved_tiles
+from orchestrator.mall_builder import (
+    LINE_RECIPES, _cell_footprint_tiles, _cell_origins, compact_cell_reserved_tiles, planned_cell_reserved_tiles,
+)
+from planners.mall_layout import generate_paired_mall_layout
 
 
 def test_the_next_cell_sites_are_reserved_but_their_gaps_stay_routable():
@@ -17,3 +21,39 @@ def test_the_next_cell_sites_are_reserved_but_their_gaps_stay_routable():
     free = [(x, y) for x in range(substation[0] - 9, substation[0] + 10) for y in range(substation[1] - 9, substation[1] + 10)
             if (x, y) not in reserved and (x, y) not in _cell_footprint_tiles(current)]
     assert len(free) > 50  # poles can still reach the cell through the gaps
+
+
+def test_routing_one_half_keeps_the_other_half_of_its_cell_clear():
+    origin = (54, 32)  # live 2026-10-15: a bridge pole took the right half's chest column
+    spec = LINE_RECIPES["copper-cable"]
+    left = generate_paired_mall_layout(
+        "copper-cable", spec["machine"], spec["ingredients"], spec["amounts"], origin, "left",
+        craft_time=spec["craft_time"], set_recipe=False, include_substation=False,
+    )
+    reserved = compact_cell_reserved_tiles(left, (0.0, 0.0), origin)
+    assert {(58, 34), (59, 34)} <= reserved  # right-half provider and output inserter
+    substation = (origin[0] + 4, origin[1] + 5)
+    big_pole_spots = [(x, y) for x in range(substation[0] - 5, substation[0] + 5)
+                      for y in range(substation[1] - 5, substation[1] + 5)
+                      if not {(x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1)} & reserved]
+    assert big_pole_spots  # the cell's power can still land in the gap row
+
+
+def test_shared_substations_power_several_cells_from_the_gaps():
+    from orchestrator.mall_builder import (
+        _cell_powered_boxes, _substation_reaches, cell_substation, seed_cell_uses_shared_substation,
+        shared_substation_sites,
+    )
+    from planners.infrastructure_geometry import footprint_tile_indices
+
+    reference = (0.0, 0.0)
+    cells = [o for o in _cell_origins(reference) if not seed_cell_uses_shared_substation(reference, o)]
+    sites = shared_substation_sites(reference)
+    assert len(sites) * 3 <= len(cells)  # one substation per cell wasted its 18x18 supply area
+    bodies = set().union(*(_cell_footprint_tiles(o) for o in _cell_origins(reference)))
+    for origin in cells:
+        site = cell_substation(reference, origin)
+        assert _substation_reaches(site, _cell_powered_boxes(origin))
+        assert not footprint_tile_indices(site, 2) & bodies
+    centres = [site for site, _cells in sites]
+    assert all(any(math.dist(a, b) <= 18 for b in centres if b != a) for a in centres)  # one wired spine

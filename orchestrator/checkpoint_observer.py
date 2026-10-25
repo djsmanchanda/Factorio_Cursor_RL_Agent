@@ -18,9 +18,12 @@ from typing import Any, Callable, Mapping, Protocol
 from orchestrator.checkpoint_milestones import FactorySnapshot
 from orchestrator import live_base
 from orchestrator.baseline_production import BASELINE_MACHINES
-from orchestrator.bootstrap_district import BootstrapDistrictLedger, BootstrapLifecycleError
+from orchestrator.bootstrap_district import (
+    BootstrapDistrictLedger, BootstrapDistrictState, BootstrapLifecycleError,
+)
 from planners.bootstrap_smelting import direct_smelter_positions
 from planners.recipe_data import LINE_RECIPES
+from tools.rcon_client import RconError
 
 
 class ObservationUnsupported(RuntimeError):
@@ -199,6 +202,7 @@ class LiveCheckpointObservationAdapter:
         force: str = "player",
         reference_point: tuple[float, float] = (0.0, 0.0),
         bootstrap_profile: str = "reduced-v1",
+        startup_unavailable_reason: str | None = None,
     ) -> None:
         self.client = client
         self.bridge = bridge
@@ -206,6 +210,7 @@ class LiveCheckpointObservationAdapter:
         self.force = force
         self.reference_point = reference_point
         self.bootstrap_profile = bootstrap_profile
+        self.startup_unavailable_reason = startup_unavailable_reason
 
     def bind(self, client: Any, bridge: Any | None = None) -> "LiveCheckpointObservationAdapter":
         """Bind a runner's already-open read-only clients and return self."""
@@ -229,32 +234,100 @@ class LiveCheckpointObservationAdapter:
             )
         return self.client
 
-    def _foundation_survey(self, client: Any) -> dict[str, dict[str, Any]]:
-        """Survey real electric furnaces and classify them by ore/output.
+    def _foundations_or_unknown(
+        self, client: Any, districts: Mapping[str, BootstrapDistrictState] | None,
+    ) -> dict[str, dict[str, Any]]:
+        """Foundation census, or unknown foundations when the census itself fails.
 
-        Furnaces often have no Lua recipe (their recipe is inferred from the
-        inserted ore), so ``find_line`` cannot reliably identify a standing
-        plate district.  This read-only survey uses the furnace source/result
-        inventories and the monotonic ``products_finished`` counter instead.
+        A failed furnace survey says nothing about the other checkpoints, so it
+        must not void the whole observation; its evidence (including the raw
+        response) stays attached so the failure remains diagnosable.
         """
+        try:
+            return self._foundation_survey(client, districts)
+        except ObservationUnsupported as error:
+            return {
+                name: {
+                    "machine_count": None, "healthy": None, "producing": None,
+                    "output_count": None, "working_count": None,
+                    "identity_source": "census-failed", "counter_basis": None,
+                    "machines": [],
+                    "census_error": f"{error}: {json.dumps(error.evidence, sort_keys=True)[:400]}",
+                }
+                for name in self._FOUNDATION_ORES
+            }
+
+    def _foundation_survey(
+        self, client: Any, districts: Mapping[str, BootstrapDistrictState] | None,
+    ) -> dict[str, dict[str, Any]]:
+        """Count real furnaces at the episode's exact replacement sites.
+
+        Inventory/recipe visibility is transient, whereas the persisted
+        district identifies even an empty furnace that has never crafted.
+        Missing ownership stays unknown; it must not adopt nearby furnaces.
+        Counters belong to the current live entities, not an immortal district
+        total. Keep their IDs so removal/replacement remains distinguishable.
+        """
+        result = {
+            name: {
+                "machine_count": 0 if districts is not None else None,
+                "healthy": False if districts is not None else None,
+                "producing": False if districts is not None else None,
+                "output_count": 0 if districts is not None else None,
+                "working_count": 0 if districts is not None else None,
+                "identity_source": "no-district" if districts is not None else "unavailable",
+                "counter_basis": None,
+                "machines": [],
+            }
+            for name in self._FOUNDATION_ORES
+        }
+        sites: list[tuple[str, str, float, float]] = []
+        owned: set[tuple[float, float]] = set()
+        for name, recipe, _ore in self._STARTERS:
+            district = (districts or {}).get(recipe)
+            if district is None:
+                continue
+            result[name].update(
+                district_id=district.district_id, district_revision=district.revision,
+                identity_source="bootstrap-replacement-v1", counter_basis="live-entity-products-finished",
+            )
+            machine = LINE_RECIPES[recipe]["machine"]
+            for action in district.replacement_actions:
+                if action.get("entity") != machine:
+                    continue
+                position = action["position"]
+                point = (float(position["x"]), float(position["y"]))
+                if point in owned:
+                    raise ObservationUnsupported(
+                        "foundation ownership contains duplicate furnace sites",
+                        evidence={"survey": "foundations", "position": point},
+                    )
+                owned.add(point)
+                sites.append((name, machine, *point))
+        if not sites:
+            return result
+
         surface = self.surface.replace("\\", "\\\\").replace("'", "\\'")
         force = self.force.replace("\\", "\\\\").replace("'", "\\'")
+        positions = ",".join(
+            "{" + str(x) + "," + str(y) + "," + json.dumps(machine) + "}"
+            for _, machine, x, y in sites
+        )
         lua = (
             "/sc local s=game.surfaces['" + surface + "'];"
             "local f=game.forces['" + force + "'];local names={};"
             "for k,v in pairs(defines.entity_status) do names[v]=k end;local out={};"
-            "for _,e in pairs(s.find_entities_filtered{name='electric-furnace',force=f}) do "
-            # Factorio 2.1 names furnace inventories crafter_input/crafter_output (2.0: furnace_source/result);
-            # get_contents() returns {name, count, quality} records, not a name -> count map.
-            "local input=defines.inventory.crafter_input or defines.inventory.furnace_source;"
-            "local output=defines.inventory.crafter_output or defines.inventory.furnace_result;"
-            "local ore='';local si=e.get_inventory(input);"
-            "if si then for _,c in pairs(si.get_contents()) do ore=c.name break end end;"
-            "local item='';local ri=e.get_inventory(output);"
-            "if ri then for _,c in pairs(ri.get_contents()) do item=c.name break end end;"
-            "local made=0;local ok,p=pcall(function() return e.products_finished end);"
-            "if ok and type(p)=='number' then made=p end;"
-            "out[#out+1]=ore..'|'..item..'|'..(names[e.status] or 'unknown')..'|'..made end;"
+            "for i,p in ipairs({" + positions + "}) do local found=nil;"
+            "for _,e in pairs(s.find_entities_filtered{position={p[1],p[2]},radius=0.4,"
+            "name=p[3],force=f}) do "
+            "if e.type~='entity-ghost' and math.abs(e.position.x-p[1])<0.01 and "
+            "math.abs(e.position.y-p[2])<0.01 then found=e break end end;"
+            "local unit='';local status='missing';local made='';"
+            "if found then unit=found.unit_number;status=names[found.status] or 'unknown';"
+            "if found.to_be_deconstructed() then status='marked-for-deconstruction' end;"
+            "local ok,n=pcall(function() return found.products_finished end);"
+            "if ok and type(n)=='number' then made=n end end;"
+            "out[#out+1]=i..'|'..unit..'|'..status..'|'..made end;"
             "rcon.print(table.concat(out,';'))"
         )
         try:
@@ -264,41 +337,52 @@ class LiveCheckpointObservationAdapter:
                 f"foundation telemetry request failed: {type(error).__name__}: {error}",
                 evidence={"adapter": type(self).__name__, "survey": "foundations"},
             ) from error
-        result = {
-            name: {"machine_count": 0, "healthy": False, "producing": False, "output_count": 0}
-            for name in self._FOUNDATION_ORES
-        }
-        if not raw:
-            return result
         try:
+            seen_sites: set[int] = set()
+            seen_units: set[int] = set()
             for row in raw.split(";"):
                 fields = row.split("|")
                 if len(fields) != 4:
                     raise ValueError(f"expected 4 fields, got {len(fields)}")
-                ore, item, status, made_raw = fields
-                name = next(
-                    (candidate for candidate, expected in self._FOUNDATION_ORES.items()
-                     if ore == expected or item == f"{candidate}-plate"
-                     or (candidate == "stone" and item == "stone-brick")),
-                    None,
-                )
-                if name is None:
+                index_raw, unit_raw, status, made_raw = fields
+                index = int(index_raw)
+                if not 1 <= index <= len(sites) or index in seen_sites:
+                    raise ValueError("invalid or duplicate foundation site")
+                seen_sites.add(index)
+                name, _machine, x, y = sites[index - 1]
+                if status == "missing":
+                    if unit_raw or made_raw:
+                        raise ValueError("missing furnace has live evidence")
                     continue
+                unit = int(unit_raw)
+                made = int(made_raw) if made_raw else None
+                if unit <= 0 or unit in seen_units or (made is not None and made < 0):
+                    raise ValueError("invalid or duplicate foundation entity")
+                seen_units.add(unit)
                 evidence = result[name]
+                evidence["machines"].append({
+                    "unit_number": unit, "position": {"x": x, "y": y},
+                    "status": status, "products_finished": made,
+                })
                 evidence["machine_count"] += 1
                 evidence["healthy"] = bool(evidence["healthy"] or self._status_healthy(status))
                 evidence["producing"] = bool(evidence["producing"] or status == "working")
-                evidence["output_count"] += int(float(made_raw))
+                evidence["working_count"] += int(status == "working")
+                evidence["output_count"] = (
+                    evidence["output_count"] + made
+                    if evidence["output_count"] is not None and made is not None else None
+                )
+            if len(seen_sites) != len(sites):
+                raise ValueError("incomplete foundation survey")
         except (TypeError, ValueError) as error:
             raise ObservationUnsupported(
                 "foundation telemetry response is malformed",
                 evidence={"adapter": type(self).__name__, "survey": "foundations", "response": raw[:200]},
             ) from error
-        # Historical output is valid health evidence even when a district is
-        # between crafts.  A counted furnace with no positive output remains
-        # a measured failure in the milestone predicate.
+        # Preserve the v1 predicate's has-produced semantics. This lifetime
+        # counter is not a rate; working_count separately records current work.
         for evidence in result.values():
-            if evidence["output_count"] > 0:
+            if evidence["output_count"] is not None and evidence["output_count"] > 0:
                 evidence["producing"] = True
         return result
 
@@ -320,7 +404,7 @@ class LiveCheckpointObservationAdapter:
             ) from error
 
         starters: dict[str, dict[str, Any]] = {}
-        district_states: dict[str, Any] = {}
+        district_states: dict[str, BootstrapDistrictState] | None = None
         if self.bridge is not None and getattr(self.bridge, "episode_id", None):
             try:
                 ledger = BootstrapDistrictLedger(
@@ -330,7 +414,10 @@ class LiveCheckpointObservationAdapter:
                     force=self.force,
                     bootstrap_profile=self.bootstrap_profile,
                 )
-                district_states = {state.recipe: state for state in ledger.states()}
+                # A legacy/resumed episode may have no ownership sidecar.
+                # Absence of that source cannot prove absence of its furnaces.
+                if ledger.root.is_dir():
+                    district_states = {state.recipe: state for state in ledger.states()}
             except (OSError, BootstrapLifecycleError) as error:
                 raise ObservationUnsupported(
                     f"bootstrap district telemetry is unreadable: {type(error).__name__}: {error}",
@@ -347,7 +434,7 @@ class LiveCheckpointObservationAdapter:
                     evidence={"adapter": type(self).__name__, "survey": "starter", "starter": name},
                 ) from error
             if starter is None:
-                district = district_states.get(recipe)
+                district = (district_states or {}).get(recipe)
                 retiring = district is not None and district.lifecycle_state != "released"
                 starters[name] = {
                     # The exact recognizer stops matching during partial
@@ -418,6 +505,7 @@ class LiveCheckpointObservationAdapter:
                     "producing": None if status is None else status == "working",
                     "craft_count": int(counters[position]) if position in counters else None,
                     "name": recipe,
+                    "status": status,
                 })
 
         production: dict[str, dict[str, int]] = {}
@@ -481,10 +569,11 @@ class LiveCheckpointObservationAdapter:
             "base_valid": True,
             "starters": starters,
             "mall_assemblers": mall,
-            "foundations": self._foundation_survey(client),
+            "foundations": self._foundations_or_unknown(client, district_states),
             "production": production,
             "providers": providers,
             "recipes": recipes,
+            "plastic_startup": self._plastic_startup(client),
         }
         try:
             snapshot["tick_end"] = live_base.game_tick(client)
@@ -492,6 +581,40 @@ class LiveCheckpointObservationAdapter:
             raise ObservationUnsupported(f"checkpoint ending tick unavailable: {error}",
                                          evidence={"survey": "game_tick_end"}) from error
         return _normalize(snapshot, source="live-rcon-structured")
+
+    def _plastic_startup(self, client: Any, *, arm: bool = False) -> Mapping[str, Any] | None:
+        """Arm/read the bounded game-clock sampler for this logical episode.
+
+        Missing sampler evidence affects C5 alone. Observing an old freeze
+        cannot retroactively invent its startup rates.
+        """
+        if self.startup_unavailable_reason is not None:
+            return {"unavailable_reason": self.startup_unavailable_reason}
+        run_id = getattr(self.bridge, "episode_id", None)
+        if not run_id:
+            return None
+        args = ",".join(json.dumps(value) for value in
+                        (self.surface, self.force, "plastic-bar", run_id))
+        method = "production_startup_arm" if arm else "production_startup_read"
+        interface = json.dumps(getattr(self.bridge, "remote_interface", "factorio_cursor_rl_agent"))
+        command = (f'/sc if remote.interfaces[{interface}] and '
+                   f'remote.interfaces[{interface}].{method} then '
+                   f'local value=remote.call({interface},"{method}",'
+                   + args + '); if value==nil then rcon.print("null") '
+                   + 'else rcon.print(helpers.table_to_json(value)) end '
+                   + 'else rcon.print("null") end')
+        try:
+            result = json.loads(client.command(command))
+        except (ValueError, TypeError, OSError, RconError):
+            return None
+        if not isinstance(result, Mapping):
+            return None
+        if (result.get("surface"), result.get("force"), result.get("run_id")) != (self.surface, self.force, run_id):
+            return None
+        # Factorio encodes an empty Lua table as {}, not necessarily [].
+        if result.get("samples") == {}:
+            result["samples"] = []
+        return result
 
 
 __all__ = [

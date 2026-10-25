@@ -343,7 +343,7 @@ def test_live_measurement_exports_mission_items_including_fluid_recipes(tmp_path
     # Run the actual generated recipe/counter export block; a fluid recipe is
     # excluded from geometry recipes but its production must still be measured.
     block=world.lua_source.split('local recipe_names=',1)[1].split('local bounds=',1)[0]
-    script = """local force={recipes={}}; local facts={recipes={},production={},consumption={}}
+    script = """local request={}; local prototypes={entity={},item={['plastic-bar']={},['advanced-circuit']={},['automation-science-pack']={},['production-science-pack']={}}}; local force={recipes={}}; local facts={machines={},recipe_observations={},recipes={},enabled_recipes={},production={},consumption={}}
 local counts={['plastic-bar']=20,['advanced-circuit']=9,['automation-science-pack']=7,['production-science-pack']=5}
 local stats={get_input_count=function(name) return counts[name] or 0 end,get_output_count=function(name) return 0 end}
 local recipe_names="""+block+"""

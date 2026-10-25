@@ -87,3 +87,10 @@ def test_completed_research_goal_records_success_only_with_verified_evidence(tmp
     assert entry['target']=='mining-productivity-4' and entry['research_goal']['verified'] is True
     index['summary']['goal']['verified']=False
     assert run_ledger.laya_entry(index)['outcome']=='error'
+
+def test_research_completion_requires_earned_acceptance_in_the_ledger(tmp_path):
+    index={'root':str(tmp_path),'run_id':'research-1234567890','summary':{'stop':'research_complete'}}
+    assert run_ledger.laya_entry(index)['outcome']=='error'
+    index['summary']['research_acceptance']={'version':'laya-research-consumption-v1','earned':True,'requested':'mining-productivity-4'}
+    entry=run_ledger.laya_entry(index)
+    assert entry['outcome']=='completed' and entry['research_acceptance']['earned']

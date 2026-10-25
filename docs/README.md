@@ -14,6 +14,7 @@ Read only the route relevant to the current task.
 | Concurrent deterministic checkpoint runs | [Checkpoint fleet](deterministic/checkpoint_fleet.md) |
 | RCON, deployment, restarts, live failures | [Factorio operations](factorio_operations.md) |
 | Current priorities | [Roadmap](roadmap.md) |
+| Parallel source work across laptops | [Two-machine task workflow](two_machine_workflow.md) |
 | Game mechanics used by validators/rewards | [Factorio mechanics](reference/factorio_mechanics.md) |
 
 The Laya route separates current capabilities from intended authority. Use

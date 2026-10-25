@@ -6,6 +6,7 @@ import copy
 import importlib
 import inspect
 import textwrap
+from dataclasses import fields, is_dataclass
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,8 @@ _FIXTURE = Path(__file__).parent / "fixtures" / "electronics_world_spec.json"
 # are orthogonal, so `-m "deterministic and not slow"` and `-m lua` remain
 # meaningful without duplicating test files into artificial directories.
 _TRAINING_FILES = {
+    "test_laya_decision_pacing.py",
+    "test_laya_ops_initialization.py",
     "test_training_batch_cli.py", "test_training_candidates.py",
     "test_training_compute.py", "test_training_episode.py",
     "test_training_evaluation.py", "test_training_factorio_bridge.py",
@@ -33,6 +36,7 @@ _TRAINING_FILES = {
     "test_zoning_scoring.py",
 }
 _OPS_HINTS = (
+    "laya_batch", "laya_host_scheduler",
     "campaign", "controls", "dashboard", "journal", "log_retention",
     "observatory", "research_commands", "runner", "server", "worker",
 )
@@ -49,11 +53,18 @@ _DETERMINISTIC_HINTS = (
 # highest-value safety/contracts across all domains; breadth remains in the
 # scheduled/manual full suite instead of masquerading as fast validation.
 _FAST_FILES = {
+    "test_production_startup_lua.py", "test_plastic_startup_milestone.py",
+    "test_laya_decision_pacing.py", "test_mall_reconciliation.py",
+    "test_checkpoint_observer.py",
+    "test_laya_ops_initialization.py", "test_mall_cell_release_lua.py",
+    "test_laya_batch.py",
+    "test_laya_cohort_metrics.py", "test_laya_run_retention.py", "test_laya_host_scheduler.py", "test_laya_research.py", "test_laya_ops_checkpoint.py",
+    "test_laya_review_regressions.py", "test_laya_ops_data.py",
     "test_action_catalog.py", "test_bootstrap_district.py",
     "test_campaign_runtime.py", "test_campaign_writable_root.py", "test_laya_campaign_runner_budget.py", "test_capacity_model.py", "test_construction_stock.py",
     "test_factory_invariants.py", "test_fluid_routing.py",
     "test_fluid_systems.py", "test_infrastructure.py",
-    "test_laya_ops_runner.py", "test_mall_bootstrap.py",
+    "test_laya_ops_runner.py", "test_laya_ops_decision_facts.py", "test_mall_bootstrap.py",
     "test_mall_growth.py",
     "test_material_reservations.py", "test_mission_state.py",
     "test_module_integrity.py", "test_plan_self_collision.py",
@@ -62,6 +73,7 @@ _FAST_FILES = {
     "test_runner_log_retention.py", "test_sandbox_contracts.py",
     "test_science_recipe_graph.py", "test_standing_stock_cap.py",
     "test_training_isolation.py",
+    "test_teardown_storage_room.py", "test_starter_provider_retention.py",
     "test_test_taxonomy.py",
     "test_training_power.py", "test_training_rewards.py",
     "test_transport_occupancy.py",
@@ -87,11 +99,19 @@ _EXHAUSTIVE_NODE_FRAGMENTS = {
     *_SLOW_NODE_FRAGMENTS,
 }
 _LUA_FILES = {
+    "test_production_startup_lua.py",
     "test_atomic_removal_preflight.py", "test_logistic_sections_lua.py",
     "test_recipe_catalog_lua.py", "test_research_lua.py",
     "test_science_telemetry_lua.py", "test_training_lab_validation_lua.py",
 }
 _LUA_NODE_FRAGMENTS = {
+    "test_teardown_storage_room.py::test_storage_probe_excludes_target_capacity",
+    "test_checkpoint_observer.py::test_missing_watch_command",
+    "test_checkpoint_observer.py::test_owned_empty_furnaces",
+    "test_checkpoint_observer.py::test_missing_ghost_and_foreign_furnaces",
+    "test_checkpoint_observer.py::test_uncrafted_and_deconstructing_furnaces",
+    "test_checkpoint_observer.py::test_unavailable_entity_counter",
+    "test_checkpoint_observer.py::test_neighboring_district",
     "test_bootstrap_supply.py::test_generated_seed_lua_is_syntactically_valid",
 }
 _LOOPBACK_NODE_FRAGMENTS = {
@@ -127,6 +147,7 @@ _SOURCE_TRIPWIRE_NODE_FRAGMENTS = {
 # owns one episode. Tests exercise many episodes in one interpreter, so restore
 # their pre-test contents explicitly instead of depending on collection order.
 _ISOLATED_MUTABLE_STATE = {
+    "planners.recipe_data": ("LINE_RECIPES",),
     "orchestrator.autonomous_builder": (
         "_STAGE_DELIVERY_PROVIDERS",
         "_REFINERY_SITE_RESERVATIONS",
@@ -143,10 +164,11 @@ _ISOLATED_MUTABLE_STATE = {
         "_MALL_STOCK_GATE_FLOORS",
         "_MALL_ITEM_PROVIDER_LIMITS",
         "_CRAFT_PROOF_CONSUMED",
+        "_STARTER_PROVIDER_RECLAIM_ORDERED", "_STARTER_PROVIDER_LAST_NOTE",
     ),
     "orchestrator.resource_patches": ("_PATCH_CACHE",),
     "orchestrator.stage_extraction": ("_NEW_DIRECT_MINE_CACHE",),
-    "orchestrator.stage_services": (
+    "orchestrator.construction_coverage": (
         "_PENDING_POWER_BRIDGES", "_COVERAGE_PROGRESS",
     ),
     "orchestrator.stage_chemical": ("_CRUDE_EXPANSION_FAILED_CELLS",),
@@ -235,6 +257,9 @@ def _restore_mutable_value(module, name: str, snapshot) -> None:
     elif isinstance(snapshot, list) and isinstance(current, list):
         current.clear()
         current.extend(copy.deepcopy(snapshot))
+    elif is_dataclass(snapshot) and type(current) is type(snapshot):
+        for field in fields(snapshot):
+            _restore_mutable_value(current, field.name, getattr(snapshot, field.name))
     else:
         setattr(module, name, copy.deepcopy(snapshot))
 
@@ -261,7 +286,11 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
         path = Path(str(item.path))
         filename = path.name
         nodeid = item.nodeid
-        item.add_marker(getattr(pytest.mark, _primary_domain(filename)))
+        primary = {m.name for m in item.iter_markers() if m.name in {"contracts", "deterministic", "training", "ops"}}
+        if len(primary) > 1:
+            raise pytest.UsageError(f"multiple primary domains for {nodeid}: {sorted(primary)}")
+        if not primary:
+            item.add_marker(getattr(pytest.mark, _primary_domain(filename)))
 
         slow = filename in _SLOW_FILES or any(
             fragment in nodeid for fragment in _SLOW_NODE_FRAGMENTS

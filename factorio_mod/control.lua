@@ -24,6 +24,7 @@ require("water_seeding")
 require("layout_executor")
 require("research")
 require("science_telemetry")
+local production_startup = require("production_startup")
 require("logistic_inventory")
 require("live_execution")
 require("spidertron_builder")
@@ -35,7 +36,10 @@ if namespace.runtime == "laya" then
   laya_coach = require("laya_coach")
 end
 
-namespace.install_remote(remote)
+namespace.install_remote(remote, {
+  production_startup_arm = production_startup.arm,
+  production_startup_read = production_startup.read,
+})
 
 local function activate(active)
   local ok, err = namespace.set_active(active)

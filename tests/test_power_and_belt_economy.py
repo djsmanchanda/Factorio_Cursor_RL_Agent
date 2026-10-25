@@ -425,7 +425,7 @@ def test_power_sizing_does_not_treat_existing_coverage_as_a_grid_join(
 ) -> None:
     """Coverage by a pole is not proof that the remote grid was bridged."""
     monkeypatch.setattr(builder, "maybe_ensure_bootstrap_steam_power", lambda *_a, **_k: False)
-    from orchestrator.stage_services import PowerExtensionResult
+    from orchestrator.construction_coverage import PowerExtensionResult
 
     monkeypatch.setattr(
         builder, "extend_power",
@@ -452,7 +452,7 @@ def test_submit_does_not_adopt_an_unowned_same_force_belt(monkeypatch) -> None:
     """Force and prototype family do not establish planner ownership."""
     from types import SimpleNamespace
 
-    import orchestrator.stage_services as ss
+    import orchestrator.construction_coverage as ss
 
     plan = {"phases": [{
         "actions": [
@@ -487,7 +487,7 @@ def test_submit_does_not_adopt_an_unowned_same_force_belt(monkeypatch) -> None:
         if (pos[0], pos[1]) == (51.5, -104.5) else None,
     )
 
-    with pytest.raises(ss.StuckError, match="blocked by real infrastructure"):
+    with pytest.raises(ss.StuckError, match="blocked by real infrastructure") as blocked:
         ss._submit(
             object(), FakeBridge(), "nauvis", plan, "landfill bridge",
             lambda _m: None,
@@ -495,6 +495,9 @@ def test_submit_does_not_adopt_an_unowned_same_force_belt(monkeypatch) -> None:
 
     assert len(built) == 1
     assert plan["phases"][0]["actions"]
+    assert blocked.value.code == "infrastructure_collision"
+    assert blocked.value.details["blocking_count"] == 1
+    assert blocked.value.details["blockers"][0]["occupant"]["name"] == "transport-belt"
 
 
 def test_lone_undiagnosed_ghost_gets_one_rebuild_cycle(monkeypatch) -> None:
@@ -835,7 +838,7 @@ def test_extend_power_accepts_a_generating_own_network_on_the_first_attempt(monk
     require a retry before accepting that, so the admission deferred forever
     and the mall could not grow past its seed slots (live 2026-09-17)."""
     from orchestrator import live_base
-    import orchestrator.stage_services as services
+    import orchestrator.construction_coverage as services
 
     monkeypatch.setattr(services.live_base, "pole_network_id", lambda *_a, **_k: 5)
     monkeypatch.setattr(services.live_base, "nearest_powered_pole",
@@ -855,7 +858,7 @@ def test_extend_power_accepts_a_generating_own_network_on_the_first_attempt(monk
 
 def test_extend_power_still_fails_a_dead_own_network_without_other_supply(monkeypatch):
     from orchestrator import live_base
-    import orchestrator.stage_services as services
+    import orchestrator.construction_coverage as services
 
     monkeypatch.setattr(services.live_base, "pole_network_id", lambda *_a, **_k: 5)
     monkeypatch.setattr(services.live_base, "nearest_powered_pole",

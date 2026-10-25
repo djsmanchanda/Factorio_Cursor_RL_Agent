@@ -31,9 +31,9 @@
 .board-panel th, .decision-panel th { color: var(--muted); font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; }
 .decision-panel tbody { max-height: 520px; }
 .cond-satisfied { color: var(--green); }
-.cond-unbuilt, .cond-recipe_unavailable, .cond-power_limited { color: var(--red); }
+.cond-unbuilt, .cond-recipe_unavailable, .cond-recipe_disabled, .cond-power_limited { color: var(--red); }
 .cond-input_starved, .cond-output_blocked, .cond-under_capacity, .cond-short { color: var(--yellow); }
-.cond-unmeasured { color: var(--muted); }
+.cond-unmeasured, .cond-recipe_unknown, .cond-recipe_unsupported, .cond-fluid_supply_unknown { color: var(--muted); }
 .row-failure td { color: var(--red); }
 .row-phase td { color: var(--green); font-weight: 700; }
 

@@ -121,6 +121,8 @@ def _oriented_plan(
             action["direction"] = transform_direction(
                 "north", direction=direction, mirror=mirror,
             )
+        if action.get("entity") in directional_machines:
+            action["mirroring"] = bool(action.get("mirroring", False)) != (mirror is not None)
     validate_build_plan(plan)
     return plan
 

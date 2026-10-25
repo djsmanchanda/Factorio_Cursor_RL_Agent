@@ -112,6 +112,52 @@ def test_lifecycle_persists_full_footprint_and_releases_after_output(
     assert ledger.load("iron-plate") == state
 
 
+def test_retiring_state_persists_exact_teardown_and_retained_provider(
+    tmp_path: Path,
+) -> None:
+    ledger, _state = _provisioned(tmp_path)
+    ledger.mark_validating("iron-plate", measured_output_count=3)
+    state = ledger.mark_retiring(
+        "iron-plate",
+        starter_geometry={
+            "drill_position": [1.5, 2.5], "output_direction": "north", "pole_side": 1,
+        },
+        retained_providers=[(61.5, 18.5)],
+    )
+    payload = json.loads(state.to_json())
+
+    assert payload["version"] == 2
+    assert payload["starter_geometry"] == {
+        "drill_position": [1.5, 2.5], "output_direction": "north", "pole_side": 1,
+    }
+    assert payload["retained_providers"] == [[61.5, 18.5]]
+    assert not list(Draft7Validator(SCHEMA).iter_errors(payload))
+    assert ledger.load("iron-plate") == state
+
+
+def test_reclaim_retained_provider_is_exact_and_records_its_event(
+    tmp_path: Path,
+) -> None:
+    ledger, _state = _provisioned(tmp_path)
+    ledger.mark_validating("iron-plate", measured_output_count=3)
+    ledger.mark_retiring(
+        "iron-plate",
+        retained_providers=[(61.5, 18.5), (70.5, 18.5)],
+    )
+
+    state = ledger.reclaim_retained_provider(
+        "iron-plate", (61.5, 18.5), "retained_provider_reclaimed_drained",
+    )
+
+    assert state.retained_providers == ((70.5, 18.5),)
+    assert state.history[-1]["event"] == "retained_provider_reclaimed_drained"
+    assert state.history[-1]["from"] == state.history[-1]["to"] == "retiring"
+    with pytest.raises(BootstrapLifecycleError, match="does not retain"):
+        ledger.reclaim_retained_provider(
+            "iron-plate", (61.5, 18.5), "retained_provider_reclaimed_drained",
+        )
+
+
 def test_released_district_never_recreates_its_pioneer(
     tmp_path: Path, monkeypatch,
 ) -> None:

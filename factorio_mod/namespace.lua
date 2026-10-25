@@ -100,18 +100,22 @@ function namespace.install(engine_commands, engine_helpers)
   return wrapped_commands, wrapped_helpers
 end
 
-function namespace.install_remote(engine_remote)
+function namespace.install_remote(engine_remote, additional_methods)
   if engine_remote.interfaces[namespace.remote_interface] then
     return
   end
-  engine_remote.add_interface(namespace.remote_interface, {
+  local methods = {
     runtime_info = function()
       return namespace.info()
     end,
     is_active = function()
       return namespace.is_active()
     end,
-  })
+  }
+  for name, method in pairs(additional_methods or {}) do
+    methods[name] = method
+  end
+  engine_remote.add_interface(namespace.remote_interface, methods)
 end
 
 return namespace

@@ -1,7 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "bootstrap_district_state.schema.json",
-  "title": "Bootstrap District State 1",
+  "title": "Bootstrap District State 2",
+  "description": "Version 2: released means the pioneer production machinery is absent; its passive provider may remain in retained_providers until drained.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -28,7 +29,7 @@
     }
   }],
   "properties": {
-    "version": { "const": 1 },
+    "version": { "const": 2 },
     "episode_id": { "$ref": "#/definitions/nonEmptyString" },
     "surface": { "$ref": "#/definitions/nonEmptyString" },
     "force": { "$ref": "#/definitions/nonEmptyString" },
@@ -59,6 +60,21 @@
     "transport_actions": { "type": "array", "items": { "$ref": "#/definitions/action" } },
     "replacement_submitted": { "type": "boolean" },
     "measured_output_count": { "type": "integer", "minimum": 0 },
+    "starter_geometry": {
+      "anyOf": [{ "type": "null" }, {
+        "type": "object",
+        "required": ["drill_position", "output_direction", "pole_side"],
+        "properties": {
+          "drill_position": { "$ref": "#/definitions/point" },
+          "output_direction": { "enum": ["north", "east", "south", "west"] },
+          "pole_side": { "enum": [-1, 1] }
+        },
+        "additionalProperties": false
+      }]
+    },
+    "retained_providers": {
+      "type": "array", "uniqueItems": true, "items": { "$ref": "#/definitions/point" }
+    },
     "revision": { "type": "integer", "minimum": 1 },
     "history": {
       "type": "array",

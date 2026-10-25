@@ -523,6 +523,9 @@ def _run_item(
                         client, bridge, surface=args.surface, force=args.force,
                         reference_point=tuple(args.reference_point),
                         bootstrap_profile=args.bootstrap_profile,
+                        # Replay attempts do not have an episode-start sampler
+                        # protocol. Never inherit the creator save's C5 proof.
+                        startup_unavailable_reason="deterministic_startup_capture_unavailable",
                     )
                 evidence = checkpoint_monitor.observe_boundary(client, bridge)
                 if evidence.get("status") == "incompatible":

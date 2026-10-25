@@ -10,6 +10,9 @@ from datetime import datetime, timezone
 
 from orchestrator.extraction_state import ResourceMine, find_resource_mines
 from orchestrator.game_bridge import GameBridge, load_json
+from orchestrator.recoverable_retirement import (
+    RecoverableRetirementStorageWait, require_teardown_storage_room,
+)
 from orchestrator.resource_patches import RETIRE_ACTIVE_PATCH_RESOURCE, nearest_patch
 from tools.rcon_client import RconClient
 
@@ -133,6 +136,15 @@ def retire_depleted_mines(
             client, surface, force, mine, _RETIRABLE_ENTITY_NAMES,
         )
         if not entities:
+            continue
+        try:
+            # Chests full of ore would otherwise send every bot to a full storage.
+            require_teardown_storage_room(client, surface, force, tuple(
+                (entity["name"], (entity["position"]["x"], entity["position"]["y"]))
+                for entity in entities
+            ), f"{resource} mine at {drill}")
+        except RecoverableRetirementStorageWait as error:
+            emit(f"MINE RETIREMENT DEFERRED: {error}")
             continue
         actions = [
             {"action": "deconstruct_entity", **entity, "block": "managed_mine"}

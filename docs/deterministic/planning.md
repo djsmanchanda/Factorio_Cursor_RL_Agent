@@ -79,10 +79,25 @@ gated separately and is not changed by the release.
   item is observed in its exact provider chest, with generated power verified.
   Remaining drills, furnaces, or inserters need not be complete; their ghosts,
   reservations, and mall bills remain active. Check delivery during construction
-  polling, not only after the full blueprint finishes. Then the starter drill, furnace,
-  inserter, and provider chest receive exact deconstruction orders. Retirement
-  waits for construction bots to recover those entities and their contents into
-  logistics; it must never destroy them. After the production entities are
+  polling, not only after the full blueprint finishes. Persist the exact drill
+  position, output direction, and pole side before ordering any teardown, so a
+  bot timeout leaves the district `retiring` and the next pass re-issues the
+  same orders instead of failing. Then the starter drill, furnace, and inserter
+  receive exact deconstruction orders. The starter's passive provider is
+  retained (district state version 2, `retained_providers`): its stock stays on
+  the network and it is reclaimed only once empty. Retirement waits for
+  construction bots to recover those entities and their contents into
+  logistics; it must never destroy them. No bot teardown is ordered while
+  logistic storage cannot take its cargo: the shared probe counts each target's
+  own item, inventories, held stacks, and belt lines, credits partial stacks of
+  the same item, and requires empty stacks in a network whose construction area
+  covers every target. A target chest's own stacks are not destination room;
+  filtered or deconstructing storage is not generic room, and a network
+  covering only some targets leaves coverage unknown. Unknown coverage raises
+  a typed `teardown_storage_wait` supply wait, not a
+  tool failure. This applies to the shared starter helper, mine retirement, and
+  promoted mall halves, which use bots instead of destroying entities with
+  their contents. After the production entities are
   gone, an empty starter-pole leaf is pruned back one pole at a time; pruning
   stops at a consumer-supplying pole or a pole needed for connectivity. Empty
   poles with multiple neighbours require an observed alternate copper path
@@ -111,8 +126,9 @@ gated separately and is not changed by the release.
   resumes the named district and reports whether it must reserve the district,
   construct the replacement, or repair its power or transport. Starter absence
   alone is not the readiness signal.
-- A migration is incomplete while any recognized starter chest or furnace
-  remains. Producing plates somewhere else is not sufficient evidence.
+- A migration is incomplete while any recognized starter drill, furnace or
+  inserter remains. A retained passive provider is not machinery; producing
+  plates somewhere else is not sufficient evidence.
 - Extraction grows in complete six-drill checkpoints:
   `6 -> 12 -> 24 -> 48 -> 96`, but measured demand chooses when to advance.
   After advanced-circuit output releases the independent mall, iron demand continues
@@ -228,6 +244,15 @@ gated separately and is not changed by the release.
   Producer reservations remain held through construction and release only
   after measured output; an impossible self-seed is a typed supply wait rather
   than a generic no-progress failure.
+  Reusing a transient submission name renews its construction bill, even when
+  its item counts match the previous build. Funding also subtracts the live
+  bill of other unbuilt entity ghosts: submission does not make their stock
+  free before bots collect it. Exact same-prototype ghosts at the current
+  plan's positions are excluded so retries do not pay twice. Shortage targets
+  include both the new bill and those pending commitments. This protects the
+  steel seed's pole reserve while independent foundations build concurrently.
+  Additive ghosts may wait for future production, but cannot bypass another
+  active project's reservation for a missing construction item.
 - A compact producer that needs its own requester chest may borrow one duplicate
   copper-cable or gear assembler long enough to make the aggregate requester
   seed reserved by the ledger. The borrowed cell recursively makes missing
@@ -472,6 +497,10 @@ gated separately and is not changed by the release.
   first makes any missing gears, then switches to belts, while the two baseline
   gear assemblers and one cable assembler remain assigned. The loan restores
   the cable recipe when its reserve is full or another batch needs the slot.
+  Each built gear/cable assembler reads its own provider over a green wire and
+  stops at min(10 stacks, 1000 items) there (user 2026-10-15: the chest is
+  shared, so it must not hold more than 1k gear or cable). A loan clears that
+  circuit gate on the borrowed machine and its restore reapplies it.
 - A collision-checked additive blueprint does not wait for every construction
   item to have a producer. Stage its reachable construction coverage, submit
   the ghosts, and promote the persisted exact shortfall as binding mall work;

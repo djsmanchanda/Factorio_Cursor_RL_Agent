@@ -145,8 +145,8 @@ class GuidedPolicy:
     model_ref = GUIDED_MODEL
 
     def __init__(self, seed: int, epsilon: float = 0.15, preferences: Mapping[str, list] | None = None) -> None:
-        if not 0 < epsilon <= 1:
-            raise ValueError("epsilon must be in (0, 1]")
+        if not 0 <= epsilon <= 1:
+            raise ValueError("epsilon must be in [0, 1]")
         self.rng = random.Random(seed)
         self.epsilon = epsilon
         self.preferences = dict(preferences) if preferences is not None else load_preferences()
