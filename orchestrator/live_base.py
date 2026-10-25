@@ -1073,6 +1073,8 @@ def occupied_tiles(
         "{" + str(max_point[0]) + "," + str(max_point[1]) + "}};"
         + water_scan + "for _,e in pairs(s.find_entities_filtered{area=area}) do "
         "if " + resource_check + "e.type~='character' and "
+        # Flying robots pass over everything and never block a placement.
+        "e.type~='logistic-robot' and e.type~='construction-robot' and "
         + clutter_check + "not ignored[e.name] then "
         "local b=e.bounding_box;"
         "for x=math.floor(b.left_top.x),math.ceil(b.right_bottom.x)-1 do "
@@ -1994,6 +1996,9 @@ def occupied_tile_owners(
         "for _,e in pairs(s.find_entities_filtered{area=area}) do "
         "if " + ("" if include_resources else "e.type~='resource' and ")
         + "e.type~='character' and "
+        # Flying robots are not occupants: C36 extensions were refused on a
+        # logistic-robot that happened to be overhead at survey time.
+        "e.type~='logistic-robot' and e.type~='construction-robot' and "
         "not (e.force and e.force.name=='neutral' and "
         "(e.type=='tree' or e.type=='simple-entity')) then "
         "local b=e.bounding_box;"
