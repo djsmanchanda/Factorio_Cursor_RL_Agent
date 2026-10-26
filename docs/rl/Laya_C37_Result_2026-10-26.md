@@ -76,17 +76,17 @@ By message:
 - 11 control events read `No recipe knowledge for 'stone'`. That is a separate planner gap, seen only in control.
 - The rest are copper-plate (control 4) and iron-plate (robots 5) `full_output`.
 
-## Where runs stop (last 25 decisions per completed run)
+## Overlapping attainment groups and terminal outcomes
 
 | Group | control | robots | dominant terminal outcomes |
 | --- | ---: | ---: | --- |
 | never C2 | 7 | 10 | `chemical_capability_handoff`, `steel_seed_site_wait` |
 | C2, no C3 | 17 | 13 | `steel_seed_site_wait`, temporary mall batches, `material_shortage` |
 | C3, no C5 | 5 | 7 | temporary mall batches, pending system construction |
-| C5, no strict C6 | 21 | 23 | `material_shortage`, temporary mall batches, `bootstrap_mall_slot_cap` |
-| strict C6 | 10 | 7 | `production_prerequisite_deferred` |
+| C5, no strict C6 | 25 | 29 | `material_shortage`, temporary mall batches, `bootstrap_mall_slot_cap` |
+| strict C6 | 11 | 7 | `production_prerequisite_deferred` |
 
-These last-decision groups classify 59 control runs and all 60 robot runs; the primary acceptance table above retains all 120 jobs. The stop profile matches C29–C36 on this base:
+These groups use each run's `accepted_ever` set and overlap; they are not a cumulative funnel. All 120 jobs remain in the primary table. `control-s80125` reached C4/C5/C6 without C3, illustrating why a first-missing-milestone grouping cannot replace marginal attainment. The earlier 59/60 classification note was incorrect. The stop profile matches C29–C36 on this base:
 - early runs stop on the chemical handoff and the steel seed site;
 - late runs stop on material shortages, temporary mall batches and mall slot capacity.
 

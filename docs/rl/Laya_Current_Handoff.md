@@ -28,3 +28,19 @@ The canonical shared source save is hash-verified at SHA-256 `347eba65065014f822
 The [cohort ledger](Laya_Cohort_Ledger_2026-10-21.md) and result documents carry denominators and predicate details. Historical indexes are preserved for provenance: [main](../archive/rl/Laya_Current_Handoff_Main_2026-10-26.md), [controller](../archive/rl/Laya_Current_Handoff_Controller_2026-10-26.md). Dated evidence does not grant current lifecycle authority.
 
 C38's queued comparison is converged source + common experimental robots, varying only clearance (60 pairs, fresh seeds80160–80219, ports39900/32900). It was queued at 05:17 IST on 2026-10-26 from immutable base `9764fb6`, retained by tag `archive/20261026/convergence/c38-base-9764fb6`. Later main corrections do not change this freeze. See the [convergence record](Laya_Branch_Convergence_2026-10-26.md) and check its actual freeze/job status before lifecycle actions. Clearance and robot exclusion remain experimental.
+
+## 2026-10-26 15:56 IST: C38 closed; next factor selected
+
+[C38 is terminal](Laya_C38_Result_2026-10-26.md): 119 completed plus one
+preparation failure; 117 early choice-count stops, no C2 and no clearance
+exposure. Repair `c71d826` uses `decision-idle-v3` with no ops choice-count
+cutoff; 116 focused tests and the fast gate pass. Historical freezes stay fixed.
+
+The [executive decision](Laya_C37_C38_Decision_2026-10-26.md) prioritizes consumer
+ownership/service for the next policy comparison and defers clearance
+confirmation. The two-job `laya-c39-preflight-2123-miniship-20261026` baseline
+smoke is running from `c71d826`, with a 35-minute unit limit. No full C39 cohort
+is queued. Read `data/laya-orchestration/c39-20261026/state.json`; require C2 and
+then a tested, exposed consumer operation before admitting 120 jobs. If the
+base fails, investigate allocatable-stock facts first. C29 remains the policy
+reference; source integration and sampler-fixture success are not adoption.
