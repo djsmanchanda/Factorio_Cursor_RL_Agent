@@ -110,6 +110,19 @@ class _PendingPool:
         return object()
 
 
+def test_arm_cap_prevents_shared_model_request_queues_without_blocking_other_arms(tmp_path):
+    batch = _batch(tmp_path)
+    batch.arms["control"]["concurrency"] = 1
+    first, other, _, second = batch.jobs
+    assert batch.submit(_PendingPool(), first, 0) is not None
+    assert not batch.arm_available(second)
+    assert batch.submit(_PendingPool(), second, 1) is None
+    assert second["status"] == "queued"
+    assert batch.arm_available(other)
+    first.update(status="completed", admission_reserved=False)
+    assert batch.submit(_PendingPool(), second, 1) is not None
+
+
 def test_host_gate_pauses_and_resumes_real_batch_admission(tmp_path, monkeypatch):
     from tools.laya_host_scheduler import DEFAULTS, cycle
 

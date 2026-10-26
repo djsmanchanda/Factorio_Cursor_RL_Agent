@@ -1063,6 +1063,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                 "elapsed_ticks": elapsed_game_ticks, "wait_multiplier": multiplier(settings, elapsed_game_ticks),
                 "maximum_multiplier": settings.decision_wait_max_multiplier,
                 "minimum_wait_ticks": settings.decision_wait_min_ticks}
+        if hasattr(policy, "context"):
+            policy.context = {"run_id": run_id, "index": index, "tick": facts["tick"], "phase": phase["phase_id"]}
         choice = policy.choose(state, menu)
         chosen = next(o for o in menu["options"] if o["option_id"] == choice["option_id"])
         emit(f"DECISION {index} phase={phase['phase_id']} tick={facts['tick']} need={chosen['need_id']} "
@@ -1107,7 +1109,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         emit(f"  OUTCOME: {'ok' if result.get('ok') else result.get('code')}"
              + (f" -- {result.get('message', '')[:200]}" if not result.get("ok") else ""))
         _training_record(records, run_id=run_id, index=index, tick=facts["tick"], phase=phase["phase_id"],
-                         state=state, options=[{k: o.get(k) for k in ("option_id", "family", "need_id", "product",
+                         state=state, options=[{k: o.get(k) for k in ("option_id", "summary", "family", "need_id", "product",
                                                                       "params", "features", "bill", "bill_owner",
                                                                       "wait_ticks", "base_wait_ticks")} for o in menu["options"]],
                          distribution=choice["distribution"], choice=choice,

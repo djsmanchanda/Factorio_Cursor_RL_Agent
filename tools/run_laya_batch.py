@@ -18,7 +18,8 @@ batch.json:
                         "nice": 0..19, "python_nice": 0..19},
    "arms": [{"id": str, "code": frozen worktree, "mods": staged mods dir, "revision": sha,
              "change": str, "variant": optional path, "extra_args": optional [str],
-             "runtime": optional arm override of the batch runtime}]}
+             "runtime": optional arm override of the batch runtime,
+             "concurrency": optional maximum active jobs for this arm}]}
 """
 
 from __future__ import annotations
@@ -182,6 +183,10 @@ class Batch:
                      for arm in (self.cfg["arms"][index % len(self.cfg["arms"]):]
                                  + self.cfg["arms"][:index % len(self.cfg["arms"])])]
         self.arms = {arm["id"]: arm for arm in self.cfg["arms"]}
+        for arm in self.arms.values():
+            cap = arm.get("concurrency", self.cfg["concurrency"])
+            if type(cap) is not int or cap < 1:
+                raise ValueError("arm concurrency must be a positive integer")
         self.host = HostBudget(self.root, self.cfg["host_budget"]) if self.cfg.get("host_budget") else None
         self.ledger = CohortLedger(self.root, self.cfg)
         self.admission = "run"
@@ -233,10 +238,21 @@ class Batch:
                 ready, self.admission_reason = False, "baseline_not_settled"
         return ready
 
+    def arm_available(self, job: dict) -> bool:
+        # A shared single-request model server must never accumulate a queue of
+        # live worlds whose inference timeouts would depend on admission order.
+        arm = self.arms[job["arm"]]
+        occupied = sum(j["arm"] == job["arm"] and
+                       (bool(j.get("admission_reserved")) or j["status"] in {"preparing", "running"})
+                       for j in self.jobs)
+        return occupied < arm.get("concurrency", self.cfg["concurrency"])
+
     def submit(self, pool, job: dict, slot: int):
         if not self.may_admit():
             return None
         with self.host.lock() if self.host else nullcontext():
+            if not self.arm_available(job):
+                return None
             if self.host and not self.host.may_admit(time.time()):
                 return None
             job.update(status="preparing", admission_reserved=True)
@@ -323,7 +339,8 @@ class Batch:
                 if prepared.returncode:
                     raise RuntimeError(f"prepare exit {prepared.returncode}")
                 run = self._cmd(arm, "run", "--root", str(world), "--seed", str(job["seed"]), *ports,
-                                "--actions", "deterministic", "--policy", "guided", "--speed", "2", "--decisions", "0",
+                                "--actions", "deterministic", "--policy", arm.get("policy", "guided"), "--speed", "2", "--decisions", "0",
+                                *(["--model-bundle", arm["model_bundle"]] if arm.get("model_bundle") else []),
                                 "--no-helper", "--max-game-ticks", str(self.cfg["max_game_ticks"]),
                                 "--experiment", self.cfg["name"], *(["--variant", arm["variant"]] if arm.get("variant") else []),
                                 *arm.get("extra_args", []), *recovery_args,
@@ -468,11 +485,14 @@ class Batch:
                             job["status"] = "not_started_deadline"
                         queue.clear()
                         break
-                    job, slot = queue[0], slots[0]
+                    job = next((j for j in queue if self.arm_available(j)), None)
+                    if job is None:
+                        break
+                    slot = slots[0]
                     future = self.submit(pool, job, slot)
                     if future is None:
                         break
-                    queue.pop(0)
+                    queue.remove(job)
                     slots.pop(0)
                     active[future] = slot
                 if self.stopping.is_set():

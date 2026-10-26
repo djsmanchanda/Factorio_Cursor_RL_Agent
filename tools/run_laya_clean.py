@@ -71,8 +71,9 @@ def main(argv=None) -> int:
     p.add_argument("--actions", choices=["geometry", "deterministic"], default="geometry",
                    help="deterministic: Laya chooses among the deterministic runtime's operations "
                         "(training/laya_ops_runner.py); geometry: Laya's own build generators")
-    p.add_argument("--policy", choices=["guided", "exploration"], default="guided",
+    p.add_argument("--policy", choices=["guided", "exploration", "model"], default="guided",
                    help="guided: doc-rule preferences + exploration floor; exploration: uniform")
+    p.add_argument("--model-bundle", type=Path, help="Immutable verified local System One policy bundle")
     p.add_argument("--variant", type=Path, help="Variant JSON (docs/rl/laya_variants/); default: the current workflow")
     p.add_argument("--until-phase", help="Experiment window: stop once this phase is reached")
     p.add_argument("--max-game-ticks", type=int, help="Experiment window: stop after this many game ticks")
@@ -96,6 +97,13 @@ def main(argv=None) -> int:
                    help="Restart a fresh controller on this already-running world after a stall or failure "
                         "(experiment): carry only earlier segments' lifecycle receipts")
     args = p.parse_args(argv)
+    if args.policy == "model":
+        if not args.model_bundle or args.actions != "deterministic":
+            p.error("model policy requires deterministic actions and --model-bundle")
+        if args.ops_resume_bundle or args.ops_checkpoint_dir or args.resume_bundle or args.jumpstart:
+            p.error("model policy recovery is not yet qualified; exact recovery is unsupported")
+    elif args.model_bundle:
+        p.error("--model-bundle requires --policy model")
     root = owned_root(args.root)
     ops_resume = None
     ops_meta = None
@@ -196,6 +204,9 @@ def main(argv=None) -> int:
                 log(f"LIVE: game unpaused at speed {speed:g}; decisions are taken while the factory runs")
             policy = (GuidedPolicy(args.seed, preferences=load_preferences(ROOT / settings.catalog), **policy_options)
                       if args.policy == "guided" else ExplorationPolicy(args.seed))
+            if args.policy == "model":
+                from training.laya_model_policy import ModelPolicy
+                policy = ModelPolicy(args.seed, args.model_bundle, paths["journal"].parent / "model-decisions.jsonl")
             if ops_resume:
                 config = ops_resume["policy"]
                 if config["class"] == "GuidedPolicy":
