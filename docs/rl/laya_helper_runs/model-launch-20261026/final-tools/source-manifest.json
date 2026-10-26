@@ -1,0 +1,41 @@
+{
+  "version": "laya-final-tools-source-copy-v1",
+  "files": [
+    {
+      "file": "final_accounting.py",
+      "operational_source": "data/laya-orchestration/model-launch-20261026/autonomy12h-20261027/final_accounting.py",
+      "sha256": "bc6d21932da4c4b81af87294d32ad97f408c2459e9f58deef04a762885fded11",
+      "bytes": 35232
+    },
+    {
+      "file": "test_final_accounting.py",
+      "operational_source": "data/laya-orchestration/model-launch-20261026/autonomy12h-20261027/test_final_accounting.py",
+      "sha256": "226767791cc835a13f73c859c03d008e5c4130793de90b4df949622e5cec7c78",
+      "bytes": 22904
+    },
+    {
+      "file": "final-adapter-notes.md",
+      "operational_source": "data/laya-orchestration/model-launch-20261026/autonomy12h-20261027/final-adapter-notes.md",
+      "sha256": "62f7893cf896b17f664967c994b9fffa439a092c0fcaa9b47962003bccb3e691",
+      "bytes": 17550
+    },
+    {
+      "file": "collect_physical_closure.py",
+      "operational_source": "data/laya-orchestration/model-launch-20261026/autonomy12h-20261027/collect_physical_closure.py",
+      "sha256": "a6b0481f0778cf15a5431cce9293b16d74590fb4c92c3d34fef656ae0f89c2c4",
+      "bytes": 33185
+    },
+    {
+      "file": "test_physical_closure.py",
+      "operational_source": "data/laya-orchestration/model-launch-20261026/autonomy12h-20261027/test_physical_closure.py",
+      "sha256": "c4d9c0b203d4ff201adcd69e719504246fc307b303c4bef883585fdbd5b1ad88",
+      "bytes": 26400
+    },
+    {
+      "file": "physical-closure-notes.md",
+      "operational_source": "data/laya-orchestration/model-launch-20261026/autonomy12h-20261027/physical-closure-notes.md",
+      "sha256": "eb5e996fa677d70fe10baa4132aaa6a7ef2ee025d735e395c1c30a21d0fa3b51",
+      "bytes": 13659
+    }
+  ]
+}
