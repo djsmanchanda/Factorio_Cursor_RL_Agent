@@ -89,3 +89,14 @@ reference; source integration and sampler-fixture success are not adoption.
 - **Exposure:** chest options offered, chosen and succeeded (`data/laya-orchestration/c39-20261026/chest_exposure.py`).
 - **Reading:** this is a whole-base comparison. A difference chooses the base for later single-factor cohorts; it does not attribute a mechanism.
 - **Unit:** `RuntimeMaxSec` ends at 2026-10-27 18:10 IST. Admission ends at 18:00.
+
+## C39 final shared-base decision — 2026-10-27 00:47 IST
+
+All120completed, unitinactive/success, noactiveworldprocesses/reservations.
+Retainreference9d9b279; integrated0/60strictC6-ever versusreference13/60,
+withC2/C3/C4regressions andC5predicateincompatibility.
+See [final result](Laya_C39_Result_2026-10-27.md). Preparedmodelbasegate ready,
+mainbaselinegate stillpendingmemoryqualification and4jobwiringsmoke.
+No120modeljobsadmitted, noFactorio/modrestart, productionchangeorpush.
+
+2026-10-27 01:08 IST — Authorized120-job released-model cohort launched (30seeds xguided/Kev/Vela/Jiwo), all120planned; initial3jobs admitted, not120completed. C39 final reference retained; three simultaneous37-option serving checks and all4separatewiringjobs pass (7verifiedlearnedchoices,0backend/tool/safety/untypedfaults,cleanup complete). Common concurrency3/perarm1,4GiBworldpool under19GiB own aggregate slice; originalunqualified4proposal preserved in capacity-v2 freeze. Fullreport docs/rl/Laya_Model_Cohort_2026-10-27.md. Laya optimizedfit stillactive,143/217lastobserved finite. Lifecycle: leave activefreezes untouched;30minboundedmonitor/final accounting byOct31 00:20IST. No push/admin/production/mod/hosttarget changes.

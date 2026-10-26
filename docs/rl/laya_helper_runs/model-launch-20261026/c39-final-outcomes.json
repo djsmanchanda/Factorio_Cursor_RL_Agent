@@ -1,0 +1,4510 @@
+{
+  "root": "data/laya-experiments/laya-c39-2123-miniship-20261026",
+  "jobs": [
+    {
+      "id": "reference-s80240",
+      "arm": "reference",
+      "seed": 80240,
+      "run_id": "reference-s80240-s80240-1793022715",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80240",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "passed",
+        "C6": "failed"
+      },
+      "game_ticks": 361972,
+      "elapsed_s": 3115
+    },
+    {
+      "id": "integrated-s80240",
+      "arm": "integrated",
+      "seed": 80240,
+      "run_id": "integrated-s80240-s80240-1793022726",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80240",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 44485,
+      "elapsed_s": 386
+    },
+    {
+      "id": "integrated-s80241",
+      "arm": "integrated",
+      "seed": 80241,
+      "run_id": "integrated-s80241-s80241-1793022736",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80241",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 40157,
+      "elapsed_s": 350
+    },
+    {
+      "id": "reference-s80241",
+      "arm": "reference",
+      "seed": 80241,
+      "run_id": "reference-s80241-s80241-1793022746",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80241",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C6"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "passed"
+      },
+      "game_ticks": 461177,
+      "elapsed_s": 3990
+    },
+    {
+      "id": "reference-s80242",
+      "arm": "reference",
+      "seed": 80242,
+      "run_id": "reference-s80242-s80242-1793022757",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80242",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "failed"
+      },
+      "game_ticks": 396661,
+      "elapsed_s": 3447
+    },
+    {
+      "id": "integrated-s80242",
+      "arm": "integrated",
+      "seed": 80242,
+      "run_id": "integrated-s80242-s80242-1793022767",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80242",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 39405,
+      "elapsed_s": 345
+    },
+    {
+      "id": "integrated-s80243",
+      "arm": "integrated",
+      "seed": 80243,
+      "run_id": "integrated-s80243-s80243-1793022778",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80243",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 39887,
+      "elapsed_s": 348
+    },
+    {
+      "id": "reference-s80243",
+      "arm": "reference",
+      "seed": 80243,
+      "run_id": "reference-s80243-s80243-1793022788",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80243",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "passed",
+        "C6": "failed"
+      },
+      "game_ticks": 331149,
+      "elapsed_s": 2845
+    },
+    {
+      "id": "reference-s80244",
+      "arm": "reference",
+      "seed": 80244,
+      "run_id": "reference-s80244-s80244-1793022798",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80244",
+      "ever": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 233909,
+      "elapsed_s": 2016
+    },
+    {
+      "id": "integrated-s80244",
+      "arm": "integrated",
+      "seed": 80244,
+      "run_id": "integrated-s80244-s80244-1793022809",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80244",
+      "ever": [
+        "C0",
+        "C1"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 79740,
+      "elapsed_s": 689
+    },
+    {
+      "id": "integrated-s80245",
+      "arm": "integrated",
+      "seed": 80245,
+      "run_id": "integrated-s80245-s80245-1793022820",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80245",
+      "ever": [
+        "C0",
+        "C1",
+        "C2"
+      ],
+      "final": [
+        "C0",
+        "C2"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 140157,
+      "elapsed_s": 1227
+    },
+    {
+      "id": "reference-s80245",
+      "arm": "reference",
+      "seed": 80245,
+      "run_id": "reference-s80245-s80245-1793022830",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80245",
+      "ever": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 195807,
+      "elapsed_s": 1697
+    },
+    {
+      "id": "reference-s80246",
+      "arm": "reference",
+      "seed": 80246,
+      "run_id": "reference-s80246-s80246-1793022840",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80246",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "passed",
+        "C6": "failed"
+      },
+      "game_ticks": 390424,
+      "elapsed_s": 3398
+    },
+    {
+      "id": "integrated-s80246",
+      "arm": "integrated",
+      "seed": 80246,
+      "run_id": "integrated-s80246-s80246-1793022851",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80246",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 40472,
+      "elapsed_s": 355
+    },
+    {
+      "id": "integrated-s80247",
+      "arm": "integrated",
+      "seed": 80247,
+      "run_id": "integrated-s80247-s80247-1793022862",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80247",
+      "ever": [
+        "C0",
+        "C1"
+      ],
+      "final": [
+        "C0",
+        "C1"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "passed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 39389,
+      "elapsed_s": 343
+    },
+    {
+      "id": "reference-s80247",
+      "arm": "reference",
+      "seed": 80247,
+      "run_id": "reference-s80247-s80247-1793023092",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80247",
+      "ever": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 157021,
+      "elapsed_s": 1381
+    },
+    {
+      "id": "reference-s80248",
+      "arm": "reference",
+      "seed": 80248,
+      "run_id": "reference-s80248-s80248-1793023117",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80248",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "stop": "window_timeout",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "failed"
+      },
+      "game_ticks": 540673,
+      "elapsed_s": 4676
+    },
+    {
+      "id": "integrated-s80248",
+      "arm": "integrated",
+      "seed": 80248,
+      "run_id": "integrated-s80248-s80248-1793023128",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80248",
+      "ever": [
+        "C0",
+        "C1"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 187981,
+      "elapsed_s": 1640
+    },
+    {
+      "id": "integrated-s80249",
+      "arm": "integrated",
+      "seed": 80249,
+      "run_id": "integrated-s80249-s80249-1793023138",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80249",
+      "ever": [
+        "C0",
+        "C1"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 40701,
+      "elapsed_s": 361
+    },
+    {
+      "id": "reference-s80249",
+      "arm": "reference",
+      "seed": 80249,
+      "run_id": "reference-s80249-s80249-1793023211",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80249",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "passed",
+        "C6": "failed"
+      },
+      "game_ticks": 398147,
+      "elapsed_s": 3451
+    },
+    {
+      "id": "reference-s80250",
+      "arm": "reference",
+      "seed": 80250,
+      "run_id": "reference-s80250-s80250-1793023222",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80250",
+      "ever": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 225468,
+      "elapsed_s": 1953
+    },
+    {
+      "id": "integrated-s80250",
+      "arm": "integrated",
+      "seed": 80250,
+      "run_id": "integrated-s80250-s80250-1793023504",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80250",
+      "ever": [
+        "C0",
+        "C1",
+        "C2"
+      ],
+      "final": [
+        "C0",
+        "C2"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 309222,
+      "elapsed_s": 2688
+    },
+    {
+      "id": "integrated-s80251",
+      "arm": "integrated",
+      "seed": 80251,
+      "run_id": "integrated-s80251-s80251-1793023515",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80251",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 42602,
+      "elapsed_s": 374
+    },
+    {
+      "id": "reference-s80251",
+      "arm": "reference",
+      "seed": 80251,
+      "run_id": "reference-s80251-s80251-1793023894",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80251",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "failed"
+      },
+      "game_ticks": 475687,
+      "elapsed_s": 4112
+    },
+    {
+      "id": "reference-s80252",
+      "arm": "reference",
+      "seed": 80252,
+      "run_id": "reference-s80252-s80252-1793024052",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80252",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "passed",
+        "C6": "failed"
+      },
+      "game_ticks": 313705,
+      "elapsed_s": 2705
+    },
+    {
+      "id": "integrated-s80252",
+      "arm": "integrated",
+      "seed": 80252,
+      "run_id": "integrated-s80252-s80252-1793024479",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80252",
+      "ever": [
+        "C0",
+        "C1",
+        "C2",
+        "C3"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 293296,
+      "elapsed_s": 2616
+    },
+    {
+      "id": "integrated-s80253",
+      "arm": "integrated",
+      "seed": 80253,
+      "run_id": "integrated-s80253-s80253-1793024533",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80253",
+      "ever": [
+        "C0",
+        "C1",
+        "C2"
+      ],
+      "final": [
+        "C0",
+        "C2"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 265092,
+      "elapsed_s": 2321
+    },
+    {
+      "id": "reference-s80253",
+      "arm": "reference",
+      "seed": 80253,
+      "run_id": "reference-s80253-s80253-1793024775",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80253",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "failed"
+      },
+      "game_ticks": 431734,
+      "elapsed_s": 3728
+    },
+    {
+      "id": "reference-s80254",
+      "arm": "reference",
+      "seed": 80254,
+      "run_id": "reference-s80254-s80254-1793024820",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80254",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "failed"
+      },
+      "game_ticks": 384315,
+      "elapsed_s": 3339
+    },
+    {
+      "id": "integrated-s80254",
+      "arm": "integrated",
+      "seed": 80254,
+      "run_id": "integrated-s80254-s80254-1793025182",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80254",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 42991,
+      "elapsed_s": 379
+    },
+    {
+      "id": "integrated-s80255",
+      "arm": "integrated",
+      "seed": 80255,
+      "run_id": "integrated-s80255-s80255-1793025567",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80255",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 42029,
+      "elapsed_s": 369
+    },
+    {
+      "id": "reference-s80255",
+      "arm": "reference",
+      "seed": 80255,
+      "run_id": "reference-s80255-s80255-1793025639",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80255",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 182494,
+      "elapsed_s": 1626
+    },
+    {
+      "id": "reference-s80256",
+      "arm": "reference",
+      "seed": 80256,
+      "run_id": "reference-s80256-s80256-1793025836",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80256",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "passed",
+        "C6": "failed"
+      },
+      "game_ticks": 402349,
+      "elapsed_s": 3466
+    },
+    {
+      "id": "integrated-s80256",
+      "arm": "integrated",
+      "seed": 80256,
+      "run_id": "integrated-s80256-s80256-1793025942",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80256",
+      "ever": [
+        "C0",
+        "C1",
+        "C2"
+      ],
+      "final": [
+        "C0",
+        "C2"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 183932,
+      "elapsed_s": 1631
+    },
+    {
+      "id": "integrated-s80257",
+      "arm": "integrated",
+      "seed": 80257,
+      "run_id": "integrated-s80257-s80257-1793026199",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80257",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 40837,
+      "elapsed_s": 362
+    },
+    {
+      "id": "reference-s80257",
+      "arm": "reference",
+      "seed": 80257,
+      "run_id": "reference-s80257-s80257-1793026209",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80257",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "failed"
+      },
+      "game_ticks": 399030,
+      "elapsed_s": 3443
+    },
+    {
+      "id": "reference-s80258",
+      "arm": "reference",
+      "seed": 80258,
+      "run_id": "reference-s80258-s80258-1793026243",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80258",
+      "ever": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 188895,
+      "elapsed_s": 1634
+    },
+    {
+      "id": "integrated-s80258",
+      "arm": "integrated",
+      "seed": 80258,
+      "run_id": "integrated-s80258-s80258-1793026567",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80258",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 40531,
+      "elapsed_s": 363
+    },
+    {
+      "id": "integrated-s80259",
+      "arm": "integrated",
+      "seed": 80259,
+      "run_id": "integrated-s80259-s80259-1793026668",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80259",
+      "ever": [
+        "C0",
+        "C1",
+        "C2"
+      ],
+      "final": [
+        "C0",
+        "C2"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 304669,
+      "elapsed_s": 2688
+    },
+    {
+      "id": "reference-s80259",
+      "arm": "reference",
+      "seed": 80259,
+      "run_id": "reference-s80259-s80259-1793026742",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80259",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "failed"
+      },
+      "game_ticks": 421437,
+      "elapsed_s": 3636
+    },
+    {
+      "id": "reference-s80260",
+      "arm": "reference",
+      "seed": 80260,
+      "run_id": "reference-s80260-s80260-1793026762",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80260",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "failed"
+      },
+      "game_ticks": 438480,
+      "elapsed_s": 3817
+    },
+    {
+      "id": "integrated-s80260",
+      "arm": "integrated",
+      "seed": 80260,
+      "run_id": "integrated-s80260-s80260-1793026860",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80260",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 40004,
+      "elapsed_s": 353
+    },
+    {
+      "id": "integrated-s80261",
+      "arm": "integrated",
+      "seed": 80261,
+      "run_id": "integrated-s80261-s80261-1793026936",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80261",
+      "ever": [
+        "C0",
+        "C1",
+        "C2",
+        "C3"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 261060,
+      "elapsed_s": 2326
+    },
+    {
+      "id": "reference-s80261",
+      "arm": "reference",
+      "seed": 80261,
+      "run_id": "reference-s80261-s80261-1793027100",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80261",
+      "ever": [
+        "C0",
+        "C2"
+      ],
+      "final": [
+        "C0",
+        "C2"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 191176,
+      "elapsed_s": 1684
+    },
+    {
+      "id": "reference-s80262",
+      "arm": "reference",
+      "seed": 80262,
+      "run_id": "reference-s80262-s80262-1793027218",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80262",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C6"
+      ],
+      "stop": "window_timeout",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "passed"
+      },
+      "game_ticks": 540208,
+      "elapsed_s": 4693
+    },
+    {
+      "id": "integrated-s80262",
+      "arm": "integrated",
+      "seed": 80262,
+      "run_id": "integrated-s80262-s80262-1793027271",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80262",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 44252,
+      "elapsed_s": 396
+    },
+    {
+      "id": "integrated-s80263",
+      "arm": "integrated",
+      "seed": 80263,
+      "run_id": "integrated-s80263-s80263-1793027579",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80263",
+      "ever": [
+        "C0",
+        "C1"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 115346,
+      "elapsed_s": 1003
+    },
+    {
+      "id": "reference-s80263",
+      "arm": "reference",
+      "seed": 80263,
+      "run_id": "reference-s80263-s80263-1793027673",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80263",
+      "ever": [
+        "C0",
+        "C1",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "failed"
+      },
+      "game_ticks": 407429,
+      "elapsed_s": 3538
+    },
+    {
+      "id": "reference-s80264",
+      "arm": "reference",
+      "seed": 80264,
+      "run_id": "reference-s80264-s80264-1793027800",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80264",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C6"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "passed"
+      },
+      "game_ticks": 432750,
+      "elapsed_s": 3743
+    },
+    {
+      "id": "integrated-s80264",
+      "arm": "integrated",
+      "seed": 80264,
+      "run_id": "integrated-s80264-s80264-1793027883",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80264",
+      "ever": [
+        "C0",
+        "C1"
+      ],
+      "final": [
+        "C0",
+        "C1"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "passed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 39467,
+      "elapsed_s": 350
+    },
+    {
+      "id": "integrated-s80265",
+      "arm": "integrated",
+      "seed": 80265,
+      "run_id": "integrated-s80265-s80265-1793028011",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80265",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 42473,
+      "elapsed_s": 375
+    },
+    {
+      "id": "reference-s80265",
+      "arm": "reference",
+      "seed": 80265,
+      "run_id": "reference-s80265-s80265-1793028164",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80265",
+      "ever": [
+        "C0",
+        "C1",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "failed"
+      },
+      "game_ticks": 517637,
+      "elapsed_s": 4496
+    },
+    {
+      "id": "reference-s80266",
+      "arm": "reference",
+      "seed": 80266,
+      "run_id": "reference-s80266-s80266-1793028239",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80266",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 176200,
+      "elapsed_s": 1532
+    },
+    {
+      "id": "integrated-s80266",
+      "arm": "integrated",
+      "seed": 80266,
+      "run_id": "integrated-s80266-s80266-1793028392",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80266",
+      "ever": [
+        "C0",
+        "C1"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 150654,
+      "elapsed_s": 1322
+    },
+    {
+      "id": "integrated-s80267",
+      "arm": "integrated",
+      "seed": 80267,
+      "run_id": "integrated-s80267-s80267-1793028508",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80267",
+      "ever": [
+        "C0",
+        "C1"
+      ],
+      "final": [
+        "C0",
+        "C1"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "passed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 39427,
+      "elapsed_s": 349
+    },
+    {
+      "id": "reference-s80267",
+      "arm": "reference",
+      "seed": 80267,
+      "run_id": "reference-s80267-s80267-1793028588",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80267",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 177376,
+      "elapsed_s": 1546
+    },
+    {
+      "id": "reference-s80268",
+      "arm": "reference",
+      "seed": 80268,
+      "run_id": "reference-s80268-s80268-1793028789",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80268",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C6"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "passed"
+      },
+      "game_ticks": 481533,
+      "elapsed_s": 4166
+    },
+    {
+      "id": "integrated-s80268",
+      "arm": "integrated",
+      "seed": 80268,
+      "run_id": "integrated-s80268-s80268-1793028862",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80268",
+      "ever": [
+        "C0",
+        "C1",
+        "C3"
+      ],
+      "final": [
+        "C0",
+        "C3"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "passed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 102589,
+      "elapsed_s": 890
+    },
+    {
+      "id": "integrated-s80269",
+      "arm": "integrated",
+      "seed": 80269,
+      "run_id": "integrated-s80269-s80269-1793029269",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80269",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 42787,
+      "elapsed_s": 376
+    },
+    {
+      "id": "reference-s80269",
+      "arm": "reference",
+      "seed": 80269,
+      "run_id": "reference-s80269-s80269-1793029308",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80269",
+      "ever": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 163440,
+      "elapsed_s": 1458
+    },
+    {
+      "id": "reference-s80270",
+      "arm": "reference",
+      "seed": 80270,
+      "run_id": "reference-s80270-s80270-1793029361",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80270",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "failed"
+      },
+      "game_ticks": 508211,
+      "elapsed_s": 4367
+    },
+    {
+      "id": "integrated-s80270",
+      "arm": "integrated",
+      "seed": 80270,
+      "run_id": "integrated-s80270-s80270-1793029652",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80270",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 38249,
+      "elapsed_s": 335
+    },
+    {
+      "id": "integrated-s80271",
+      "arm": "integrated",
+      "seed": 80271,
+      "run_id": "integrated-s80271-s80271-1793029663",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80271",
+      "ever": [
+        "C0",
+        "C1"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 102916,
+      "elapsed_s": 900
+    },
+    {
+      "id": "reference-s80271",
+      "arm": "reference",
+      "seed": 80271,
+      "run_id": "reference-s80271-s80271-1793029720",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80271",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C6"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "passed"
+      },
+      "game_ticks": 429685,
+      "elapsed_s": 3720
+    },
+    {
+      "id": "reference-s80272",
+      "arm": "reference",
+      "seed": 80272,
+      "run_id": "reference-s80272-s80272-1793029757",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80272",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C6"
+      ],
+      "stop": "window_timeout",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "passed"
+      },
+      "game_ticks": 539817,
+      "elapsed_s": 4664
+    },
+    {
+      "id": "integrated-s80272",
+      "arm": "integrated",
+      "seed": 80272,
+      "run_id": "integrated-s80272-s80272-1793029776",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80272",
+      "ever": [
+        "C0",
+        "C1",
+        "C3"
+      ],
+      "final": [
+        "C0",
+        "C3"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "passed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 171629,
+      "elapsed_s": 1489
+    },
+    {
+      "id": "integrated-s80273",
+      "arm": "integrated",
+      "seed": 80273,
+      "run_id": "integrated-s80273-s80273-1793029993",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80273",
+      "ever": [
+        "C0",
+        "C1"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 99287,
+      "elapsed_s": 866
+    },
+    {
+      "id": "reference-s80273",
+      "arm": "reference",
+      "seed": 80273,
+      "run_id": "reference-s80273-s80273-1793030138",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80273",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "failed"
+      },
+      "game_ticks": 382745,
+      "elapsed_s": 3345
+    },
+    {
+      "id": "reference-s80274",
+      "arm": "reference",
+      "seed": 80274,
+      "run_id": "reference-s80274-s80274-1793030384",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80274",
+      "ever": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 221177,
+      "elapsed_s": 1942
+    },
+    {
+      "id": "integrated-s80274",
+      "arm": "integrated",
+      "seed": 80274,
+      "run_id": "integrated-s80274-s80274-1793030570",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80274",
+      "ever": [
+        "C0",
+        "C1"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 88263,
+      "elapsed_s": 770
+    },
+    {
+      "id": "integrated-s80275",
+      "arm": "integrated",
+      "seed": 80275,
+      "run_id": "integrated-s80275-s80275-1793030585",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80275",
+      "ever": [
+        "C0",
+        "C1"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 44414,
+      "elapsed_s": 394
+    },
+    {
+      "id": "reference-s80275",
+      "arm": "reference",
+      "seed": 80275,
+      "run_id": "reference-s80275-s80275-1793030772",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80275",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "failed"
+      },
+      "game_ticks": 400154,
+      "elapsed_s": 3469
+    },
+    {
+      "id": "reference-s80276",
+      "arm": "reference",
+      "seed": 80276,
+      "run_id": "reference-s80276-s80276-1793030866",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80276",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "failed"
+      },
+      "game_ticks": 446850,
+      "elapsed_s": 3878
+    },
+    {
+      "id": "integrated-s80276",
+      "arm": "integrated",
+      "seed": 80276,
+      "run_id": "integrated-s80276-s80276-1793030985",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80276",
+      "ever": [
+        "C0",
+        "C1"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 187801,
+      "elapsed_s": 1662
+    },
+    {
+      "id": "integrated-s80277",
+      "arm": "integrated",
+      "seed": 80277,
+      "run_id": "integrated-s80277-s80277-1793031217",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80277",
+      "ever": [
+        "C0",
+        "C1",
+        "C2",
+        "C3"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 225050,
+      "elapsed_s": 2031
+    },
+    {
+      "id": "reference-s80277",
+      "arm": "reference",
+      "seed": 80277,
+      "run_id": "reference-s80277-s80277-1793031270",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80277",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 213000,
+      "elapsed_s": 1857
+    },
+    {
+      "id": "reference-s80278",
+      "arm": "reference",
+      "seed": 80278,
+      "run_id": "reference-s80278-s80278-1793031346",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80278",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "failed"
+      },
+      "game_ticks": 397033,
+      "elapsed_s": 3455
+    },
+    {
+      "id": "integrated-s80278",
+      "arm": "integrated",
+      "seed": 80278,
+      "run_id": "integrated-s80278-s80278-1793031548",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80278",
+      "ever": [
+        "C0",
+        "C1",
+        "C2"
+      ],
+      "final": [
+        "C0",
+        "C2"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 123790,
+      "elapsed_s": 1098
+    },
+    {
+      "id": "integrated-s80279",
+      "arm": "integrated",
+      "seed": 80279,
+      "run_id": "integrated-s80279-s80279-1793031917",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80279",
+      "ever": [
+        "C0",
+        "C1",
+        "C2"
+      ],
+      "final": [
+        "C0",
+        "C2"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 313439,
+      "elapsed_s": 2758
+    },
+    {
+      "id": "reference-s80279",
+      "arm": "reference",
+      "seed": 80279,
+      "run_id": "reference-s80279-s80279-1793032330",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80279",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 131543,
+      "elapsed_s": 1160
+    },
+    {
+      "id": "reference-s80280",
+      "arm": "reference",
+      "seed": 80280,
+      "run_id": "reference-s80280-s80280-1793032652",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80280",
+      "ever": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 233534,
+      "elapsed_s": 2078
+    },
+    {
+      "id": "integrated-s80280",
+      "arm": "integrated",
+      "seed": 80280,
+      "run_id": "integrated-s80280-s80280-1793032664",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80280",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 38469,
+      "elapsed_s": 338
+    },
+    {
+      "id": "integrated-s80281",
+      "arm": "integrated",
+      "seed": 80281,
+      "run_id": "integrated-s80281-s80281-1793032675",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80281",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 37966,
+      "elapsed_s": 338
+    },
+    {
+      "id": "reference-s80281",
+      "arm": "reference",
+      "seed": 80281,
+      "run_id": "reference-s80281-s80281-1793032960",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80281",
+      "ever": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 193811,
+      "elapsed_s": 1689
+    },
+    {
+      "id": "reference-s80282",
+      "arm": "reference",
+      "seed": 80282,
+      "run_id": "reference-s80282-s80282-1793033008",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80282",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "failed"
+      },
+      "game_ticks": 407686,
+      "elapsed_s": 3563
+    },
+    {
+      "id": "integrated-s80282",
+      "arm": "integrated",
+      "seed": 80282,
+      "run_id": "integrated-s80282-s80282-1793033019",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80282",
+      "ever": [
+        "C0",
+        "C1",
+        "C2"
+      ],
+      "final": [
+        "C0",
+        "C2"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 172301,
+      "elapsed_s": 1517
+    },
+    {
+      "id": "integrated-s80283",
+      "arm": "integrated",
+      "seed": 80283,
+      "run_id": "integrated-s80283-s80283-1793033134",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80283",
+      "ever": [
+        "C0",
+        "C1"
+      ],
+      "final": [
+        "C0",
+        "C1"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "passed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 39984,
+      "elapsed_s": 354
+    },
+    {
+      "id": "reference-s80283",
+      "arm": "reference",
+      "seed": 80283,
+      "run_id": "reference-s80283-s80283-1793033254",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80283",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 112570,
+      "elapsed_s": 979
+    },
+    {
+      "id": "reference-s80284",
+      "arm": "reference",
+      "seed": 80284,
+      "run_id": "reference-s80284-s80284-1793033446",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80284",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "failed"
+      },
+      "game_ticks": 453864,
+      "elapsed_s": 3981
+    },
+    {
+      "id": "integrated-s80284",
+      "arm": "integrated",
+      "seed": 80284,
+      "run_id": "integrated-s80284-s80284-1793033490",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80284",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 41100,
+      "elapsed_s": 365
+    },
+    {
+      "id": "integrated-s80285",
+      "arm": "integrated",
+      "seed": 80285,
+      "run_id": "integrated-s80285-s80285-1793033554",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80285",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 44051,
+      "elapsed_s": 392
+    },
+    {
+      "id": "reference-s80285",
+      "arm": "reference",
+      "seed": 80285,
+      "run_id": "reference-s80285-s80285-1793033564",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80285",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "failed"
+      },
+      "game_ticks": 477881,
+      "elapsed_s": 4193
+    },
+    {
+      "id": "reference-s80286",
+      "arm": "reference",
+      "seed": 80286,
+      "run_id": "reference-s80286-s80286-1793033734",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80286",
+      "ever": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 190005,
+      "elapsed_s": 1689
+    },
+    {
+      "id": "integrated-s80286",
+      "arm": "integrated",
+      "seed": 80286,
+      "run_id": "integrated-s80286-s80286-1793033860",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80286",
+      "ever": [
+        "C0",
+        "C1"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 160242,
+      "elapsed_s": 1421
+    },
+    {
+      "id": "integrated-s80287",
+      "arm": "integrated",
+      "seed": 80287,
+      "run_id": "integrated-s80287-s80287-1793033953",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80287",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 45686,
+      "elapsed_s": 403
+    },
+    {
+      "id": "reference-s80287",
+      "arm": "reference",
+      "seed": 80287,
+      "run_id": "reference-s80287-s80287-1793034238",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80287",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "failed"
+      },
+      "game_ticks": 522450,
+      "elapsed_s": 4565
+    },
+    {
+      "id": "reference-s80288",
+      "arm": "reference",
+      "seed": 80288,
+      "run_id": "reference-s80288-s80288-1793034249",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80288",
+      "ever": [
+        "C0",
+        "C2",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C4"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "failed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "failed"
+      },
+      "game_ticks": 365128,
+      "elapsed_s": 3221
+    },
+    {
+      "id": "integrated-s80288",
+      "arm": "integrated",
+      "seed": 80288,
+      "run_id": "integrated-s80288-s80288-1793034362",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80288",
+      "ever": [
+        "C0",
+        "C1"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 115648,
+      "elapsed_s": 1024
+    },
+    {
+      "id": "integrated-s80289",
+      "arm": "integrated",
+      "seed": 80289,
+      "run_id": "integrated-s80289-s80289-1793034427",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80289",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 41760,
+      "elapsed_s": 371
+    },
+    {
+      "id": "reference-s80289",
+      "arm": "reference",
+      "seed": 80289,
+      "run_id": "reference-s80289-s80289-1793034542",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80289",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "failed"
+      },
+      "game_ticks": 417518,
+      "elapsed_s": 3680
+    },
+    {
+      "id": "reference-s80290",
+      "arm": "reference",
+      "seed": 80290,
+      "run_id": "reference-s80290-s80290-1793034656",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80290",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "passed",
+        "C6": "failed"
+      },
+      "game_ticks": 327956,
+      "elapsed_s": 2891
+    },
+    {
+      "id": "integrated-s80290",
+      "arm": "integrated",
+      "seed": 80290,
+      "run_id": "integrated-s80290-s80290-1793034680",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80290",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 42250,
+      "elapsed_s": 384
+    },
+    {
+      "id": "integrated-s80291",
+      "arm": "integrated",
+      "seed": 80291,
+      "run_id": "integrated-s80291-s80291-1793034735",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80291",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 43555,
+      "elapsed_s": 388
+    },
+    {
+      "id": "reference-s80291",
+      "arm": "reference",
+      "seed": 80291,
+      "run_id": "reference-s80291-s80291-1793034750",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80291",
+      "ever": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 233895,
+      "elapsed_s": 2081
+    },
+    {
+      "id": "reference-s80292",
+      "arm": "reference",
+      "seed": 80292,
+      "run_id": "reference-s80292-s80292-1793034805",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80292",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C6"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "passed"
+      },
+      "game_ticks": 465897,
+      "elapsed_s": 4071
+    },
+    {
+      "id": "integrated-s80292",
+      "arm": "integrated",
+      "seed": 80292,
+      "run_id": "integrated-s80292-s80292-1793034815",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80292",
+      "ever": [
+        "C0",
+        "C1",
+        "C2"
+      ],
+      "final": [
+        "C0",
+        "C2"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 244780,
+      "elapsed_s": 2239
+    },
+    {
+      "id": "integrated-s80293",
+      "arm": "integrated",
+      "seed": 80293,
+      "run_id": "integrated-s80293-s80293-1793035070",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80293",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 43220,
+      "elapsed_s": 383
+    },
+    {
+      "id": "reference-s80293",
+      "arm": "reference",
+      "seed": 80293,
+      "run_id": "reference-s80293-s80293-1793035129",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80293",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 95956,
+      "elapsed_s": 845
+    },
+    {
+      "id": "reference-s80294",
+      "arm": "reference",
+      "seed": 80294,
+      "run_id": "reference-s80294-s80294-1793035285",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80294",
+      "ever": [
+        "C0",
+        "C2"
+      ],
+      "final": [
+        "C0",
+        "C2"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 294120,
+      "elapsed_s": 2614
+    },
+    {
+      "id": "integrated-s80294",
+      "arm": "integrated",
+      "seed": 80294,
+      "run_id": "integrated-s80294-s80294-1793035393",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80294",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 44821,
+      "elapsed_s": 402
+    },
+    {
+      "id": "integrated-s80295",
+      "arm": "integrated",
+      "seed": 80295,
+      "run_id": "integrated-s80295-s80295-1793035429",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80295",
+      "ever": [
+        "C0"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 47624,
+      "elapsed_s": 426
+    },
+    {
+      "id": "reference-s80295",
+      "arm": "reference",
+      "seed": 80295,
+      "run_id": "reference-s80295-s80295-1793035460",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80295",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C6"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "passed"
+      },
+      "game_ticks": 464039,
+      "elapsed_s": 4052
+    },
+    {
+      "id": "reference-s80296",
+      "arm": "reference",
+      "seed": 80296,
+      "run_id": "reference-s80296-s80296-1793035800",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80296",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "failed"
+      },
+      "game_ticks": 383425,
+      "elapsed_s": 3335
+    },
+    {
+      "id": "integrated-s80296",
+      "arm": "integrated",
+      "seed": 80296,
+      "run_id": "integrated-s80296-s80296-1793035860",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80296",
+      "ever": [
+        "C0",
+        "C1",
+        "C2",
+        "C3"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 348365,
+      "elapsed_s": 3113
+    },
+    {
+      "id": "integrated-s80297",
+      "arm": "integrated",
+      "seed": 80297,
+      "run_id": "integrated-s80297-s80297-1793035980",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80297",
+      "ever": [
+        "C0",
+        "C1"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 200520,
+      "elapsed_s": 1800
+    },
+    {
+      "id": "reference-s80297",
+      "arm": "reference",
+      "seed": 80297,
+      "run_id": "reference-s80297-s80297-1793036578",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80297",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "failed"
+      },
+      "game_ticks": 391656,
+      "elapsed_s": 3382
+    },
+    {
+      "id": "reference-s80298",
+      "arm": "reference",
+      "seed": 80298,
+      "run_id": "reference-s80298-s80298-1793036837",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80298",
+      "ever": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 193451,
+      "elapsed_s": 1694
+    },
+    {
+      "id": "integrated-s80298",
+      "arm": "integrated",
+      "seed": 80298,
+      "run_id": "integrated-s80298-s80298-1793037062",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80298",
+      "ever": [
+        "C0",
+        "C1",
+        "C3"
+      ],
+      "final": [
+        "C0",
+        "C3"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "passed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 176095,
+      "elapsed_s": 1518
+    },
+    {
+      "id": "integrated-s80299",
+      "arm": "integrated",
+      "seed": 80299,
+      "run_id": "integrated-s80299-s80299-1793037432",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/integrated/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/integrated-s80299",
+      "ever": [
+        "C0",
+        "C1"
+      ],
+      "final": [
+        "C0"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "failed",
+        "C3": "failed",
+        "C4": "failed",
+        "C5": "unknown",
+        "C6": "failed"
+      },
+      "game_ticks": 43674,
+      "elapsed_s": 387
+    },
+    {
+      "id": "reference-s80299",
+      "arm": "reference",
+      "seed": 80299,
+      "run_id": "reference-s80299-s80299-1793037477",
+      "world": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/laya-c39-2123-miniship-20261026/arms/reference/code/data/laya-saved-world/laya-c39-2123-miniship-20261026/reference-s80299",
+      "ever": [
+        "C0",
+        "C2",
+        "C3",
+        "C4",
+        "C5"
+      ],
+      "final": [
+        "C0",
+        "C2",
+        "C3",
+        "C4"
+      ],
+      "stop": "stalled",
+      "returncode": 0,
+      "final_statuses": {
+        "C0": "passed",
+        "C1": "failed",
+        "C2": "passed",
+        "C3": "passed",
+        "C4": "passed",
+        "C5": "failed",
+        "C6": "failed"
+      },
+      "game_ticks": 424188,
+      "elapsed_s": 3612
+    }
+  ],
+  "raw_mismatches": [],
+  "denominator": {
+    "planned": 120,
+    "status_jobs": 120,
+    "unique_status_ids": 120,
+    "statuses": {
+      "completed": 120
+    },
+    "missing_planned": [],
+    "extra_unplanned": [],
+    "events": {
+      "attempt_started": {
+        "rows": 120,
+        "unique_jobs": 120
+      },
+      "attempt_terminal": {
+        "rows": 120,
+        "unique_jobs": 120
+      }
+    },
+    "terminal_returncodes": {
+      "0": 120
+    }
+  },
+  "paired": {
+    "C2_ever": {
+      "reference": 53,
+      "integrated": 13,
+      "cells": {
+        "reference_only": 42,
+        "both": 11,
+        "neither": 5,
+        "integrated_only": 2
+      },
+      "exact_two_sided_p": 1.1266365618212149e-10,
+      "seeds": {
+        "reference_only": [
+          80240,
+          80241,
+          80242,
+          80243,
+          80244,
+          80246,
+          80247,
+          80248,
+          80249,
+          80251,
+          80254,
+          80257,
+          80258,
+          80260,
+          80262,
+          80263,
+          80264,
+          80265,
+          80268,
+          80269,
+          80270,
+          80271,
+          80272,
+          80273,
+          80274,
+          80275,
+          80276,
+          80280,
+          80281,
+          80284,
+          80285,
+          80286,
+          80287,
+          80288,
+          80289,
+          80290,
+          80291,
+          80294,
+          80295,
+          80297,
+          80298,
+          80299
+        ],
+        "both": [
+          80245,
+          80250,
+          80252,
+          80253,
+          80256,
+          80259,
+          80261,
+          80278,
+          80282,
+          80292,
+          80296
+        ],
+        "neither": [
+          80255,
+          80266,
+          80267,
+          80283,
+          80293
+        ],
+        "integrated_only": [
+          80277,
+          80279
+        ]
+      },
+      "comparable": true
+    },
+    "C3_ever": {
+      "reference": 50,
+      "integrated": 7,
+      "cells": {
+        "reference_only": 45,
+        "both": 5,
+        "neither": 8,
+        "integrated_only": 2
+      },
+      "exact_two_sided_p": 1.6044054973463062e-11,
+      "seeds": {
+        "reference_only": [
+          80240,
+          80241,
+          80242,
+          80243,
+          80244,
+          80245,
+          80246,
+          80247,
+          80248,
+          80249,
+          80250,
+          80251,
+          80253,
+          80254,
+          80256,
+          80257,
+          80258,
+          80259,
+          80260,
+          80262,
+          80263,
+          80264,
+          80265,
+          80269,
+          80270,
+          80271,
+          80273,
+          80274,
+          80275,
+          80276,
+          80278,
+          80280,
+          80281,
+          80282,
+          80284,
+          80285,
+          80286,
+          80287,
+          80289,
+          80290,
+          80291,
+          80292,
+          80295,
+          80297,
+          80299
+        ],
+        "both": [
+          80252,
+          80268,
+          80272,
+          80296,
+          80298
+        ],
+        "neither": [
+          80255,
+          80266,
+          80267,
+          80279,
+          80283,
+          80288,
+          80293,
+          80294
+        ],
+        "integrated_only": [
+          80261,
+          80277
+        ]
+      },
+      "comparable": true
+    },
+    "C4_ever": {
+      "reference": 39,
+      "integrated": 0,
+      "cells": {
+        "reference_only": 39,
+        "neither": 21
+      },
+      "exact_two_sided_p": 3.637978807091713e-12,
+      "seeds": {
+        "reference_only": [
+          80240,
+          80241,
+          80242,
+          80243,
+          80246,
+          80248,
+          80249,
+          80251,
+          80252,
+          80253,
+          80254,
+          80256,
+          80257,
+          80259,
+          80260,
+          80262,
+          80263,
+          80264,
+          80265,
+          80268,
+          80270,
+          80271,
+          80272,
+          80273,
+          80275,
+          80276,
+          80278,
+          80282,
+          80284,
+          80285,
+          80287,
+          80288,
+          80289,
+          80290,
+          80292,
+          80295,
+          80296,
+          80297,
+          80299
+        ],
+        "neither": [
+          80244,
+          80245,
+          80247,
+          80250,
+          80255,
+          80258,
+          80261,
+          80266,
+          80267,
+          80269,
+          80274,
+          80277,
+          80279,
+          80280,
+          80281,
+          80283,
+          80286,
+          80291,
+          80293,
+          80294,
+          80298
+        ]
+      },
+      "comparable": true
+    },
+    "C5_ever": {
+      "reference": 39,
+      "integrated": 0,
+      "cells": {
+        "reference_only": 39,
+        "neither": 21
+      },
+      "exact_two_sided_p": null,
+      "seeds": {
+        "reference_only": [
+          80240,
+          80241,
+          80242,
+          80243,
+          80246,
+          80248,
+          80249,
+          80251,
+          80252,
+          80253,
+          80254,
+          80256,
+          80257,
+          80259,
+          80260,
+          80262,
+          80263,
+          80264,
+          80265,
+          80268,
+          80270,
+          80271,
+          80272,
+          80273,
+          80275,
+          80276,
+          80278,
+          80282,
+          80284,
+          80285,
+          80287,
+          80288,
+          80289,
+          80290,
+          80292,
+          80295,
+          80296,
+          80297,
+          80299
+        ],
+        "neither": [
+          80244,
+          80245,
+          80247,
+          80250,
+          80255,
+          80258,
+          80261,
+          80266,
+          80267,
+          80269,
+          80274,
+          80277,
+          80279,
+          80280,
+          80281,
+          80283,
+          80286,
+          80291,
+          80293,
+          80294,
+          80298
+        ]
+      },
+      "comparable": false,
+      "comparison_note": "Different active predicates; no inferential paired P."
+    },
+    "C6_ever": {
+      "reference": 13,
+      "integrated": 0,
+      "cells": {
+        "neither": 47,
+        "reference_only": 13
+      },
+      "exact_two_sided_p": 0.000244140625,
+      "seeds": {
+        "neither": [
+          80240,
+          80242,
+          80243,
+          80244,
+          80245,
+          80246,
+          80247,
+          80248,
+          80249,
+          80250,
+          80252,
+          80253,
+          80254,
+          80255,
+          80256,
+          80257,
+          80258,
+          80259,
+          80260,
+          80261,
+          80263,
+          80265,
+          80266,
+          80267,
+          80269,
+          80270,
+          80273,
+          80274,
+          80275,
+          80276,
+          80277,
+          80279,
+          80280,
+          80281,
+          80282,
+          80283,
+          80284,
+          80286,
+          80288,
+          80289,
+          80290,
+          80291,
+          80293,
+          80294,
+          80296,
+          80298,
+          80299
+        ],
+        "reference_only": [
+          80241,
+          80251,
+          80262,
+          80264,
+          80268,
+          80271,
+          80272,
+          80278,
+          80285,
+          80287,
+          80292,
+          80295,
+          80297
+        ]
+      },
+      "comparable": true
+    },
+    "C2_final": {
+      "reference": 53,
+      "integrated": 13,
+      "cells": {
+        "reference_only": 42,
+        "both": 11,
+        "neither": 5,
+        "integrated_only": 2
+      },
+      "exact_two_sided_p": 1.1266365618212149e-10,
+      "seeds": {
+        "reference_only": [
+          80240,
+          80241,
+          80242,
+          80243,
+          80244,
+          80246,
+          80247,
+          80248,
+          80249,
+          80251,
+          80254,
+          80257,
+          80258,
+          80260,
+          80262,
+          80263,
+          80264,
+          80265,
+          80268,
+          80269,
+          80270,
+          80271,
+          80272,
+          80273,
+          80274,
+          80275,
+          80276,
+          80280,
+          80281,
+          80284,
+          80285,
+          80286,
+          80287,
+          80288,
+          80289,
+          80290,
+          80291,
+          80294,
+          80295,
+          80297,
+          80298,
+          80299
+        ],
+        "both": [
+          80245,
+          80250,
+          80252,
+          80253,
+          80256,
+          80259,
+          80261,
+          80278,
+          80282,
+          80292,
+          80296
+        ],
+        "neither": [
+          80255,
+          80266,
+          80267,
+          80283,
+          80293
+        ],
+        "integrated_only": [
+          80277,
+          80279
+        ]
+      },
+      "comparable": true
+    },
+    "C3_final": {
+      "reference": 50,
+      "integrated": 7,
+      "cells": {
+        "reference_only": 45,
+        "both": 5,
+        "neither": 8,
+        "integrated_only": 2
+      },
+      "exact_two_sided_p": 1.6044054973463062e-11,
+      "seeds": {
+        "reference_only": [
+          80240,
+          80241,
+          80242,
+          80243,
+          80244,
+          80245,
+          80246,
+          80247,
+          80248,
+          80249,
+          80250,
+          80251,
+          80253,
+          80254,
+          80256,
+          80257,
+          80258,
+          80259,
+          80260,
+          80262,
+          80263,
+          80264,
+          80265,
+          80269,
+          80270,
+          80271,
+          80273,
+          80274,
+          80275,
+          80276,
+          80278,
+          80280,
+          80281,
+          80282,
+          80284,
+          80285,
+          80286,
+          80287,
+          80289,
+          80290,
+          80291,
+          80292,
+          80295,
+          80297,
+          80299
+        ],
+        "both": [
+          80252,
+          80268,
+          80272,
+          80296,
+          80298
+        ],
+        "neither": [
+          80255,
+          80266,
+          80267,
+          80279,
+          80283,
+          80288,
+          80293,
+          80294
+        ],
+        "integrated_only": [
+          80261,
+          80277
+        ]
+      },
+      "comparable": true
+    },
+    "C4_final": {
+      "reference": 39,
+      "integrated": 0,
+      "cells": {
+        "reference_only": 39,
+        "neither": 21
+      },
+      "exact_two_sided_p": 3.637978807091713e-12,
+      "seeds": {
+        "reference_only": [
+          80240,
+          80241,
+          80242,
+          80243,
+          80246,
+          80248,
+          80249,
+          80251,
+          80252,
+          80253,
+          80254,
+          80256,
+          80257,
+          80259,
+          80260,
+          80262,
+          80263,
+          80264,
+          80265,
+          80268,
+          80270,
+          80271,
+          80272,
+          80273,
+          80275,
+          80276,
+          80278,
+          80282,
+          80284,
+          80285,
+          80287,
+          80288,
+          80289,
+          80290,
+          80292,
+          80295,
+          80296,
+          80297,
+          80299
+        ],
+        "neither": [
+          80244,
+          80245,
+          80247,
+          80250,
+          80255,
+          80258,
+          80261,
+          80266,
+          80267,
+          80269,
+          80274,
+          80277,
+          80279,
+          80280,
+          80281,
+          80283,
+          80286,
+          80291,
+          80293,
+          80294,
+          80298
+        ]
+      },
+      "comparable": true
+    },
+    "C5_final": {
+      "reference": 7,
+      "integrated": 0,
+      "cells": {
+        "reference_only": 7,
+        "neither": 53
+      },
+      "exact_two_sided_p": null,
+      "seeds": {
+        "reference_only": [
+          80240,
+          80243,
+          80246,
+          80249,
+          80252,
+          80256,
+          80290
+        ],
+        "neither": [
+          80241,
+          80242,
+          80244,
+          80245,
+          80247,
+          80248,
+          80250,
+          80251,
+          80253,
+          80254,
+          80255,
+          80257,
+          80258,
+          80259,
+          80260,
+          80261,
+          80262,
+          80263,
+          80264,
+          80265,
+          80266,
+          80267,
+          80268,
+          80269,
+          80270,
+          80271,
+          80272,
+          80273,
+          80274,
+          80275,
+          80276,
+          80277,
+          80278,
+          80279,
+          80280,
+          80281,
+          80282,
+          80283,
+          80284,
+          80285,
+          80286,
+          80287,
+          80288,
+          80289,
+          80291,
+          80292,
+          80293,
+          80294,
+          80295,
+          80296,
+          80297,
+          80298,
+          80299
+        ]
+      },
+      "comparable": false,
+      "comparison_note": "Different active predicates; no inferential paired P."
+    },
+    "C6_final": {
+      "reference": 8,
+      "integrated": 0,
+      "cells": {
+        "neither": 52,
+        "reference_only": 8
+      },
+      "exact_two_sided_p": 0.0078125,
+      "seeds": {
+        "neither": [
+          80240,
+          80242,
+          80243,
+          80244,
+          80245,
+          80246,
+          80247,
+          80248,
+          80249,
+          80250,
+          80251,
+          80252,
+          80253,
+          80254,
+          80255,
+          80256,
+          80257,
+          80258,
+          80259,
+          80260,
+          80261,
+          80263,
+          80265,
+          80266,
+          80267,
+          80269,
+          80270,
+          80273,
+          80274,
+          80275,
+          80276,
+          80277,
+          80278,
+          80279,
+          80280,
+          80281,
+          80282,
+          80283,
+          80284,
+          80285,
+          80286,
+          80287,
+          80288,
+          80289,
+          80290,
+          80291,
+          80293,
+          80294,
+          80296,
+          80297,
+          80298,
+          80299
+        ],
+        "reference_only": [
+          80241,
+          80262,
+          80264,
+          80268,
+          80271,
+          80272,
+          80292,
+          80295
+        ]
+      },
+      "comparable": true
+    }
+  },
+  "aggregate": {
+    "reference": {
+      "stops": {
+        "stalled": 57,
+        "window_timeout": 3
+      },
+      "faults": {
+        "tool_error": {
+          "events": 0,
+          "jobs": 0
+        },
+        "untyped_stuck": {
+          "events": 37,
+          "jobs": 21
+        },
+        "infrastructure_collision": {
+          "events": 1,
+          "jobs": 1
+        },
+        "power_route_unavailable": {
+          "events": 35,
+          "jobs": 21
+        },
+        "safe_stop_after_repeated_failures": {
+          "events": 0,
+          "jobs": 0
+        }
+      },
+      "final_statuses": {
+        "C2": {
+          "passed": 53,
+          "failed": 7
+        },
+        "C3": {
+          "passed": 50,
+          "failed": 10
+        },
+        "C4": {
+          "passed": 39,
+          "failed": 21
+        },
+        "C5": {
+          "passed": 7,
+          "failed": 32,
+          "unknown": 21
+        },
+        "C6": {
+          "failed": 52,
+          "passed": 8
+        }
+      },
+      "classifications": {
+        "intended_difficulty": 15389,
+        "unclassified": 597,
+        "bug": 87
+      },
+      "termination": {
+        "stalled": 57,
+        "game_window": 3
+      },
+      "run_count": 60,
+      "decisions": 20995,
+      "failures": 0,
+      "maintenance_failure_events": 5,
+      "evidence_errors": 0,
+      "malformed_journal_rows": 0,
+      "legacy_c5_comparison": {}
+    },
+    "integrated": {
+      "stops": {
+        "stalled": 60
+      },
+      "faults": {
+        "tool_error": {
+          "events": 0,
+          "jobs": 0
+        },
+        "untyped_stuck": {
+          "events": 88,
+          "jobs": 6
+        },
+        "infrastructure_collision": {
+          "events": 0,
+          "jobs": 0
+        },
+        "power_route_unavailable": {
+          "events": 0,
+          "jobs": 0
+        },
+        "safe_stop_after_repeated_failures": {
+          "events": 0,
+          "jobs": 0
+        }
+      },
+      "final_statuses": {
+        "C2": {
+          "failed": 47,
+          "passed": 13
+        },
+        "C3": {
+          "failed": 53,
+          "passed": 7
+        },
+        "C4": {
+          "failed": 60
+        },
+        "C5": {
+          "unknown": 60
+        },
+        "C6": {
+          "failed": 60
+        }
+      },
+      "classifications": {
+        "intended_difficulty": 2974,
+        "unclassified": 342,
+        "bug": 91
+      },
+      "termination": {
+        "stalled": 60
+      },
+      "run_count": 60,
+      "decisions": 5147,
+      "failures": 0,
+      "maintenance_failure_events": 0,
+      "evidence_errors": 0,
+      "malformed_journal_rows": 0,
+      "legacy_c5_comparison": {
+        "observed_jobs": 60,
+        "ever_pass": 0,
+        "final_pass": 0
+      }
+    }
+  },
+  "input_sha256": {
+    "batch.json": "646789a4a0d223be722e7b90994d21285b90cb9cec4f620c5bba6087ff9457e5",
+    "freeze.json": "d750a34974aded869c7bf788588e27224cbe017663c0847c39d66ce14e2e0d78",
+    "planned-jobs.json": "2ec85f944598d7867cc74aa425ddad8699468deba8411437f099b4a13f7219fc",
+    "job-status.json": "0855c87bb9661dadca4550abf3fe0fb37b7e92cf9dde946e1cc8e18bd87a79e6",
+    "batch-events.jsonl": "de56abd6711d2c6f87cd3e3141565fd18dc0edd5bdf7fa2dc866d9c9eb04b0ca",
+    "report.json": "34fcdc801d27488694747e12e877cac23902afa24fab37b66bd1a541093e2664"
+  }
+}
