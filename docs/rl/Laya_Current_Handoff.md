@@ -44,3 +44,18 @@ is queued. Read `data/laya-orchestration/c39-20261026/state.json`; require C2 an
 then a tested, exposed consumer operation before admitting 120 jobs. If the
 base fails, investigate allocatable-stock facts first. C29 remains the policy
 reference; source integration and sampler-fixture success are not adoption.
+
+## 2026-10-26 17:30 IST: C39 base smoke fixed and passed on branch
+
+- **Smoke 1 failed its gate.** `laya-c39-preflight-2123-miniship-20261026` ran from `c71d826`. Neither run reached strict C2; both idle-stalled under `decision-idle-v3`, with zero tool or safety faults.
+  - Cause: `_prepare_operation` refreshed the deterministic prospective LOGISTIC CHEST BUDGET before every Laya operation.
+  - That held all 7 kit passive-provider chests from +3 s for the stage-order claimants.
+  - Foundations and early belt/drill/inserter cells are not claimants, so they refused in a loop (`passive-provider-chest: need 6, short -1`).
+- **Fix:** `8eb4690`, branch `fix/rl-laya-chest-hold-20261026`, based on `9224ce4`.
+  - Laya refreshes explicit fences only (the plastic output packet). The deterministic runtime keeps its hold.
+  - A regression test fails on the old behaviour. 281 focused and 1,626 fast tests pass.
+- **Smoke 2 passed.** `laya-c39-smoke2-2123-miniship-20261026` ran from `8eb4690` on the same seeds and ports 40100/33100.
+  - Both runs reached strict C2: 27.3 and 25.9 game minutes from the first decision.
+  - Zero tool, safety or untyped faults; no prospective budget line; no negative-shortage loop.
+- **Not yet on main:** merging or pushing `8eb4690` needs the user's go-ahead.
+- **Next:** the consumer-service candidate (shared facts plus one operation) needs implementation, regressions and an exposure smoke before any 120-job freeze. State: `data/laya-orchestration/c39-20261026/state.json`.
