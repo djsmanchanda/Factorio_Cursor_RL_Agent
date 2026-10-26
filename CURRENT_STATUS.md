@@ -655,3 +655,5 @@ Set shared new-cohort default7200 and updated generators; longer15000-second res
   - C39 `laya-c39-2123-miniship-20261026` compares the integrated main against the C29 reference plus census (`9d9b279`): 120 jobs, seeds 80240–80299, ports 40200/33200, 7,200 s / 540,000 ticks. Primary is strict C6 ever.
   - A mixed-harness wiring smoke passed.
   - Lifecycle: new unit, capped at 2026-10-27 18:10. Host scheduler unchanged (manual 15).
+
+- 2026-10-26 19:40 IST: user replaced retired controller `mcp:94f918da-f279-4342-bc00-c5d125c67e16` with `30223f04-9750-4be0-b1f6-1c63971af9a8` (Laya Controller Supervisor). Current handoff, C39 operational state and the local result schedule now record the replacement; verified its independent enabled 55-minute schedule and all retired-thread schedules disabled. No cohort/runtime action; changes stay local and unpushed.

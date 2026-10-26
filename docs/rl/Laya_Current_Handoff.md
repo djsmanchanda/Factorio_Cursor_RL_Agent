@@ -6,6 +6,12 @@ Updated 2026-10-26 IST during branch convergence. Read the [runner contract](Lay
 
 The decision-policy release is `5a5ed28`, adopted in [C29](Laya_C29_Result_2026-10-24.md). The fixed foundation census (`9d9b279`) passed all 4,323 acceptance checks in [C34](Laya_C34_Result_2026-10-25.md). It changes both acceptance observation and policy facts, so pre/post-census counts are not directly comparable. Measurement, crash-safe run retention and named obstruction evidence are being integrated with main's independent runtime isolation and research-goal work. Integration tests do not establish a matched live improvement.
 
+## Current controller routing — 2026-10-26 19:40 IST
+
+The controller supervisor is [Laya Controller Supervisor](t3-thread://v1/30223f04-9750-4be0-b1f6-1c63971af9a8), thread `30223f04-9750-4be0-b1f6-1c63971af9a8`. The user retired `mcp:94f918da-f279-4342-bc00-c5d125c67e16`; it is historical evidence only and must receive no further work. The replacement already owns an enabled 55-minute read-only cohort-observation schedule.
+
+This convergence thread (`94dcfaf2-9531-4234-bde5-b6ae616de9b1`) retains the C39 result and base-decision work. Its one-time result schedule remains at 2026-10-27 08:00 IST. Do not duplicate the supervisor timer. Commit locally; push only on explicit user instruction for those commits. This routing update changes no frozen cohort, runtime, policy, or ownership of the result.
+
 | Cohort | Result and decision |
 |---|---|
 | C29 | Stale mall-reservation release adopted; [result](Laya_C29_Result_2026-10-24.md). |
