@@ -284,6 +284,27 @@ def validate_coach_record(record: Mapping[str, Any]) -> None:
     if errors:
         detail = "; ".join(f"{'/'.join(map(str, error.path)) or '<root>'}: {error.message}" for error in errors[:4])
         raise LayaWorkflowError(f"invalid Laya coach record: {detail}")
+    area = record.get("area")
+    if area is not None:
+        left_top, right_bottom = area["left_top"], area["right_bottom"]
+        if right_bottom["x"] < left_top["x"] or right_bottom["y"] < left_top["y"]:
+            raise LayaWorkflowError("invalid Laya coach record: area right_bottom precedes left_top")
+
+
+def _area_digest(area: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep the reviewer's selected box with a bounded entity sample."""
+    return {
+        "left_top": dict(area["left_top"]),
+        "right_bottom": dict(area["right_bottom"]),
+        "selection_mode": str(area["selection_mode"]),
+        "entity_count": int(area["entity_count"]),
+        "entities": [
+            {"name": str(entity["name"])[:96], "position": entity["position"]}
+            for entity in area["entities"][:16]
+        ],
+        "resources": {str(name)[:96]: float(amount) for name, amount in area["resources"].items()},
+        "truncated": bool(area.get("truncated", False)),
+    }
 
 
 def coach_record_to_case(record: Mapping[str, Any], *, split: str = "train") -> dict[str, Any]:
@@ -308,6 +329,8 @@ def coach_record_to_case(record: Mapping[str, Any], *, split: str = "train") -> 
     state["options"] = [dict(option) for option in options]
     if isinstance(record.get("observation"), Mapping):
         state["observation_digest"] = _observation_digest(record["observation"])
+    if isinstance(record.get("area"), Mapping):
+        state.setdefault("observation_digest", {})["area"] = _area_digest(record["area"])
     validate_state(state)
     guidance = record.get("guidance") if isinstance(record.get("guidance"), Mapping) else {}
     confidence = guidance.get("confidence", record.get("confidence", 1.0))

@@ -36,7 +36,7 @@ _BASE_COMMANDS = frozenset({
     "build_layout_plan", "verify_electronics_execution", "set_research",
     "research_status", "research_options", "science_status", "logistic_inventory",
     "create_planner_world", "apply_ghost_plan", "activate_runtime", "deactivate_runtime",
-    "spawn_construction_spidertron",
+    "spawn_construction_spidertron", "layout_executor_capabilities",
 })
 
 _LUA_HARNESS = r"""
@@ -45,9 +45,10 @@ local registered, writes, remotes, event_fns, command_fns = {}, {}, {}, {}, {}
 commands = { add_command = function(name, help, fn) registered[#registered + 1] = name; command_fns[name] = fn end }
 helpers = { write_file = function(path) writes[#writes + 1] = path end,
   json_to_table = function() return {} end, table_to_json = function() return "{}" end }
-remote = { interfaces = {}, add_interface = function(n) remotes[#remotes + 1] = n; remote.interfaces[n] = true end,
+remote = { interfaces = {}, add_interface = function(n, methods) remotes[#remotes + 1] = n; remote.interfaces[n] = methods end,
   call = function() return {} end }
-script = { on_event = function(_name, fn) event_fns[#event_fns + 1] = fn end,
+script = { on_nth_tick = function() end,
+  on_event = function(_name, fn) event_fns[#event_fns + 1] = fn end,
   on_init = function() end, on_configuration_changed = function() end }
 defines = setmetatable({}, { __index = function(t, k) local v = {}; rawset(t, k, v); return v end })
 storage = { construction_session = { completed = 0 } }
@@ -67,6 +68,8 @@ print("err=" .. tostring(err))
 print("commands=" .. table.concat(registered, ","))
 print("writes=" .. table.concat(writes, ","))
 print("remotes=" .. table.concat(remotes, ","))
+local methods = remote.interfaces[remotes[1]] or {}
+print("startup_api=" .. tostring(type(methods.production_startup_arm) == "function" and type(methods.production_startup_read) == "function"))
 print("mutated=" .. tostring(storage.construction_session.completed))
 -- Toggle activation live (no reload) and re-run the events.
 for name, fn in pairs(command_fns) do
@@ -100,6 +103,7 @@ def _run_control(mod_dir: Path, setting_name: str, active: bool) -> dict:
         "commands": set(filter(None, parsed["commands"].split(","))),
         "writes": [w for w in parsed["writes"].split(",") if w],
         "remotes": [r for r in parsed["remotes"].split(",") if r],
+        "startup_api": parsed["startup_api"] == "true",
         "mutated": int(parsed["mutated"]),
         "mutated_after": int(parsed["mutated_after"]),
     }
@@ -144,6 +148,7 @@ def test_runtime_mods_route_output_and_remote_interfaces(tmp_path: Path) -> None
     assert laya["writes"] == ["factorio_laya_mod/snapshots/probe.json"]
     assert deterministic["remotes"] == ["factorio_cursor_rl_agent"]
     assert laya["remotes"] == ["factorio_laya_agent"]
+    assert deterministic["startup_api"] and laya["startup_api"]
     # An inactive runtime applies no gameplay side effects, even though the
     # Laya coach module is loaded; the active runtime's robot handler runs once.
     inactive_laya = _run_control(

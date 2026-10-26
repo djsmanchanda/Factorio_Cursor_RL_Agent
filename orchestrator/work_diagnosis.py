@@ -213,7 +213,10 @@ def diagnose(bundle: dict) -> dict:
             if artifact.get("source_id") != identity["source_id"]:
                 raise ValueError("source identity mismatch")
             payload = _object(artifact.get("payload"), "artifact payload")
-            if payload.get("version") != 1:
+            # District state version 2 adds retained starter providers while
+            # keeping the same diagnosis fields; other artifacts stay version 1.
+            supported_versions = {1, 2} if kind == "district" else {1}
+            if payload.get("version") not in supported_versions:
                 raise ValueError("unsupported artifact version")
             for key in ("episode_id", "surface", "force", "source_id"):
                 if key not in payload and key in {"surface", "force", "source_id"} and kind == "work":

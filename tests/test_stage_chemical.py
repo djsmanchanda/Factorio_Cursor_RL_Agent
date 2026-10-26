@@ -359,6 +359,7 @@ def test_existing_coal_mine_on_selected_patch_is_reused(monkeypatch) -> None:
         (-329.5, 10.5), (-369.5, 1.5), (-325.5, 43.5), 16_281_288,
     )
     messages: list[str] = []
+    serviced = []
     monkeypatch.setattr(stage_chemical, "retire_depleted_mines", lambda *_a: None)
     monkeypatch.setattr(
         stage_chemical.extraction_state, "find_resource_mine",
@@ -378,11 +379,15 @@ def test_existing_coal_mine_on_selected_patch_is_reused(monkeypatch) -> None:
     client = type("Client", (), {"command": lambda self, _text: "NONE"})()
     source = stage_chemical.ensure_coal_mine(
         client, object(), "nauvis", "player", (-192.5, -91.0),
-        lambda *_a, **_k: None, messages.append,
+        lambda *args, **kwargs: serviced.append((args, kwargs)), messages.append,
         prefer_nearest_patch=True,
     )
 
     assert source == mine.haul_head
+    assert serviced[0][0][8] == [
+        (x, y) for y in (9.5, 13.5) for x in (-329.5, -326.5, -323.5, -320.5)
+    ]
+    assert serviced[0][1]["logistic_chest_positions"] == []
     assert any("reusing owned belt mine" in message for message in messages)
 
 
@@ -491,6 +496,7 @@ def test_oil_cell_uses_local_belt_coal_and_no_requester(monkeypatch) -> None:
         return (-340.0, 20.0)
 
     monkeypatch.setattr(stage_chemical, "ensure_coal_mine", local_coal)
+    monkeypatch.setattr(stage_chemical, "_service_reserved_coal_mine", lambda *_a: None)
 
     def plastic_site(_client, _surface, refinery_centre, coal_output):
         calls["plastic_inputs"] = (refinery_centre, coal_output)
@@ -757,7 +763,7 @@ def test_split_oil_submission_reserves_later_pipe_footprints(monkeypatch) -> Non
     )
     monkeypatch.setattr(stage_chemical, "_wait_for_ghosts", lambda *_args, **_kwargs: 0)
     monkeypatch.setattr(
-        stage_chemical.live_base, "available_items",
+        stage_chemical.live_base, "transferable_items",
         lambda *_args: {"chemical-plant": 1, "landfill": 1, "pipe": 1},
     )
     machine = {"phases": [{"name": "machine", "actions": [{
@@ -796,7 +802,7 @@ def test_oil_packets_refuse_partial_submission_when_later_supply_is_missing(
         }]}]}),
     ]
     monkeypatch.setattr(
-        stage_chemical.live_base, "available_items",
+        stage_chemical.live_base, "transferable_items",
         lambda *_args: {"substation": 1, "pipe": 0},
     )
     monkeypatch.setattr(
@@ -830,7 +836,7 @@ def test_oil_power_connects_before_later_packets(monkeypatch) -> None:
         }]}]}),
     ]
     monkeypatch.setattr(
-        stage_chemical.live_base, "available_items",
+        stage_chemical.live_base, "transferable_items",
         lambda *_args: {"substation": 1, "chemical-plant": 1},
     )
     monkeypatch.setattr(
@@ -1034,22 +1040,6 @@ def test_chest_content_query_reads_held_items() -> None:
 
 
 
-def test_chest_content_query_reads_held_items() -> None:
-    from orchestrator import live_base
-
-    class _Client:
-        def __init__(self):
-            self.commands = []
-
-        def command(self, text):
-            self.commands.append(text)
-            return "3"
-
-    client = _Client()
-    assert live_base.chest_stored_items(client, "nauvis", (1.5, 2.5)) == 3
-    lua = client.commands[0]
-    assert "get_contents" in lua
-    assert "requester-chest" in lua
 
 
 def test_extra_pumpjack_spots_fill_the_patch_without_overlap() -> None:
@@ -1138,6 +1128,7 @@ def test_oil_cell_builds_extra_pumpjacks_to_saturate_the_refinery(monkeypatch) -
     monkeypatch.setattr(
         stage_chemical, "ensure_coal_mine", lambda *_a, **_k: (-340.0, 20.0),
     )
+    monkeypatch.setattr(stage_chemical, "_service_reserved_coal_mine", lambda *_a: None)
     monkeypatch.setattr(
         stage_chemical, "_find_plastic_site", lambda *_a: (-305.0, -45.0),
     )
@@ -1203,6 +1194,7 @@ def _oil_cell_world(monkeypatch, routed) -> None:
     monkeypatch.setattr(
         stage_chemical, "ensure_coal_mine", lambda *_a, **_k: (-340.0, 20.0),
     )
+    monkeypatch.setattr(stage_chemical, "_service_reserved_coal_mine", lambda *_a: None)
     monkeypatch.setattr(
         stage_chemical, "_find_plastic_site", lambda *_a: (-305.0, -45.0),
     )
@@ -1705,3 +1697,87 @@ def test_oil_route_exhaustion_reports_every_bounded_attempt(monkeypatch):
     with pytest.raises(ValueError, match='No bounded fluid route') as failure:
         stage_chemical._route_oil_fluid_link((0, 0), [(5, 0)], 'water', foreign=[], hard=set(), terrain_water=set(), existing_tiles=[])
     assert str(failure.value).count('blocked endpoints') == 4
+
+
+def test_reserved_oil_retry_services_owned_coal_before_production(monkeypatch) -> None:
+    mine = extraction_state.ResourceMine(
+        (-334.5, 12.5), 2, belt_y=12.5, first_column_x=-330.5,
+        haul_head=(-325.5, 12.5),
+    )
+    monkeypatch.setattr(stage_chemical.extraction_state, "find_resource_mine", lambda *_a: mine)
+    monkeypatch.setattr(stage_chemical, "_coal_belt_source", lambda *_a: mine.haul_head)
+    monkeypatch.setattr(stage_chemical, "_submit_oil_cell_packets", lambda *_a, **_k: None)
+    monkeypatch.setattr(stage_chemical, "ensure_logistic_coverage", lambda *_a: None)
+    events = []
+    def diagnose(*_a, **_k):
+        assert events[-1] == ("mining stage for coal", [
+            (-330.5, 10.5), (-327.5, 10.5), (-330.5, 14.5), (-327.5, 14.5),
+        ], [])
+        return []
+    monkeypatch.setattr(stage_chemical, "_diagnose_machines", diagnose)
+    def plan(machine):
+        return {"phases": [{"actions": [{
+            "entity": machine, "position": {"x": 0.5, "y": 0.5},
+        }, {"entity": "substation", "position": {"x": 4, "y": 4}}, {
+            "entity": "passive-provider-chest", "position": {"x": 3.5, "y": 3.5},
+        }]}]}
+    intent = {"plans": [plan(name) for name in (
+        "pumpjack", "offshore-pump", "oil-refinery", "chemical-plant", "chemical-plant",
+    )], "links": [], "packets": [], "coal": list(mine.haul_head),
+        "coal_actions": [], "coal_belt_type": "transport-belt", "target_output": "plastic-bar"}
+    import copy
+    before = copy.deepcopy(intent)
+    stage_chemical._execute_opening_oil_cell(
+        object(), object(), "nauvis", "player",
+        lambda *args, **kwargs: events.append((args[4], args[8], kwargs["logistic_chest_positions"])),
+        lambda _m: None, intent,
+    )
+    assert intent == before
+
+
+@pytest.mark.parametrize("missing", [True, False])
+def test_reserved_coal_source_does_not_switch_or_duplicate_mines(monkeypatch, missing) -> None:
+    mine = None if missing else extraction_state.ResourceMine((1.5, 2.5), 2)
+    monkeypatch.setattr(stage_chemical.extraction_state, "find_resource_mine", lambda *_a: mine)
+    with pytest.raises(stage_chemical.StuckError, match="no matching owned mine"):
+        stage_chemical._service_reserved_coal_mine(
+            object(), object(), "nauvis", "player", (10.5, 20.5),
+            lambda *_a: pytest.fail("unowned mine must not be serviced"), lambda _m: None,
+        )
+
+
+def _plastic_fence(tmp_path, monkeypatch, stock, targets=None):
+    from orchestrator import autonomous_builder as builder
+    from orchestrator.material_reservations import MaterialReservationLedger
+    ledger = MaterialReservationLedger(tmp_path / "script-output" / "factorio_cursor_rl",
+                                       episode_id="episode-plastic-fence", surface="nauvis", force="player")
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", ledger)
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_a: stock)
+    builder._reserve_plastic_output_chest(object(), "nauvis", "player", targets or {"plastic-bar": 1}, lambda _m: None)
+    return builder, ledger
+
+
+def test_the_plastic_output_chest_is_fenced_before_mall_cells_spend_the_kit(tmp_path, monkeypatch):
+    # Cohort 7: mall cells spent the start kit's passive-provider chests before the oil cell, which needs
+    # one and cannot get more without plastic (7/48 runs deadlocked).
+    stock = {"passive-provider-chest": 2}
+    builder, ledger = _plastic_fence(tmp_path, monkeypatch, stock)
+    assert ledger.projects[builder._PLASTIC_OUTPUT_PACKET].reserved == {"passive-provider-chest": 1}
+    ledger.declare("paired_mall_iron-gear-wheel", {"passive-provider-chest": 2}, stock, priority=100)
+    assert ledger.shortage_targets("paired_mall_iron-gear-wheel", stock)  # only one chest is free
+    # The packet's own full bill later replaces the fence under the same name and keeps the chest.
+    ledger.declare(builder._PLASTIC_OUTPUT_PACKET, {"passive-provider-chest": 1, "pipe": 3}, stock, priority=100)
+    assert ledger.projects[builder._PLASTIC_OUTPUT_PACKET].reserved["passive-provider-chest"] == 1
+    builder._reserve_plastic_output_chest(object(), "nauvis", "player", {"plastic-bar": 1}, lambda _m: None)
+    assert ledger.projects[builder._PLASTIC_OUTPUT_PACKET].required == {"passive-provider-chest": 1, "pipe": 3}
+    from types import SimpleNamespace
+    monkeypatch.setattr(builder, "_pending_startup_dependencies", lambda *_: ())
+    builder._refresh_logistic_chest_budget(SimpleNamespace(command=lambda _: ""), "nauvis", "player", ledger)
+    assert ledger.projects[builder._PLASTIC_OUTPUT_PACKET].reserved["passive-provider-chest"] == 1
+    assert builder._PLASTIC_OUTPUT_PACKET in ledger.dependency_claimants
+
+
+def test_no_plastic_in_the_mission_fences_nothing(tmp_path, monkeypatch):
+    builder, ledger = _plastic_fence(tmp_path, monkeypatch, {"passive-provider-chest": 2}, {"iron-gear-wheel": 1})
+    assert builder._PLASTIC_OUTPUT_PACKET not in ledger.projects

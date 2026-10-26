@@ -114,6 +114,7 @@ def test_west_pumpjack_requires_its_live_verified_output_tile() -> None:
     assert pumpjack == {
         "action_type": "place_ghost", "entity": "pumpjack",
         "position": {"x": 18.5, "y": -43.5}, "direction": "west",
+        "mirroring": True,
     }
     assert pipe["position"] == {"x": 16.5, "y": -42.5}
     validate_no_collisions([("crude", plan)])

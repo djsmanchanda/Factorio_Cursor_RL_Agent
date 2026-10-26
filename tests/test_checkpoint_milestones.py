@@ -3,6 +3,7 @@
 from orchestrator.checkpoint_milestones import (
     C1_V1,
     C1_V2,
+    C5_V1,
     CheckpointEvaluator,
     FactorySnapshot,
     PredicateStatus,
@@ -36,7 +37,8 @@ def test_default_registry_is_ordered_and_versioned_with_advanced_circuit_milesto
     assert [item.checkpoint_id for item in milestones] == ["C0", "C1", "C2", "C3", "C4", "C5", "C6"]
     versions = {item.checkpoint_id: item.predicate_version for item in milestones}
     assert versions["C1"] == "c1-v2"
-    assert all(version.endswith("-v1") for key, version in versions.items() if key != "C1")
+    assert versions["C5"] == "c5-v2"
+    assert all(version.endswith("-v1") for key, version in versions.items() if key not in {"C1", "C5"})
     assert milestones[-1].name == "advanced_circuit_consumption"
 
 
@@ -141,8 +143,8 @@ def test_c5_requires_120_seconds_and_advancing_plastic_evidence():
         return {"tick": tick, "production": {"plastic-bar": {"craft_count": craft}}, "providers": {"plastic-bar": {"delivered": delivered}}}
 
     history = [sample(0, 1, 1), sample(3600, 2, 2), sample(7200, 3, 3)]
-    assert evaluate_milestone("C5", history[-1], history=history[:-1]).passed
-    assert evaluate_milestone("C5", sample(6000, 3, 3), history=history[:-1]).failed
+    assert evaluate_milestone("C5", history[-1], history=history[:-1], milestones=(C5_V1,)).passed
+    assert evaluate_milestone("C5", sample(6000, 3, 3), history=history[:-1], milestones=(C5_V1,)).failed
 
 
 def test_c5_ignores_preproduction_history_from_c0_lane():
@@ -155,7 +157,7 @@ def test_c5_ignores_preproduction_history_from_c0_lane():
         sample(200, 1, 1),
         sample(3800, 2, 2),
     ]
-    result = evaluate_milestone("C5", sample(7400, 3, 3), history=history)
+    result = evaluate_milestone("C5", sample(7400, 3, 3), history=history, milestones=(C5_V1,))
     assert result.passed
     assert result.evidence["ignored_preproduction_samples"] == 2
 
@@ -178,3 +180,30 @@ def test_evaluator_keeps_passed_checkpoint_monotonic():
     later = evaluator.evaluate("C0", {"tick": 4})
     assert later.passed
     assert later.evidence["monotonic_reached"] is True
+
+
+def test_c1_evidence_counts_mall_statuses_and_reads_idle_producers_as_failed():
+    idle = [{"recipe": "iron-gear-wheel", "working": False, "status": "output_full"},
+            {"recipe": "copper-cable", "working": False, "status": "no_ingredients"},
+            {"recipe": "electronic-circuit", "working": True, "status": "working"},
+            {"recipe": "transport-belt", "working": False}]
+    starters = {"iron": {"present": True, "healthy": True, "producing": True},
+                "copper": {"present": True, "healthy": True, "producing": False},
+                "stone": {"present": False}}
+    result = evaluate_milestone("C1", _snapshot(mall_assemblers=idle, starters=starters))
+    assert result.failed
+    assert result.evidence["mall_status_counts"] == {"no_ingredients": 1, "output_full": 1, "unreported": 1, "working": 1}
+    assert result.evidence["recipes_present"] == {"iron-gear-wheel": True, "copper-cable": True}
+    assert result.evidence["checks"]["iron_gear_producer_working"] is False
+    assert result.evidence["starter_blockers"] == {"iron": "ready", "copper": "not_producing", "stone": "absent"}
+
+
+def test_c1_idle_survey_now_reads_producers_false_without_changing_status():
+    # c1-v1 change: an observed survey with no working machine used to report the producer checks unknown;
+    # they are now measured False. The count check already failed it, so the status is unchanged.
+    idle = [{"recipe": "iron-gear-wheel", "working": False, "status": "no_power"}] * 4
+    result = evaluate_milestone("C1", _snapshot(mall_assemblers=idle))
+    assert result.failed and result.evidence["checks"]["copper_cable_producer_working"] is False
+    empty = evaluate_milestone("C1", _snapshot(mall_assemblers=[]))
+    assert empty.unknown and empty.evidence["checks"]["iron_gear_producer_working"] is None
+    assert empty.evidence["mall_status_counts"] == {}

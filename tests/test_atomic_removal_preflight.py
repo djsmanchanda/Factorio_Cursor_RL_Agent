@@ -11,7 +11,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXECUTOR = REPO_ROOT / "factorio_mod" / "layout_executor.lua"
 
-_HARNESS = r"""
+_HARNESS = f'package.path = "{(REPO_ROOT / "factorio_mod").as_posix()}/?.lua;" .. package.path\n' + r"""
 mutation_log = {}
 captured_report = nil
 registered = {}

@@ -396,8 +396,8 @@ def _ask(config: dict, work: Path, message: str, session: str | None, title: str
          timeout: int = 1800) -> str:
     """One OpenCode turn (new or resumed session), resumed up to twice on failure; returns the session id."""
     for attempt in range(3):
-        command = [OPENCODE[0], "run", "--dir", str(REPO_ROOT), "--format", "json", "--model", config["model"],
-                   "--variant", config["variant"], "--auto"]
+        # OpenCode v2 takes the reasoning variant inside the model id and the directory from cwd.
+        command = [OPENCODE[0], "run", "--format", "json", "--model", f"{config['model']}#{config['variant']}", "--auto"]
         command += ["--session", session] if session else ["--title", title]
         report = str(Path(config["report_path"]).resolve())
         env = dict(os.environ)

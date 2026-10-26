@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from orchestrator import autonomous_builder as builder, stage_services as services
+from orchestrator import autonomous_builder as builder, construction_coverage as services
 from orchestrator.material_reservations import plan_material_bill
 from planners.infrastructure import POLE_SPECS, strip_local_power
 from planners.infrastructure_geometry import distance, footprint_tile_indices
@@ -109,7 +109,9 @@ def test_substation_manufacturing_requires_advanced_circuit_production(monkeypat
     recipe = next(r for r in catalog["recipes"] if r["name"] == "substation")
     monkeypatch.setitem(builder.LINE_RECIPES, "substation", {
         "ingredients": [i["name"] for i in recipe["ingredients"]],
+        "amounts": [i["amount"] for i in recipe["ingredients"]],
     })
+    monkeypatch.setattr(builder, "_transferable_or_available_stock", lambda *_: {})
     monkeypatch.setattr(builder, "_chemical_capability_started", lambda _c, _s, _f, item: item != "advanced-circuit")
     assert builder._unfunded_ladder_ingredient(object(), "nauvis", "player", "substation") == "advanced-circuit"
     monkeypatch.setattr(builder, "_chemical_capability_started", lambda *_: True)

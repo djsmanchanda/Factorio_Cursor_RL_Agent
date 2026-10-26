@@ -353,7 +353,7 @@ DEFAULT_CHECKPOINT_DEFINITIONS = (
     ("C2", "Iron + copper rollout", "c2-v1"),
     ("C3", "Stone rollout", "c3-v1"),
     ("C4", "First plastic", "c4-v1"),
-    ("C5", "Stable plastic", "c5-v1"),
+    ("C5", "Stable plastic startup", "c5-v2"),
     ("C6", "Advanced circuit consumer", "c6-v1"),
 )
 

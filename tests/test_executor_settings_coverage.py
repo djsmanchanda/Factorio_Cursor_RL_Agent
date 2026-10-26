@@ -14,13 +14,14 @@ _SCHEMA = json.loads(
     (REPO_ROOT / "schemas" / "build_plan.schema.json").read_text(encoding="utf-8")
 )
 
-# Applied only at creation time, or a modifier of another field rather than a
-# setting in its own right.
+# Applied at creation, checked as a guard, or a modifier of another field rather
+# than a setting in its own right.
 _NOT_STANDALONE_SETTINGS = {
     "recipe",          # ghosts carry it from creation; guarded separately
     "fill_percentage",  # qualifies infinity_filter
     "entity", "tile", "position", "direction", "action_type", "underground_type",
     "logistic_group",   # qualifies logistic_requests
+    "configuration_preconditions",  # compare-before-write guard; exercised by Lua protocol tests
 }
 
 
@@ -115,7 +116,7 @@ def test_the_schema_promises_no_action_field_the_executor_ignores() -> None:
     """`blueprint` sat in the schema for a capability the executor never had, so
     a plan could declare one and have it silently dropped -- the same silent
     failure SETTING_FIELDS exists to prevent, one level up. Any field added here
-    must be either a setting, a creation-time field, or a qualifier of one."""
+    must be a setting, a creation-time field, a guard, or a qualifier of one."""
     declared = _action_properties()
     accounted = _setting_fields() | _NOT_STANDALONE_SETTINGS
 

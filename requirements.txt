@@ -1,2 +1,5 @@
+# Path: requirements.txt | Purpose: Base runtime and test-collection dependencies.
 jsonschema==4.21.1
+numpy>=1.26
+psutil>=5.9
 pytest>=8.0

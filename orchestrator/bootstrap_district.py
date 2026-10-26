@@ -13,6 +13,11 @@ from typing import Mapping, Sequence
 Point = tuple[float, float]
 Tile = tuple[int, int]
 LIFECYCLE_STATES = ("pioneer", "provisioning", "validating", "retiring", "released")
+# Version 2: "released" means the pioneer's production machinery is gone. Its
+# passive provider may remain under ``retained_providers`` until it drains.
+# Version 1 states have neither field and read forward unchanged.
+STATE_VERSION = 2
+_READABLE_VERSIONS = frozenset({1, STATE_VERSION})
 REQUIRED_RESERVATION_ROLES = frozenset({
     "mine_growth", "refinery_growth", "transport_service",
     "power_service", "roboport_service",
@@ -71,6 +76,20 @@ def _canonical_actions(actions: Sequence[Mapping[str, object]]) -> tuple[dict, .
     return tuple(sorted(copied, key=lambda action: _action_key(action)))
 
 
+def _starter_geometry(value: object) -> dict | None:
+    """Exact direct-starter identity a resumed retirement regenerates its targets from."""
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise BootstrapLifecycleError("Retiring starter geometry must be an object")
+    direction = value.get("output_direction")
+    pole_side = value.get("pole_side")
+    if direction not in {"north", "east", "south", "west"} or pole_side not in {-1, 1}:
+        raise BootstrapLifecycleError("Retiring starter geometry is malformed")
+    x, y = _point(value.get("drill_position", ()))
+    return {"drill_position": [x, y], "output_direction": direction, "pole_side": pole_side}
+
+
 @dataclass(frozen=True)
 class BootstrapDistrictState:
     episode_id: str
@@ -91,13 +110,25 @@ class BootstrapDistrictState:
     transport_actions: tuple[dict, ...] = ()
     replacement_submitted: bool = False
     measured_output_count: int = 0
+    starter_geometry: Mapping[str, object] | None = None
+    retained_providers: tuple[Point, ...] = ()
     revision: int = 1
     history: tuple[dict, ...] = ()
-    version: int = 1
+    version: int = STATE_VERSION
 
     def __post_init__(self) -> None:
-        if self.version != 1:
+        if self.version != STATE_VERSION:
             raise BootstrapLifecycleError(f"Unsupported bootstrap district version {self.version}")
+        _starter_geometry(self.starter_geometry)
+        if len(set(self.retained_providers)) != len(self.retained_providers):
+            raise BootstrapLifecycleError("Retained starter providers must be unique")
+        if (
+            (self.starter_geometry is not None or self.retained_providers)
+            and self.lifecycle_state not in {"retiring", "released"}
+        ):
+            raise BootstrapLifecycleError(
+                "Only a retiring or released district may record its retired starter"
+            )
         for label, value in {
             "episode_id": self.episode_id, "surface": self.surface,
             "force": self.force, "bootstrap_profile": self.bootstrap_profile,
@@ -159,6 +190,8 @@ class BootstrapDistrictState:
             "transport_actions": list(self.transport_actions),
             "replacement_submitted": self.replacement_submitted,
             "measured_output_count": self.measured_output_count,
+            "starter_geometry": _starter_geometry(self.starter_geometry),
+            "retained_providers": [list(point) for point in self.retained_providers],
             "revision": self.revision,
             "history": list(self.history),
         }
@@ -168,6 +201,10 @@ class BootstrapDistrictState:
     def from_json(cls, encoded: str) -> BootstrapDistrictState:
         try:
             payload = json.loads(encoded)
+            if payload.get("version") not in _READABLE_VERSIONS:
+                raise BootstrapLifecycleError(
+                    f"Unsupported bootstrap district version {payload.get('version')}"
+                )
             reservations = {
                 str(name): frozenset(_tile(tile) for tile in tiles)
                 for name, tiles in payload["reservations"].items()
@@ -200,9 +237,15 @@ class BootstrapDistrictState:
                 transport_actions=_canonical_actions(payload.get("transport_actions", ())),
                 replacement_submitted=bool(payload.get("replacement_submitted", False)),
                 measured_output_count=int(payload["measured_output_count"]),
+                starter_geometry=_starter_geometry(payload.get("starter_geometry")),
+                retained_providers=tuple(
+                    _point(point) for point in payload.get("retained_providers", ())
+                ),
                 revision=int(payload["revision"]),
                 history=tuple(payload.get("history", ())),
-                version=int(payload["version"]),
+                # Version 1 had no retained providers; it reads as version 2
+                # unchanged because both new fields are absent, not guessed.
+                version=STATE_VERSION,
             )
         except BootstrapLifecycleError:
             raise
@@ -422,11 +465,50 @@ class BootstrapDistrictLedger:
             }),
         ))
 
-    def mark_retiring(self, recipe: str) -> BootstrapDistrictState:
+    def mark_retiring(
+        self, recipe: str, *, starter_geometry: Mapping[str, object] | None = None,
+        retained_providers: Sequence[Point] = (),
+    ) -> BootstrapDistrictState:
+        """Persist the exact teardown before ordering it, so a timeout can resume.
+
+        Absent arguments preserve any geometry/providers already recorded, so a
+        version-1 ``retiring`` district upgrades in place without losing state.
+        """
         state = self.load(recipe)
         if state is None:
             raise BootstrapLifecycleError(f"{recipe} has no bootstrap district to retire")
-        return self._transition(state, "retiring", "pioneer_retirement_started")
+        return self._transition(
+            state, "retiring", "pioneer_retirement_started",
+            starter_geometry=(
+                _starter_geometry(starter_geometry)
+                if starter_geometry is not None else state.starter_geometry
+            ),
+            retained_providers=(
+                tuple(dict.fromkeys(_point(p) for p in retained_providers))
+                if retained_providers else state.retained_providers
+            ),
+        )
+
+    def reclaim_retained_provider(
+        self, recipe: str, position: Point, event: str,
+    ) -> BootstrapDistrictState:
+        """Forget one retained starter provider once it is absent from the world."""
+        state = self.load(recipe)
+        if state is None or position not in state.retained_providers:
+            raise BootstrapLifecycleError(
+                f"{recipe} does not retain a starter provider at {position}"
+            )
+        return self._save(replace(
+            state,
+            retained_providers=tuple(
+                point for point in state.retained_providers if point != position
+            ),
+            revision=state.revision + 1,
+            history=(*state.history, {
+                "revision": state.revision + 1, "event": event,
+                "from": state.lifecycle_state, "to": state.lifecycle_state,
+            }),
+        ))
 
     def mark_released(self, recipe: str) -> BootstrapDistrictState:
         state = self.load(recipe)

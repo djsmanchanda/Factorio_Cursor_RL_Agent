@@ -4,7 +4,7 @@ import pytest
 
 from orchestrator.laya_state import validate_state
 from training.laya_factory_status import (
-    FactoryStatusError, apply_to_state, bottleneck_chain, compile_status, goal_demand,
+    FactoryStatusError, apply_to_state, bottleneck_chain, compile_status, goal_demand, goal_met,
 )
 from training.laya_saved_world import decision_state
 
@@ -67,7 +67,8 @@ def test_board_separates_starved_undersized_blocked_unpowered_and_locked_needs()
     assert needs["copper-cable"]["machines_needed"]["assembling-machine-1"] == 2
     assert needs["copper-plate"]["condition"] == "output_blocked"
     assert needs["iron-plate"]["condition"] == "power_limited"
-    assert needs["plastic-bar"]["condition"] == "recipe_unavailable"
+    assert needs["plastic-bar"]["condition"] == "recipe_unknown"
+    assert needs["plastic-bar"]["recipe_availability"] == "unknown"
     assert needs["iron-ore"]["condition"] == "unmeasured" and needs["iron-ore"]["gap_per_s"] is None
     # Goal items come first; order is goal-tree depth, never gap size.
     assert [n["depth"] for n in board["needs"]] == sorted(n["depth"] for n in board["needs"])
@@ -75,7 +76,7 @@ def test_board_separates_starved_undersized_blocked_unpowered_and_locked_needs()
     assert upgrade["to"] == "assembling-machine-2" and upgrade["target_recipe_enabled"]
     assert upgrade["gain_per_machine_per_s"] == pytest.approx(1.0)
     assert bottleneck_chain(board)[0].startswith("electronic-circuit:input_starved <- copper-cable:under_capacity")
-    assert bottleneck_chain(board)[1] == "plastic-bar:recipe_unavailable"  # One chain per unmet goal.
+    assert bottleneck_chain(board)[1] == "plastic-bar:recipe_unknown"  # One chain per unmet goal.
 
 
 def test_unbuilt_and_satisfied_needs_and_unknown_measurement_stays_unknown():
@@ -140,3 +141,35 @@ def test_compact_rows_mark_stock_chain_items_with_a_zero_goal():
     board = compile_status({**world([]), "recipes": recipes}, {"iron-plate": 0.5}, stock={"medium-electric-pole": 0.5})
     rows = {r["item"]: r for r in compact_status(board, limit=20)["needs"]}
     assert rows["steel-plate"]["goal"] == 0.0 and rows["iron-plate"]["goal"] == 0.5
+
+
+def test_full_mall_with_stock_is_satisfied_but_empty_blocked_mall_is_not():
+    blocked = [machine("electric-furnace", "copper-plate", "full_output")]
+    full = compile_status(world(blocked, items={"copper-plate": 4800}), {"copper-plate": 0.25}, flows(copper_plate=0.0))
+    empty = compile_status(world(blocked, items={"copper-plate": 10}), {"copper-plate": 0.25}, flows(copper_plate=0.0))
+    assert full["needs"][0]["condition"] == "satisfied"
+    assert empty["needs"][0]["condition"] == "output_blocked"
+    assert bottleneck_chain(full) == []
+    assert not goal_met(full["needs"][0])  # Phase goals still judge the measured rate.
+
+
+def test_a_cell_held_off_by_its_own_gate_reads_as_stocked_not_idle():
+    # A capped gear chest switches its assembler off; that is a full mall, not a broken one.
+    gated = [machine("assembling-machine-1", "iron-gear-wheel", "disabled_by_control_behavior")]
+    board = compile_status(world(gated, items={"iron-gear-wheel": 400}), {"iron-gear-wheel": 0.25},
+                           flows(iron_gear_wheel=0.0))
+    assert board["needs"][0]["condition"] == "satisfied"
+
+
+def test_raw_ore_is_not_short_when_every_consumer_is_satisfied_from_stock():
+    # C11: copper plates stood at ~4800 in a full mall (0/s), yet copper-ore read "short" whenever it
+    # was measured, so "extend copper-plate" stayed on the menu for 75 game minutes.
+    furnaces = [machine("electric-furnace", "copper-plate", "full_output", x) for x in range(6)]
+    full = world(furnaces, items={"copper-plate": 4800})
+    board = compile_status(full, {"copper-plate": 1.25}, flows(copper_plate=0.0, copper_ore=0.0))
+    ore = next(n for n in board["needs"] if n["item"] == "copper-ore")
+    assert ore["condition"] == "satisfied" and ore["satisfied_by"] == "consumers_satisfied"
+    # With the plate genuinely short, the ore stays short.
+    empty = world([machine("electric-furnace", "copper-plate", "working")], items={"copper-plate": 0})
+    board = compile_status(empty, {"copper-plate": 1.25}, flows(copper_plate=0.1, copper_ore=0.0))
+    assert next(n for n in board["needs"] if n["item"] == "copper-ore")["condition"] == "short"

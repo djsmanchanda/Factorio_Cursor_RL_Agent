@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import copy
 from pathlib import Path
 
 import pytest
@@ -28,7 +29,12 @@ _CATALOG = json.loads(
 
 @pytest.fixture(scope="module", autouse=True)
 def _catalog():
+    original = copy.deepcopy(LINE_RECIPES)
     install_catalog_line_recipes(_CATALOG)
+    yield
+    # Other modules must start with their own episode's recipe capabilities.
+    LINE_RECIPES.clear()
+    LINE_RECIPES.update(original)
 
 
 def test_the_agent_can_build_the_machine_it_builds_everything_with() -> None:

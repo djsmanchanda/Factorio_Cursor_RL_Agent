@@ -202,30 +202,46 @@ def retire_direct_smelter_plan(
     output_direction: str,
     *,
     pole_side: int = 1,
+    retain_provider: bool = True,
 ) -> dict:
     """Remove the starter's production stack after its direct replacement works.
 
     Its medium pole is deliberately retained: by migration time it may be part
     of the parent grid or construction coverage, while the production entities
     are uniquely owned by the recorded starter geometry.
+
+    The passive provider is retained by default and listed under ``retained``.
+    Its stock stays available to the network and it is reclaimed once empty;
+    deconstructing a full chest sends every bot to haul its contents and can
+    deadlock on full storage.
     """
     plan = generate_direct_smelter(
         recipe, ore, drill_position, output_direction, pole_side=pole_side,
     )
+    kept = {"medium-electric-pole"}
+    if retain_provider:
+        kept.add("passive-provider-chest")
+    starter_actions = plan["phases"][0]["actions"]
     actions = [
         {
             "action_type": "remove_entity",
             "entity": action["entity"],
             "position": action["position"],
         }
-        for action in plan["phases"][0]["actions"]
-        if action["entity"] != "medium-electric-pole"
+        for action in starter_actions
+        if action["entity"] not in kept
+    ]
+    retained = [
+        {"entity": action["entity"], "position": dict(action["position"])}
+        for action in starter_actions
+        if retain_provider and action["entity"] == "passive-provider-chest"
     ]
     return {
         "phases": [{
             "name": f"retire_direct_{recipe}_starter",
             "actions": actions,
         }],
+        "retained": retained,
     }
 
 

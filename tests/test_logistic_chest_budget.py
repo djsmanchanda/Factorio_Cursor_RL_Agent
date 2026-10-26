@@ -273,6 +273,7 @@ def test_laya_uses_the_shared_dependency_budget_before_operations(monkeypatch):
     monkeypatch.setattr(builder, '_MATERIAL_RESERVATION_LEDGER', None)
     session = DeterministicSession.__new__(DeterministicSession)
     session.client, session.bridge, session.emit = object(), object(), lambda _:None
-    monkeypatch.setattr(session, '_operations', lambda: {'reserve_steel_seed': lambda:True})
+    monkeypatch.setattr(session, '_operations', lambda: {'reserve_steel_seed': lambda: {'ok': True, 'code': 'reserved'}})
+    monkeypatch.setattr(session, '_maintain_mall', lambda: None)
     session.run('reserve_steel_seed')
     assert len(calls) == 1

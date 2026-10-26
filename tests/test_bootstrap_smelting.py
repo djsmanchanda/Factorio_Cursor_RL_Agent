@@ -128,19 +128,29 @@ def test_stone_starter_retirement_removes_both_drills() -> None:
     assert not any(action["entity"] == "medium-electric-pole" for action in actions)
 
 
-def test_direct_starter_retirement_keeps_only_its_shared_power_pole() -> None:
+def test_direct_starter_retirement_keeps_its_pole_and_retains_its_provider() -> None:
     retirement = retire_direct_smelter_plan(
         "copper-plate", "copper-ore", (61.5, 24.5), "north",
     )
     actions = retirement["phases"][0]["actions"]
 
+    # The provider drains in place; only production machinery is removed.
     assert {action["entity"] for action in actions} == {
         "electric-mining-drill",
         "electric-furnace",
         "inserter",
-        "passive-provider-chest",
     }
     assert all(action["action_type"] == "remove_entity" for action in actions)
+    assert retirement["retained"] == [
+        {"entity": "passive-provider-chest", "position": {"x": 61.5, "y": 18.5}},
+    ]
+    unmanaged = retire_direct_smelter_plan(
+        "copper-plate", "copper-ore", (61.5, 24.5), "north", retain_provider=False,
+    )
+    assert "passive-provider-chest" in {
+        action["entity"] for action in unmanaged["phases"][0]["actions"]
+    }
+    assert unmanaged["retained"] == []
 
 
 def test_new_direct_starter_stages_power_before_its_blueprint(monkeypatch) -> None:

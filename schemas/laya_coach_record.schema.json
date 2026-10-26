@@ -30,7 +30,8 @@
     "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
     "state": { "type": "object" },
     "evidence_hash": { "$ref": "#/definitions/hash" },
-    "observation": { "type": "object" }
+    "observation": { "type": "object" },
+    "area": { "$ref": "#/definitions/area" }
   },
   "definitions": {
     "id": {
@@ -73,6 +74,48 @@
         "notes": { "type": "string", "maxLength": 2000 },
         "feedback_kind": { "enum": ["guidance", "correction", "label", "outcome"] },
         "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "point": {
+      "type": "object",
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      }
+    },
+    "area": {
+      "type": "object",
+      "description": "A box the reviewer dragged with the read-only coach area tool.",
+      "additionalProperties": false,
+      "required": ["left_top", "right_bottom", "selection_mode", "entity_count", "entities", "resources"],
+      "properties": {
+        "left_top": { "$ref": "#/definitions/point" },
+        "right_bottom": { "$ref": "#/definitions/point" },
+        "surface": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "tick": { "type": "integer", "minimum": 0 },
+        "selection_mode": { "type": "string", "pattern": "^[a-z_]{1,64}$" },
+        "entity_count": { "type": "integer", "minimum": 0 },
+        "entities": {
+          "type": "array",
+          "maxItems": 160,
+          "items": {
+            "type": "object",
+            "required": ["name", "position"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "type": { "type": "string", "maxLength": 64 },
+              "position": { "$ref": "#/definitions/point" }
+            }
+          }
+        },
+        "resources": {
+          "type": "object",
+          "maxProperties": 64,
+          "additionalProperties": { "type": "number", "minimum": 0 }
+        },
+        "resource_entity_count": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "boolean" }
       }
     },
     "option": {

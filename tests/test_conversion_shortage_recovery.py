@@ -64,7 +64,7 @@ def test_recovery_preserves_hard_failures_and_chemical_retry_contract(monkeypatc
 def test_saved_steel_seed_uses_its_fenced_poles_without_taking_bridge_stock(tmp_path, monkeypatch):
     import json
     from types import SimpleNamespace
-    from orchestrator import stage_services
+    from orchestrator import construction_coverage
     from orchestrator.material_reservations import MaterialReservationLedger, plan_material_bill
     from planners.steel_bootstrap import steel_seed
 
@@ -79,13 +79,13 @@ def test_saved_steel_seed_uses_its_fenced_poles_without_taking_bridge_stock(tmp_
     monkeypatch.setattr(builder, '_MATERIAL_RESERVATION_LEDGER', ledger)
     monkeypatch.setattr(builder, '_bootstrap_state', lambda _: SimpleNamespace(lifecycle_state='released'))
     monkeypatch.setattr(builder, '_transferable_or_available_stock', lambda *_: stock)
-    monkeypatch.setattr(stage_services.live_base, 'transferable_items', lambda *_: stock)
-    monkeypatch.setattr(stage_services, 'active_material_ledger', lambda: ledger)
-    monkeypatch.setattr(stage_services, '_reservation_supply_estimates', lambda *_: ({}, {}))
+    monkeypatch.setattr(construction_coverage.live_base, 'transferable_items', lambda *_: stock)
+    monkeypatch.setattr(construction_coverage, 'active_material_ledger', lambda: ledger)
+    monkeypatch.setattr(construction_coverage, '_reservation_supply_estimates', lambda *_: ({}, {}))
     submitted = []
 
     def submit(c, bridge, surface, actual_plan, name, emit, **kwargs):
-        stage_services.assert_affordable(c, surface, 'player', actual_plan, name, emit,
+        construction_coverage.assert_affordable(c, surface, 'player', actual_plan, name, emit,
             reserve_project=True, reservation_priority=kwargs.get('reservation_priority', 50))
         submitted.append((name, actual_plan))
 

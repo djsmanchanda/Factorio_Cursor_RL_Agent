@@ -112,6 +112,7 @@ identifies inherited decisions and missing observations.
 | `mission.ops-steel-fence` | Reserve the funded steel seed's poles before competing builds consume them. |
 | `mission.ops-steel` | Start the funded steel seed when iron supply is verified and lifecycle admission permits it, including the pioneer-output cycle break. |
 | `mission.ops-shortage` | Reconcile current material shortfalls and produce missing items before retrying the blocked transaction. |
+| `mission.ops-grow-feedstock` | Add a gear or cable producer when every existing one runs flat out while other mall cells starve for its output. |
 | `mission.ops-one-batch` | Let a feasible mall batch finish; interrupt when its inputs cannot arrive or its lender blocks a more urgent dependency. |
 | `mission.ops-no-blind-retry` | Retry a material-blocked transaction after its required stock or allocation changes; reuse its existing plan. |
 | `mission.ops-wait` | While relevant bots or coverage are advancing, wait or serve independent work. |
@@ -146,3 +147,25 @@ Geometry selects relevant rules before its count limit. Ops uses catalog order
 and a character budget after its brief; neither is a tokenizer guarantee.
 Changing scopes, weights, rule visibility or representation requires its own
 recorded comparison. See [variant adoption](laya_variants/README.md).
+
+## Progressive science objective
+
+For the versioned research objective, science throughput starts at **0.25**
+and increases after a measured sustain window of manufacture, delivery and lab
+consumption with continued useful research and stable supporting supply. The
+current rung is demand, not an achieved result. Choose normal funded capacity,
+delivery, power and lab operations against its bottleneck; do not manufacture a
+sink just to advance a target. Persist the rung and evidence across coherent
+recovery. Completion means the requested research level actually finished;
+science-pack production alone establishes readiness.
+
+## Mall utilization experiments
+
+The [October 23 candidates](Laya_Mall_Utilization_2026-10-23.md) expose selected
+reconciliation of measured completed loan prerequisites and, independently,
+linear 3% per game minute wait acceleration. They change no quoted preference
+or numeric rule weight. Prefer evidence of useful bottleneck output and earlier
+goal completion when assessing them; a stocked producer being gated off is
+not itself a reason to manufacture more. Status samples describe observed
+idleness, not measured working-time utilization. Broader lender eligibility
+and parallel cell-kit planning remain separate work.

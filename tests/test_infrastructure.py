@@ -22,7 +22,7 @@ from planners.infrastructure import (
 )
 from planners.infrastructure_geometry import choose_clear_l_route
 from planners.plan_validation import validate_no_collisions
-from planners.sandbox_infrastructure import CANONICAL_ROBOPORT_HUB
+from planners.sandbox_infrastructure import CANONICAL_ROBOPORT_HUB, compose_managed_sandbox
 from tools.electronics_execution import scaffolding_with_materials
 
 # NOTE ON THE MOVED SYMBOLS THIS TEST USED TO IMPORT FROM tools.build_processing_units:
@@ -130,11 +130,9 @@ def test_composed_bundle_validator_detects_cross_plan_collision(processing_bundl
         validate_no_collisions(infrastructure + plans)
 
 
-def test_managed_scaffolding_targets_every_planned_roboport_without_infrastructure(
-    processing_bundle,
-) -> None:
-    robots = dict(processing_bundle["infrastructure"])["unified_roboports"]
-    payload = scaffolding_with_materials(processing_bundle["scaffolding"], {"pipe": 12})
+def _assert_managed_scaffolding_matches_roboports(bundle) -> None:
+    robots = dict(bundle["infrastructure"])["unified_roboports"]
+    payload = scaffolding_with_materials(bundle["scaffolding"], {"pipe": 12})
 
     assert payload["managed_infrastructure"] is True
     positions = [(anchor["x"], anchor["y"]) for anchor in payload["anchors"]]
@@ -148,6 +146,23 @@ def test_managed_scaffolding_targets_every_planned_roboport_without_infrastructu
         for anchor in payload["anchors"]
         for key in ("electric-energy-interface", "substation", "roboport")
     )
+
+
+def test_managed_scaffolding_targets_every_planned_roboport_without_infrastructure() -> None:
+    # Exercise the real composer without generating an unrelated electronics factory.
+    bundle = compose_managed_sandbox(
+        [], [(-48, -128)], {}, bots_per_roboport=50,
+        extra_roboports=[(-48, -88)],
+    )
+    positions = roboport_positions(dict(bundle["infrastructure"])["unified_roboports"])
+    assert len(positions) > 2
+    assert (-48, -88) in positions
+    _assert_managed_scaffolding_matches_roboports(bundle)
+
+
+def test_composed_processing_bundle_scaffolding_matches_every_roboport(processing_bundle) -> None:
+    # Retain the complete factory check alongside the other slow composition cases.
+    _assert_managed_scaffolding_matches_roboports(processing_bundle)
 
 
 def test_build_plan_schema_requires_entity_and_complete_position() -> None:

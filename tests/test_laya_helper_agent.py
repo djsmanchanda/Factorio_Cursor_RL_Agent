@@ -71,7 +71,7 @@ def test_review_writes_findings_through_one_read_only_opencode_session(tmp_path,
     fake = tmp_path / "opencode"
     fake.write_text("#!/bin/sh\necho '{\"sessionID\": \"ses_1\"}'\nfor a; do last=$a; done\n"
                     "echo \"$last\" > \"$(dirname \"$0\")/prompt.txt\"\n")
-    fake.write_text(fake.read_text() + _FAKE_WRITE_FINDINGS)
+    fake.write_text(fake.read_text() + 'echo "$@" > "$(dirname "$0")/argv.txt"\n' + _FAKE_WRITE_FINDINGS)
     fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setattr(helper, "OPENCODE", [str(fake)])
     report = helper.review("now")
@@ -79,6 +79,8 @@ def test_review_writes_findings_through_one_read_only_opencode_session(tmp_path,
     message = (tmp_path / "prompt.txt").read_text()
     assert "read-only" in message and "context management" in message and "fine-tuning" in message
     assert "do not edit code" in message
+    argv = (tmp_path / "argv.txt").read_text()  # OpenCode v2: variant inside the model id, no --dir/--variant flags.
+    assert "--model m#v" in argv and "--dir" not in argv and "--variant" not in argv
 
 
 def test_live_observer_checkpoints_then_reviews_in_the_same_session(tmp_path, monkeypatch):
@@ -86,7 +88,7 @@ def test_live_observer_checkpoints_then_reviews_in_the_same_session(tmp_path, mo
     fake = tmp_path / "opencode"
     fake.write_text("#!/bin/sh\necho '{\"sessionID\": \"ses_live\"}'\nfor a; do last=$a; done\n"
                     "echo '---CALL---' >> \"$(dirname \"$0\")/calls.txt\"\necho \"$@\" >> \"$(dirname \"$0\")/calls.txt\"\n")
-    fake.write_text(fake.read_text() + _FAKE_WRITE_FINDINGS)
+    fake.write_text(fake.read_text() + 'echo "$@" > "$(dirname "$0")/argv.txt"\n' + _FAKE_WRITE_FINDINGS)
     fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setattr(helper, "OPENCODE", [str(fake)])
     root = tmp_path / "now"  # RUN END already logged and no runner PID record: one checkpoint, then the review.
@@ -319,3 +321,11 @@ def test_incomplete_report_markers_do_not_publish_or_complete(tmp_path, monkeypa
     with pytest.raises(RuntimeError,match='findings document was not updated'):
         helper.final_review('now')
     assert json.loads((helper.DATA_ROOT/'now/helper-state.json').read_text())['status'] == 'failed'
+
+def test_journal_summary_accepts_ops_rows_without_status(tmp_path):
+    journal = tmp_path / "clean-decisions.jsonl"
+    rows = [{"event": "decision", "run_id": "r", "index": 0, "phase": "C1", "choice": {"need_id": "wait"}},
+            {"event": "phase_reached", "run_id": "r", "phase": "C1"}]
+    journal.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    summary = helper.journal_summary(journal, "r")
+    assert summary["decisions"] == 1 and summary["statuses"] == {"recorded": 1} and summary["phases_reached"] == ["C1"]

@@ -396,6 +396,7 @@ def test_large_belt_backlog_borrows_duplicate_cable_before_shared_line(
 def test_dynamic_belt_capacity_builds_missing_anchor_instead_of_six_line(
     monkeypatch,
 ) -> None:
+    monkeypatch.setitem(builder.BASELINE_MACHINES, "iron-gear-wheel", 2)
     plan = SimpleNamespace(
         existing=SimpleNamespace(machine_count=1), promote_to_line=True,
         production_target=200, mall_storage_limit=400,

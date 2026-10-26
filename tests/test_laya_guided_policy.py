@@ -44,6 +44,16 @@ def test_choice_carries_rules_and_full_distribution_and_is_seeded():
     assert a["option_id"] == b["option_id"] and len(a["distribution"]) == 4 and "rules" in a
 
 
+def test_zero_exploration_keeps_weighted_seeded_sampling():
+    policy = GuidedPolicy(7, epsilon=0, preferences=PREFS)
+    rows = policy.distribution(state(["serve", "wait"]), menu())
+    assert [r["probability"] for r in rows] == pytest.approx([0.04, 0.64, 0.16, 0.16])
+    sequence = [policy.choose(state(["serve", "wait"]), menu())["option_id"] for _ in range(40)]
+    replay = GuidedPolicy(7, epsilon=0, preferences=PREFS)
+    assert sequence == [replay.choose(state(["serve", "wait"]), menu())["option_id"] for _ in range(40)]
+    assert len(set(sequence)) > 1
+
+
 def test_matcher_and_the_mission_catalog_preferences():
     assert matches({"need": "item:copper-*", "family": ["mine", "smelt"]}, {"need": "item:copper-ore", "family": "mine"})
     assert not matches({"others_available": True}, {"others_available": False})
