@@ -649,3 +649,9 @@ Set shared new-cohort default7200 and updated generators; longer15000-second res
   - Fix `8eb4690` (branch `fix/rl-laya-chest-hold-20261026`) applies explicit fences only on Laya operations. Focused 281 and fast 1,626 pass.
   - Smoke 2 from `8eb4690`, same seeds: 2/2 strict C2 at 27.3 and 25.9 game minutes, zero faults. This is wiring evidence, not adoption.
   - Lifecycle: no restart or deploy. The fix is not merged to main or pushed; that awaits the user. No full C39 is queued.
+
+- 2026-10-26 19:25 IST: chest-hold fix merged and C39 queued.
+  - Main is `f098f9f` (merge of `8eb4690`), pushed.
+  - C39 `laya-c39-2123-miniship-20261026` compares the integrated main against the C29 reference plus census (`9d9b279`): 120 jobs, seeds 80240–80299, ports 40200/33200, 7,200 s / 540,000 ticks. Primary is strict C6 ever.
+  - A mixed-harness wiring smoke passed.
+  - Lifecycle: new unit, capped at 2026-10-27 18:10. Host scheduler unchanged (manual 15).

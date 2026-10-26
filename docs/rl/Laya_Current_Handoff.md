@@ -59,3 +59,27 @@ reference; source integration and sampler-fixture success are not adoption.
   - Zero tool, safety or untyped faults; no prospective budget line; no negative-shortage loop.
 - **Not yet on main:** merging or pushing `8eb4690` needs the user's go-ahead.
 - **Next:** the consumer-service candidate (shared facts plus one operation) needs implementation, regressions and an exposure smoke before any 120-job freeze. State: `data/laya-orchestration/c39-20261026/state.json`.
+
+## 2026-10-26 19:25 IST: chest-hold fix on main; C39 base validation queued
+
+`8eb4690` is merged into main as `f098f9f` and pushed. The tree differs from the tested commit only in docs.
+
+**Why base validation comes before a consumer treatment:**
+- In C37, no run (0/120) was ever offered a standing passive or requester chest cell. Chest service came only from temporary batches, and a chest batch completed (`ok`) only in C6 runs (control 5, robots 6), never in C5-not-C6 runs.
+- Main (from `2e5a2f0`, carried by the merge) already offers standing mall slots for non-core shortages, chests included. The C29 line offers only the four baseline items.
+- So a consumer-service operation on main would overlap an untested base difference, and the integrated base has never run a full window (C38 was cut off by the choice limit).
+
+**C39** (`laya-c39-2123-miniship-20261026`):
+- **Arms:** reference `9d9b279` (C29 policy `5a5ed28` plus the verified census fix; the C34/C35 control) against integrated `f098f9f` (main).
+- **Setup:** 60 seeds, 80240–80299, 120 jobs. Ports 40200/33200, 540,000 ticks / 7,200 s, harness `f098f9f`, retention off, no dependency.
+- **Wiring:** a two-job mixed-harness smoke (`laya-c39w-…`, seed 80222) passed: both arms prepared, decided and reported, with zero faults.
+- **Primary:** strict C6 ever. The `_c6` body is identical in both arms; C2/C3/C4 predicate bodies are identical too, and census is in both.
+- **Secondary:**
+  - C6 final.
+  - C2/C3 as earlier-service guards.
+  - C5 c5-v1, which integrated also records as a comparison; integrated's c5-v2 is reported separately.
+  - C1 c1-v1 in both.
+  - Laya C6-v2, `time_to.py` speed and typed faults.
+- **Exposure:** chest options offered, chosen and succeeded (`data/laya-orchestration/c39-20261026/chest_exposure.py`).
+- **Reading:** this is a whole-base comparison. A difference chooses the base for later single-factor cohorts; it does not attribute a mechanism.
+- **Unit:** `RuntimeMaxSec` ends at 2026-10-27 18:10 IST. Admission ends at 18:00.
