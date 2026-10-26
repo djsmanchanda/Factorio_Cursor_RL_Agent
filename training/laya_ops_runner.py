@@ -1713,7 +1713,9 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                 stall["idle_ticks"], stall["since"] = 0, 0
             else:
                 stall["since"] += 1
-            if stall["idle_ticks"] >= STALL_TICKS or stall["since"] >= settings.stall_decisions:
+            # Choice frequency varies with host speed and retry latency. C38's 12-choice
+            # cutoff ended before the declared idle window; geometry alone uses that setting.
+            if stall["idle_ticks"] >= STALL_TICKS:
                 summary["stop"] = "stalled"
                 emit(f"STALLED: {stall['idle_ticks']} idle game ticks / {stall['since']} decisions without a "
                      "funded submission, work in progress or goal progress")
@@ -1749,8 +1751,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     summary["codes"] = dict(Counter(r.get("code") or "error" for r in results if not r.get("ok")))
     if not goal:
         summary["stall"] = {"idle_ticks": stall["idle_ticks"], "decisions": stall["since"],
-                            "tool_ticks": stall["tool_ticks"], "version": "decision-idle-v2",
-                            "idle_tick_limit": STALL_TICKS, "decision_limit": settings.stall_decisions}
+                            "tool_ticks": stall["tool_ticks"], "version": "decision-idle-v3",
+                            "idle_tick_limit": STALL_TICKS, "decision_limit": None}
     elif "goal" not in summary:
         # Expose version and stall evidence even when the run ended on the decision budget or a failure.
         summary["goal"] = goal_evidence(goal_status) if goal_status is not None else {"version": GOAL_VERSION,

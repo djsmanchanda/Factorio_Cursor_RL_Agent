@@ -607,19 +607,34 @@ def test_the_total_game_cap_still_stops_after_a_long_blocking_call(tmp_path):
     assert summary["stop"] == "window_timeout"  # The independent total game cap still bounds the run.
 
 
-def test_repeated_unchanged_choices_still_stall(tmp_path):
-    world = FakeWorld()
+def test_repeated_unchanged_choices_stall_after_the_idle_game_window(tmp_path):
+    world = _ClockWorld()
     session = SteppingSession(world, block_ticks=10)  # Quick retries that never change the world.
     summary = run(world, SteppingPolicy("op.reserve_steel_seed"), journal=tmp_path / "j.jsonl", decisions=40,
                   measure_ticks=600, seed=1, run_id="repeat", session=session)
     assert summary["stop"] == "stalled"
-    assert summary["decisions"] <= 14 and session.calls == summary["decisions"]
+    assert summary["stall"]["idle_ticks"] >= 18000
+    assert summary["decisions"] > 12 and session.calls == summary["decisions"]
+
+
+def test_ops_can_reach_delayed_progress_after_twelve_quick_choices(tmp_path):
+    # C38 stopped 117 runs before C2: 12 retries used only part of the idle game window.
+    from training.laya_clean_runner import Settings
+    world = _ClockWorld()
+    session = SteppingSession(world, block_ticks=10, progress_every=20)
+    summary = run(world, SteppingPolicy("op.reserve_steel_seed"), journal=tmp_path / "j.jsonl", decisions=25,
+                  measure_ticks=600, seed=1, run_id="delayed", session=session,
+                  settings=Settings(stall_decisions=1))  # Geometry's guard does not tune ops.
+    assert summary["stop"] == "decision_budget" and session.calls == 25
+    assert summary["progress_guard"]["last_reset"]["reasons"] == ["funded_plan"]
+    assert summary["stall"]["version"] == "decision-idle-v3"
+    assert summary["stall"]["decision_limit"] is None
 
 
 def test_a_funded_partial_submission_resets_the_stall_clock(tmp_path):
     import json
     world = FakeWorld()
-    # Every fourth decision a funded plan is submitted, so the no-progress streak never reaches the bound.
+    # Every fourth decision a funded plan is submitted, resetting the idle game clock.
     session = SteppingSession(world, block_ticks=10, progress_every=4)
     summary = run(world, SteppingPolicy("op.reserve_steel_seed"), journal=tmp_path / "j.jsonl", decisions=20,
                   measure_ticks=600, seed=1, run_id="funded", session=session)
@@ -653,7 +668,7 @@ def test_funded_plan_progress_counts_a_funded_submission_not_an_earmark():
 
 
 def test_repeated_construction_code_without_observed_progress_stalls(tmp_path):
-    world = FakeWorld()
+    world = _ClockWorld()
     class UnchangedConstruction(SteppingSession):
         def run(self, operation, **params):
             result = super().run(operation, **params)

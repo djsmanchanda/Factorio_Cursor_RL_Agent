@@ -309,10 +309,12 @@ The separate coherent ops-generation protocol described below restores both,
 with exact code/mod/objective hashes and cumulative budgets.
 
 Geometry defaults to a 12-decision stall limit; a non-goal ops run tracks
-decision-idle game time (waits and time outside blocking operation execution)
-plus a 12-decision bound on choices without genuine progress, resetting on
-measured goal progress or a new funded plan committed through the shared
-material ledger (a versioned `decision-idle-v2` contract). A **goal** run uses
+18,000 decision-idle game ticks (waits and time outside blocking operation
+execution), resetting on measured goal progress or a new funded plan committed
+through the shared material ledger. Choice count is diagnostic only; geometry's
+`stall_decisions` does not shorten this window. This `decision-idle-v3` contract
+repairs the early choice-count stops observed in C38. Total game/wall caps and
+the phase budget still bound blocking work. A **goal** run uses
 the `useful-state-window-v1` contract instead: no choice-count cutoff, and a
 stall only when the relevant useful state (ghosts, required-input crafting or
 delivery, research progress, funded plans, loans) is unchanged over the entire
