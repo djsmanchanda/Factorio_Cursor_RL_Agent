@@ -132,3 +132,4 @@ C33 final (2026-10-25 12:19 IST): 120/120 completed. Strict C6 10/11 (11:10), C2
 C36 (queued 2026-10-25 13:27 IST, waits for C34+C35): 120 planned = 60 seeds 80040–80099 × control d9402da / clearance cdb16a2 (both with refinery-extension blocker names); ports 39700/32700; 7200 s. Primary strict C6 and C3 (C33 replication).
 
 C37 (queued 2026-10-26 02:11 IST, waits for C36): 120 planned = 60 seeds 80100–80159 × control d9402da / robots 32c1ef5 (flying robots excluded from occupancy surveys); ports 39800/32800; 7200 s. Primary strict C6 ever.
+C37 complete 2026-10-26 12:00 IST: 120/120 (111 stalled, 9 window cap). Strict C6 ever control 11 / robots 7 (5:9, p 0.42); C2 53/50 (3:6); C3 36/37 (10:9); C5 ever 36/36, final 8/12; Laya C6 29/26. Tool/safety 0. Robot-only refusals: control 6 runs, robots 0. Not adopted; base stays 5a5ed28. Result: docs/rl/Laya_C37_Result_2026-10-26.md.

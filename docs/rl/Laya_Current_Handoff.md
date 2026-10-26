@@ -510,3 +510,12 @@ C36's typed blockers revealed that placement surveys counted flying logistic and
 - A 2026-10-25 cleanup (`data/laya-experiments/laya-c24-*/README.cleanup.md`) retired old cohort directories and removed `takeover-20261021/mall-wt`. The branch still exists. Freezes now copy the save from C36 and keep C24's recorded hash check.
 - Older cohort worlds (C29/C30/C33) may no longer be available for re-analysis; results already written stand.
 Next free ports: 39900+.
+
+## C37 complete: robot exclusion not adopted (2026-10-26 12:30 IST)
+
+C37 ended 120/120 at 12:00 IST. Robots `32c1ef5` against control `d9402da`: strict C6 ever 7 vs 11 (5:9, p 0.42), C2 3:6, C3 10:9, C5 final 12 vs 6 (10:6), untyped stuck 29/15 vs 72/17. No refusal in the robots arm names a robot. Control has only 6 robot-only refusal runs, because the big electric pole at (−40,−14) still blocks the line, so the fix has little exposure on the release base. See `docs/rl/Laya_C37_Result_2026-10-26.md`.
+
+Ownership since 2026-10-26 04:40 IST (user via thread 94dcfaf2): thread 94dcfaf2 owns the next-cohort decision and queue, C38 and the C36 decision.
+- C38 `laya-c38-2123-miniship-20261026` compares robots vs clearance_robots on converged main `9764fb6`.
+- Every C38 run has so far stopped at C0/C1 under the base's 12-decision stall rule.
+- This thread queues nothing.

@@ -596,3 +596,8 @@ Set shared new-cohort default7200 and updated generators; longer15000-second res
   - Separately, 40 stale local branches were archived as `archive/20261025/*` tags.
 
 - 2026-10-26 02:11 IST: Flying robots no longer count as tile occupants. C36's new blocker names showed refinery extensions refused on `logistic-robot` at in-flight positions (for example (−40.859, −21.758)). `occupied_tiles` and `occupied_tile_owners` excluded characters, resources and clutter, but not robots. Fix `32c1ef5` on work/miniship/laya-names-base-20261025 (= `d9402da` + robot exclusion); ported as `8f17890` on the clearance branch. Evidence: new test plus 155 related focused tests; generated Lua run on a fake surface; fast gate exit 0 on both branches. C37 `laya-c37-2123-miniship-20261026` (control `d9402da` vs robots `32c1ef5`, seeds 80100–80159, ports 39800/32800, 120 jobs, 7200 s) is queued behind C36. Note: a 2026-10-25 cleanup retired C24's save and directories and removed the mall-wt worktree; freezes now copy the hash-checked save from C36. Lifecycle: nothing.
+
+- 2026-10-26 12:30 IST: C37 complete, 120/120 (control `d9402da` vs robots `32c1ef5`, the flying-robot occupancy exclusion).
+  - Robots is not adopted. Strict C6 ever (primary) is 7 vs 11 (5:9 pairs, p 0.42). The C2 and C3 guards are level (3:6 and 10:9). No tool or safety failures in either arm.
+  - The fix works: no refusal in the robots arm names a robot. But on this base nearly every control refusal also names the real big-pole blocker, and only 6 runs had a robot-only refusal. So there is almost no exposure without clearance; C38 (thread 94dcfaf2) tests that combination.
+  - Result: `docs/rl/Laya_C37_Result_2026-10-26.md`. Base stays `5a5ed28`. Lifecycle: nothing.
