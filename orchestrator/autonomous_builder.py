@@ -8930,17 +8930,27 @@ def _refresh_logistic_chest_budget(
     client: RconClient, surface: str, force: str,
     ledger: MaterialReservationLedger | None,
     emit: Callable[[str], None] | None = None,
+    *, prospective: bool = True,
 ) -> None:
     """Hold finite kit chests for required startup dependencies this pass.
 
     The hold is derived prospectively from each dependency's own recipe bill
     and released as soon as the dependency is established, so it never blocks
     production indefinitely and never steals an existing reservation.
+
+    ``prospective=False`` keeps only explicit fences (the plastic output
+    packet). The prospective hold assumes the fixed stage order builds those
+    dependencies next; a chooser that does not can deadlock behind it (C39
+    smoke 2026-10-26: all 7 kit chests held from +3 s, so foundations and early
+    mall cells refused for 18,000 ticks).
     """
     if ledger is None or not hasattr(client, "command"):
         return
     try:
-        pending = _pending_startup_dependencies(client, surface, force)
+        pending = (
+            _pending_startup_dependencies(client, surface, force)
+            if prospective else ()
+        )
         plan = plan_dependency_chest_budget(
             pending,
             bill_for=lambda item: compact_mall_project_bill(item),

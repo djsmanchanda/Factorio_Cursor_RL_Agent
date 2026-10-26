@@ -269,11 +269,34 @@ def test_funded_claimant_does_not_hold_its_chest_twice(tmp_path):
 def test_laya_uses_the_shared_dependency_budget_before_operations(monkeypatch):
     from training.laya_ops import DeterministicSession
     calls = []
-    monkeypatch.setattr(builder, '_refresh_logistic_chest_budget', lambda *args:calls.append(args))
+    monkeypatch.setattr(builder, '_refresh_logistic_chest_budget', lambda *args, **kw: calls.append(kw))
     monkeypatch.setattr(builder, '_MATERIAL_RESERVATION_LEDGER', None)
     session = DeterministicSession.__new__(DeterministicSession)
     session.client, session.bridge, session.emit = object(), object(), lambda _:None
     monkeypatch.setattr(session, '_operations', lambda: {'reserve_steel_seed': lambda: {'ok': True, 'code': 'reserved'}})
     monkeypatch.setattr(session, '_maintain_mall', lambda: None)
     session.run('reserve_steel_seed')
-    assert len(calls) == 1
+    assert calls == [{'prospective': False}]
+
+
+def test_laya_refresh_keeps_explicit_fences_but_holds_no_stage_order_chests(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    # C39 smoke 2026-10-26: the prospective hold took all 7 kit chests at +3 s, and every foundation and
+    # early mall cell (not claimants) refused for 18,000 ticks until the idle guard stopped the run.
+    monkeypatch.setitem(builder.LINE_RECIPES, "long-handed-inserter", {
+        "machine": "assembling-machine-2",
+        "ingredients": ["inserter", "iron-plate"], "amounts": [1, 2],
+        "product_amount": 1, "craft_time": 0.5, "set_recipe": True,
+    })
+    ledger = _ledger(tmp_path)
+    monkeypatch.setattr(builder, "_pending_startup_dependencies", lambda *_a: ("long-handed-inserter",))
+    stock = {"passive-provider-chest": 2}
+    ledger.declare(builder._PLASTIC_OUTPUT_PACKET, dict(builder._PLASTIC_OUTPUT_RESERVE), stock, priority=100)
+
+    builder._refresh_logistic_chest_budget(_fake_client(), "nauvis", "player", ledger, prospective=False)
+
+    assert ledger.dependency_claimants == (builder._PLASTIC_OUTPUT_PACKET,)
+    assert ledger.dependency_budget == dict(builder._PLASTIC_OUTPUT_RESERVE)
+    foundation = ledger.declare("modular_iron-plate_refinery", {"passive-provider-chest": 1}, stock)
+    assert foundation.reserved == {"passive-provider-chest": 1}

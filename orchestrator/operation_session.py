@@ -422,9 +422,14 @@ class DeterministicSession:
         return self._attach_loan_batch(outcome, params)
 
     def _prepare_operation(self) -> None:
-        """Refresh shared dependency funding before a selected operation can spend it."""
+        """Refresh explicit dependency fences before a selected operation can spend it.
+
+        The chooser decides which dependency comes next, so the stage-order
+        prospective chest hold does not apply here; explicit fences still do.
+        """
         ab._refresh_logistic_chest_budget(
-            self.client, SURFACE, FORCE, ab._MATERIAL_RESERVATION_LEDGER, self.emit)
+            self.client, SURFACE, FORCE, ab._MATERIAL_RESERVATION_LEDGER, self.emit,
+            prospective=False)
         ab._refresh_owned_standing_gates(self.client, self.bridge, SURFACE, FORCE, self.emit)
         # Retirements already authorized by the explicit operation keep draining:
         # only an empty retained provider with proven storage room is reclaimed.
