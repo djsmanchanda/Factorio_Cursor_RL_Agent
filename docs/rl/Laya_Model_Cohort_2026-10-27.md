@@ -18,7 +18,7 @@ identical to the prepared cohort.
 
 Shared execution: live speed2, 540,000-tick game window, 7,200-second job wall
 cap, tick-only18,000 idle guard, learned epsilon.15, one active job per arm.
-The common global concurrency is **three**, reduced from the unqualified
+The initial common global concurrency was **three**, reduced from the unqualified
 proposal of four before admission. Seeds, arm order and all120 planned IDs are
 unchanged. CPU inference consumes live game time, so this compares complete
 deployed policy packages including latency; it cannot isolate strategy quality.
@@ -71,3 +71,52 @@ Lifecycle: leave the active freeze/worlds/services untouched. Observe bounded
 counts/health, then perform final matched strict/proxy/fault/latency accounting
 after every planned terminal and scoped cleanup. No automatic adoption,
 production change, installed-mod deployment, root action or push.
+
+## User-authorized capacity increase — 2026-10-27 02:06 IST
+
+The user explicitly requested increasing concurrency toward15. The initial
+three-world limit was an operational choice, not a demonstrated host ceiling.
+The original supervisor was drained through its existing admission protocol;
+its4completed and3running attempts were preserved. Exactly113 never-started
+IDs were released with an acknowledged administrative queued cancellation and
+assigned disjointly to four new capacity segments:29guided,28Kev,28Vela,28Jiwo.
+Those113 source cancellation rows transfer ownership; they are not additional
+experimental outcomes. Original actual7 + transferred113 remains120logical
+jobs,30per arm, with no reruns. Original batch/freeze/code/assets are unchanged.
+
+New registries/units are `laya-model-scale15-{guided,kev,vela,jiwo}-2123-miniship-20261027`
+under `data/laya-experiments/`. Each has its own immutable batch, planned IDs,
+freeze and launch receipt. All use unchanged runtime2511e4 and the same source
+save, mods, validators, released bundles, seeds and game/wall budgets. Wrapper
+commit `f08eb7308b52dd3e3b76a96a59e0562427464df0` validates the acknowledged
+never-started transfer, rejects duplicate assignments, and counts per-arm
+reservations across the draining original and all four segments under the
+existing host admission lock. Four focused tests pass; the1347-test fast gate
+exited0. The wrapper was committed before freezing; no push.
+
+Global capacity is15 through the unchanged host gate, with a shared per-arm
+ceiling4. New segments share an11GiB/no-swap/CPU1200% world pool; individual
+segment units have5GiB/CPU400% ceilings. The own aggregate slice was expanded
+from19 to25GiB as part of this user-authorized capacity revision. Original
+4GiB batch budget and all three one-thread model servers remain unchanged.
+Their shared serialized HTTP serving retains the original600-second timeout;
+more worlds can queue for inference. Capacity therefore changes observed
+latency, and original/scale15 results must be shown as separate capacity
+strata alongside the complete120-job accounting.
+
+First live verification: **15running,4completed,101queued**; guided4/Vela4/
+Jiwo4/Kev3 active, fresh heartbeats (maximum9.9s),7.09GiB host available,
+93recorded learned choices across currently running worlds,0backend errors
+and no memory-limit/OOM events. This checks live operation, not policy quality
+or every future context length. Receipts and original-source snapshots are in
+`data/laya-orchestration/model-launch-20261026/capacity15-20261027/`, especially
+`transfer-plan.json`, `segment-freezes.json`, `launch-evidence.json` and
+`first15-health.json`. The transfer map is authoritative for final joins.
+
+Lifecycle: all five supervisor components must finish and release their worlds
+and reservations before final accounting and stopping the exact owned model
+servers. Never restart the original transferred queues or treat its113cuts as
+113failures or120actual completions. The same owned30min continuation now
+tracks all five components, next2026-10-27 02:28:19.804IST; terminal accounting
+and disable-by2026-10-31 00:20IST remain mandatory. No root, production, mod,
+host-target, model-weight or policy changes. No automatic adoption or push.
