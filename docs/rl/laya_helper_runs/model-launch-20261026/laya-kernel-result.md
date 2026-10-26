@@ -47,7 +47,7 @@ The one-epoch fit launched2026-10-27 00:55:07IST as bounded user unit
 `a6943ccb4ea349bdbb866cb585bed599`, RuntimeMaxSec28800. Recipe:
 attention-only LoRA rank8/alpha16/dropout.05 plus decision head/type embedding/
 scorer, frozen act head, direct soft CE, microbatch1/accumulation8, seed917,
-217 updates; LR2e-5 LoRA/1e-4 head. Checkpoint `checkpoint-A` remains pending.
+217 updates; LR2e-5 LoRA/1e-4 head. The fit completed all217 updates and1729 records in1207.19seconds (20.12minutes), with zero truncations/rejections and3,496,233,984peak allocated CUDA bytes. Checkpoint `checkpoint-A` contains10files/336,304,724bytes and is backed up locally; its fresh-process reload gives exact0.0logit error.
 Intermediate snapshots are evaluation artifacts, not tested resumable states.
 
 Remote evidence lives in
@@ -59,7 +59,5 @@ launch identity are retained separately. This is local-receipt weak imitation,
 not RL, optimality, Factorio improvement or promotion. The original four released
 base-model cohort arms and completed Kev checkpoint remain unchanged.
 
-Lifecycle: leave the healthy fit running. After successful exit/GPU release,
-freeze and back up the checkpoint, perform a fresh reload, evaluate both base and
-trained models on777 frozen held-out rows, and fit calibration on376 rows only.
+Lifecycle: the fit is complete, frozen, backed up and reload-verified. Complete the sequential777-row released/trained evaluations and fit calibration on376 rows only; never overwrite checkpoint metadata or promote automatically.
 No root, reboot, unlock, production, installed-mod or push action was performed.
