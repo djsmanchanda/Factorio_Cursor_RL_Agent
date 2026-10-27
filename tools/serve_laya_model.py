@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+from copy import copy
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from importlib.metadata import version
 import json
@@ -12,7 +14,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from training.laya_model_policy import QUESTION, canonical, digest, load_policy_bundle
+from training.laya_model_policy import QUESTION, canonical, digest, load_policy_bundle, numerical_contract
 
 
 def covered_windows(bounds, length):
@@ -24,6 +26,55 @@ def covered_windows(bounds, length):
         end = max(end, stop)
     if end != length:
         raise ValueError("native input windows do not cover the whole state")
+
+
+def load_kev_checkpoint(ck, bundle, LoadOptions):
+    """Reconstruct saved values in FP32 only when the bundle explicitly opts in.
+
+    Kev treats weights_dtype as both training provenance and a load instruction.
+    A shallow checkpoint copy with replaced dataclass metadata bypasses its BF16
+    load/merge override without changing the original metadata or saved tensors.
+    Casting a BF16-loaded model afterward would not recover an FP32 merge.
+    """
+    import torch
+    contract = numerical_contract(bundle)
+    options = dict(dtype=torch.float32, backend="torch", attn="eager", merge=True, cuda_graphs=False, fused=False)
+    if contract is None:
+        tok, model = ck.load("cpu", LoadOptions(**options))
+        return tok, model, {"temperature": model.head.temperature}
+
+    original = ck.meta
+    if original.weights_dtype != contract["checkpoint_weights_dtype"]:
+        raise ValueError("Kev checkpoint training precision differs from numerical contract")
+    full = ck.full
+    loading = copy(ck)
+    if not full:
+        loading.meta = replace(original, weights_dtype="fp32")
+    # PointerHead.forward divides by its temperature in eval mode. Ask the
+    # native loader for raw logits; external calibration then happens once.
+    tok, model = loading.load("cpu", LoadOptions(**options, temperature=1.0))
+    if model.training or model.head.training or model.head.temperature != 1.0 or model.backend != "torch":
+        raise ValueError("Kev did not load an eval-mode torch model with raw head logits")
+
+    from peft import PeftModel
+    from peft.tuners.tuners_utils import BaseTunerLayer
+    if isinstance(model.lm, PeftModel) or any(isinstance(m, BaseTunerLayer) for m in model.lm.modules()):
+        raise ValueError("Kev numerical contract requires a merged adapter")
+    parameter_dtypes, buffer_dtypes = set(), set()
+    for category, tensors, dtypes in (("parameter", model.named_parameters(), parameter_dtypes),
+                                      ("buffer", model.named_buffers(), buffer_dtypes)):
+        for name, tensor in tensors:
+            if tensor.device.type != "cpu" or (tensor.is_floating_point() and tensor.dtype != torch.float32) or tensor.is_complex():
+                raise ValueError(f"Kev numerical contract requires CPU FP32: {category} {name} is {tensor.dtype} on {tensor.device}")
+            dtypes.add(str(tensor.dtype).removeprefix("torch."))
+    if not parameter_dtypes:
+        raise ValueError("Kev numerical contract found no model parameters")
+    return tok, model, {"temperature": contract["external_temperature"],
+        "numerical_contract": contract, "checkpoint_weights_dtype": original.weights_dtype,
+        "load_weights_dtype": loading.meta.weights_dtype, "checkpoint_temperature": original.temperature,
+        "head_temperature": model.head.temperature, "temperature_source": "external",
+        "parameter_dtypes": sorted(parameter_dtypes), "buffer_dtypes": sorted(buffer_dtypes),
+        "adapter_merged": not full, "full_weights": full}
 
 
 def scorer(bundle):
@@ -46,16 +97,19 @@ def scorer(bundle):
         ck = Checkpoint(model_path)
         if ck.meta.base != bundle["base_repo"] or ck.meta.base_revision != bundle["base_revision"]:
             raise ValueError("Kev base identity mismatch")
-        tok, model = ck.load("cpu", LoadOptions(dtype=torch.float32, backend="torch", attn="eager", merge=True, cuda_graphs=False, fused=False))
-        temperature = model.head.temperature
-        runtime.update(temperature=temperature, peft=version("peft"))
+        tok, model, numerics = load_kev_checkpoint(ck, bundle, LoadOptions)
+        temperature = numerics["temperature"]
+        runtime.update(numerics, peft=version("peft"))
 
         def predict(body):
             rec, meta = to_record(SystemOneRequest.model_validate(body))
             enc = admit(model, tok, rec, truncate=False)
             with torch.inference_mode():
-                calibrated_logits = model.forward(enc)[0]
-            raw, p = distributions(calibrated_logits.double()*temperature, meta[0]["keys"], temperature)
+                logits = model.forward(enc)[0]
+            # Legacy head outputs are calibrated; the explicit contract loads a
+            # unit-temperature head and supplies raw logits directly.
+            raw_logits = logits.double() if "numerical_contract" in numerics else logits.double()*temperature
+            raw, p = distributions(raw_logits, meta[0]["keys"], temperature)
             return raw, p, {"input_tokens": len(enc["ids"]), "state_tokens": enc["state_tokens"], "output_tokens": 0}
 
     elif kind == "jiwo":

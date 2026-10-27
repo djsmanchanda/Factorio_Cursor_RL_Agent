@@ -109,11 +109,28 @@ def probabilities(values, ids):
     return {k: values[k] / total for k in ids}
 
 
+def numerical_contract(bundle):
+    """An absent contract preserves the released loader's numerical behavior."""
+    if "numerical_contract" not in bundle:
+        return None
+    contract = bundle["numerical_contract"]
+    if (bundle.get("model") != "kev" or not isinstance(contract, dict)
+            or set(contract) != {"version", "checkpoint_weights_dtype", "external_temperature"}
+            or contract.get("version") != "kev-cpu-fp32-v1"
+            or contract.get("checkpoint_weights_dtype") not in ("fp32", "bf16")):
+        raise ValueError("unsupported numerical contract")
+    temperature = contract["external_temperature"]
+    if type(temperature) not in (int, float) or not math.isfinite(temperature) or temperature <= 0:
+        raise ValueError("external temperature must be finite and positive")
+    return contract
+
+
 def load_policy_bundle(path):
     path = Path(path).resolve()
     bundle = json.loads(path.read_text())
     if bundle["version"] != "laya-model-policy-v1" or bundle["renderer"] != RENDERER:
         raise ValueError("unsupported model bundle or renderer")
+    numerical_contract(bundle)
     if not bundle.get("files"):
         raise ValueError("model bundle has no verified artifacts")
     for name, expected in bundle["files"].items():
