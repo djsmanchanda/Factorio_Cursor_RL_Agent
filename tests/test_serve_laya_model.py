@@ -244,8 +244,10 @@ def test_cuda_contract_loads_the_offline_evaluation_path_and_refuses_cpu_paramet
     loading_meta, opts = ck.loads[0]
     assert loading_meta is ck.meta and opts.dtype == torch.bfloat16 and opts.merge is False
     assert opts.attn == "sdpa" and opts.temperature == 1.0 and opts.fused is False and opts.cuda_graphs is False
+    # The offline evaluation loaded both released (FP32-trained) and weak-v3 (BF16-trained) Kev this way.
+    assert numerical_contract({"model": "kev", "numerical_contract": {**gpu, "checkpoint_weights_dtype": "fp32"}})
     with pytest.raises(ValueError, match="contract"):
-        numerical_contract({"model": "kev", "numerical_contract": {**gpu, "checkpoint_weights_dtype": "fp32"}})
+        numerical_contract({"model": "kev", "numerical_contract": {**gpu, "checkpoint_weights_dtype": "fp16"}})
 
 
 def test_artifact_roots_verify_the_same_bytes_without_changing_identity(tmp_path):

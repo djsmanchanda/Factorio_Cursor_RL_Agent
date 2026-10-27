@@ -111,7 +111,7 @@ def probabilities(values, ids):
 
 # Pinned Kev numerical paths and the checkpoint training precisions each accepts.
 # kev-cuda-bf16-v1 is the weak-v3 offline evaluation's GPU path.
-NUMERICAL_CONTRACTS = {"kev-cpu-fp32-v1": ("fp32", "bf16"), "kev-cuda-bf16-v1": ("bf16",)}
+NUMERICAL_CONTRACTS = {"kev-cpu-fp32-v1": ("fp32", "bf16"), "kev-cuda-bf16-v1": ("fp32", "bf16")}
 
 
 def numerical_contract(bundle):
