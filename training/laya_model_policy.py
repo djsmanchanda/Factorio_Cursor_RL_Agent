@@ -109,6 +109,11 @@ def probabilities(values, ids):
     return {k: values[k] / total for k in ids}
 
 
+# Pinned Kev numerical paths and the checkpoint training precisions each accepts.
+# kev-cuda-bf16-v1 is the weak-v3 offline evaluation's GPU path.
+NUMERICAL_CONTRACTS = {"kev-cpu-fp32-v1": ("fp32", "bf16"), "kev-cuda-bf16-v1": ("bf16",)}
+
+
 def numerical_contract(bundle):
     """An absent contract preserves the released loader's numerical behavior."""
     if "numerical_contract" not in bundle:
@@ -116,8 +121,7 @@ def numerical_contract(bundle):
     contract = bundle["numerical_contract"]
     if (bundle.get("model") != "kev" or not isinstance(contract, dict)
             or set(contract) != {"version", "checkpoint_weights_dtype", "external_temperature"}
-            or contract.get("version") != "kev-cpu-fp32-v1"
-            or contract.get("checkpoint_weights_dtype") not in ("fp32", "bf16")):
+            or contract.get("checkpoint_weights_dtype") not in NUMERICAL_CONTRACTS.get(contract.get("version"), ())):
         raise ValueError("unsupported numerical contract")
     temperature = contract["external_temperature"]
     if type(temperature) not in (int, float) or not math.isfinite(temperature) or temperature <= 0:
@@ -125,7 +129,16 @@ def numerical_contract(bundle):
     return contract
 
 
-def load_policy_bundle(path):
+def local_path(name, roots=None):
+    """Where a serving host keeps an artifact; ``roots`` maps path prefixes to the same bytes elsewhere."""
+    for source, target in (roots or {}).items():
+        if name == source or name.startswith(source.rstrip("/") + "/"):
+            return Path(target) / Path(name).relative_to(source)
+    return Path(name)
+
+
+def load_policy_bundle(path, roots=None):
+    """Verify every artifact hash; the identity is the bundle's own digest, independent of ``roots``."""
     path = Path(path).resolve()
     bundle = json.loads(path.read_text())
     if bundle["version"] != "laya-model-policy-v1" or bundle["renderer"] != RENDERER:
@@ -135,7 +148,7 @@ def load_policy_bundle(path):
         raise ValueError("model bundle has no verified artifacts")
     for name, expected in bundle["files"].items():
         h = hashlib.sha256()
-        with Path(name).open("rb") as source:
+        with local_path(name, roots).open("rb") as source:
             for block in iter(lambda: source.read(1024 * 1024), b""):
                 h.update(block)
         if h.hexdigest() != expected:

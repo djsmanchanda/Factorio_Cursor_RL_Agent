@@ -14,7 +14,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from training.laya_model_policy import QUESTION, canonical, digest, load_policy_bundle, numerical_contract
+from training.laya_model_policy import QUESTION, canonical, digest, load_policy_bundle, local_path, numerical_contract
 
 
 def covered_windows(bounds, length):
@@ -46,6 +46,8 @@ def load_kev_checkpoint(ck, bundle, LoadOptions):
     original = ck.meta
     if original.weights_dtype != contract["checkpoint_weights_dtype"]:
         raise ValueError("Kev checkpoint training precision differs from numerical contract")
+    if contract["version"] == "kev-cuda-bf16-v1":
+        return load_kev_cuda(ck, contract, LoadOptions)
     full = ck.full
     loading = copy(ck)
     if not full:
@@ -77,11 +79,29 @@ def load_kev_checkpoint(ck, bundle, LoadOptions):
         "adapter_merged": not full, "full_weights": full}
 
 
-def scorer(bundle):
+def load_kev_cuda(ck, contract, LoadOptions):
+    """The weak-v3 offline evaluation's GPU path: unmerged adapter, BF16, SDPA, raw head logits."""
+    import torch
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    tok, model = ck.load("cuda:0", LoadOptions(dtype=torch.bfloat16, merge=False, attn="sdpa", temperature=1.0,
+                                               backend="torch", fused=False, cuda_graphs=False))
+    if model.training or model.head.training or model.head.temperature != 1.0 or model.backend != "torch":
+        raise ValueError("Kev did not load an eval-mode torch model with raw head logits")
+    devices = {tensor.device.type for tensor in model.parameters()}
+    if devices != {"cuda"}:
+        raise ValueError(f"Kev CUDA contract found parameters on {sorted(devices)}")
+    return tok, model, {"temperature": contract["external_temperature"], "numerical_contract": contract,
+        "checkpoint_weights_dtype": ck.meta.weights_dtype, "checkpoint_temperature": ck.meta.temperature,
+        "head_temperature": model.head.temperature, "temperature_source": "external", "dtype": "bfloat16",
+        "device": torch.cuda.get_device_name(0), "attn": "sdpa", "adapter_merged": False}
+
+
+def scorer(bundle, roots=None):
     import torch
     torch.set_num_threads(bundle.get("threads", 1))
     torch.set_num_interop_threads(1)
-    model_path = bundle["weights"]
+    model_path = str(local_path(bundle["weights"], roots))
     kind = bundle["model"]
     runtime = {"model": kind, "python": sys.version, "torch": torch.__version__, "transformers": version("transformers"),
                "dtype": "float32", "device": "cpu", "threads": torch.get_num_threads()}
@@ -174,9 +194,12 @@ def scorer(bundle):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--bundle", type=Path, required=True)
+    ap.add_argument("--artifact-root", action="append", default=[], metavar="FROM=TO",
+                    help="serve artifacts listed under FROM from TO on this host; hashes and identity are unchanged")
     args = ap.parse_args()
-    bundle, identity = load_policy_bundle(args.bundle)
-    predict, runtime = scorer(bundle)
+    roots = dict(item.split("=", 1) for item in args.artifact_root)
+    bundle, identity = load_policy_bundle(args.bundle, roots)
+    predict, runtime = scorer(bundle, roots)
     port = int(bundle["endpoint"].split(":")[2].split("/")[0])
 
     class Handler(BaseHTTPRequestHandler):

@@ -1,5 +1,6 @@
 # Path: tests/test_serve_laya_model.py | Purpose: Verify opt-in Kev reconstruction and single external calibration without model assets or serving.
 from dataclasses import dataclass, field
+import hashlib
 import importlib.util
 import json
 import os
@@ -10,7 +11,7 @@ from types import ModuleType, SimpleNamespace
 import pytest
 
 from tools import serve_laya_model as serving
-from training.laya_model_policy import QUESTION, RENDERER, load_policy_bundle, numerical_contract
+from training.laya_model_policy import QUESTION, RENDERER, digest, load_policy_bundle, numerical_contract
 
 torch = pytest.importorskip("torch")
 pytestmark = pytest.mark.training
@@ -233,3 +234,34 @@ def test_pinned_native_loader_bf16_override_and_contract(tmp_path, monkeypatch, 
     assert not isinstance(exact.lm, Adapter) and next(exact.lm.parameters()).dtype == torch.float32
     assert exact.head.temperature == 1.0 and runtime["temperature"] == TEMPERATURE
     assert ck.meta.weights_dtype == "bf16" and ck.meta.temperature == 9.0
+
+
+def test_cuda_contract_loads_the_offline_evaluation_path_and_refuses_cpu_parameters(fake_peft):
+    ck = Checkpoint()
+    gpu = {**contract(), "version": "kev-cuda-bf16-v1"}
+    with pytest.raises(ValueError, match=r"parameters on \['cpu'\]"):
+        serving.load_kev_checkpoint(ck, {"model": "kev", "numerical_contract": gpu}, LoadOptions)
+    loading_meta, opts = ck.loads[0]
+    assert loading_meta is ck.meta and opts.dtype == torch.bfloat16 and opts.merge is False
+    assert opts.attn == "sdpa" and opts.temperature == 1.0 and opts.fused is False and opts.cuda_graphs is False
+    with pytest.raises(ValueError, match="contract"):
+        numerical_contract({"model": "kev", "numerical_contract": {**gpu, "checkpoint_weights_dtype": "fp32"}})
+
+
+def test_artifact_roots_verify_the_same_bytes_without_changing_identity(tmp_path):
+    mirror = tmp_path / "mirror"
+    mirror.mkdir()
+    (mirror / "head.pt").write_bytes(b"weights")
+    origin = "/absent/laya-models"
+    bundle = {"version": "laya-model-policy-v1", "renderer": RENDERER, "model": "kev",
+              "endpoint": "http://127.0.0.1:9181/score", "epsilon": 0.15,
+              "files": {f"{origin}/head.pt": hashlib.sha256(b"weights").hexdigest()}}
+    path = tmp_path / "bundle.json"
+    path.write_text(json.dumps(bundle))
+    with pytest.raises(FileNotFoundError):
+        load_policy_bundle(path)
+    loaded, identity = load_policy_bundle(path, {origin: str(mirror)})
+    assert loaded == bundle and identity == digest(bundle)
+    (mirror / "head.pt").write_bytes(b"changed")
+    with pytest.raises(ValueError, match="artifact changed"):
+        load_policy_bundle(path, {origin: str(mirror)})
