@@ -161,6 +161,22 @@ def test_a_cell_held_off_by_its_own_gate_reads_as_stocked_not_idle():
     assert board["needs"][0]["condition"] == "satisfied"
 
 
+def test_gate_held_cell_with_capacity_meets_its_phase_goal_but_full_output_does_not():
+    # C39 integrated-s80240: a demand-derived gate (< 27) held the gear cell off at stock 27, so the
+    # 0.25/s C1 goal never measured as met and the run stalled in C1 with a wait-only menu.
+    gated = [machine("assembling-machine-1", "iron-gear-wheel", "disabled_by_control_behavior")]
+    board = compile_status(world(gated, items={"iron-gear-wheel": 27}), {"iron-gear-wheel": 0.25},
+                           flows(iron_gear_wheel=0.0))
+    assert goal_met(board["needs"][0])
+    # No stock yet, or a full chest rather than its own gate, still judges the measured rate.
+    empty = compile_status(world(gated, items={"iron-gear-wheel": 0}), {"iron-gear-wheel": 0.25},
+                           flows(iron_gear_wheel=0.0))
+    full = [machine("assembling-machine-1", "iron-gear-wheel", "full_output")]
+    blocked = compile_status(world(full, items={"iron-gear-wheel": 27}), {"iron-gear-wheel": 0.25},
+                             flows(iron_gear_wheel=0.0))
+    assert not goal_met(empty["needs"][0]) and not goal_met(blocked["needs"][0])
+
+
 def test_raw_ore_is_not_short_when_every_consumer_is_satisfied_from_stock():
     # C11: copper plates stood at ~4800 in a full mall (0/s), yet copper-ore read "short" whenever it
     # was measured, so "extend copper-plate" stayed on the menu for 75 game minutes.

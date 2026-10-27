@@ -35,6 +35,8 @@ SATISFIED_SHARE = 0.95
 # Output-blocked machines whose accessible stock covers this many seconds of demand
 # are idle because nothing draws from them, not because supply is missing.
 STOCKED_SECONDS = 600
+# Status of an assembler switched off by its logistic stock gate (circuit/control behavior).
+GATE_HELD_STATUS = "disabled_by_control_behavior"
 
 # Factorio entity_status names grouped into the conditions Laya must separate.
 STATUS_BUCKETS = {
@@ -339,7 +341,17 @@ def goal_met(need: Mapping) -> bool:
     """A goal item meets its phase rate (stock demand on the same item is not part of the goal)."""
     measured = need["measured_per_s"]
     goal = need.get("goal_required_per_s", need["required_per_s"])
-    return measured is not None and measured >= goal * SATISFIED_SHARE
+    if measured is None:
+        return False
+    if measured >= goal * SATISFIED_SHARE:
+        return True
+    # Standing mall gates follow current demand, so a cell its own logistic stock gate switched
+    # off measures below the goal rate while its installed capacity covers it (C39: 38/47
+    # never-C2 runs held C1 forever with gear/cable gated at 27/92). Demand, not supply, limits it.
+    counts = need.get("status_counts") or {}
+    held = counts.get(GATE_HELD_STATUS, 0)
+    return (held * 2 > sum(counts.values()) and (need.get("stock") or 0) > 0
+            and (need.get("capacity_per_s") or 0) >= goal * SATISFIED_SHARE)
 
 
 def bottleneck_chain(board: Mapping) -> list[str]:
