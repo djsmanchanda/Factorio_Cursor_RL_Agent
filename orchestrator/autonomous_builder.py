@@ -1350,6 +1350,14 @@ def _place_new_mine(
     ox, oy = extraction.mine_origin
     plan = strip_local_power(extraction.build_plan, remove_substations=False)
     _publish_output_chest(plan)
+    # Preflight has reserved the refinery and its ore route, but neither need
+    # have ghosts yet. Mine service must preserve those future footprints too.
+    reserved_tiles = planned_footprint_tiles(plan)
+    if _BOOTSTRAP_DISTRICT_LEDGER is not None:
+        for district in _BOOTSTRAP_DISTRICT_LEDGER.states():
+            if (district.surface, district.force) == (surface, force):
+                for role in ("refinery_growth", "transport_service"):
+                    reserved_tiles.update(district.reservations.get(role, ()))
     if hasattr(client, "command"):
         _relocate_roboports_blocking_mine_plan(
             client, bridge, surface, force, plan, emit,
@@ -1392,6 +1400,7 @@ def _place_new_mine(
         client, bridge, surface, plan, f"mining_{extraction.ore}", emit,
         stage_coverage=lambda: _ensure_plan_construction_coverage(
             client, bridge, surface, force, plan, emit,
+            reserved_tiles=reserved_tiles,
         ),
         allow_unfunded_ghosts=allow_unfunded_ghosts,
     )
@@ -1403,7 +1412,7 @@ def _place_new_mine(
         _ensure_power_anchor_on_generated_network(
             client, bridge, surface, force, substation_position,
             f"{extraction.ore} mine", emit,
-            reserved_tiles=planned_footprint_tiles(plan),
+            reserved_tiles=reserved_tiles,
         )
         emit(
             f"  BLUEPRINT EARMARK: {extraction.ore} mine is placed as ghosts; "
@@ -1424,7 +1433,7 @@ def _place_new_mine(
     _ensure_power_anchor_on_generated_network(
         client, bridge, surface, force, substation_position,
         f"{extraction.ore} mine", emit,
-        reserved_tiles=planned_footprint_tiles(plan),
+        reserved_tiles=reserved_tiles,
     )
     stuck = _diagnose_machines(
         client, surface, machine_positions, emit, bridge=bridge, force=force,

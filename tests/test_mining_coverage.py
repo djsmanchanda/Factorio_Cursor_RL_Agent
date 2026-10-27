@@ -129,3 +129,50 @@ def test_power_anchor_repair_requires_generated_network_after_bridge(
 
     assert failure.value.code == "stage_power_connection_failed"
     assert failure.value.state == "power_wait"
+
+
+@pytest.mark.parametrize("earmarked", [False, True])
+def test_mine_services_preserve_future_refinery_and_ore_route(monkeypatch, earmarked):
+    plan = {"phases": [{"name": "mine", "actions": [
+        {"action_type": "place_ghost", "entity": "substation",
+         "position": {"x": 66.0, "y": -88.0}},
+        {"action_type": "place_ghost", "entity": "electric-mining-drill",
+         "position": {"x": 64.5, "y": -86.5}},
+    ]}]}
+    # The future belt isn't a live blocker: the power bridge must consult its
+    # reservation before placing the pole which otherwise makes it unbuildable.
+    route_tile, refinery_tile, foreign_tile = (72, -86), (80, -90), (999, 999)
+    states = [SimpleNamespace(surface="nauvis", force="player", reservations={
+        "transport_service": frozenset({route_tile}),
+        "refinery_growth": frozenset({refinery_tile}),
+    }), SimpleNamespace(surface="other", force="player", reservations={
+        "transport_service": frozenset({foreign_tile}),
+    })]
+    monkeypatch.setattr(autonomous_builder, "_BOOTSTRAP_DISTRICT_LEDGER",
+                        SimpleNamespace(states=lambda: states))
+    monkeypatch.setattr(autonomous_builder, "_publish_output_chest", lambda _plan: None)
+    seen = {}
+
+    def coverage(*_args, reserved_tiles):
+        seen["coverage"] = set(reserved_tiles)
+
+    def power(*_args, reserved_tiles):
+        seen["power"] = set(reserved_tiles)
+
+    def submit(*_args, stage_coverage, **_kwargs):
+        stage_coverage()
+
+    monkeypatch.setattr(autonomous_builder, "_ensure_plan_construction_coverage", coverage)
+    monkeypatch.setattr(autonomous_builder, "_ensure_power_anchor_on_generated_network", power)
+    monkeypatch.setattr(autonomous_builder, "_submit", submit)
+    monkeypatch.setattr(autonomous_builder, "bring_stage_up", lambda *_a, **_k: None)
+    monkeypatch.setattr(autonomous_builder, "_diagnose_machines", lambda *_a, **_k: None)
+    extraction = SimpleNamespace(mine_origin=(66.0, -88.0), build_plan=plan,
+                                 ore="stone", ore_output=(70.5, -82.5))
+    autonomous_builder._place_new_mine(
+        object(), object(), "nauvis", "player", extraction, lambda _m: None,
+        allow_unfunded_ghosts=earmarked,
+    )
+    for reserved in (seen["coverage"], seen["power"]):
+        assert {route_tile, refinery_tile, (66, -88)} <= reserved
+        assert foreign_tile not in reserved
