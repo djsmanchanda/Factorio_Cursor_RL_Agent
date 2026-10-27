@@ -6995,6 +6995,13 @@ def _borrow_free_mall_cell(
             # A loan cannot consume the only producer of its own inputs.
             # Stock is a buffer; keeping it stocked does not replace supply.
             anchor_minimum = max(1, anchor_minimum)
+        if any(LINE_RECIPES.get(ingredient, {}).get("fluid_ingredients")
+               for ingredient in _recipe_ingredient_closure(original_recipe)):
+            # A producer fed by the chemical ladder (advanced circuits need plastic) is a capability,
+            # not spare capacity: lending its last cell to a temporary recipe starves the goal it
+            # exists for (C41 reference: 7 of 15 C5-not-C6 runs lent the advanced-circuit cell to
+            # temporary electronic circuits 10-55 times). Duplicates stay borrowable.
+            anchor_minimum = max(1, anchor_minimum)
         if line.machine_count <= anchor_minimum:
             # Gear and cable are the bootstrap mall's feedstock anchors. A
             # recipe loan may use a duplicate, never the last producer.

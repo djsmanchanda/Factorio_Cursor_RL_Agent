@@ -2025,6 +2025,35 @@ def test_last_anchor_producer_is_never_borrowed(monkeypatch) -> None:
 
 
 
+def test_last_chemical_fed_producer_is_never_borrowed_but_a_duplicate_is(monkeypatch) -> None:
+    # C41 reference: the only advanced-circuit cell was lent to temporary electronic circuits.
+    for count, expected in ((1, None), (2, "advanced-circuit")):
+        line = SimpleNamespace(machine_count=count, machine_positions=[(36.5, 32.5), (42.5, 32.5)][:count])
+        monkeypatch.setattr(
+            builder.live_base, "find_line",
+            lambda _c, _s, _f, r, _m, **_k: line if r == "advanced-circuit" else None,
+        )
+        monkeypatch.setattr(builder.live_base, "available_items", lambda *_a: {"advanced-circuit": 5})
+        monkeypatch.setattr(builder, "locate_mall_cell", lambda *_a: ((35, 31), "left"))
+        monkeypatch.setattr(builder, "mall_slot_uses_shared_provider", lambda *_a: False)
+
+        def _entity(_client, _surface, position):
+            if tuple(position) == (39.5, 32.5):
+                return {"name": "requester-chest"}
+            if tuple(position) == (39.5, 31.5):
+                return {"name": "passive-provider-chest"}
+            return {"name": "assembling-machine-2"}
+        monkeypatch.setattr(builder.live_base, "entity_at", _entity)
+
+        borrowed = builder._borrow_free_mall_cell(
+            object(), "nauvis", "player", "electronic-circuit", (3.0, -1.0),
+            allowed_original_recipes=None, allow_shared_provider=False,
+            require_stocked_original=False, excluded_origins=set(),
+        )
+
+        assert (borrowed and borrowed[0]) == expected
+
+
 def test_live_cell_request_window_never_shrinks_below_throughput(monkeypatch) -> None:
     """2026-09-04: a transient finite batch rewrote the circuit base window
     15 -> 6 and starved the 200 reserve for 700s. The refresh floors at the
