@@ -35,7 +35,7 @@ from orchestrator.laya_knowledge import load_guideline_context
 from training.laya_clean_runner import (ROOT, Settings, _append, _goal_gap, _status_line, _training_record,
                                         _write_status, rolling_measurement)
 from training.laya_saved_world import speed_status
-from training.laya_mall_slots import RAW, obtainable
+from training.laya_mall_slots import FLUIDS, RAW, obtainable
 from training.laya_mission import current_phase, phase_reached
 from training.laya_goal import (
     GOAL_VERSION, goal_evidence, observation_window, research_goal_satisfied, useful_state,
@@ -1034,7 +1034,8 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                 target = max(1, math.ceil(goal_rate.get(item, 0) * 60))
                 demands[item] = {"target": target, "missing": target, "capability": True, "parents": []}
     for item, demand in demands.items():
-        if item in RAW:
+        # Fluids are capabilities of chemical operations, never assembler produce targets.
+        if item in RAW or item in FLUIDS:
             continue
         # The tooling's stock_target is a network level (the mall's stock gate), not a delta: asking for the
         # bare shortage gated a drill cell at 4 while the network held 6 and the starter needed 8.

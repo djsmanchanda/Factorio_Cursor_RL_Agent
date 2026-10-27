@@ -1466,3 +1466,18 @@ def test_layout_signature_counts_built_machines_and_poles():
     from training.laya_ops_runner import layout_signature
     assert layout_signature({"machines": [{}, {}], "poles": [{}]}) == (2, 1)
     assert layout_signature({"machines": [{}]}) is None
+
+
+def test_fluid_shortages_are_not_produce_targets_but_items_remain_selectable():
+    from training.laya_mall_slots import FLUIDS
+
+    results = [{"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}},
+               {"ok": False, "operation": "produce", "params": {"item": "plastic-bar"},
+                "code": "material_shortage", "details": {
+                    "required": {**{fluid: 10 for fluid in FLUIDS}, "inserter": 2, "plastic-bar": 3}, "available": {}}}]
+    # Empty facts exercise the fallback; populated facts exercise obtainable().
+    for recipes in ({}, {name: {"ingredients": []} for name in (*FLUIDS, "inserter", "plastic-bar")}):
+        menu = compile_options({"needs": []}, results, recipes=recipes)
+        ids = {option["option_id"] for option in menu["options"]}
+        assert {"op.produce.inserter", "op.produce.plastic-bar"} <= ids
+        assert not {f"op.produce.{fluid}" for fluid in FLUIDS} & ids
