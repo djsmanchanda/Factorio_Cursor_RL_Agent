@@ -88,10 +88,25 @@ unborrowable assembler. A lender choice must account for displaced production.
 | `mission.slot-settle` | Let a feasible retargeted batch reach its target; reconsider if blocked or if its displaced output is urgently needed. |
 
 Before advanced circuits, prefer finite batches and rotating cells for occasional
-needs. After advanced circuits, prefer dedicated slots for sustained needs and
-dedicated lines for orders too large for a slot. Retain useful production while
-the replacement builds. Reconsider a batch when its inputs cannot arrive;
-waiting for deliveries and waiting on an impossible dependency are different.
+needs. Retain useful production while a replacement builds. Reconsider a batch
+when its inputs cannot arrive; waiting for deliveries and waiting on an
+impossible dependency are different.
+
+### Dedicated production after advanced circuits
+
+User direction, 28 October 2026. This is target behavior; the current ops menu
+does not yet offer dedicated slots or dedicated lines as operations.
+
+- Once advanced circuits can be made, move sustained items from rotating mall
+  slots to **dedicated slots**: a machine whose sole purpose is that item.
+- An item uses **at most two mall slots**. A need beyond two slots gets a
+  **dedicated assembly line** for that item.
+- A dedicated line takes **every precursor by belt**, connected belt-to-belt
+  from that precursor's source belt. It must not depend on mall slots.
+- Bots and logistic chests are expensive to build, and bots draw a lot of
+  electricity. Keep heavy item flow on belts, not bot deliveries.
+- The mall's importance diminishes slowly. As items move into their own
+  production zones, the mall ends up making only finished building parts.
 
 ## Current ops adapter
 
