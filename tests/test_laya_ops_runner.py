@@ -1019,6 +1019,18 @@ GOAL_RECIPES = {
 _GOAL_STARTERS = [{"ok": True, "operation": "starter", "params": {"recipe": p}} for p in ("iron-plate", "copper-plate")]
 
 
+def test_a_reserved_project_waiting_on_supply_is_a_producible_shortage():
+    # C39 integrated-s80240: the copper mine held "missing electric-mining-drill 6", no operation had
+    # failed on drills, and the menu offered only waits until the run stalled.
+    results = [{"ok": True, "operation": "mall_slot", "params": {"item": "iron-gear-wheel"}}]
+    projects = {"mining_copper-ore": {"state": "supply_wait", "missing": {"electric-mining-drill": 6},
+                                      "reserved": {"transport-belt": 13}}}
+    ids = {o["option_id"] for o in compile_options(BOARD, results)["options"]}
+    options = compile_options(BOARD, results, projects=projects)["options"]
+    drill = next(o for o in options if o["option_id"] == "op.produce.electric-mining-drill")
+    assert "op.produce.electric-mining-drill" not in ids and drill["features"]["shortage"] == 6
+
+
 def test_goal_targets_get_generic_produce_options_before_any_shortage():
     # C4 could not build plastic: the mission target was never offered because only shortages were producible.
     board = {"needs": [{"item": "plastic-bar", "condition": "unbuilt", "goal_required_per_s": 0.5},

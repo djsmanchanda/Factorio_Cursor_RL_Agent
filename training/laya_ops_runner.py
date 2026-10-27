@@ -847,7 +847,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                     bootstrap_districts: Mapping | None = None, allocation: Mapping[str, tuple] | None = None,
                     measurement: Mapping | None = None, research_goal: str | None = None,
                     goal_status: Mapping | None = None, labs: int | None = None,
-                    layout: Sequence[int] | None = None) -> dict:
+                    layout: Sequence[int] | None = None, projects: Mapping | None = None) -> dict:
     """Operations worth offering now, each tagged with the need it serves and the facts rules weigh.
 
     ``foundations`` (plate -> observed ready) advances a plate past "starter" when the world shows its foundation
@@ -861,6 +861,11 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     stuck = unchanged_failures(current_materials, stock or {}, allocation, layout)
     sources: dict[str, set] = {}
     stages, codes, short = plate_stages(results), last_codes(results, tick), shortages(current_materials, sources)
+    # A reserved project waiting on supply is a shortage even when no operation has failed on it
+    # (C39: a copper mine held "missing electric-mining-drill 6" while the menu offered only waits).
+    for project in (projects or {}).values():
+        for item, missing in (project.get("missing") or {}).items():
+            short[item] = max(short.get(item, 0), int(missing))
     for plate, ready in (foundations or {}).items():
         if ready is True and stages.get(plate) == "starter":
             stages[plate] = "foundation"
@@ -1478,7 +1483,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                               bootstrap_districts=districts, allocation=allocation,
                                               measurement=measurement, research_goal=goal,
                                               goal_status=goal_status, labs=_lab_count(facts),
-                                              layout=layout_signature(facts)),
+                                              layout=layout_signature(facts),
+                                              projects=(economics or {}).get("projects")),
                               results, economics, stock=stock, reconcile_loans=settings.mall_loan_reconciliation)
         if objective:
             menu = add_research_options(menu, board, research, facts, objective)
