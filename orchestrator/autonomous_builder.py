@@ -1351,11 +1351,12 @@ def _place_new_mine(
     plan = strip_local_power(extraction.build_plan, remove_substations=False)
     _publish_output_chest(plan)
     # Preflight has reserved the refinery and its ore route, but neither need
-    # have ghosts yet. Mine service must preserve those future footprints too.
+    # have ghosts yet. Preserve this mine district's future footprints; unrelated
+    # districts must not turn the shared network into a global exclusion zone.
     reserved_tiles = planned_footprint_tiles(plan)
     if _BOOTSTRAP_DISTRICT_LEDGER is not None:
         for district in _BOOTSTRAP_DISTRICT_LEDGER.states():
-            if (district.surface, district.force) == (surface, force):
+            if (district.surface, district.force, district.ore) == (surface, force, extraction.ore):
                 for role in ("refinery_growth", "transport_service"):
                     reserved_tiles.update(district.reservations.get(role, ()))
     if hasattr(client, "command"):

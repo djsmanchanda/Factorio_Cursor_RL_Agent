@@ -142,11 +142,14 @@ def test_mine_services_preserve_future_refinery_and_ore_route(monkeypatch, earma
     # The future belt isn't a live blocker: the power bridge must consult its
     # reservation before placing the pole which otherwise makes it unbuildable.
     route_tile, refinery_tile, foreign_tile = (72, -86), (80, -90), (999, 999)
-    states = [SimpleNamespace(surface="nauvis", force="player", reservations={
+    states = [SimpleNamespace(surface="nauvis", force="player", ore="stone", reservations={
         "transport_service": frozenset({route_tile}),
         "refinery_growth": frozenset({refinery_tile}),
-    }), SimpleNamespace(surface="other", force="player", reservations={
+    }), SimpleNamespace(surface="other", force="player", ore="stone", reservations={
         "transport_service": frozenset({foreign_tile}),
+    }), SimpleNamespace(surface="nauvis", force="player", ore="iron-ore", reservations={
+        "refinery_growth": frozenset({(777, 777)}),
+        "transport_service": frozenset({(778, 778)}),
     })]
     monkeypatch.setattr(autonomous_builder, "_BOOTSTRAP_DISTRICT_LEDGER",
                         SimpleNamespace(states=lambda: states))
@@ -176,3 +179,4 @@ def test_mine_services_preserve_future_refinery_and_ore_route(monkeypatch, earma
     for reserved in (seen["coverage"], seen["power"]):
         assert {route_tile, refinery_tile, (66, -88)} <= reserved
         assert foreign_tile not in reserved
+        assert not {(777, 777), (778, 778)} & reserved
