@@ -393,3 +393,18 @@ def test_curated_sources_allow_reports_without_exposing_unlisted_data(tmp_path):
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+def test_dashboard_assets_stay_csp_clean_and_mutations_stay_explicit():
+    import re
+    import shutil
+    html = (dashboard.ASSETS / "index.html").read_text()
+    script = (dashboard.ASSETS / "app.js").read_text()
+    assert not re.search(r"<script(?![^>]*\bsrc=)", html) and not re.search(r"\son[a-z]+=", html)
+    assert 'src="/app.js"' in html and 'href="/style.css"' in html
+    # The only mutating endpoints, each posted from a named action, never from render/refresh code.
+    assert set(re.findall(r"post\('(/api/[a-z-]+)'", script)) == {"/api/control", "/api/note", "/api/sync-mods", "/api/view"}
+    assert script.count("post('/api/sync-mods'") == 1 and "function startSync" in script and "sync-form" in script
+    assert not re.search(r"(localStorage|sessionStorage|save\([^)]*)[^\n]*\btoken\b", script.replace("token = next.token", ""))
+    if shutil.which("node"):
+        assert subprocess.run(["node", "--check", str(dashboard.ASSETS / "app.js")], capture_output=True).returncode == 0

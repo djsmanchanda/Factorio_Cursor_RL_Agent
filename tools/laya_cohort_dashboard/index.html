@@ -1,12 +1,166 @@
 <!doctype html>
-<!-- Path: tools/laya_cohort_dashboard/index.html | Purpose: Accessible local cohort dashboard shell. -->
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Laya · Cohort operations</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
-<body><header><div><span class="eyebrow">LAYA / DISPOSABLE WORLDS</span><h1>Cohort operations</h1><p>Evidence and host admission, without touching running worlds.</p></div><div class="fresh" id="fresh">Connecting…</div></header>
-<main><div id="notice" role="status"></div><section class="cards" id="summary"></section>
-<section class="panel"><div class="heading"><div><span class="eyebrow">HOST CAPACITY</span><h2>Performance &amp; admission</h2><p>p95 and p98 are lower-tail coverage floors: the 5th and 2nd percentiles of sampled run UPS, not high quantiles.</p></div><label>Chart <select id="metric"><option value="ups">Slow-tail UPS</option><option value="throughput">Aggregate throughput</option><option value="temperature">Temperature</option><option value="slots">Runs and ceilings</option></select></label></div><div class="range-controls" role="group" aria-label="History range"><button type="button" class="history-range selected" data-hours="6">6 hours</button><button type="button" class="history-range" data-hours="24">1 day</button><button type="button" class="history-range" data-hours="168">7 days</button></div><div id="chart" class="chart"></div><div id="attribution"></div><p class="hint">Missing samples are unknown, not zero. History uses retained scheduler samples; gaps are not attributed. Scheduler reasons may overlap and are not causal proof.</p></section>
-<section class="panel"><div class="heading"><div><span class="eyebrow">GUARDED CONTROLS</span><h2>Admission policy</h2><p>A ceiling never forces admissions. Lower targets drain as worlds finish; existing worlds are not killed.</p></div></div><div class="controls"><form id="ceiling"><label>Upper ceiling (runs)<input name="slots" type="number" min="0" max="1000" required></label><label>Temporary duration <input name="duration" placeholder="Permanent or 30m"></label><button type="button" class="adjust" data-delta="-1">−1</button><button type="button" class="adjust" data-delta="1">+1</button><button>Apply ceiling</button><button id="resume" type="button" class="secondary">Resume automatic</button></form><form id="floors"><label>p95 UPS floor<input name="p95" type="number" min="0.01" step="any" required></label><label>p98 UPS floor<input name="p98" type="number" min="0.01" step="any" required></label><label>Temperature target °C<input name="temp" type="number" min="0.01" max="120" step="any" required></label><button>Save guards</button></form></div><div class="cool"><button id="cool">Cool Miniship for 1 hour</button> <button id="cool-cancel" class="secondary">Cancel cooling</button> <span id="cool-status"></span></div><p class="warning">Controls unlock only after the live scheduler passes its source and heartbeat check. Cooling uses Linux power-saver, not BIOS quiet.</p></section>
-<section class="panel"><div class="heading"><div><span class="eyebrow">CURATED HISTORICAL EVIDENCE</span><h2>Curated cohort results</h2><p>Curated findings from the last few weeks. Strict milestones and Laya rate proxies are separate.</p></div><label>Predicate family <select id="predicate-family"><option value="strict">Strict checkpoints</option><option value="proxy">Laya rate proxies</option></select></label><label>Milestone <select id="milestone"><option>C6</option><option>C5</option><option>C4</option><option>C3</option><option>C2</option><option>C1</option><option>C0</option></select></label></div><div id="milestones"></div></section>
-<section class="panel"><div class="heading"><div><span class="eyebrow">EXPERIMENT REGISTRY</span><h2>Cohorts &amp; runs</h2><p>Planned denominators include unstarted jobs. Newest cohorts first. A running service does not imply running worlds.</p></div><label>Filter <input id="filter" type="search" placeholder="Cohort, arm or run"></label></div><button id="export" class="secondary">Export snapshot JSON</button><div id="cohorts"></div><div id="listeners"></div></section>
-<section class="panel" id="run-inspection" hidden><h2 id="run-title"></h2><div class="chart" id="latency"></div><p id="run-evidence"></p><p class="hint">Missing timings are unknown. Decision intervals include observation, execution and waits; they do not measure inference latency. Hover points for values.</p></section>
-<section class="panel"><span class="eyebrow">EVIDENCE BOUNDARIES</span><h2>Read before comparing</h2><p>Ever and final are distinct snapshots. Strict C6 v1, ops-Laya v2 and candidate v3 are different predicates. Missing predicate versions and comparison eligibility stay unknown. Partial cohorts are not final rankings; attempts and retries are separate. A zero failure counter does not mean zero typed tool faults. Notes are user observations, never learning truth.</p><p>Run ports come from world manifests, not a verified network route. A UDP listener, matching Factorio version and matching mods are required. An SSH TCP tunnel does not forward Factorio UDP.</p><p>Historical index: <code>docs/rl/Laya_Cohort_Results_Index.md</code></p></section>
-</main><footer>Local-only dashboard · No RCON credentials · No automatic joins</footer></body></html>
+<!-- Path: tools/laya_cohort_dashboard/index.html | Purpose: Accessible tabbed local cohort dashboard shell; dynamic content is rendered by app.js. -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark light"><title>Laya · Cohort operations</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+ <div class="top-row">
+  <div class="brand"><h1>Laya <span>cohort operations</span></h1></div>
+  <div role="tablist" aria-label="Views" id="tabs" class="tabs">
+   <button type="button" role="tab" id="tab-overview" data-tab="overview" aria-controls="view-overview" aria-selected="true">Overview</button>
+   <button type="button" role="tab" id="tab-performance" data-tab="performance" aria-controls="view-performance" aria-selected="false" tabindex="-1">Performance</button>
+   <button type="button" role="tab" id="tab-jobs" data-tab="jobs" aria-controls="view-jobs" aria-selected="false" tabindex="-1">Jobs <span id="jobs-count" class="count"></span></button>
+   <button type="button" role="tab" id="tab-history" data-tab="history" aria-controls="view-history" aria-selected="false" tabindex="-1">History</button>
+  </div>
+  <div class="status-cluster">
+   <span id="fresh" class="chip" role="status" data-tone="muted">Connecting…</span>
+   <button type="button" id="refresh" class="secondary small" title="Fetch a fresh snapshot now">Refresh</button>
+   <button type="button" id="rules" class="secondary small" title="How to read this dashboard">Reading rules</button>
+  </div>
+ </div>
+</header>
+<div id="toasts" aria-live="polite" aria-atomic="false"></div>
+<div id="banner" hidden></div>
+<main id="main" tabindex="-1">
+
+<div id="view-overview" role="tabpanel" aria-labelledby="tab-overview" class="view">
+ <div class="overview-grid">
+  <section id="capacity" class="panel" aria-labelledby="capacity-h">
+   <div class="heading"><h2 id="capacity-h">What limits more concurrent runs?</h2>
+    <details class="help"><summary title="How to read these limits">?<span class="visually-hidden"> How to read these limits</span></summary>
+     <ul>
+      <li><strong>Limits count concurrent runs</strong>, not cohorts. The ceiling is an upper bound; safeguards can admit fewer.</li>
+      <li><strong>Slow-tail UPS (p95 / p98 coverage).</strong> Every sample ranks the running worlds by UPS. p95 coverage is the speed 95% of runs meet or exceed (the 5th percentile, the slow tail); p98 is the same at 98% (2nd percentile). They are <em>not</em> high percentiles.</li>
+      <li><strong>Growth threshold.</strong> One more run is tried only when p95 coverage clears its floor plus a margin and temperature is below the target minus a recovery margin.</li>
+      <li><strong>Upper limit</strong> = the lower of the manual ceiling (if any) and the automatic cap for the mode. Older samples may omit the manual ceiling.</li>
+      <li>Flags compare the latest sample with thresholds. They show proximity to a limit, not proven cause; the scheduler’s own recorded reason is shown separately.</li>
+     </ul>
+    </details>
+   </div>
+   <div id="verdict" class="verdict" aria-live="polite"><div class="skeleton" style="height:70px"></div></div>
+   <div id="gauges" class="gauges"><div class="skeleton" style="height:130px"></div><div class="skeleton" style="height:130px"></div><div class="skeleton" style="height:130px"></div><div class="skeleton" style="height:130px"></div></div>
+  </section>
+
+  <section id="controls" class="panel" aria-labelledby="controls-h">
+   <div class="heading"><h2 id="controls-h">Admission controls</h2><span id="ctl-state" class="chip" data-tone="muted">Locked</span></div>
+   <div id="lock-banner" class="callout" data-tone="warn" hidden></div>
+   <form id="ceiling" class="ctl" novalidate aria-labelledby="ceiling-h">
+    <h3 id="ceiling-h">Upper limit · concurrent runs</h3>
+    <p class="muted small" id="ceiling-now">Loading current policy…</p>
+    <div class="stepper" role="group" aria-label="Upper limit in concurrent runs">
+     <button type="button" class="secondary adjust" data-delta="-1" data-control aria-label="Decrease limit by 1">−</button>
+     <label class="visually-hidden" for="slots">Upper limit (runs)</label><input id="slots" name="slots" type="number" inputmode="numeric" min="0" max="1000" step="1" required data-control>
+     <button type="button" class="secondary adjust" data-delta="1" data-control aria-label="Increase limit by 1">+</button>
+     <div class="segmented" role="group" aria-label="How long"><button type="button" data-scope="permanent" aria-pressed="true" data-control>Permanent</button><button type="button" data-scope="temporary" aria-pressed="false" data-control>Temporary</button></div>
+     <span id="duration-row" class="duration-row" hidden>
+      <label class="visually-hidden" for="duration">Duration</label>
+      <select id="duration" name="duration" data-control><option value="15m">15 min</option><option value="30m" selected>30 min</option><option value="1h">1 hour</option><option value="2h">2 hours</option><option value="4h">4 hours</option><option value="12h">12 hours</option><option value="custom">Custom…</option></select>
+      <input id="duration-custom" name="duration_custom" placeholder="90m" aria-label="Custom duration: a number then s, m, h or d" pattern="[1-9][0-9]{0,4}[smhd]" hidden data-control>
+     </span>
+    </div>
+    <p id="ceiling-preview" class="preview" aria-live="polite"></p>
+    <div class="actions"><button type="submit" id="ceiling-apply" data-control>Apply limit</button><button id="resume" type="button" class="secondary" data-control title="Clear manual and temporary ceilings">Resume automatic</button><button id="ceiling-reset" type="button" class="link" hidden>Discard edit</button></div>
+   </form>
+
+   <form id="floors" class="ctl" novalidate aria-labelledby="floors-h">
+    <h3 id="floors-h">Safeguards <span class="muted small">· permanent</span></h3>
+    <div class="field-row">
+     <label>UPS floor · p95<input name="p95" type="number" min="0.01" step="any" inputmode="decimal" required data-control aria-describedby="p95-now"><small id="p95-now"></small></label>
+     <label>UPS floor · p98<input name="p98" type="number" min="0.01" step="any" inputmode="decimal" required data-control aria-describedby="p98-now"><small id="p98-now"></small></label>
+     <label>Temp target °C<input name="temp" type="number" min="0.01" max="120" step="any" inputmode="decimal" required data-control aria-describedby="temp-now"><small id="temp-now"></small></label>
+    </div>
+    <p id="floors-hint" class="preview" aria-live="polite">p95 / p98 = slow-tail coverage: 95% / 98% of sampled runs must reach the floor.</p>
+    <div class="actions"><button type="submit" id="floors-save" data-control>Save safeguards</button><button id="floors-reset" type="button" class="link" hidden>Discard edits</button></div>
+   </form>
+
+   <div class="ctl" id="cooling" aria-labelledby="cool-h">
+    <h3 id="cool-h">Miniship cooling</h3>
+    <p id="cool-status" class="preview" aria-live="polite"></p>
+    <div class="actions"><button id="cool" type="button" data-control title="Linux power-saver for one hour, with durable recovery to balanced. Not a BIOS setting.">Cool for 1 hour</button><button id="cool-cancel" type="button" class="secondary" data-control>Cancel cooling</button></div>
+   </div>
+  </section>
+ </div>
+
+ <section id="live" class="panel" aria-labelledby="live-h">
+  <div class="heading"><h2 id="live-h">Running &amp; queued cohorts</h2><button type="button" class="link" data-goto="jobs">All jobs and servers →</button></div>
+  <div id="live-list"><div class="skeleton" style="height:100px"></div></div>
+ </section>
+</div>
+
+<div id="view-performance" role="tabpanel" aria-labelledby="tab-performance" class="view" hidden>
+ <section class="panel" aria-labelledby="perf-h">
+  <div class="heading"><h2 id="perf-h">Performance &amp; admission history</h2>
+   <div class="toolbar">
+    <div class="segmented" role="group" aria-label="History range" id="range"><button type="button" class="history-range" data-hours="6" aria-pressed="true">6 hours</button><button type="button" class="history-range" data-hours="24" aria-pressed="false">1 day</button><button type="button" class="history-range" data-hours="168" aria-pressed="false">7 days</button></div>
+   </div>
+  </div>
+  <div class="toolbar wrap" role="group" aria-label="Chart panels" id="panel-toggles"></div>
+  <div id="chart" class="chart-host" aria-busy="true"><div class="skeleton" style="height:300px"></div></div>
+  <div id="attribution" class="attribution"></div>
+  <details id="summary-table"><summary>Numbers behind the charts</summary><div id="chart-summary" class="scroll"></div></details>
+  <p class="hint">Missing samples are unknown, not zero, and lines never cross them. Dashed horizontal lines are the <em>current</em> settings, not historical ones. Scheduler reasons may overlap and are not causal proof.</p>
+ </section>
+</div>
+
+<div id="view-jobs" role="tabpanel" aria-labelledby="tab-jobs" class="view" hidden>
+ <section id="running" class="panel" aria-labelledby="running-h">
+  <div class="heading"><h2 id="running-h">Servers &amp; Starship</h2>
+   <p class="sub">Viewing relays forward UDP to a loopback server for 1 hour (never RCON, never an automatic join). <strong>Sync mods</strong> changes only Starship’s GUI client mods, and only after you confirm.</p></div>
+  <div id="running-list"><div class="skeleton" style="height:100px"></div></div>
+ </section>
+ <section id="registry" class="panel" aria-labelledby="registry-h">
+  <div class="heading"><h2 id="registry-h">Cohort registry <span class="muted small">· operational job list, newest first</span></h2></div>
+  <div class="toolbar wrap">
+   <label class="inline">Filter <input id="filter" type="search" placeholder="Cohort, arm or run" autocomplete="off"></label>
+   <div class="segmented" role="group" aria-label="Cohort state" id="registry-state"><button type="button" data-state="all" aria-pressed="true">All</button><button type="button" data-state="active" aria-pressed="false">Active</button><button type="button" data-state="issues" aria-pressed="false">With faults</button></div>
+   <button id="export" class="secondary small" type="button" title="Download the loaded snapshot (without the session token)">Export JSON</button>
+  </div>
+  <div id="cohorts"><div class="skeleton" style="height:100px"></div></div>
+ </section>
+</div>
+
+<div id="view-history" role="tabpanel" aria-labelledby="tab-history" class="view" hidden>
+ <section id="history" class="panel" aria-labelledby="history-h">
+  <div class="heading"><h2 id="history-h">Curated cohort results</h2><p class="sub" id="history-sub">Reviewed findings only, not a registry dump.</p></div>
+  <div class="toolbar wrap">
+   <div class="segmented" role="group" aria-label="Predicate family" id="family"><button type="button" data-family="strict" aria-pressed="true">Strict checkpoints</button><button type="button" data-family="proxy" aria-pressed="false">Laya rate proxies</button></div>
+   <div class="segmented" role="group" aria-label="Milestone" id="milestone-seg"></div>
+   <label class="inline">Search <input id="history-filter" type="search" placeholder="Cohort or arm" autocomplete="off"></label>
+   <label class="inline check"><input type="checkbox" id="unranked"> Show unranked rows</label>
+  </div>
+  <div id="milestones"><div class="skeleton" style="height:100px"></div></div>
+ </section>
+</div>
+</main>
+
+<dialog id="rules-dialog" aria-labelledby="rules-h">
+ <div class="dialog-head"><h2 id="rules-h">Reading rules</h2><button type="button" class="secondary small" data-close>Close</button></div>
+ <ul class="rules">
+  <li><strong>Strict and proxy are different families.</strong> A proxy phase can be reached while strict checkpoints fail; never read them together.</li>
+  <li><strong>Predicate versions differ.</strong> Strict C6 v1, ops-Laya v2 and candidate v3 are different predicates. A missing version or eligibility is shown as unknown, never as a pass.</li>
+  <li><strong>Ever and final are distinct snapshots.</strong> Early finals may be latched and are then unknown. Pending, invalid and no-start rows are unranked. Unknown is <code>null</code>, not zero.</li>
+  <li><strong>No pooling.</strong> Cohorts differ in seeds, engine, tick windows and host; they are not matched replications or a trend. Attempts and retries are separate.</li>
+  <li><strong>Counters are partial.</strong> A zero failure counter does not mean zero typed tool faults. Notes are user observations, never learning truth.</li>
+  <li><strong>Run ports come from world manifests</strong>, not a verified network route. A UDP listener, matching Factorio version and matching mods are required. An SSH TCP tunnel does not forward Factorio UDP.</li>
+  <li>Local-only dashboard: no RCON credentials, no automatic joins or syncs. Historical index: <code>docs/rl/Laya_Cohort_Results_Index.md</code></li>
+ </ul>
+</dialog>
+
+<dialog id="sync-dialog" aria-labelledby="sync-h">
+ <form method="dialog" id="sync-form">
+  <h2 id="sync-h">Sync mods to Starship Factorio?</h2>
+  <p id="sync-target" class="muted"></p>
+  <ul>
+   <li>Copies this run’s frozen mods, enabled-mod list and mod settings into the GUI client’s mods folder on Starship (<code>/home/djsm/.factorio/mods</code>).</li>
+   <li>Replaced files are archived on Starship; unrelated mods are kept; no server, save or campaign changes.</li>
+   <li>The running Factorio client is not closed; restart it before joining.</li>
+  </ul>
+  <div class="actions"><button type="submit" value="confirm" id="sync-confirm">Sync mods</button><button type="submit" value="cancel" class="secondary" formnovalidate>Cancel</button></div>
+ </form>
+</dialog>
+
+<dialog id="run-dialog" aria-labelledby="run-title">
+ <div class="dialog-head"><h2 id="run-title"></h2><button type="button" class="secondary small" data-close>Close</button></div>
+ <div id="run-body"></div>
+</dialog>
+</body></html>
