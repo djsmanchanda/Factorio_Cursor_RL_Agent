@@ -125,3 +125,33 @@ seed lost its bill to the re-declared fence) is fixed with a real-bill
 regression. Fast gate 1,121 passed, 3 skipped, known firewall failure. A
 ten-hour Claude Opus orchestration window (to 12:50 IST) now tests these
 fixes on disposable worlds; see CURRENT_STATUS.md for results.
+
+
+## 2026-10-29 01:27 IST — engine-only C45/C46 successor start
+
+C44 completed all 200 jobs and cleanup on frozen 2.1.23. Old held C45/C46
+retired through supported cancel_queued requests: 120/120 each cancelled before
+start, zero owned worlds/reservations, drain retained, inactive supervisors.
+These are superseded attempts, not completed experiments; never resume them.
+
+Actual experiments are now `laya-c45-2124-miniship-20261028` (reference 9d9b279
+vs steel 33a7c73) and `laya-c46-2124-miniship-20261028` (same reference vs
+consumer 9462d4c), 120 jobs each, unchanged seeds 80610–80669 / 80670–80729,
+540000 ticks/7200s per job. C45 initial live executable/data/mod load verified
+2.1.24 build 87808; C46 queued with zero starts behind **new C45**. Shared host
+admission and 30 concurrency upper bound retained. Original deadlines Oct31 /
+Nov1 06:00 IST; game/RCON bases 43100/36100 and 43200/36200. Both systemd units
+have independent finite RuntimeMaxSec and 120s physical-stop cleanup grace.
+
+Each original arm and harness remains byte-for-byte frozen. A private XDG alias
+named 2.1.23 selects the actual verified 2.1.24 executable/data, recorded in
+engine-override.json and freeze.json. Provenance, live verification, copied-save
+migration/reload and fluid/consumer fixture receipts, original zero-start
+retirement and rollback: `data/factorio-upgrades/2.1.24/state.json`. Never pool
+engine versions. No measured policy/UPS gain or adoption. Existing idle worlds
+remain stopped, unmigrated; independently completed GUI/Starship upgrades stand.
+
+C45/C46 review remains with thread94dcfaf2. Mixed-start implementation and C47
+are reserved to the upgrade/integration thread **after actual C46 cleanup**;
+no implementation or C47 readiness/completion handoff has occurred. C47 and
+subsequent calibration ownership follows the existing user-directed contract.

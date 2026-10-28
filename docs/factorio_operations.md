@@ -50,24 +50,52 @@ Repository, dedicated-server, GUI-client, and WSL mod copies are distinct. Compa
 
 ### Engine version and rollback
 
-Native manager and dashboard defaults target Factorio **2.1.22** (build 87719).
+Native manager and dashboard defaults target the private Factorio **2.1.24** runtime
+(build 87808, binary SHA256 `a8522f70f3bcb10844492bd0c79434180c58fc36d316e2b413a6a322aa654976`).
+The executable and full base/Space Age data were privately copied from verified
+Starship package `factorio-space-age-experimental 2.1.24-1`; installation and
+copied-save validation receipts live under `data/factorio-upgrades/2.1.24/`.
 Pair the executable with the same runtime's `data` directory and use a matching
 GUI client for multiplayer. Existing frozen experiments retain their recorded
 engine version; do not merge their results with new-version runs as matched evidence.
 
-Keep the private `factorio-2.1.21` runtime (build 87673) and pre-upgrade save
+Keep the private `factorio-2.1.23` runtime (build 87750), `factorio-2.1.22` runtime (build 87719), older 2.1.21 runtime, and pre-upgrade save
 copies for rollback.
 Use `--runtime-root` to select the older engine, restore the appropriate copied
 save and matching `read-data` configuration while stopped, then restart only
 the affected runtime and consumer. Merely changing the executable does not
 establish that an upgraded save can be loaded by the older engine.
 
+The 2026-10-29 cohort-server maintenance preserves pre-upgrade selectors and
+copied saves at `~/.local/share/factorio-rl/upgrade-backups/2.1.24-miniship-cohort-20261029`.
+Rollback applies only to selectors changed by that maintenance and requires the
+old binary **and data** plus the PRE-UPGRADE save copy; a 2.1.24-written save is
+not assumed backward compatible. Independently upgraded GUI/Starship selectors
+have separate receipts and rollback scope. Existing idle worlds are not migrated
+or resumed by changing defaults; they require a separately scoped lifecycle.
+
+Engine-labelled C45/C46 successors preserve original arm source, mods, seeds and
+windows. Their immutable old manager selects a private `XDG_DATA_HOME` alias
+named `factorio-2.1.23`, resolving to the verified 2.1.24 runtime. The actual
+engine, alias, data and hashes are explicit in each `engine-override.json` and
+`freeze.json`; verify `/proc/<pid>/exe` and server `config.ini` before accepting
+results. Never release the historical old-engine admission holds or pool
+2.1.23/2.1.24 outcomes. C46 depends on the new C45, rather than its retired predecessor.
+
+Release impact remains unmeasured: fluid-flow fix 136679 may change capacity;
+robot module fixes 134514/132457 may change construction outcomes; temperature
+migration fix 136678 and shutdown fix 135796 require their own evidence. The
+pipeline overlay aids GUI observation. New test CLI/Lua primitives remain a
+separate disposable-harness investigation; they do not replace checkpoint,
+controller or RNG contracts. Mod loadability is validated only for the frozen
+cohort mod set, not arbitrary local changes.
+
 ### Native Linux training workers
 
 `scripts/manage_linux_training_worker.sh` creates only disposable worker state
 below `~/.local/share/factorio-rl/training/<index>/worker`. It uses a separate
 Factorio `write-data` root plus the private headless runtime at
-`~/.local/share/factorio-rl/runtime/factorio-2.1.22`, local RCON port,
+`~/.local/share/factorio-rl/runtime/factorio-2.1.24`, local RCON port,
 worker-local `script-output`, save, mods, logs, and mode-600 RCON-secret file.
 Its default ports are game
 `35000 + index` and RCON `28000 + index`; RCON remains loopback-only.
@@ -76,7 +104,7 @@ Its default ports are game
 
 `scripts/manage_linux_deterministic_server.sh` owns the isolated deterministic
 root at `~/.local/share/factorio-rl/deterministic`, using the private
-`factorio-2.1.22` runtime.  Its `bootstrap` action requires an explicit source
+`factorio-2.1.24` runtime.  Its `bootstrap` action requires an explicit source
 save and copies it once to the isolated root; it never writes to
 `~/.factorio/saves`.  The default game/RCON endpoints are loopback-only
 `34199/27017`, and the RCON secret is a mode-600 file under the server root.
@@ -111,7 +139,7 @@ uv run --with-requirements requirements.txt python tools/dashboard_server.py \
   --server-manager scripts/manage_linux_deterministic_server.sh \
   --runner-manager scripts/manage_linux_deterministic_runner.sh \
   --campaign-manager scripts/manage_linux_deterministic_campaign.sh \
-  --runtime-root ~/.local/share/factorio-rl/runtime/factorio-2.1.22 \
+  --runtime-root ~/.local/share/factorio-rl/runtime/factorio-2.1.24 \
   --gui-mods ~/.factorio/mods
 ```
 
