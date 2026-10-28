@@ -392,7 +392,7 @@ class Dashboard:
                     raise ValueError("Floors and temperature must be finite numbers")
                 args.extend((flag, str(value)))
                 if key == "temp":
-                    args.extend(("--cool-temp-limit", str(min(value, scheduler._load_config(self.host)["cool_temp_limit_c"]))))
+                    args.extend(("--cool-temp", str(min(value, scheduler._load_config(self.host)["cool_temp_limit_c"]))))
         else:
             raise ValueError("Unknown control")
         result = subprocess.run([sys.executable, str(Path(scheduler.__file__).resolve()), "--root", str(self.host), "--registry", str(self.registry), *args], capture_output=True, text=True, timeout=20)

@@ -265,6 +265,18 @@ def test_bump_raises_the_target_and_reports_a_cleared_ceiling(tmp_path, monkeypa
     assert [row["action"] for row in dashboard.tail_jsonl(app.data / "audit.jsonl")].count("bump") == 3
 
 
+@pytest.mark.parametrize("temperature, cool_temperature", [(80.0, 80.0), (90.0, 85.0)])
+def test_dashboard_safeguards_apply_through_scheduler_cli(tmp_path, monkeypatch, temperature, cool_temperature):
+    app, calls = controlled_app(tmp_path, monkeypatch)
+    scheduler._set_config(app.host, mode="balanced", manual_target=12)
+    app.control({"action": "configure", "p95": 110.0, "p98": 95.0, "temp": temperature})
+    config = scheduler._load_config(app.host)
+    assert (config["temp_limit_c"], config["cool_temp_limit_c"]) == (temperature, cool_temperature)
+    assert (config["min_ups_p95"], config["min_ups_p98"]) == (110.0, 95.0)
+    assert config["mode"] == "balanced" and config["manual_target"] == 12
+    assert not calls  # Saving safeguards does not change the Linux power profile.
+
+
 def test_persistent_mode_sets_profile_and_supersedes_cooling(tmp_path, monkeypatch):
     app, calls = controlled_app(tmp_path, monkeypatch, profile="performance")
     scheduler._set_config(app.host, mode="performance")

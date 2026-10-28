@@ -425,3 +425,8 @@ only. Lifecycle: fresh frozen Python for the next runner; nothing deployed.
 ### 2026-10-28 21:06 IST — dashboard admission target and standing power modes
 
 Integrated the missing delegate checkout into the served cohort dashboard: +1/+2/+4 admission-target nudges and persistent Auto/Cool/Balanced/Performance controls. Temporary cooling preserves the prior profile; stale recovery cannot override an explicit mode. Evidence: 30 focused tests, 140 isolated browser fixture checks, JS syntax, live API dispatch and Starship tunnel asset checks; fast gate has only the known training/laya_ops.py import-firewall failure. Restarted only laya-cohort-dashboard.service at 21:05 IST; recovery service already resolves this updated script. Host config SHA256 stayed 9c18bc795ed28dba0fe21d376079c4c0e14ef4877bbc2cd4ba89333e5218895d; no live mode/target was applied, no campaign/server/mod/save changes. Refresh the browser to load the controls.
+
+
+### 2026-10-28 21:12 IST — dashboard temperature control fixed
+
+Corrected the dashboard scheduler flag from unsupported --cool-temp-limit to --cool-temp. Two real-CLI regressions prove settings apply above/below the cool threshold on temporary hosts and preserve mode/ceiling. All 32 focused checks pass; fast gate retains only the known training/laya_ops.py firewall failure. Restarted only the dashboard. Live invalid-input dispatch reached temperature validation; host configuration remained byte-identical. User must resubmit the desired temperature; no campaign or live temperature was changed by this fix.
