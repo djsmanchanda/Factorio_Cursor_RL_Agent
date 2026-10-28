@@ -22,7 +22,7 @@ const persistDrafts = () => save(sessionStorage, 'laya.drafts.v1', Object.fromEn
 let snapshot = null, token = '', lastOk = 0, loadError = null, inflight = false;
 let hist = {hours: ui.hours, data: null, loading: false, error: null};
 const openState = new Map(), busy = new Set(), results = new Map(), notesState = new Map(), pageSize = new Map(), jobFilter = new Map(), expanded = new Set(JSON.parse(sessionStorage.getItem('laya.expanded.v1') || '[]'));
-let ceilingDirty = false, floorsDirty = false, ceilingScope = 'permanent', registryShown = 15, historyShown = 14, liveShown = 4, syncTarget = null;
+let ceilingDirty = false, floorsDirty = false, modeDirty = false, bumpDelta = null, bumpedAt = 0, ceilingScope = 'permanent', registryShown = 15, historyShown = 14, liveShown = 4, syncTarget = null;
 
 const REASONS = {manual_target: 'Manual ceiling in effect', hold: 'Holding steady', trial_increase: 'Trying one more run', trial_wait: 'Waiting after a trial', trial_window: 'Measuring a trial', trial_incomplete: 'Trial inconclusive', ups_growth_hold: 'UPS headroom too low to grow', unhealthy_pending: 'Unhealthy sample, confirming', unhealthy: 'Unhealthy, reducing', settling: 'Settling after a change', sweet_spot: 'At measured sweet spot', runner_unstable: 'Runners unstable', no_measurement: 'No measurement'};
 const reasonLabel = reason => REASONS[reason] || String(reason ?? 'unknown').replace(/_/g, ' ');
@@ -170,7 +170,7 @@ function renderCapacity() {
  $('verdict').dataset.tone = worst;
  const by = id => a.limits.find(l => l.id === id)?.tone;
  const scaleRuns = Math.max(a.max || 0, a.upper || 0, target || 0, active || 0, 1);
- const runs = `<div class="gauge" data-state="${by('ceiling') || 'ok'}"><div class="gauge-head"><h3>Concurrent runs</h3>${stateChip(by('ceiling') || (isNum(active) ? 'ok' : 'none'))}</div><div class="gauge-value">${esc(fmt(active, 0))} <small>of ${esc(fmt(a.upper, 0))} allowed</small></div>${meter(active, scaleRuns, [[target, '', 'Admission target'], [a.upper, 'dash', 'Upper limit']])}<dl><dt>Admission target</dt><dd>${esc(fmt(target, 0))}</dd><dt>Manual ceiling</dt><dd>${a.manual === null ? 'none (automatic)' : esc(a.manual) + (a.manualUntil ? ` until ${esc(when(a.manualUntil))}` : ' · permanent')}</dd><dt>Automatic cap</dt><dd>${esc(fmt(a.cap, 0))} (${esc(a.mode)})</dd><dt>Hard maximum</dt><dd>${esc(fmt(a.max, 0))}</dd></dl></div>`;
+ const runs = `<div class="gauge" data-state="${by('ceiling') || 'ok'}"><div class="gauge-head"><h3>Concurrent runs</h3>${stateChip(by('ceiling') || (isNum(active) ? 'ok' : 'none'))}</div><div class="gauge-value">${esc(fmt(active, 0))} <small>of ${esc(fmt(a.upper, 0))} allowed</small></div>${meter(active, scaleRuns, [[target, '', 'Admission target'], [a.upper, 'dash', 'Upper limit']])}<dl><dt>Admission target</dt><dd>${esc(fmt(target, 0))}</dd><dt>Manual ceiling</dt><dd>${a.manual === null ? 'none (automatic)' : esc(a.manual) + (a.manualUntil ? ` until ${esc(when(a.manualUntil))}` : ' · permanent')}</dd><dt>Automatic cap</dt><dd>${esc(fmt(a.cap, 0))} (${esc(a.mode)})</dd><dt>Hard maximum</dt><dd>${esc(fmt(a.max, 0))}</dd></dl><div class="gauge-actions"><button type="button" class="link" data-focus="bump-h">Raise admission target</button><button type="button" class="link" data-focus="mode-h">Change power mode</button></div></div>`;
  const upsState = by('ups') || (isNum(m.ups_p95) ? 'ok' : 'none'), scaleUps = Math.max(m.ups_p95 || 0, a.growth || 0, c.min_ups_p95 || 0, 1) * 1.15;
  const ups = `<div class="gauge" data-state="${upsState}"><div class="gauge-head"><h3>Slow-tail UPS · p95 coverage</h3>${stateChip(upsState)}</div><div class="gauge-value">${esc(fmt(m.ups_p95))} <small>UPS · p98 ${esc(fmt(m.ups_p98))}</small></div>${meter(m.ups_p95, scaleUps, [[c.min_ups_p95, 'red', 'p95 floor'], [a.growth, 'dash', 'Growth threshold']])}<dl><dt>p95 floor / growth</dt><dd>${esc(fmt(c.min_ups_p95))} / ${esc(fmt(a.growth))}</dd><dt>p98 floor</dt><dd>${esc(fmt(c.min_ups_p98))}</dd><dt>Runs sampled</dt><dd>${esc(fmt(m.ups_samples, 0))} of ${esc(fmt(active, 0))}</dd><dt>Aggregate UPS</dt><dd>${esc(fmt(m.total_ups, 0))}</dd></dl></div>`;
  const tempState = by('temp') || (isNum(m.temp_c) ? 'ok' : 'none');
@@ -199,6 +199,11 @@ function floorsProblem() {
  if (snapshot && isNum(snapshot.config.temp_hard_c) && temp > snapshot.config.temp_hard_c) return `Temperature target cannot exceed the hard limit ${snapshot.config.temp_hard_c} °C.`;
  return '';
 }
+// Mirrors the scheduler: per-mode run cap and temperature target come from its config, not from constants here.
+const MODES = {auto: {label: 'Auto', profile: null}, cool: {label: 'Cool', profile: 'power-saver'}, balanced: {label: 'Balanced', profile: 'balanced'}, performance: {label: 'Performance', profile: 'performance'}};
+const modeCap = (c, mode) => !isNum(c.max_slots) ? null : mode === 'cool' ? Math.min(c.max_slots, isNum(c.cool_max_slots) ? c.cool_max_slots : c.max_slots) : mode === 'balanced' ? (isNum(c.balanced_max_slots) ? c.balanced_max_slots : Math.round(c.max_slots * 0.75)) : c.max_slots;
+const modeTemp = (c, mode) => mode === 'cool' ? c.cool_temp_limit_c : c.temp_limit_c;
+const profileMode = profile => ({'power-saver': 'cool', balanced: 'balanced', performance: 'performance'})[profile] || 'balanced';
 function syncControls() {
  if (!snapshot) return;
  const a = analyze(), c = snapshot.config, locked = !snapshot.controls_enabled, working = anyControlBusy();
@@ -217,7 +222,8 @@ function syncControls() {
  $('floors-reset').hidden = !floorsDirty;
  $('p95-now').textContent = `now ${fmt(c.min_ups_p95)}`; $('p98-now').textContent = `now ${fmt(c.min_ups_p98)}`; $('temp-now').textContent = `now ${fmt(c.temp_limit_c)} · hard ${fmt(c.temp_hard_c)}`;
  const cool = snapshot.cooling || {};
- $('cool-status').textContent = isNum(cool.until) ? `Cooling active · power-saver until ${when(cool.until)} (${Math.max(0, Math.ceil((cool.until - snapshot.now) / 60))} min left), then balanced is restored automatically.` : 'No cooling request active.';
+ $('cool-status').textContent = isNum(cool.until) ? `Cooling active · power-saver until ${when(cool.until)} (${Math.max(0, Math.ceil((cool.until - snapshot.now) / 60))} min left), then ${cool.previous_profile || 'balanced'} and your previous mode return automatically.` : 'No cooling request active.';
+ setHTML($('bump-result'), resultLine('control:bump')); setHTML($('mode-result'), resultLine('control:mode'));
  updatePreviews(locked, working);
 }
 function updatePreviews(locked, working) {
@@ -238,6 +244,63 @@ function updatePreviews(locked, working) {
  else if (Number(f.p98.value) > Number(f.p95.value)) { hint.textContent = 'p98 coverage is a deeper slow tail, so its floor is normally at or below the p95 floor.'; hint.dataset.tone = 'warn'; }
  else { hint.textContent = 'p95 / p98 = slow-tail coverage: 95% / 98% of sampled runs must reach the floor.'; hint.dataset.tone = ''; }
  $('floors-save').disabled = locked || working || Boolean(fp);
+ updateBump(a, locked, working); updateMode(a, locked, working);
+}
+
+// Raising the target is a one-off nudge: the scheduler restarts its search from the higher value and every safeguard still applies.
+function updateBump(a, locked, working) {
+ const {t, c} = a, target = t.target_slots, max = c.max_slots, button = $('bump-apply'), preview = $('bump-preview');
+ if (bumpDelta === null) bumpDelta = 2;
+ $$('[data-bump]').forEach(b => b.setAttribute('aria-pressed', String(Number(b.dataset.bump) === bumpDelta)));
+ if (!isNum(target)) { $('bump-now').textContent = 'No scheduler sample yet, so there is no admission target to raise.'; preview.textContent = ''; button.textContent = 'Raise admission target'; button.disabled = true; return; }
+ const to = isNum(max) ? Math.min(max, target + bumpDelta) : target + bumpDelta, atMax = isNum(max) && target >= max;
+ const postCap = a.manual === null ? a.cap : modeCap(c, a.mode), bits = [];
+ $('bump-now').textContent = `Admission target ${target} · running ${fmt(t.active_slots, 0)} · queued ${fmt(a.queued, 0)} · scheduler maximum ${fmt(max, 0)}.`;
+ button.textContent = busy.has('control:bump') ? 'Raising…' : atMax ? 'Already at maximum' : `Raise to ${to}`;
+ button.setAttribute('aria-busy', busy.has('control:bump'));
+ let tone = '';
+ if (atMax) { bits.push(`The target is already at the scheduler maximum (${max}); raise max slots in the scheduler configuration to go higher.`); tone = 'warn'; }
+ else {
+  bits.push(`Restarts the automatic search from ${to} instead of waiting for the next growth trial. UPS, temperature, memory and stability safeguards still apply and can step it back down.`);
+  if (a.manual !== null) { bits.push(`Also clears the manual ceiling of ${a.manual}${a.manualUntil ? ' (until ' + when(a.manualUntil) + ')' : ''}.`); tone = 'warn'; }
+  if (isNum(postCap) && to > postCap) { bits.push(`${MODES[a.mode]?.label ?? a.mode} mode${a.manual === null ? ' and the current safeguards' : ''} cap admission at ${postCap}, so anything above that is pulled back on the next cycle. Change the power mode to allow more.`); tone = 'warn'; }
+  if (a.queued === 0) bits.push('Nothing is queued, so a higher target admits nothing yet.');
+  if (bumpedAt && !(t.updated >= bumpedAt)) bits.unshift('Your last raise is waiting for the next scheduler sample; raising again stacks on top of it.');
+ }
+ preview.textContent = bits.join(' '); preview.dataset.tone = tone;
+ button.disabled = locked || working || atMax;
+}
+
+// The persistent mode picks the scheduler policy (run cap, temperature target, growth speed); unlike the 1-hour cooling it never expires.
+function modeView(a) {
+ const form = $('mode'), c = a.c, current = MODES[c.mode] ? c.mode : 'auto', profile = a.m.power_profile, system = profileMode(profile), cooling = isNum((snapshot.cooling || {}).until);
+ if (!modeDirty) form.mode.value = current;
+ const pick = form.mode.value || current, wants = form.profile.checked && MODES[pick].profile;
+ const same = !cooling && pick === current && (pick === 'auto' || !form.profile.checked || profile === MODES[pick].profile);
+ return {form, c, current, profile, system, pick, wants, same, cooling, resolved: pick === 'auto' ? system : pick};
+}
+function updateMode(a, locked, working) {
+ const v = modeView(a), {c} = v, cool = snapshot.cooling || {};
+ $('mo-auto').textContent = `Follows the system power profile${v.profile ? ` (now ${v.profile}, so ${MODES[v.system].label.toLowerCase()} policy)` : ''}.`;
+ for (const k of ['cool', 'balanced', 'performance']) $('mo-' + k).textContent = `Up to ${fmt(modeCap(c, k), 0)} runs · ${fmt(modeTemp(c, k))} °C target${k === 'cool' ? ' · grows more slowly' : ''}`;
+ $$('.mode-opt').forEach(label => { label.dataset.on = String(label.dataset.mode === v.pick); label.dataset.current = String(label.dataset.mode === v.current); });
+ $('mode-now').textContent = (v.current === 'auto' ? `Auto: following the system power profile (${v.profile ?? 'unknown'}), so the scheduler runs ${MODES[a.mode]?.label ?? a.mode} policy.` : `${MODES[v.current].label} is fixed${v.profile ? `; the system power profile is ${v.profile}` : ''}.`) + (v.cooling ? ` A 1-hour cooling request is active; ${MODES[cool.previous_mode]?.label ?? 'your earlier mode'} returns when it ends.` : '');
+ const preview = $('mode-preview'), bits = [];
+ let tone = '';
+ if (v.same) bits.push(`${MODES[v.pick].label} is already active${v.wants ? ' and the system power profile matches' : ''}. Choose another mode to change it.`);
+ else {
+  const capNow = modeCap(c, v.resolved), running = a.t.active_slots;
+  bits.push(v.pick === 'auto' ? `Hands the choice to the system power profile (now ${v.profile ?? 'unknown'}), which means ${MODES[v.resolved].label} policy: up to ${fmt(capNow, 0)} runs, ${fmt(modeTemp(c, v.resolved))} °C target.` : `Runs the ${MODES[v.pick].label} policy: up to ${fmt(capNow, 0)} runs, ${fmt(modeTemp(c, v.pick))} °C target.`);
+  if (v.pick !== 'auto') { bits.push(v.wants ? `Sets the system power profile to ${MODES[v.pick].profile} (now ${v.profile ?? 'unknown'}).` : `Leaves the system power profile at ${v.profile ?? 'unknown'}; only the scheduler policy changes.`); if (!v.wants) tone = 'warn'; }
+  if (isNum(running) && isNum(capNow) && capNow < running) bits.push(`${running} runs are active: none are killed; admission waits until runs finish.`);
+  if (a.manual !== null) bits.push(`The manual ceiling of ${a.manual} stays in force.`);
+  if (v.cooling) bits.push(v.pick === 'cool' ? 'Makes cool permanent: the 1-hour request is ended, so nothing restores your earlier mode later.' : 'Ends the active 1-hour cooling request.');
+  bits.push('Takes effect on the next scheduler cycle (about a minute).');
+ }
+ preview.textContent = bits.join(' '); preview.dataset.tone = tone;
+ const button = $('mode-apply'); button.textContent = busy.has('control:mode') ? 'Applying…' : v.same ? 'Mode is active' : `Switch to ${MODES[v.pick].label}`; button.setAttribute('aria-busy', busy.has('control:mode'));
+ button.disabled = locked || working || v.same;
+ $('mode-reset').hidden = !modeDirty;
 }
 
 // ---------------------------------------------------------------- shared cohort helpers
@@ -719,13 +782,16 @@ document.addEventListener('click', event => {
  if (target.matches('.copy')) return (navigator.clipboard?.writeText(d.value) ?? Promise.reject(new Error('Clipboard unavailable here; select and copy the text manually.'))).then(() => toast('Copied.', 'ok')).catch(error => toast(error.message, 'bad'));
  if (target.matches('.view')) { const key = `view:${d.cohort}/${d.run}`; return act(key, () => post('/api/view', {cohort: d.cohort, run: d.run, stop: d.stop === 'true'}), d.stop === 'true' ? 'Viewing route stopped.' : 'Viewing route enabled for 1 hour (Starship only).'); }
  if (target.matches('.sync-mods')) { syncTarget = {cohort: d.cohort, run: d.run}; $('sync-target').textContent = `Run: ${d.cohort} / ${d.run}`; const dialog = $('sync-dialog'); return dialog.showModal ? dialog.showModal() : (confirm('Sync this run’s mods to Starship Factorio?') && startSync()); }
+ if (d.bump) { bumpDelta = Number(d.bump); return syncControls(); }
  if (target.matches('.adjust')) { const form = $('ceiling'), next = Math.max(0, (Number(form.slots.value) || 0) + Number(d.delta)); form.slots.value = next; ceilingDirty = true; return syncControls(); }
  if (d.scope) { ceilingScope = d.scope; ceilingDirty = true; return syncControls(); }
  if (target.id === 'refresh') return refresh(true);
  if (target.id === 'rules') return $('rules-dialog').showModal();
  if (target.id === 'resume') return act('control:resume', () => post('/api/control', {action: 'resume'}), 'Manual and temporary ceilings cleared; automatic admission resumes.').then(ok => { if (ok) { ceilingDirty = false; syncControls(); } });
+ if (target.id === 'bump-apply') return act('control:bump', () => post('/api/control', {action: 'bump', delta: bumpDelta}), 'Admission target raised.').then(ok => { if (ok) { bumpedAt = snapshot.now; syncControls(); } });
+ if (target.id === 'mode-reset') { modeDirty = false; return syncControls(); }
  if (target.id === 'cool') return act('control:cool', () => post('/api/control', {action: 'cool'}), 'Cooling started: power-saver for 1 hour.');
- if (target.id === 'cool-cancel') return act('control:cool_cancel', () => post('/api/control', {action: 'cool_cancel'}), 'Cooling cancelled; balanced profile restored.');
+ if (target.id === 'cool-cancel') return act('control:cool_cancel', () => post('/api/control', {action: 'cool_cancel'}), 'Cooling cancelled; your previous profile and mode were restored.');
  if (target.id === 'ceiling-reset') { ceilingDirty = false; ceilingScope = 'permanent'; return syncControls(); }
  if (target.id === 'floors-reset') { floorsDirty = false; return syncControls(); }
  if (target.id === 'export') { if (!snapshot) return; const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot, null, 2)], {type: 'application/json'})), a = document.createElement('a'); a.href = url; a.download = 'laya-cohort-snapshot.json'; a.click(); URL.revokeObjectURL(url); }
@@ -745,6 +811,12 @@ $('ceiling').addEventListener('submit', event => {
  event.preventDefault(); if (ceilingProblem()) return;
  const f = event.currentTarget, body = {action: 'ceiling', slots: Number(f.slots.value), duration: ceilingDuration()};
  act('control:ceiling', () => post('/api/control', body), body.duration ? `Temporary limit of ${body.slots} runs set for ${body.duration}.` : `Permanent limit of ${body.slots} runs set.`).then(ok => { if (ok) { ceilingDirty = false; syncControls(); } });
+});
+$('mode').addEventListener('change', () => { modeDirty = true; syncControls(); });
+$('mode').addEventListener('submit', event => {
+ event.preventDefault(); if (!snapshot) return;
+ const v = modeView(analyze()); if (v.same) return;
+ act('control:mode', () => post('/api/control', {action: 'mode', mode: v.pick, system_profile: v.form.profile.checked}), `Mode set to ${MODES[v.pick].label}.`).then(ok => { if (ok) { modeDirty = false; syncControls(); } });
 });
 $('floors').addEventListener('input', () => { floorsDirty = true; syncControls(); });
 $('floors').addEventListener('submit', event => {

@@ -420,3 +420,8 @@ only. Lifecycle: fresh frozen Python for the next runner; nothing deployed.
 
 
 2026-10-28 17:31 IST — Added descriptive curated-cohort chronology with separate base/experimental panels, reached/final/retention metrics, window filters and keyboard/tooltips. Parent removed unsupported significance verdicts, qualified connectors by known predicate/window metadata, kept unknown-only gaps and individual replicate-arm counts, and required ten compatible metadata points for descriptive medians. Evidence: 116 browser fixtures/25 focused passed, live read-only UI/Starship checks; fast 1155 passed/3 skipped plus known baseline import-firewall failure. Lifecycle: assets served immediately; browser refresh only, no service/campaign/control/mod changes; no adoption or improvement claim, no push.
+
+
+### 2026-10-28 21:06 IST — dashboard admission target and standing power modes
+
+Integrated the missing delegate checkout into the served cohort dashboard: +1/+2/+4 admission-target nudges and persistent Auto/Cool/Balanced/Performance controls. Temporary cooling preserves the prior profile; stale recovery cannot override an explicit mode. Evidence: 30 focused tests, 140 isolated browser fixture checks, JS syntax, live API dispatch and Starship tunnel asset checks; fast gate has only the known training/laya_ops.py import-firewall failure. Restarted only laya-cohort-dashboard.service at 21:05 IST; recovery service already resolves this updated script. Host config SHA256 stayed 9c18bc795ed28dba0fe21d376079c4c0e14ef4877bbc2cd4ba89333e5218895d; no live mode/target was applied, no campaign/server/mod/save changes. Refresh the browser to load the controls.

@@ -24,6 +24,7 @@
 <main id="main" tabindex="-1">
 
 <div id="view-overview" role="tabpanel" aria-labelledby="tab-overview" class="view">
+ <div id="lock-banner" class="callout" data-tone="warn" hidden></div>
  <div class="overview-grid">
   <section id="capacity" class="panel" aria-labelledby="capacity-h">
    <div class="heading"><h2 id="capacity-h">What limits more concurrent runs?</h2>
@@ -43,7 +44,17 @@
 
   <section id="controls" class="panel" aria-labelledby="controls-h">
    <div class="heading"><h2 id="controls-h">Admission controls</h2><span id="ctl-state" class="chip" data-tone="muted">Locked</span></div>
-   <div id="lock-banner" class="callout" data-tone="warn" hidden></div>
+   <div class="ctl" id="bump" aria-labelledby="bump-h">
+    <h3 id="bump-h" tabindex="-1">Raise admission target</h3>
+    <p class="muted small" id="bump-now">Loading current target…</p>
+    <div class="actions">
+     <div class="segmented" role="group" aria-label="How many runs to add"><button type="button" data-bump="1" aria-pressed="false" data-control>+1</button><button type="button" data-bump="2" aria-pressed="true" data-control>+2</button><button type="button" data-bump="4" aria-pressed="false" data-control>+4</button></div>
+     <button type="button" id="bump-apply" data-control title="Restart the automatic search from a higher target. Safeguards still apply.">Raise admission target</button>
+    </div>
+    <p id="bump-preview" class="preview" aria-live="polite"></p>
+    <div id="bump-result"></div>
+   </div>
+
    <form id="ceiling" class="ctl" novalidate aria-labelledby="ceiling-h">
     <h3 id="ceiling-h">Upper limit · concurrent runs</h3>
     <p class="muted small" id="ceiling-now">Loading current policy…</p>
@@ -73,10 +84,30 @@
     <div class="actions"><button type="submit" id="floors-save" data-control>Save safeguards</button><button id="floors-reset" type="button" class="link" hidden>Discard edits</button></div>
    </form>
 
-   <div class="ctl" id="cooling" aria-labelledby="cool-h">
-    <h3 id="cool-h">Miniship cooling</h3>
-    <p id="cool-status" class="preview" aria-live="polite"></p>
-    <div class="actions"><button id="cool" type="button" data-control title="Linux power-saver for one hour, with durable recovery to balanced. Not a BIOS setting.">Cool for 1 hour</button><button id="cool-cancel" type="button" class="secondary" data-control>Cancel cooling</button></div>
+  </section>
+
+  <section id="power" class="panel" aria-labelledby="power-h">
+   <div class="heading"><h2 id="power-h">Power mode &amp; cooling</h2><span class="muted small">Mode is a standing choice · cooling is a one-hour relief</span></div>
+   <div class="power-layout">
+    <form id="mode" class="ctl" novalidate aria-labelledby="mode-h">
+     <h3 id="mode-h" tabindex="-1">Power mode <span class="muted small">· stays until you change it</span></h3>
+     <p class="muted small" id="mode-now">Loading current mode…</p>
+     <div class="mode-grid" role="radiogroup" aria-label="Power mode">
+      <label class="mode-opt" data-mode="auto"><input type="radio" name="mode" value="auto" data-control><span class="mo-name">Auto<i class="mo-badge">Active</i></span><span class="mo-desc" id="mo-auto"></span></label>
+      <label class="mode-opt" data-mode="cool"><input type="radio" name="mode" value="cool" data-control><span class="mo-name">Cool<i class="mo-badge">Active</i></span><span class="mo-desc" id="mo-cool"></span></label>
+      <label class="mode-opt" data-mode="balanced"><input type="radio" name="mode" value="balanced" data-control><span class="mo-name">Balanced<i class="mo-badge">Active</i></span><span class="mo-desc" id="mo-balanced"></span></label>
+      <label class="mode-opt" data-mode="performance"><input type="radio" name="mode" value="performance" data-control><span class="mo-name">Performance<i class="mo-badge">Active</i></span><span class="mo-desc" id="mo-performance"></span></label>
+     </div>
+     <label class="inline check"><input type="checkbox" name="profile" checked data-control> Also set Miniship’s system power profile to match</label>
+     <p id="mode-preview" class="preview" aria-live="polite"></p>
+     <div class="actions"><button type="submit" id="mode-apply" data-control>Apply mode</button><button id="mode-reset" type="button" class="link" hidden>Discard choice</button></div>
+     <div id="mode-result"></div>
+    </form>
+    <div class="ctl" id="cooling" aria-labelledby="cool-h">
+     <h3 id="cool-h">Miniship cooling <span class="muted small">· temporary</span></h3>
+     <p id="cool-status" class="preview" aria-live="polite"></p>
+     <div class="actions"><button id="cool" type="button" data-control title="Linux power-saver and cool mode for one hour, then your previous profile and mode return automatically. Not a BIOS setting.">Cool for 1 hour</button><button id="cool-cancel" type="button" class="secondary" data-control>Cancel cooling</button></div>
+    </div>
    </div>
   </section>
  </div>
