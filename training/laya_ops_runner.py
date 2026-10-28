@@ -21,6 +21,7 @@ logs, ledger and helper are shared.  Sequencing lives in the docs, not here.
 from __future__ import annotations
 
 import math
+import time
 from collections import Counter
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -31,6 +32,9 @@ from training.laya_clean_runner import (ROOT, Settings, _append, _goal_gap, _sta
                                         _write_status, rolling_measurement)
 from training.laya_factory_status import STATUS_BUCKETS, compact_status, compile_status
 from training.laya_mall_slots import obtainable
+from training.laya_mall_slots import FLUIDS
+from training.laya_chain_facts import (ConsumerObservation, consumer_choices,
+                                      committed_chain_facts, production_service_items)
 from training.laya_mission import current_phase, phase_reached
 
 PLATES = {"iron-plate": "iron-ore", "copper-plate": "copper-ore", "stone-brick": "stone"}
@@ -382,6 +386,87 @@ def with_economics(menu: dict, results: list[dict], economics: Mapping | None) -
     return menu
 
 
+def add_consumer_options(menu: dict, facts: Mapping, results: list[dict], economics: Mapping,
+                         stock: Mapping[str, int]) -> dict:
+    """Offer existing batch operations when observed inputs cover one craft; construction is not previewed."""
+    projects, networks = economics.get("projects"), facts.get("networks")
+    if (not isinstance(projects, Mapping) or not isinstance(networks, Mapping) or not networks
+            or any(not isinstance(project, Mapping) or not isinstance(project.get("reserved"), Mapping)
+                   for project in projects.values())
+            or any(not isinstance(network, Mapping) or not isinstance(network.get("items"), Mapping)
+                   or not isinstance(network.get("reserved"), Mapping) for network in networks.values())):
+        return menu
+    counts = [project["reserved"] for project in projects.values()]
+    counts.extend(part for network in networks.values() for part in (network["items"], network["reserved"]))
+    if any(type(value) is not int or value < 0 for values in counts for value in values.values()):
+        return menu
+    from planners.recipe_data import LINE_RECIPES
+    from training.laya_factory_status import accessible_stock
+    reserved = sum((Counter(project["reserved"]) for project in projects.values()), Counter())
+    available = accessible_stock(facts)
+    free = {item: max(0, count - reserved.get(item, 0)) for item, count in available.items()}
+    latest = {_key(result): result for result in results}
+    slots = any(operation == "mall_slot" and result.get("ok") and result.get("code") == "producing"
+                for (operation, _), result in latest.items())
+    existing = {option["option_id"] for option in menu["options"]}
+    for candidate in consumer_choices(facts, free, LINE_RECIPES) if slots else ():
+        item = candidate["item"]
+        option_id = f"op.produce.{item}"
+        if option_id in existing:
+            continue
+        need_id = f"stock:{item}"
+        menu["options"].append({"option_id": option_id, "family": "produce", "product": item,
+            "need_id": need_id, "summary": f"produce consumer {item}",
+            "params": {"item": item, "stock_target": stock.get(item, 0) + 1},
+            "features": {"consumer_goal": True, "bill_known": False,
+                         "active_loan_count": None if economics.get("loans") is None else len(economics["loans"])},
+            "consumer_input_bill": candidate["input_bill"]})
+        need = next((need for need in menu["needs"] if need["need_id"] == need_id), None)
+        if need is None:
+            need = {"need_id": need_id, "condition": "available", "options": []}
+            menu["needs"].append(need)
+        need["options"].append(option_id)
+    return menu
+
+
+def add_production_service_options(menu: dict, board: Mapping, facts: Mapping) -> dict:
+    from planners.recipe_data import LINE_RECIPES
+    from planners.fluid_layouts import FLUID_RECIPES
+    for item in production_service_items(board, facts, LINE_RECIPES, FLUID_RECIPES):
+        option_id, need_id = f"op.production_service.{item}", f"service:{item}"
+        if any(option["option_id"] == option_id for option in menu["options"]):
+            continue
+        menu["options"].append({"option_id": option_id, "family": "production_service",
+            "product": item, "need_id": need_id, "params": {"item": item},
+            "summary": f"advance permanent production service for {item}",
+            "features": {"goal_need": True, "bill_known": False,
+                         "sustained_service_verified": False, "borrows": False}})
+        menu["needs"].append({"need_id": need_id, "condition": "available", "options": [option_id]})
+    return menu
+
+
+def operation_faults(results: list[dict]) -> dict:
+    """Separate expected blocks from hard faults; event counts are not run counts."""
+    counts: dict[str, Counter] = {name: Counter() for name in ("blocked", "typed_fault", "untyped_fault")}
+    for result in results:
+        if result.get("ok"):
+            continue
+        code = result.get("code") or "missing_code"
+        if code in {"tool_error", "untyped_stuck", "missing_code"}:
+            group = "untyped_fault"
+        elif result.get("classification") in {"bug", "safety", "invalid_plan"}:
+            group = "typed_fault"
+        elif (result.get("classification") == "intended_difficulty"
+              or result.get("state") in {"supply_wait", "constructing", "waiting", "producing"}
+              or code in {"material_shortage", "prerequisite_advanced"} or in_progress(code)):
+            group = "blocked"
+        else:
+            group = "typed_fault"
+        counts[group][code] += 1
+    return {"event_counts": {name: dict(count) for name, count in counts.items()},
+            "affected_run": {name: bool(count) for name, count in counts.items()}}
+
+
 def fit_rules(guidelines: list[dict], brief_text: str, limit: int = CONTEXT_CHARS) -> list[dict]:
     """The doc rules that fit after the brief: hard rules always, soft ones in the loader's priority order."""
     import json
@@ -459,7 +544,7 @@ def saturated_feedstock(machines: list[Mapping], recipes: Mapping, stock: Mappin
 
 def compile_options(board: Mapping, results: list[dict], tick: int | None = None, recipes: Mapping | None = None,
                     stock: Mapping[str, int] | None = None, machines: list[Mapping] | None = None,
-                    growable: tuple[str, ...] = ()) -> dict:
+                    growable: tuple[str, ...] = (), *, filter_fluid_shortages: bool = False) -> dict:
     """Operations worth offering now, each tagged with the need it serves and the facts rules weigh."""
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
     goal = {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
@@ -531,6 +616,9 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     # so plastic): its loan never finishes and blocks every other batch (chemical_capability_handoff).
     producible = {i: m for i, m in short.items() if plates_in(i, recipes or {}) <= started
                   and obtainable(recipes, i, stock or {})} if recipes else short
+    if filter_fluid_shortages:
+        producible = {item: missing for item, missing in producible.items()
+                      if item not in FLUIDS and (recipes or {}).get(item, {}).get("product_type") != "fluid"}
     levels = shortage_levels(results)
     for item, missing in (sorted(producible.items(), key=lambda kv: -kv[1])[:MAX_PRODUCE] if slots else ()):
         # The tooling's stock_target is a network level (the mall's stock gate), not a delta: asking for the
@@ -607,6 +695,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     """
     from training.laya_ops import DeterministicSession
     session = session or DeterministicSession(adapter.root, emit=lambda line: emit(f"  TOOL {line}"))
+    session.chain_economics_enabled = settings.ops_chain_economics
     session.stock_networks = lambda: adapter.query().get("networks")
     records = journal.parent / "decision-states.jsonl"
     reached: list[str] = []
@@ -617,6 +706,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     samples: list = []
     measurement = None
     summary: dict = {"decisions": 0, "failures": 0, "phases_reached": reached, "stop": "decision_budget"}
+    consumer_observation = ConsumerObservation("advanced-circuit")
     stall = {"since": 0, "best_gap": math.inf, "tick": None, "machines": 0, "missing": math.inf, "made": {}}
     accept = getattr(session, "acceptance", None)
 
@@ -642,6 +732,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             summary["stop"] = "stopped"
             break
         facts = adapter.query()
+        consumer_fact = consumer_observation.observe(facts)
         samples.append((facts["tick"], dict(facts["production"]), dict(facts["consumption"])))
         measurement = rolling_measurement(samples, settings.rate_window_ticks) or measurement
         if settings.max_game_ticks and facts["tick"] - samples[0][0] >= settings.max_game_ticks:
@@ -660,7 +751,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             phase = current_phase(reached)
             board = compile_status(facts, phase["targets"], measurement) if phase else None
         if phase is None:
-            summary["stop"] = "mission_complete"
+            summary["stop"] = "phase_ladder_complete"
+            summary["research_completion_verified"] = False
             break
         if settings.until_phase and settings.until_phase in reached:
             summary["stop"] = "window_reached"
@@ -672,11 +764,17 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         economics = economics_observation(session.economics() if hasattr(session, "economics") else None,
                                           facts.get("networks"))
         menu = with_economics(compile_options(board, results, facts["tick"], facts.get("recipes"), stock,
-                                              facts.get("machines"), getattr(session, "growable", ())),
+                                              facts.get("machines"), getattr(session, "growable", ()),
+                                              filter_fluid_shortages=(settings.ops_solid_fluid_filter or
+                                                  getattr(session, "filter_fluid_shortages_enabled", False))),
                               results, economics)
         reserved: Counter = Counter()
         for project in ((economics or {}).get("projects") or {}).values():
             reserved.update(project["reserved"])
+        if settings.ops_consumer_choices or getattr(session, "consumer_choices_enabled", False):
+            add_consumer_options(menu, facts, results, economics, stock)
+        if settings.ops_production_services:
+            add_production_service_options(menu, board, facts)
         compact = compact_status(board)
         catalog = OPS_CATALOG if settings.catalog == Settings().catalog else settings.catalog
         guidance = load_guideline_context(ROOT, phase["scopes"], catalog=catalog, max_rules=32)
@@ -690,11 +788,16 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                          {g["rule_id"] for g in rules}, economics=economics)
         state = {"brief": told,
                  "observation_digest": {"factory_status": compact, "mission_phase": phase["phase_id"],
+                                        "advanced_circuit_consumer": consumer_fact,
                                         "mall_economics": economics,
                                         "saved_world": {"provider_stock": {"network": stock},
                                                         "reserved_stock": {"network": dict(reserved)}}},
                  "guidelines": rules}
+        if settings.ops_chain_economics:
+            state["observation_digest"]["committed_chain"] = committed_chain_facts(economics)
+        policy_started = time.monotonic()
         choice = policy.choose(state, menu)
+        policy_seconds = time.monotonic() - policy_started
         chosen = next(o for o in menu["options"] if o["option_id"] == choice["option_id"])
         emit(f"DECISION {index} phase={phase['phase_id']} tick={facts['tick']} need={chosen['need_id']} "
              f"p={choice['probability']:.3f} rules={','.join(sorted(set(choice['rules'])))}: {chosen['summary']}")
@@ -704,6 +807,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                   "phase": phase["phase_id"], "choice": {k: choice[k] for k in ("option_id", "need_id", "probability")},
                   "summary": chosen["summary"]}
         _append(journal, record)
+        operation_started = time.monotonic()
         if chosen["family"] == "wait":
             adapter.advance(chosen["wait_ticks"])
             result = {"ok": True, "operation": "wait", "params": {"ticks": chosen["wait_ticks"]}}
@@ -714,6 +818,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                 result = {"ok": False, "operation": chosen["family"], "params": chosen["params"],
                           "code": "tool_error", "message": f"{type(error).__name__}: {error}"[:400]}
                 summary["failures"] += 1
+        operation_seconds = time.monotonic() - operation_started
         result["tick"] = facts["tick"]
         if result.get("code") == "material_shortage":  # What was in stock when it failed, to see change later.
             result["stock_at"] = {item: stock.get(item, 0) for item in ((result.get("details") or {}).get("required") or {})}
@@ -723,7 +828,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
              + (f" -- {result.get('message', '')[:200]}" if not result.get("ok") else ""))
         _training_record(records, run_id=run_id, index=index, tick=facts["tick"], phase=phase["phase_id"],
                          state=state, options=[{k: o.get(k) for k in ("option_id", "family", "need_id", "product",
-                                                                      "params", "features")} for o in menu["options"]],
+                                                                      "params", "features", "consumer_input_bill")} for o in menu["options"]],
                          distribution=choice["distribution"], choice=choice,
                          outcome={**{k: result.get(k) for k in ("ok", "code", "classification", "state", "details",
                                                                  "message", "result")},
@@ -731,7 +836,10 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                       k: result[k] for k in ('submitted', 'submission_attempted', 'verified',
                                                             'observed', 'error') if k in result}}
                                      if chosen['family'] == 'raise_stock_gate' else {}),
-                                  "ticks": after["tick"] - facts["tick"]})
+                                  "ticks": after["tick"] - facts["tick"],
+                                  "timing": {"policy_wall_seconds": policy_seconds,
+                                             "operation_wall_seconds": operation_seconds,
+                                             "model_client_seconds": choice.get("client_latency_s")}})
         _write_status(status_path, {"run_id": run_id, "index": index, "tick": facts["tick"], "phase": phase,
                                     "reached": reached, "board": compact, "brief": state["brief"], "choice": {**choice, "summary": chosen["summary"]},
                                     "menu": {o["option_id"]: o["summary"] for o in menu["options"]},
@@ -768,6 +876,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     session.close()
     # Typed outcomes, not only caught exceptions: an untyped_stuck is a tool fault even when nothing raised.
     summary["codes"] = dict(Counter(r.get("code") or "error" for r in results if not r.get("ok")))
+    summary["faults"] = operation_faults(results)
     emit(f"SUMMARY: stop={summary['stop']} decisions={summary['decisions']} failures={summary['failures']} "
          f"phases={','.join(reached) or 'none'} accepted={','.join(summary.get('accepted', [])) or 'none'} "
          f"accepted_final={'unknown' if summary.get('accepted_final') is None else ','.join(summary['accepted_final']) or 'none'}")

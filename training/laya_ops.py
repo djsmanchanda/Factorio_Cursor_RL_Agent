@@ -49,6 +49,12 @@ def receipt(operation: str, params: dict, result: object) -> dict:
     """A normal return as a typed receipt: ``ok`` only when the operation's own postcondition holds."""
     if operation in {"raise_stock_gate", "reserve_steel_seed"}:
         return {"operation": operation, "params": params, **result}
+    if operation == "production_service":
+        # This advances the shared permanent-line builder. A returned provider
+        # position is not a measured delivery/consumption or milestone receipt.
+        return {"operation": operation, "params": params, "ok": result is not None,
+                "code": "producer_available" if result is not None else "prerequisite_advanced",
+                "result": _receipt_result(result), "sustained_service_verified": False}
     if operation in PRODUCING_OPERATIONS:
         code = "producing" if result is not None else "prerequisite_advanced"
     elif operation in SUBMITTING_OPERATIONS:
@@ -74,6 +80,9 @@ class DeterministicSession:
     """One Laya world with the deterministic runtime's per-run state."""
 
     growable = ab.GROWABLE_PRODUCERS  # producers the "grow" operation may add a cell to
+    consumer_choices_enabled = False
+    filter_fluid_shortages_enabled = False
+    chain_economics_enabled = False
 
     def __init__(self, root: Path, *, goal_item: str = "automation-science-pack",
                  reference_point: tuple[float, float] = (0.0, 0.0), emit: Callable[[str], None] = print) -> None:
@@ -121,6 +130,10 @@ class DeterministicSession:
             # stock_target is the network level wanted; the cell is capped there, so it stops when the need is met.
             "produce": lambda item, stock_target=1: ab.produce_to_demand(c, b, SURFACE, FORCE, item, ref, emit,
                                                                          stock_target=stock_target),
+            # The same permanent belt-fed/chemical operation used by the
+            # deterministic runtime; never a solid batch pretending to supply fluid.
+            "production_service": lambda item: ab.ensure_produced(
+                c, b, SURFACE, FORCE, item, ref, emit, upgrade_bootstrap=True),
             # One more gear/cable cell when every existing one runs flat out and other cells starve for it.
             "grow": lambda item, machines: ab.grow_producer(c, b, SURFACE, FORCE, item, ref, emit, machines=machines),
             # A standing slot in the bootstrap mall pool (the deterministic runner's "production prep").
@@ -280,8 +293,17 @@ class DeterministicSession:
             guarded_configuration = supports_configuration_preconditions(self.client)
         except Exception:
             guarded_configuration = None
+        requester_draws = None
+        if self.chain_economics_enabled and projects is not None:
+            items = {item for project in projects.values() for item in project["required"]}
+            if len(items) <= 128:
+                try:
+                    requester_draws = {item: ab.live_base.logistic_request_total(
+                        self.client, SURFACE, FORCE, item) for item in sorted(items)}
+                except Exception:
+                    pass
         return {"version": 1, "projects": projects, "loans": loans, "slots": slots, "cells": cells,
-                "guarded_configuration": guarded_configuration}
+                "guarded_configuration": guarded_configuration, "requester_draws": requester_draws}
 
     def _submit_stock_gate(self, plan: dict, name: str) -> dict:
         # Use the shared validator/authorization/bridge submission without the

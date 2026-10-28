@@ -1,0 +1,8 @@
+{
+  "version": "1.0.0",
+  "variant_id": "committed-chain-facts-v1",
+  "description": "Expose registered complete bills, ownership and lender facts without policy weights.",
+  "settings": {
+    "ops_chain_economics": true
+  }
+}

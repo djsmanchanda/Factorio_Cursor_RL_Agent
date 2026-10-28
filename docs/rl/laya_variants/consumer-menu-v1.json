@@ -1,0 +1,8 @@
+{
+  "version": "1.0.0",
+  "variant_id": "consumer-menu-v1",
+  "description": "Offer observed supported consumers through the existing batch executor.",
+  "settings": {
+    "ops_consumer_choices": true
+  }
+}
