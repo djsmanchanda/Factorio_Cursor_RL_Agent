@@ -142,5 +142,109 @@ class LayaC6Acceptance:
 def ops_phase_reached(phase: Mapping, board: Mapping, c6: Mapping) -> bool:
     from training.laya_mission import phase_reached
     if phase["phase_id"] == "C6":
-        return c6.get("version") == VERSION and c6.get("status") == "passed"
+        return c6.get("version") == phase.get("ops_acceptance", VERSION) and c6.get("status") == "passed"
     return phase_reached(board)
+
+
+CONSUMER_VERSION = "laya-c6-choice-output-v3"
+
+
+def consumer_recipes(facts: Mapping) -> set[str]:
+    """Observed recipe facts, without prescribing which consumer to choose."""
+    return {name for name, recipe in (facts.get("recipe_observations") or {}).items()
+            if any(p.get("type") == "item" and p.get("name") == ITEM
+                   for p in recipe.get("ingredients", ()))}
+
+
+class LayaC6ConsumerAcceptance:
+    """V2 output evidence plus same-machine, same-recipe post-choice progression.
+
+    Ownership is surface/force membership in the isolated automated run's survey.
+    Samples live in the receipt so checkpoint recovery preserves the interval.
+    """
+
+    def __init__(self, run_id: str):
+        self.run_id = run_id
+        self.evidence = {"version": CONSUMER_VERSION, "run_id": run_id, "status": "failed",
+                         "reason": "no_explicit_choice"}
+
+    explicit_choice = staticmethod(LayaC6Acceptance.explicit_choice)
+
+    def _output(self):
+        output = LayaC6Acceptance(self.run_id)
+        if "output" in self.evidence:
+            output.evidence = copy.deepcopy(self.evidence["output"])
+        return output
+
+    def choose(self, chosen: Mapping, facts: Mapping, *, index: int) -> None:
+        if self.evidence["status"] == "passed":
+            return
+        output = self._output()
+        if not self.explicit_choice(chosen) and chosen.get("family") not in MALL_OPERATIONS:
+            return
+        # Consumer choices must retain the AC choice window they are fulfilling.
+        if output.evidence.get("baseline") and (output.evidence["status"] == "passed"
+                or (chosen.get("params") or {}).get("item") in consumer_recipes(facts)):
+            return
+        output.choose(chosen, facts, index=index)
+        self.evidence = {"version": CONSUMER_VERSION, "run_id": self.run_id,
+                         "status": output.evidence["status"], "reason": output.evidence.get("reason"),
+                         "output": output.snapshot(), "consumer_samples": {}}
+
+    def outcome(self, result: Mapping) -> None:
+        output = self._output()
+        output.outcome(result)
+        self.evidence["output"] = output.snapshot()
+
+    def observe(self, facts: Mapping) -> dict:
+        if self.evidence["status"] in {"passed", "unknown"}:
+            return self.snapshot()
+        output = self._output()
+        receipt = output.observe(facts)
+        self.evidence["output"] = receipt
+        baseline = receipt.get("baseline")
+        if not baseline or receipt["status"] == "unknown":
+            self.evidence.update(status=receipt["status"], reason=receipt.get("reason"))
+            return self.snapshot()
+        try:
+            observed = _sample(facts)
+            if any(observed[k] != baseline[k] for k in ("surface", "force", "catalog_mod_sha256")):
+                raise ValueError("consumer scope/catalog changed")
+            if observed["tick"] < self.evidence.get("consumer_last_tick", baseline["tick"]):
+                raise ValueError("consumer observation tick regressed")
+        except (ValueError, TypeError, KeyError) as error:
+            self.evidence.update(status="unknown", reason=str(error))
+            return self.snapshot()
+        tick = observed["tick"]
+        self.evidence["consumer_last_tick"] = tick
+        previous = self.evidence.get("consumer_samples", {})
+        current = {}
+        consumers = consumer_recipes(facts)
+        if type(tick) is int and tick > baseline["tick"]:
+            for machine in facts.get("machines", ()):
+                recipe, count = machine.get("recipe"), machine.get("products_finished")
+                if recipe not in consumers or type(count) is not int or count < 0:
+                    continue
+                identity = (["unit", machine["unit_number"]] if machine.get("unit_number") is not None
+                            else [machine.get("name"), machine.get("position")])
+                key = json.dumps(identity, sort_keys=True)
+                sample = {"recipe": recipe, "products_finished": count, "tick": tick}
+                old = previous.get(key)
+                if (old and old["recipe"] == recipe and tick > old["tick"]
+                        and count > old["products_finished"]):
+                    self.evidence["consumer_progression"] = {"identity": identity, "before": old, "after": sample}
+                current[key] = sample
+            self.evidence["consumer_samples"] = current
+        passed = receipt["status"] == "passed" and bool(self.evidence.get("consumer_progression"))
+        self.evidence.update(status="passed" if passed else "failed",
+                             reason="choice_output_and_consumer_progression" if passed else "consumer_or_output_unmet")
+        return self.snapshot()
+
+    def snapshot(self) -> dict:
+        return copy.deepcopy(self.evidence)
+
+
+def consumer_goal(board: dict, phase: Mapping, evidence: Mapping, facts: Mapping) -> None:
+    if phase.get("ops_acceptance") == CONSUMER_VERSION and not evidence.get("consumer_progression"):
+        board["consumer_goal"] = {"ingredient": ITEM, "condition": "unmet",
+                                  "recipes": sorted(consumer_recipes(facts))}

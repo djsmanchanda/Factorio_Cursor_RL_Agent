@@ -336,3 +336,21 @@ nominal/effective waits and typed reconciliation receipts; current status and
 summary expose actual decision rates and an instantaneous assembler status
 sample with explicit known denominators. These are separate experimental factors,
 not adopted defaults or measured time utilization.
+
+
+Ops C6 uses `laya-c6-choice-output-v3`: the v2 explicit AC choice and new
+attributable AC output, plus positive `products_finished` progression on one
+surface/force-owned AC-consuming recipe. Two observations strictly after the
+choice baseline must identify the same machine and recipe. New, rebuilt or
+retargeted machines establish a fresh interval. Unit number identifies a
+machine when available; older facts fall back to name and position. Missing
+counters cannot prove progression. Ownership assumes an isolated automated run
+with no concurrent player/script production. The C6 board and decision digest
+carry the unmet consumer goal; obtainable catalog consumers use existing
+produce choices without a fixed consumer or changed policy weights. V2 remains
+available for historical receipts; strict checkpoint predicates are unchanged.
+
+The saved-world survey is Python-loaded Lua executed over guarded RCON, not
+installed-mod code. Its optional machine `unit_number` and `products_finished`
+fields retain the backward-compatible `saved-world-v1` schema. New cohorts need
+the updated frozen code; this change requires no additional mod deployment.

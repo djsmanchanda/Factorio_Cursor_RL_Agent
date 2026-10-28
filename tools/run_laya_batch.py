@@ -503,7 +503,7 @@ class Batch:
             final = dict(Counter(p for j in final_rows for p in j["accepted_final"]))
             c6_rows = [(j.get("laya_acceptance") or {}).get("C6") for j in ran]
             c6_rows = [r for r in c6_rows if isinstance(r, dict) and
-                       r.get("version") == "laya-c6-choice-output-v2" and r.get("status") in {"passed", "failed"}]
+                       r.get("version") in {"laya-c6-choice-output-v2", "laya-c6-choice-output-v3"} and r.get("status") in {"passed", "failed"}]
             c6_passed = sum(r["status"] == "passed" for r in c6_rows)
             codes = dict(sum((Counter(j["outcome_codes"]) for j in ran if j.get("outcome_codes") is not None), Counter()))
             code_observed = sum(j.get("outcome_codes") is not None for j in ran)
@@ -537,7 +537,7 @@ class Batch:
                     return name[:-6] in observed if isinstance(observed, list) else None
                 if name == "C6_v2":
                     receipt = (job.get("laya_acceptance") or {}).get("C6", {})
-                    return (receipt["status"] == "passed" if receipt.get("version") == "laya-c6-choice-output-v2"
+                    return (receipt["status"] == "passed" if receipt.get("version") in {"laya-c6-choice-output-v2", "laya-c6-choice-output-v3"}
                             and receipt.get("status") in {"passed", "failed"} else None)
                 research = job.get("research_acceptance")
                 return (research.get("earned") if isinstance(research, dict) and research.get("available") is True

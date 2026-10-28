@@ -39,9 +39,9 @@ for _, e in pairs(surface.find_entities_filtered{force=force}) do
     table.insert(facts.poles, {name=e.name, position=e.position, wire=e.prototype.get_max_wire_distance(),
       supply=e.prototype.get_supply_area_distance(), grid=tostring(e.electric_network_id),
       generated=generation[tostring(e.electric_network_id)] == true})
-  elseif e.type == "mining-drill" or e.type == "furnace" or e.type == "assembling-machine" then
-    local m={name=e.name, position=e.position, energy=e.energy,status=status_names[e.status] or "unknown"}
-    if e.type~="mining-drill" then local recipe=e.get_recipe(); m.recipe=recipe and recipe.name end
+  elseif e.type == "mining-drill" or e.type == "furnace" or e.type == "assembling-machine" or e.type == "rocket-silo" then
+    local m={name=e.name, unit_number=e.unit_number, position=e.position, energy=e.energy,status=status_names[e.status] or "unknown"}
+    if e.type~="mining-drill" then local recipe=e.get_recipe(); m.recipe=recipe and recipe.name; m.products_finished=e.products_finished end
     table.insert(facts.machines,m)
   end
 end

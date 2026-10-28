@@ -37,7 +37,7 @@ from training.laya_clean_runner import (ROOT, Settings, _append, _goal_gap, _sta
 from training.laya_factory_status import STATUS_BUCKETS, compact_status, compile_status
 from training.laya_mall_slots import obtainable
 from training.laya_mission import PHASES, current_phase
-from training.laya_phase_acceptance import LayaC6Acceptance, ops_phase_reached
+from training.laya_phase_acceptance import LayaC6ConsumerAcceptance, consumer_goal, consumer_recipes, ops_phase_reached
 
 PLATES = {"iron-plate": "iron-ore", "copper-plate": "copper-ore", "stone-brick": "stone"}
 # The tooling is already making it (a mall batch or loan in progress, a borrow queued): wait, and it is progress.
@@ -611,6 +611,8 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     """
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
     goal = {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
+    consumers = set((board.get("consumer_goal") or {}).get("recipes", ()))
+    goal.update(consumers)
     current_materials = material_results(results, transactions)
     stuck = unchanged_failures(current_materials, stock or {})
     sources: dict[str, set] = {}
@@ -695,7 +697,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                              "shortage": short.get(item, 0),
                              "borrows": next((r.get("code") for r in reversed(results)
                                               if _key(r) == ("mall_slot", item)), None) in BORROW_CODES,
-                             "goal_need": goal_blocked or bool(sources.get(item, set()) & goal)}})
+                             "goal_need": item in consumers or goal_blocked or bool(sources.get(item, set()) & goal)}})
     # Borrowing a slot to batch an item needs standing slots to borrow from.
     slots = any(code == "ok" for (operation, _), code in codes.items() if operation == "mall_slot")
     # Producing an item whose chain needs an unstarted plate would make the tooling open that plate's
@@ -750,6 +752,13 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                 and ((recipes or {}) if enabled_recipes is None else enabled_recipes).get(item)
                 and plates_in(item, recipes or {}) <= started):
             demand = demands.setdefault(item, {"target": 1, "missing": 0, "parents": []})
+            demand["capability"] = True
+    for item in sorted(consumers):
+        if (item in (recipes or {}) and plates_in(item, recipes or {}) <= started
+                and obtainable(recipes, item, stock or {})
+                and (enabled_recipes is None or enabled_recipes.get(item))):
+            demand = demands.setdefault(item, {"target": int((stock or {}).get(item, 0)) + 1,
+                                                "missing": 0, "parents": []})
             demand["capability"] = True
     for item, demand in demands.items():
         # The tooling's stock_target is a network level (the mall's stock gate), not a delta: asking for the
@@ -865,7 +874,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                      "objective_version": "laya-research-consumption-v1" if settings.research_target else "legacy-science-readiness-v1"}
     stall = {"since": 0, "best_gap": math.inf, "tick": None, "machines": 0, "missing": math.inf, "made": {},
              "batches": {}, "installed": {}, "network": None, "rungs": None, "mark": None, "mark_tick": None}
-    c6 = LayaC6Acceptance(run_id)
+    c6 = LayaC6ConsumerAcceptance(run_id)
     from training.laya_research import ResearchObjective, SUPPORT, add_research_options
     from training.laya_mission import research_phase
     from orchestrator.research_operations import collect_research_reports, research_observation
@@ -959,13 +968,22 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             summary["stop"] = "wall_budget"
             break
         economics = session.economics() if hasattr(session, "economics") else None
-        adapter.extra_recipes = recipe_demand(results, economics)
+        adapter.extra_recipes = (*recipe_demand(results, economics),
+                                 *sorted(consumer_recipes(previous_service_facts or {})))
         reports = None
         if objective:
             reports = collect_research_reports(session.bridge, surface="nauvis", force="player", requested=settings.research_target)
             packs = ((reports.get("research") or {}).get("technology") or {}).get("science_packs", {})
             adapter.extra_recipes = (*adapter.extra_recipes, *packs, "lab")
         facts = adapter.query()
+        # Ask the existing survey for the consumer recipes' ordinary item closure.
+        # The full catalog identifies alternatives; the bounded recipe map may omit them.
+        consumers = consumer_recipes(facts)
+        missing = {name for name in consumers if facts["recipe_observations"][name].get("enabled")
+                   and name not in facts.get("recipes", {}) and name not in facts.get("enabled_recipes", {})}
+        if missing - set(adapter.extra_recipes):
+            adapter.extra_recipes = tuple(sorted(set(adapter.extra_recipes) | consumers))
+            facts = adapter.query()
         if objective:
             research = research_observation(reports, tick=facts["tick"], surface="nauvis", force="player", requested=settings.research_target)
             support_board = compile_status(facts, objective.targets(research), measurement) if objective.targets(research) else None
@@ -1013,6 +1031,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         if settings.until_phase and settings.until_phase in reached:
             summary["stop"] = "window_reached"
             break
+        consumer_goal(board, phase, c6.snapshot(), facts)
         stock: dict[str, int] = {}
         for network in (facts.get("networks") or {}).values():
             for name, count in (network.get("items") or {}).items():
@@ -1037,6 +1056,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         for project in ((economics or {}).get("projects") or {}).values():
             reserved.update(project["reserved"])
         compact = compact_status(board)
+        if "consumer_goal" in board:
+            compact["consumer_goal"] = board["consumer_goal"]
         catalog = OPS_CATALOG if settings.catalog == Settings().catalog else settings.catalog
         guidance = load_guideline_context(ROOT, phase["scopes"], catalog=catalog, max_rules=32)
         # The brief comes first and has its room reserved; the doc rules fill what is left.

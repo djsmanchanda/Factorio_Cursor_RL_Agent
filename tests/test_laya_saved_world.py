@@ -171,7 +171,8 @@ def test_quad_chest_inventory_settings_are_deferred_until_bot_construction():
 
 
 @pytest.mark.lua
-def test_demand_query_expands_enabled_recipes_and_measures_fluid_recipe_items():
+@pytest.mark.parametrize("machine_type", ["assembling-machine", "furnace", "rocket-silo"])
+def test_demand_query_expands_enabled_recipes_and_measures_fluid_recipe_items(machine_type):
     import shutil
     import subprocess
 
@@ -192,13 +193,22 @@ local recipes={['audit-product']=recipe('audit-product','audit-input','item',tru
   ['disabled-product']=recipe('disabled-product','audit-input','item',false)}
 local stats={get_input_count=function(name) return name=='plastic-bar' and 9 or 3 end,
   get_output_count=function() return 2 end}
-local surface={find_entities_filtered=function() return {} end}
+local machine={name='assembling-machine-2',type='assembling-machine',unit_number=42,
+  position={x=1,y=2},energy=100,status=1,products_finished=7,
+  get_recipe=function() return {name='audit-product'} end}
+local surface={find_entities_filtered=function(filter)
+  if filter.type then return {} end
+  return {machine}
+end}
 game={tick=100,tick_paused=true,ticks_to_run=0,surfaces={nauvis=surface},players={},
   forces={player={recipes=recipes,technologies={},get_item_production_statistics=function() return stats end}}}
 defines={entity_status={}}; script={active_mods={}}
 prototypes={entity={},item={['audit-product']={},['audit-input']={},['plastic-bar']={},['disabled-product']={}}}
 """
+    fixture = fixture.replace("type='assembling-machine'", f"type='{machine_type}'")
     assertions = """
+assert(facts.machines[1].products_finished==7 and facts.machines[1].unit_number==42)
+assert(facts.machines[1].recipe=='audit-product')
 assert(facts.recipes['audit-product'] and facts.recipes['audit-input'])
 assert(facts.enabled_recipes['plastic-bar'] and not facts.recipes['plastic-bar'])
 assert(not facts.enabled_recipes['disabled-product'] and not facts.enabled_recipes['unknown-product'])

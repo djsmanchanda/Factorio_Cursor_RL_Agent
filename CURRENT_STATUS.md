@@ -535,3 +535,8 @@ Added opt-in selected reconciliation of measured finished loan prerequisites thr
 ## 2026-10-24 00:17 IST —7200-second ordinary trial allowance
 
 Set shared new-cohort default7200 and updated generators; longer15000-second research windows retained. C26/C27 safely drained/stopped before any admission, original records archived, both arms amended7200 and wrappers resumed behind C25; verified60 queued each, hashes intact, original unit horizon preserved. C25 and Starship live attempts keep6000 because no safe hot extension exists. Evidence:frontier37 focused/1358 fast+3 skips; Miniship36/1326+3 skips, all exit0; live waiting-supervisor readback verified. Lifecycle:new Python freezes for future defaults; no Factorio/mod restart or controller message. See docs/rl/Laya_Wall_Allowance_2026-10-24.md and data/laya-orchestration/wall-allowance-7200-20261024/.
+
+
+## 2026-10-28 14:03 IST — C46 C6 consumer candidate (offline)
+
+Added optional saved-world machine identity/craft counters, versioned C6 v3 consumer progression, consumer goal facts and obtainable existing operation choices, and v2/v3 batch reporting. Evidence: 100 focused tests; fast gate 1,341 passed, 3 skipped, 3,075 deselected; disabling the consumer leg fails seven regressions. Strict predicates, geometry and weights unchanged. Lifecycle: apply candidate patch and freeze new Python runners for a future authorized cohort; survey Lua travels over RCON, so no additional mod deployment or Factorio restart. No services or live worlds touched; no adoption claimed.
