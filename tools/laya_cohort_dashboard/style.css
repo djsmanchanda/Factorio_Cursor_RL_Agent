@@ -1,10 +1,10 @@
 /* Path: tools/laya_cohort_dashboard/style.css | Purpose: Responsive, accessible operations-dashboard styling with dark/light themes and chart tokens. */
-:root{color-scheme:dark;--bg:#0b1016;--surface:#121a23;--surface-2:#182330;--border:#2a3a4b;--text:#e9f1f5;--muted:#a3b4c1;--faint:#7f92a1;--accent:#6fd9b4;--accent-ink:#06231a;--blue:#7bbcff;--amber:#f3bd6a;--red:#ff9a9a;--ok:#6fd9b4;
+:root{color-scheme:dark;--m1:#8a8f98;--m2:#3987e5;--m3:#d95926;--m4:#199e70;--m5:#d55181;--m6:#9085e9;--bg:#0b1016;--surface:#121a23;--surface-2:#182330;--border:#2a3a4b;--text:#e9f1f5;--muted:#a3b4c1;--faint:#7f92a1;--accent:#6fd9b4;--accent-ink:#06231a;--blue:#7bbcff;--amber:#f3bd6a;--red:#ff9a9a;--ok:#6fd9b4;
  --ok-bg:#12302a;--warn-bg:#352b18;--bad-bg:#3a1c20;--info-bg:#15293a;--focus:#7bbcff;
  /* chart entities: fixed hue per entity, never per rank */
  --c-active:#199e70;--c-target:#3987e5;--c-cap:#c98500;--c-manual:#d55181;--c-p95:#9085e9;--c-p98:#3987e5;--c-temp:#d95926;--c-total:#199e70;--c-mem:#c98500;
  --g-ceiling:#d55181;--g-ups:#9085e9;--g-thermal:#d95926;--g-memory:#c98500;--g-health:#e66767;--g-search:#5f7a90;--g-nodata:#33414f;--g-other:#8a8f98}
-@media(prefers-color-scheme:light){:root{color-scheme:light;--bg:#f2f5f8;--surface:#fff;--surface-2:#eef2f6;--border:#cbd5df;--text:#10202c;--muted:#475a6a;--faint:#667888;--accent:#0a7d5a;--accent-ink:#fff;--blue:#1d5fb4;--amber:#8a5a00;--red:#b3261e;--ok:#0a7d5a;--ok-bg:#dcf3ea;--warn-bg:#fbefd5;--bad-bg:#fbe0e0;--info-bg:#e2eefb;--focus:#1d5fb4;
+@media(prefers-color-scheme:light){:root{color-scheme:light;--m1:#6b7078;--m2:#2a78d6;--m3:#eb6834;--m4:#1baf7a;--m5:#c23c70;--m6:#6250d6;--bg:#f2f5f8;--surface:#fff;--surface-2:#eef2f6;--border:#cbd5df;--text:#10202c;--muted:#475a6a;--faint:#667888;--accent:#0a7d5a;--accent-ink:#fff;--blue:#1d5fb4;--amber:#8a5a00;--red:#b3261e;--ok:#0a7d5a;--ok-bg:#dcf3ea;--warn-bg:#fbefd5;--bad-bg:#fbe0e0;--info-bg:#e2eefb;--focus:#1d5fb4;
  --c-active:#1baf7a;--c-target:#2a78d6;--c-cap:#b87800;--c-manual:#c23c70;--c-p95:#6250d6;--c-p98:#2a78d6;--c-temp:#eb6834;--c-total:#1baf7a;--c-mem:#b87800;--g-ceiling:#c23c70;--g-ups:#6250d6;--g-thermal:#eb6834;--g-memory:#b87800;--g-health:#e34948;--g-search:#7d95a8;--g-nodata:#c3ced8;--g-other:#8a8f98}}
 *{box-sizing:border-box}html{scroll-padding-top:70px}
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-text-size-adjust:100%}
@@ -124,3 +124,12 @@ details>summary{font-size:13px;color:var(--muted)}details>summary:hover{color:va
 .attribution details,#summary-table{margin-top:4px}
 @media(max-width:560px){.hgrid{grid-template-columns:1fr}.tabs button{padding:8px 9px}}
 .cv b{font-variant-numeric:tabular-nums}
+
+.m1{--sc:var(--m1)}.m2{--sc:var(--m2)}.m3{--sc:var(--m3)}.m4{--sc:var(--m4)}.m5{--sc:var(--m5)}.m6{--sc:var(--m6)}
+.trend-scroll{overflow-x:auto}.trend-stack{position:relative}.trend-stack svg{display:block;overflow:visible}.trend-stack svg text{fill:var(--faint);font-size:11px}
+svg .ln.dotted{stroke-dasharray:2 4;opacity:.5}svg .dot.hollow{fill:var(--surface);stroke:var(--sc);stroke-width:2}svg .armdot{fill:var(--sc);opacity:.45}svg .whisker{stroke:var(--sc);stroke-width:1.5;opacity:.5}
+.legend button:disabled{opacity:.3;text-decoration:none;cursor:not-allowed}.legend button.m1 i,.legend button.m2 i,.legend button.m3 i,.legend button.m4 i,.legend button.m5 i,.legend button.m6 i{color:var(--sc)}
+.tip i.m1,.tip i.m2,.tip i.m3,.tip i.m4,.tip i.m5,.tip i.m6,.swatch{background:var(--sc)}.swatch{display:inline-block;width:12px;height:4px;border-radius:2px;margin-right:6px;vertical-align:middle}.tip th{text-align:left;font-size:11px;color:var(--muted);padding:6px 0 1px;border:0}.tip td,.tip th{border:0}
+.trend-h{font-size:15px;margin:12px 0 6px}.trend-table td,.trend-table th{white-space:normal}#trend-summary{margin-bottom:6px}
+.trend-stack:not(.hover) .cursor,.trend-stack:not(.hover) .cursor-dot{display:none}svg .cursor-dot{fill:var(--sc);stroke:var(--surface);stroke-width:2}
+.toolbar label.inline{flex-wrap:wrap;max-width:100%;min-width:0}.toolbar select{max-width:100%}@media(max-width:560px){#trend-window{max-width:calc(100vw - 70px)}}

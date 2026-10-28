@@ -14,7 +14,7 @@ const chip = (text, tone = 'muted', title = '') => `<span class="chip" data-tone
 // Page-session preferences. The snapshot token is never stored anywhere.
 const keep = (storage, key, fallback) => { try { return JSON.parse(storage.getItem(key)) ?? fallback; } catch { return fallback; } };
 const save = (storage, key, value) => { try { storage.setItem(key, JSON.stringify(value)); } catch { /* storage may be unavailable */ } };
-const ui = {tab: 'overview', hours: 6, panels: ['runs', 'ups', 'temp'], hiddenSeries: [], family: 'strict', milestone: 'C6', registryState: 'all', unranked: false, ...keep(localStorage, 'laya.ui.v1', {})};
+const ui = {tab: 'overview', hours: 6, panels: ['runs', 'ups', 'temp'], hiddenSeries: [], family: 'strict', milestone: 'C6', registryState: 'all', unranked: false, historyView: 'trend', trendMetric: 'ever', trendMilestones: ['C2', 'C3', 'C4', 'C5', 'C6'], trendWindow: 'all', trendExp: 'mean', trendCI: false, ...keep(localStorage, 'laya.ui.v1', {})};
 const persistUi = () => save(localStorage, 'laya.ui.v1', ui);
 const drafts = new Map(Object.entries(keep(sessionStorage, 'laya.drafts.v1', {})));
 const persistDrafts = () => save(sessionStorage, 'laya.drafts.v1', Object.fromEntries(drafts));
@@ -478,7 +478,12 @@ function onChartKey(event) {
 function renderHistory() {
  const data = snapshot?.curated, box = $('milestones');
  if (!snapshot) return;
- if (!Array.isArray(data?.cohorts)) { setHTML(box, '<div class="empty"><strong>Curated history unavailable</strong>The reviewed feed <code>docs/rl/laya_cohort_curated_history.json</code> could not be read. The registry on the Jobs tab is not a substitute for it.</div>'); return; }
+ $$('#history-view button').forEach(b => b.setAttribute('aria-pressed', b.dataset.hview === ui.historyView));
+ $$('#family button').forEach(b => b.setAttribute('aria-pressed', b.dataset.family === ui.family));
+ $('trend-view').hidden = ui.historyView !== 'trend'; $('results-view').hidden = ui.historyView !== 'results';
+ if (!Array.isArray(data?.cohorts)) { const none = '<div class="empty"><strong>Curated history unavailable</strong>The reviewed feed <code>docs/rl/laya_cohort_curated_history.json</code> could not be read. The registry on the Jobs tab is not a substitute for it.</div>'; setHTML(box, none); setHTML($('trend-chart'), none); setHTML($('trend-summary'), ''); return; }
+ $('history-sub').textContent = `${data.coverage?.from ?? '?'} → ${data.coverage?.to ?? '?'} · ${data.cohorts.length} reviewed rows · ${data.cohorts.reduce((n, c) => n + (c.arms || []).length, 0)} arms · independent cohorts, not matched replications`;
+ if (ui.historyView === 'trend') return renderTrend(data);
  const family = ui.family, UNRANKED = new Set(['pending', 'no_start', 'invalid']);
  const keys = [...new Set(data.cohorts.flatMap(c => (c.arms || []).filter(a => a.predicate_family === family).flatMap(a => Object.keys(a.ever || {}))))].sort();
  if (!keys.includes(ui.milestone)) ui.milestone = keys.at(-1) || ui.milestone;
@@ -486,7 +491,6 @@ function renderHistory() {
  setHTML($('milestone-seg'), keys.map(k => `<button type="button" data-milestone="${k}" aria-pressed="${k === milestone}">${k}</button>`).join('') || '<span class="muted small">no milestones</span>');
  $$('#family button').forEach(b => b.setAttribute('aria-pressed', b.dataset.family === family));
  $('unranked').checked = ui.unranked;
- $('history-sub').textContent = `${data.coverage?.from ?? '?'} → ${data.coverage?.to ?? '?'} · ${data.cohorts.length} reviewed rows · ${data.cohorts.reduce((n, c) => n + (c.arms || []).length, 0)} arms · independent cohorts, not a trend`;
  const sorted = [...data.cohorts].sort((a, b) => (b.date || '').localeCompare(a.date || '') || String(b.id).localeCompare(String(a.id), undefined, {numeric: true}));
  const matches = sorted.filter(c => !q || `${c.id} ${(c.arms || []).map(a => a.id).join(' ')}`.toLowerCase().includes(q));
  const prepared = matches.map(c => {
@@ -521,6 +525,154 @@ function armRow(a, milestone, uniform, field) {
  return `<div class="hrow"><div class="lab"><strong>${esc(a.id)}</strong> <span class="meta">${esc(tail(a.commit, 9) || 'commit unknown')}</span>${own ? `<div class="chips">${own}</div>` : ''}</div><div class="bar${known ? '' : ' unk'}" role="img" aria-label="${esc(label)}">${known ? `<i style="width:${w}%"></i>${fw !== null ? `<b style="width:${fw}%"></b>` : ''}` : ''}</div><div class="cv">${known ? `ever <b>${ever}</b>/${a.planned} · ${pct(ever, a.planned)}%<br>final ${isNum(fin) ? `<b>${fin}</b>` : '<span class="meta">' + (latched ? 'latched, unknown' : 'not reported') + '</span>'}` : '<span class="meta">not reported</span>'}${caveats.length ? `<details class="more"><summary>${caveats.length} caveat${caveats.length === 1 ? '' : 's'}</summary><ul>${caveats.map(x => `<li>${esc(x)}</li>`).join('')}</ul></details>` : ''}</div></div>`;
 }
 
+// ---------------------------------------------------------------- trend across curated cohorts
+// Base arms are recognised by name only (the feed has no role field); a cohort without one simply has no base point.
+const BASE_ARM = /^(control|reference|ref|base|baseline|old-baseline)(_[a-z0-9]+)?$/i, UNRANKED_STATUS = new Set(['pending', 'no_start', 'invalid']);
+const TREND_MS = ['C1', 'C2', 'C3', 'C4', 'C5', 'C6'];
+const METRICS = {ever: ['Reached', 'of planned runs that ever reached the milestone'], final: ['Final sample', 'of planned runs accepted at the last sample (not sustained operation)'], retention: ['Retention', 'of runs that ever reached it still accepted at the end']};
+const wilson = (k, n) => { const z = 1.96, p = k / n, d = 1 + z * z / n, c = p + z * z / (2 * n), m = z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)); return [Math.max(0, (c - m) / d), Math.min(1, (c + m) / d)]; };
+const median = values => { const v = values.filter(isNum).sort((a, b) => a - b); return v.length ? (v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : null; };
+const shortId = id => String(id).replace(/-?2026\d{4}-?/, '-').replace(/^-|-$/g, '').replace(/^(.{9}).+$/, '$1…');
+const ptsPct = v => isNum(v) ? `${Math.round(v * 100)}%` : 'unknown';
+function trendModel(data) {
+ const fam = ui.family, metric = ui.trendMetric, wf = ui.trendWindow;
+ const rate = (a, m) => {
+  const planned = a.planned, ever = a.ever?.[m], fin = a.final?.[m], latched = (a.caveats || []).some(x => /latch/i.test(x));
+  if (!Number.isInteger(planned) || planned <= 0) return null;
+  const r = metric === 'ever' ? (isNum(ever) ? {k: ever, n: planned} : null) : metric === 'final' ? (isNum(fin) && !latched ? {k: fin, n: planned} : null) : (isNum(ever) && ever > 0 && isNum(fin) && !latched ? {k: fin, n: ever} : null);
+  if (!r || !Number.isInteger(r.k) || !Number.isInteger(r.n) || r.k < 0 || r.n <= 0 || r.k > r.n) return null;
+  const [lo, hi] = wilson(r.k, r.n); return {...r, p: r.k / r.n, lo, hi};
+ };
+ const windowOf = arms => { const set = new Set(arms.map(a => a.window_max_game_ticks ?? null)); return set.size === 1 ? [...set][0] : arms.length ? 'mixed' : null; };
+ const windows = new Map();
+ const sorted = data.cohorts.filter(c => !UNRANKED_STATUS.has(c.status)).sort((a, b) => (a.date || '').localeCompare(b.date || '') || String(a.id).localeCompare(String(b.id), undefined, {numeric: true}));
+ const rows = sorted.map(c => {
+  const arms = (c.arms || []).filter(a => a.predicate_family === fam);
+  arms.forEach(a => { const w = a.window_max_game_ticks ?? 'unknown'; windows.set(w, (windows.get(w) || 0) + 1); });
+  const use = arms.filter(a => wf === 'all' || String(a.window_max_game_ticks ?? 'unknown') === wf), base = use.filter(a => BASE_ARM.test(a.id)), exp = use.filter(a => !BASE_ARM.test(a.id)), row = {c, base: {}, exp: {}, baseNames: base.map(a => a.id), baseWin: windowOf(base), expWin: windowOf(exp), selectedArms: base.length + exp.length, any: false};
+  const aggregate = (group, m, bestOnly = false) => {
+   const points = group.map(a => ({arm: a.id, source: a, r: rate(a, m)})).filter(a => a.r);
+   if (!points.length) return null;
+   const versions = new Set(points.map(a => a.source.predicate_versions?.[m] ?? null)), windows = new Set(points.map(a => a.source.window_max_game_ticks ?? null));
+   // Different explicit definitions or budgets cannot form one milestone rate.
+   if (versions.size !== 1 || windows.size !== 1) return null;
+   const version = [...versions][0], window = [...windows][0], metadata = version && isNum(window) ? JSON.stringify([fam, version, window]) : null;
+   const best = points.reduce((a, b) => b.r.p > a.r.p ? b : a), selected = bestOnly ? best : points[0];
+   const single = bestOnly || points.length === 1;
+   return {p: single ? selected.r.p : points.reduce((sum, a) => sum + a.r.p, 0) / points.length,
+    ...(single ? selected.r : {}), arms: points, label: single ? selected.arm : 'mean of ' + points.length, metadata, version, window};
+  };
+  TREND_MS.forEach(m => {
+   row.base[m] = aggregate(base, m);
+   row.exp[m] = aggregate(exp, m, ui.trendExp === 'best');
+   if (row.base[m] || row.exp[m]) row.any = true;
+  });
+  return row;
+ }).filter(r => r.selectedArms > 0);
+ return {rows, windows, metric};
+}
+function trendSummary(model, series) {
+ return ui.trendMilestones.filter(m => TREND_MS.includes(m)).map(m => {
+  const groups = new Map();
+  for (const row of model.rows) {
+   const value = row[series][m]; if (!value?.metadata) continue;
+   if (!groups.has(value.metadata)) groups.set(value.metadata, []);
+   groups.get(value.metadata).push({id: row.c.id, ...value});
+  }
+  const list = [...groups.values()].sort((a, b) => b.length - a.length)[0] || [], example = list[0];
+  const qualification = example ? `${example.version} · ${Math.round(example.window / 1000)}k ticks` : 'known window and predicate definition required';
+  if (list.length < 10) return {m, n: list.length, qualification};
+  const prior = list.slice(-10, -5), recent = list.slice(-5), a = median(prior.map(x => x.p)), b = median(recent.map(x => x.p));
+  return {m, n: list.length, qualification, a, b, diff: b - a, prior: prior.map(x => x.id), recent: recent.map(x => x.id)};
+ });
+}
+function trendSummaryHTML(model) {
+ const cell = r => !isNum(r.a) ? `<span class="muted small">${r.n} points with matching known metadata; 10 needed</span><br><span class="meta">${esc(r.qualification)}</span>` : `${ptsPct(r.a)} → <b>${ptsPct(r.b)}</b> <span class="meta">${r.diff >= 0 ? '+' : '−'}${Math.round(Math.abs(r.diff) * 100)} pp</span><br><span class="meta">${esc(r.qualification)}</span><details class="more"><summary>Cohorts used</summary><p class="meta">Previous: ${esc(r.prior.join(', '))}<br>Latest: ${esc(r.recent.join(', '))}</p></details>`;
+ const base = trendSummary(model, 'base'), exp = trendSummary(model, 'exp');
+ const head = ui.trendMilestones.length ? `<div class="scroll"><table class="trend-table"><caption class="visually-hidden">Descriptive medians by recorded definition and tick window</caption><thead><tr><th>Milestone</th><th>Base arms · previous 5 → latest 5 (median)</th><th>${ui.trendExp === 'best' ? 'Best experimental arm' : 'Mean experimental arm'} · previous 5 → latest 5</th></tr></thead><tbody>${base.map((r, i) => `<tr><td><i class="swatch m${r.m.slice(1)}"></i><b>${esc(r.m)}</b></td><td>${cell(r)}</td><td>${cell(exp[i])}</td></tr>`).join('')}</tbody></table></div>` : '';
+ return `<h3 class="trend-h">Recent descriptive rates <span class="muted small">${esc(METRICS[model.metric][0])}</span></h3>${head}<p class="hint">Each cell uses the most populated group with the same known predicate definition and tick window, and requires ten cohort points. It reports medians, not a test of improvement or regression. Policies, seeds, hosts and engine versions can still differ; repeated seeds are not independent replications. Base roles are inferred from names. Mean arms are unweighted summaries, and a best arm is selected after the fact. Use individual cohort reports for matched comparisons.</p>`;
+}
+let trendModelCache = null;
+function renderTrend(data) {
+ const model = trendModel(data); trendModelCache = model;
+ $$('#trend-metric button').forEach(b => b.setAttribute('aria-pressed', b.dataset.metric === ui.trendMetric));
+ $$('#trend-exp button').forEach(b => b.setAttribute('aria-pressed', b.dataset.texp === ui.trendExp));
+ $('trend-ci').checked = ui.trendCI;
+ const counts = [...model.windows.entries()].sort((a, b) => b[1] - a[1]);
+ setHTML($('trend-window'), `<option value="all">All windows (metadata changes are dotted)</option>${counts.map(([w, n]) => `<option value="${esc(w)}">${isNum(w) ? Math.round(w / 1000) + 'k ticks' : 'window unknown'} · ${n} arms</option>`).join('')}`);
+ $('trend-window').value = ui.trendWindow;
+ const has = m => model.rows.some(r => r.base[m] || r.exp[m]);
+ setHTML($('trend-legend'), `<span class="static">Milestones</span>${TREND_MS.map(m => `<button type="button" class="m${m.slice(1)}" data-tm="${m}" aria-pressed="${ui.trendMilestones.includes(m)}" ${has(m) ? '' : 'disabled title="No data for this selection"'}><i></i>${m}</button>`).join('')}`);
+ setHTML($('trend-summary'), model.rows.length >= 2 ? trendSummaryHTML(model) : '');
+ $('trend-hint').innerHTML = `${esc(METRICS[ui.trendMetric][0])} = % ${esc(METRICS[ui.trendMetric][1])}. <strong>Solid</strong> segments share a known tick window and predicate definition; <strong>dotted</strong> segments have differing or unknown metadata. Neither establishes a matched comparison. Hollow markers have missing window or definition metadata. Mixed definitions/windows are not averaged into one point. Means use reported arms only, so composition can change. Base roles are inferred from names; missing roles and counts remain gaps. Individual arm binomial ranges assume independent runs; repeated seeds and early stopping can make them optimistic. ${ui.trendExp === 'best' ? 'Best arm is chosen after the fact and overstates a typical experiment. ' : ''}${ui.family === 'proxy' ? 'Proxy rates only cover one early campaign, so there is no trend. ' : ''}`;
+ drawTrend(model);
+}
+function drawTrend(model = trendModelCache) {
+ const host = $('trend-chart'); if (!model || ui.tab !== 'history' || ui.historyView !== 'trend') return;
+ const rows = model.rows, shown = ui.trendMilestones.filter(m => TREND_MS.includes(m));
+ if (rows.filter(r => r.any).length < 2) return setHTML(host, '<div class="empty"><strong>Not enough cohorts to draw a trend</strong>This selection has fewer than two cohorts with a numeric value. Choose another family, window or metric.</div>');
+ if (!shown.length) return setHTML(host, '<div class="empty"><strong>No milestone selected</strong>Turn on at least one milestone above.</div>');
+ const n = rows.length, left = 44, right = 12, step = Math.max(13, Math.min(34, ((host.clientWidth || 800) - left - right) / n)), W = Math.max(host.clientWidth || 800, left + right + n * 13), pw = W - left - right, px = Math.max(6, pw / n), x = i => left + (i + 0.5) * px;
+ const winOrder = [...model.windows.entries()].filter(([w]) => isNum(w)).sort((a, b) => b[1] - a[1]).map(([w]) => w), winFill = w => isNum(w) ? ['var(--g-search)', 'var(--g-ups)', 'var(--g-thermal)', 'var(--g-memory)'][Math.min(3, winOrder.indexOf(w))] : 'var(--g-nodata)';
+ const off = m => (shown.indexOf(m) - (shown.length - 1) / 2) * Math.min(3, px / 8), tickEvery = Math.max(1, Math.ceil(16 / px));
+ const panel = (series, title, H) => {
+  const top = 8, ph = H - top - 6, y = p => top + ph - p * ph, winOf = r => series === 'base' ? r.baseWin : r.expWin;
+  const grid = [0, .25, .5, .75, 1].map(v => `<line class="grid" x1="${left}" x2="${W - right}" y1="${y(v)}" y2="${y(v)}"/><text x="${left - 6}" y="${y(v) + 4}" text-anchor="end">${v * 100}%</text>`).join('');
+  const lines = shown.map(m => {
+   let path = '', segs = [], marks = '', whisk = '', prev = null;
+   rows.forEach((r, i) => {
+    const v = r[series][m]; if (!v) { prev = null; return; }
+    const cx = x(i) + off(m), cy = y(v.p), w = winOf(r), known = Boolean(v.metadata);
+    if (prev) { const like = prev.metadata && prev.metadata === v.metadata; segs.push(`<path class="ln m${m.slice(1)}${like ? '' : ' dotted'}" d="M${prev.cx.toFixed(1)},${prev.cy.toFixed(1)}L${cx.toFixed(1)},${cy.toFixed(1)}"/>`); }
+    marks += `<circle class="dot m${m.slice(1)}${known ? '' : ' hollow'}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${px < 10 ? 2.6 : 3.4}"/>`;
+    if (ui.trendCI && series === 'base' && isNum(v.lo)) whisk += `<line class="whisker m${m.slice(1)}" x1="${cx.toFixed(1)}" x2="${cx.toFixed(1)}" y1="${y(v.lo).toFixed(1)}" y2="${y(v.hi).toFixed(1)}"/>`;
+    if (v.arms.length > 1 && (series === 'base' || ui.trendExp === 'mean')) v.arms.forEach(a => { marks += `<circle class="armdot m${m.slice(1)}" cx="${cx.toFixed(1)}" cy="${y(a.r.p).toFixed(1)}" r="1.6"/>`; });
+    prev = {cx, cy, w, metadata: v.metadata};
+   });
+   return whisk + segs.join('') + marks;
+  }).join('');
+  return `<div class="cp"><div class="cp-head"><h3>${esc(title)}</h3></div><svg class="tsvg" data-series="${series}" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true">${grid}${lines}<g class="hl"></g></svg></div>`;
+ };
+ const lane = `<div class="band-label" style="margin-left:${left}px">Tick window per cohort</div><svg width="${W}" height="12" aria-hidden="true">${rows.map((r, i) => { const w = r.baseWin ?? r.expWin; return `<rect x="${x(i) - px / 2 + 0.5}" y="0" width="${Math.max(1, px - 1)}" height="10" fill="${winFill(w === 'mixed' ? null : w)}"${w === 'mixed' || !isNum(w) ? ' opacity=".55"' : ''}/>`; }).join('')}</svg><div class="reasons" style="margin:4px 0 0 ${left}px">${winOrder.map(w => `<span><i style="background:${winFill(w)}"></i>${Math.round(w / 1000)}k ticks</span>`).join('')}<span><i style="background:var(--g-nodata)"></i>unknown / mixed</span></div>`;
+ const labelY = 62, axis = `<svg width="${W}" height="${labelY}" aria-hidden="true">${rows.map((r, i) => i % tickEvery === 0 ? `<line class="axis" x1="${x(i)}" x2="${x(i)}" y1="0" y2="4"/><text transform="translate(${x(i) + 3},9) rotate(60)" text-anchor="start">${esc(shortId(r.c.id))}</text>` : '').join('')}</svg>`;
+ const old = host.querySelector('.trend-scroll'), pinned = !old || old.scrollLeft + old.clientWidth >= old.scrollWidth - 4, keepLeft = old?.scrollLeft;
+ setHTML(host, `<div class="scroll trend-scroll"><div class="trend-stack" tabindex="0" role="group" aria-label="Cohort trend. Hover or use the left and right arrow keys to inspect cohorts." style="width:${W}px">${panel('base', 'Base arms (name-inferred; dots = individual arms)', 170)}${panel('exp', ui.trendExp === 'best' ? 'Experimental arms · best arm per cohort' : 'Experimental arms · mean of arms (dots = individual arms)', 170)}${lane}${axis}<div class="tip" hidden></div></div></div><div class="visually-hidden" id="trend-live" aria-live="polite"></div>`);
+ const scroller = host.querySelector('.trend-scroll'); if (scroller) scroller.scrollLeft = pinned ? scroller.scrollWidth : keepLeft; // newest cohorts stay in view
+ trendGeom = {x, off, left, W, px, n, rows, shown, idx: -1};
+}
+let trendGeom = null;
+function trendInspect(i, py) {
+ const g = trendGeom, stack = $('trend-chart').querySelector('.trend-stack'); if (!g || !stack) return;
+ const r = g.rows[i], tip = stack.querySelector('.tip'), cx = g.x(i), yOf = p => 8 + 156 * (1 - p);
+ stack.classList.add('hover');
+ $$('.tsvg', stack).forEach(svg => { const series = svg.dataset.series; svg.querySelector('.hl').innerHTML = `<line class="cursor" x1="${cx}" x2="${cx}" y1="0" y2="170"/>` + g.shown.filter(m => r[series][m]).map(m => `<circle class="cursor-dot m${m.slice(1)}" cx="${(cx + g.off(m)).toFixed(1)}" cy="${yOf(r[series][m].p).toFixed(1)}" r="5"/>`).join(''); });
+ const f = v => v ? `${v.k !== undefined ? `${v.k}/${v.n} = ` : ''}${ptsPct(v.p)}${v.lo !== undefined ? ` <span class="mut">(nominal 95% ${Math.round(v.lo * 100)}–${Math.round(v.hi * 100)}%)</span>` : ''}` : '<span class="mut">unknown</span>';
+ const winTxt = w => isNum(w) ? `${Math.round(w / 1000)}k ticks` : w === 'mixed' ? 'mixed windows' : 'window unknown';
+ const rowsHTML = (series, name) => `<tr><th colspan="2">${name}${series === 'base' ? (r.baseNames.length ? ` · ${esc(r.baseNames.join(', '))}` : ' · none in this cohort') : ''} <span class="mut">· ${winTxt(series === 'base' ? r.baseWin : r.expWin)}</span></th></tr>${g.shown.map(m => {
+  const v = r[series][m];
+  return `<tr><td><i class="m${m.slice(1)}"></i>${m}</td><td>${v ? `${f(v)} <span class="mut">(${esc(v.label)}; ${esc(v.version ?? 'definition unknown')})</span><div class="mut">${v.arms.map(a => `${esc(a.arm)}: ${a.r.k}/${a.r.n} · ${esc(tail(a.source.commit, 9) || 'commit unknown')} · eligible ${esc(a.source.comparison_eligible ?? 'unknown')}`).join('<br>')}</div>` : '<span class="mut">unknown or mixed metadata</span>'}</td></tr>`;
+ }).join('')}`;
+ const armsLine = Object.values(r.exp)[0]?.arms?.map(a => esc(a.arm)).join(', ');
+ tip.innerHTML = `<h4>${esc(r.c.id)} · ${esc(r.c.date)}</h4><div class="mut">${esc(String(r.c.status).replace(/_/g, ' '))}${armsLine ? ' · arms: ' + armsLine : ''}</div><table>${rowsHTML('base', 'Base')}${rowsHTML('exp', ui.trendExp === 'best' ? 'Best experimental' : 'Experimental mean')}</table>`;
+ tip.hidden = false; const w = tip.offsetWidth, h = tip.offsetHeight, sw = stack.clientWidth;
+ tip.style.left = Math.max(0, Math.min(sw - w, cx + 16 + w > sw ? cx - w - 16 : cx + 16)) + 'px'; tip.style.top = Math.max(0, (py ?? 40) - h / 2) + 'px'; g.idx = i;
+ return r;
+}
+function trendLeave() { const stack = $('trend-chart').querySelector('.trend-stack'); if (!stack) return; stack.classList.remove('hover'); stack.querySelector('.tip').hidden = true; $$('.hl', stack).forEach(h => h.innerHTML = ''); if (trendGeom) trendGeom.idx = -1; }
+function trendMove(event) {
+ const g = trendGeom, stack = event.target.closest?.('.trend-stack'); if (!g || !stack) return;
+ const rect = stack.getBoundingClientRect(), px = event.clientX - rect.left, py = event.clientY - rect.top;
+ if (px < g.left || px > g.W || event.target.closest('.cp-head')) return trendLeave();
+ trendInspect(Math.max(0, Math.min(g.n - 1, Math.floor((px - g.left) / g.px))), py);
+}
+function trendKey(event) {
+ const g = trendGeom; if (!g || !event.target.matches?.('.trend-stack')) return;
+ if (event.key === 'Escape') return trendLeave();
+ const d = {ArrowLeft: -1, ArrowRight: 1, Home: -Infinity, End: Infinity}[event.key]; if (d === undefined) return; event.preventDefault();
+ const next = Math.max(0, Math.min(g.n - 1, g.idx < 0 ? g.n - 1 : isFinite(d) ? g.idx + d : d < 0 ? 0 : g.n - 1)), r = trendInspect(next, 60);
+ $('trend-live').textContent = `${r.c.id}: ${g.shown.map(m => `${m} base ${r.base[m] ? ptsPct(r.base[m].p) : 'unknown'}, experimental ${r.exp[m] ? ptsPct(r.exp[m].p) : 'unknown'}`).join('; ')}`;
+}
+
 // ---------------------------------------------------------------- run inspector
 const SERIES = [['Policy', 'policy_seconds', 'var(--c-p95)'], ['Executor', 'executor_seconds', 'var(--c-target)'], ['Model client', 'model_client_seconds', 'var(--c-total)'], ['Decision interval (includes waits)', 'decision_interval_seconds', 'var(--c-cap)']];
 async function inspectRun(cohort, run) {
@@ -550,6 +702,10 @@ document.addEventListener('click', event => {
  if (d.panel) { ui.panels = ui.panels.includes(d.panel) ? ui.panels.filter(p => p !== d.panel) : [...ui.panels, d.panel]; persistUi(); return drawPerformance(); }
  if (d.series) { ui.hiddenSeries = ui.hiddenSeries.includes(d.series) ? ui.hiddenSeries.filter(s => s !== d.series) : [...ui.hiddenSeries, d.series]; persistUi(); return drawPerformance(); }
  if (d.state) { ui.registryState = d.state; registryShown = 15; persistUi(); return renderJobs(); }
+ if (d.hview) { ui.historyView = d.hview; persistUi(); return renderHistory(); }
+ if (d.metric) { ui.trendMetric = d.metric; persistUi(); return renderHistory(); }
+ if (d.texp) { ui.trendExp = d.texp; persistUi(); return renderHistory(); }
+ if (d.tm) { ui.trendMilestones = ui.trendMilestones.includes(d.tm) ? ui.trendMilestones.filter(m => m !== d.tm) : [...ui.trendMilestones, d.tm]; persistUi(); return renderHistory(); }
  if (d.family) { ui.family = d.family; persistUi(); historyShown = 14; return renderHistory(); }
  if (d.milestone) { ui.milestone = d.milestone; persistUi(); return renderHistory(); }
  if (d.moreLive !== undefined) { liveShown = 999; return renderLive(); }
@@ -606,6 +762,8 @@ document.addEventListener('toggle', event => {
  openState.set(key, element.open);
  if (key.startsWith('review:') && element.open) loadNotes(key.slice(7)); else if (key.startsWith('cohort:')) renderJobs();
 }, true);
+$('trend-window').addEventListener('change', event => { ui.trendWindow = event.target.value; persistUi(); renderHistory(); });
+$('trend-ci').addEventListener('change', event => { ui.trendCI = event.target.checked; persistUi(); renderHistory(); });
 document.addEventListener('change', event => { if (event.target.dataset?.jobfilter) { jobFilter.set(event.target.dataset.jobfilter, event.target.value); pageSize.delete(event.target.dataset.jobfilter); renderJobs(); } });
 document.addEventListener('input', event => {
  const form = event.target.closest?.('.note-form'); if (!form) return;
@@ -624,6 +782,10 @@ document.addEventListener('submit', event => {
   notesState.delete(key); return r;
  }, 'Review saved.').then(ok => { if (ok) loadNotes(key); });
 });
+const trendHost = $('trend-chart');
+trendHost.addEventListener('pointermove', trendMove); trendHost.addEventListener('pointerleave', trendLeave); trendHost.addEventListener('keydown', trendKey); trendHost.addEventListener('blur', trendLeave, true);
+let trendFrame = 0, trendWidth = 0;
+new ResizeObserver(() => { const width = Math.round(trendHost.clientWidth); if (!width || Math.abs(width - trendWidth) < 3) return; trendWidth = width; cancelAnimationFrame(trendFrame); trendFrame = requestAnimationFrame(() => { trendHost._html = null; drawTrend(); }); }).observe(trendHost);
 const chartHost = $('chart');
 chartHost.addEventListener('pointermove', onChartMove); chartHost.addEventListener('pointerleave', leaveChart); chartHost.addEventListener('keydown', onChartKey); chartHost.addEventListener('blur', leaveChart, true);
 let resizeFrame = 0, lastWidth = 0;

@@ -121,14 +121,33 @@
 
 <div id="view-history" role="tabpanel" aria-labelledby="tab-history" class="view" hidden>
  <section id="history" class="panel" aria-labelledby="history-h">
-  <div class="heading"><h2 id="history-h">Curated cohort results</h2><p class="sub" id="history-sub">Reviewed findings only, not a registry dump.</p></div>
+  <div class="heading"><h2 id="history-h">Curated cohort history</h2><p class="sub" id="history-sub">Reviewed findings only, not a registry dump.</p></div>
   <div class="toolbar wrap">
+   <div class="segmented" role="group" aria-label="History view" id="history-view"><button type="button" data-hview="trend" aria-pressed="true">Trend across cohorts</button><button type="button" data-hview="results" aria-pressed="false">Cohort results</button></div>
    <div class="segmented" role="group" aria-label="Predicate family" id="family"><button type="button" data-family="strict" aria-pressed="true">Strict checkpoints</button><button type="button" data-family="proxy" aria-pressed="false">Laya rate proxies</button></div>
-   <div class="segmented" role="group" aria-label="Milestone" id="milestone-seg"></div>
-   <label class="inline">Search <input id="history-filter" type="search" placeholder="Cohort or arm" autocomplete="off"></label>
-   <label class="inline check"><input type="checkbox" id="unranked"> Show unranked rows</label>
   </div>
-  <div id="milestones"><div class="skeleton" style="height:100px"></div></div>
+
+  <div id="trend-view">
+   <div class="toolbar wrap">
+    <div class="segmented" role="group" aria-label="Trend metric" id="trend-metric"><button type="button" data-metric="ever" aria-pressed="true" title="Share of planned runs that ever reached the milestone">Reached</button><button type="button" data-metric="final" aria-pressed="false" title="Share of planned runs accepted at the last sample, not sustained operation">Final sample</button><button type="button" data-metric="retention" aria-pressed="false" title="Of the runs that ever reached it, the share still accepted at the end">Retention</button></div>
+    <label class="inline">Tick window <select id="trend-window"></select></label>
+    <div class="segmented" role="group" aria-label="Experimental summary" id="trend-exp"><button type="button" data-texp="mean" aria-pressed="true" title="Unweighted mean over the experimental arms of each cohort">Mean arm</button><button type="button" data-texp="best" aria-pressed="false" title="Best arm per cohort: optimistic, selected after the fact">Best arm</button></div>
+    <label class="inline check"><input type="checkbox" id="trend-ci" title="Single base-arm binomial ranges only; multiple base arms are not pooled"> Nominal 95% base ranges</label>
+   </div>
+   <div class="legend" id="trend-legend" role="group" aria-label="Milestones shown"></div>
+   <div id="trend-chart" class="chart-host"><div class="skeleton" style="height:300px"></div></div>
+   <p class="hint" id="trend-hint"></p>
+   <div id="trend-summary"></div>
+  </div>
+
+  <div id="results-view" hidden>
+   <div class="toolbar wrap">
+    <div class="segmented" role="group" aria-label="Milestone" id="milestone-seg"></div>
+    <label class="inline">Search <input id="history-filter" type="search" placeholder="Cohort or arm" autocomplete="off"></label>
+    <label class="inline check"><input type="checkbox" id="unranked"> Show unranked rows</label>
+   </div>
+   <div id="milestones"><div class="skeleton" style="height:100px"></div></div>
+  </div>
  </section>
 </div>
 </main>
@@ -139,7 +158,7 @@
   <li><strong>Strict and proxy are different families.</strong> A proxy phase can be reached while strict checkpoints fail; never read them together.</li>
   <li><strong>Predicate versions differ.</strong> Strict C6 v1, ops-Laya v2 and candidate v3 are different predicates. A missing version or eligibility is shown as unknown, never as a pass.</li>
   <li><strong>Ever and final are distinct snapshots.</strong> Early finals may be latched and are then unknown. Pending, invalid and no-start rows are unranked. Unknown is <code>null</code>, not zero.</li>
-  <li><strong>No pooling.</strong> Cohorts differ in seeds, engine, tick windows and host; they are not matched replications or a trend. Attempts and retries are separate.</li>
+  <li><strong>No pooling.</strong> Cohorts differ in seeds, engine, tick windows and host. Chronological charts are descriptive, not matched replications or evidence of improvement. Attempts and retries are separate.</li>
   <li><strong>Counters are partial.</strong> A zero failure counter does not mean zero typed tool faults. Notes are user observations, never learning truth.</li>
   <li><strong>Run ports come from world manifests</strong>, not a verified network route. A UDP listener, matching Factorio version and matching mods are required. An SSH TCP tunnel does not forward Factorio UDP.</li>
   <li>Local-only dashboard: no RCON credentials, no automatic joins or syncs. Historical index: <code>docs/rl/Laya_Cohort_Results_Index.md</code></li>
