@@ -969,7 +969,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             break
         economics = session.economics() if hasattr(session, "economics") else None
         adapter.extra_recipes = (*recipe_demand(results, economics),
-                                 *sorted(consumer_recipes(previous_service_facts or {})))
+                                 *sorted(consumer_recipes(previous_service_facts or {}, enabled_only=True)))
         reports = None
         if objective:
             reports = collect_research_reports(session.bridge, surface="nauvis", force="player", requested=settings.research_target)
@@ -978,9 +978,10 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         facts = adapter.query()
         # Ask the existing survey for the consumer recipes' ordinary item closure.
         # The full catalog identifies alternatives; the bounded recipe map may omit them.
-        consumers = consumer_recipes(facts)
-        missing = {name for name in consumers if facts["recipe_observations"][name].get("enabled")
-                   and name not in facts.get("recipes", {}) and name not in facts.get("enabled_recipes", {})}
+        # Only enabled consumer recipes are worth surveying for their item closure.
+        consumers = consumer_recipes(facts, enabled_only=True)
+        missing = {name for name in consumers
+                   if name not in facts.get("recipes", {}) and name not in facts.get("enabled_recipes", {})}
         if missing - set(adapter.extra_recipes):
             adapter.extra_recipes = tuple(sorted(set(adapter.extra_recipes) | consumers))
             facts = adapter.query()

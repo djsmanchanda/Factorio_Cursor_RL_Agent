@@ -284,6 +284,18 @@ def configuration_actions(plan):
             if CONFIGURATION_FIELDS.intersection(a)]
 
 
+def normalize_lua_lists(value: dict) -> dict:
+    """Lua serializes an empty list as {}; restore the arrays the facts contract declares."""
+    for key in ("ports", "poles", "machines", "resources"):
+        if value.get(key) == {}:
+            value[key] = []
+    # An ingredient-free recipe (2.1.24's biter-egg, reached through consumer closures) is still a recipe.
+    for recipe in (value.get("recipes") or {}).values():
+        if recipe.get("ingredients") == {}:
+            recipe["ingredients"] = []
+    return value
+
+
 class SavedWorldAdapter:
     runtime = "disposable_saved_world"
     surface = "nauvis"
@@ -368,9 +380,7 @@ class SavedWorldAdapter:
                     value["validations"][candidate["option_id"]] = {"reason": reason}
         if candidates is None and inspect is None:
             value["quad_centers"] = centers
-            for key in ("ports", "poles", "machines", "resources"):
-                if value.get(key) == {}:
-                    value[key] = []
+            normalize_lua_lists(value)
             errors = list(FACTS_VALIDATOR.iter_errors(value))
             if errors:
                 raise SavedWorldError(f"saved-world facts violate their contract: {errors[0].message}")

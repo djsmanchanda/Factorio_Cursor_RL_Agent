@@ -149,11 +149,12 @@ def ops_phase_reached(phase: Mapping, board: Mapping, c6: Mapping) -> bool:
 CONSUMER_VERSION = "laya-c6-choice-output-v3"
 
 
-def consumer_recipes(facts: Mapping) -> set[str]:
+def consumer_recipes(facts: Mapping, *, enabled_only: bool = False) -> set[str]:
     """Observed recipe facts, without prescribing which consumer to choose."""
     return {name for name, recipe in (facts.get("recipe_observations") or {}).items()
-            if any(p.get("type") == "item" and p.get("name") == ITEM
-                   for p in recipe.get("ingredients", ()))}
+            if (recipe.get("enabled") or not enabled_only)
+            and any(p.get("type") == "item" and p.get("name") == ITEM
+                    for p in recipe.get("ingredients", ()))}
 
 
 class LayaC6ConsumerAcceptance:

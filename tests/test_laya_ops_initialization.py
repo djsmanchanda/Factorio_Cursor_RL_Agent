@@ -230,3 +230,17 @@ def test_live_world_patches_every_anchor_of_the_shipped_saved_world_helper():
     for anchor in (live.PAUSED_ASSERTION, live.RECIPE_LIST_END, live.RECIPE_LINE, live.COLLISION_RETURN):
         assert source.count(anchor) == 1, anchor
     assert live.RECIPE_LINE_LIVE.startswith(live.RECIPE_LINE[:-len(" end")])
+
+
+def test_an_ingredient_free_recipe_survives_lua_serialization():
+    # C46b-2124: biter-egg's empty ingredient list arrived as {} and failed every consumer run's first query.
+    import json
+    from pathlib import Path
+    from jsonschema import Draft7Validator
+    from training.laya_saved_world import normalize_lua_lists
+    schema = json.loads(Path("schemas/laya_saved_world.schema.json").read_text())
+    recipes = Draft7Validator(schema["properties"]["recipes"])
+    value = {"machines": {}, "recipes": {"biter-egg": {"ingredients": {}, "product_amount": 5, "energy_ticks": 600}}}
+    assert not recipes.is_valid(value["recipes"])
+    normalize_lua_lists(value)
+    assert value["machines"] == [] and recipes.is_valid(value["recipes"])
