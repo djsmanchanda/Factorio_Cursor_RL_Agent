@@ -103,8 +103,10 @@ RECIPE_LIST_END = '"chemical-plant","oil-refinery","pumpjack"}'
 EXTRA_RECIPES = ("big-electric-pole", "iron-stick", "fast-inserter")  # fast-inserter: line output taps
 # Idle furnaces return no current recipe; report the previous one so built-but-starved
 # furnaces stay attributed to their product.
-RECIPE_LINE = 'if e.type~="mining-drill" then local recipe=e.get_recipe(); m.recipe=recipe and recipe.name end'
+RECIPE_LINE = ('if e.type~="mining-drill" then local recipe=e.get_recipe(); m.recipe=recipe and recipe.name; '
+               'm.products_finished=e.products_finished end')
 RECIPE_LINE_LIVE = ('if e.type~="mining-drill" then local recipe=e.get_recipe(); m.recipe=recipe and recipe.name; '
+                    'm.products_finished=e.products_finished; '
                     'if not m.recipe and e.type=="furnace" then local ok,prev=pcall(function() return e.previous_recipe end); '
                     'if ok and prev then local n=prev.name; if type(n)~="string" then n=n and n.name end; m.recipe=n end end end')
 COLLISION_RETURN = 'then return "collision" end'

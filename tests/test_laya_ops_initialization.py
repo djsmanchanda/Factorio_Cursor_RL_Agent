@@ -220,3 +220,13 @@ def test_reopening_restores_district_space_and_reconciles_only_measured_work(wor
 
     assert builder._REFINERY_SITE_RESERVATIONS[("nauvis", "player", "iron-plate")] == ((20, 30), (22, 31))
     assert builder._BOOTSTRAP_WORK_LEDGER.edges == {"steel-plate": {"copper-plate": "still missing"}}
+
+
+def test_live_world_patches_every_anchor_of_the_shipped_saved_world_helper():
+    # A runner fails at startup when the helper's text moves under a live patch (C46-2124: 22 instant runner_errors).
+    from pathlib import Path
+    from training import laya_clean_runner as live
+    source = Path("training/laya_saved_world.lua").read_text()
+    for anchor in (live.PAUSED_ASSERTION, live.RECIPE_LIST_END, live.RECIPE_LINE, live.COLLISION_RETURN):
+        assert source.count(anchor) == 1, anchor
+    assert live.RECIPE_LINE_LIVE.startswith(live.RECIPE_LINE[:-len(" end")])
