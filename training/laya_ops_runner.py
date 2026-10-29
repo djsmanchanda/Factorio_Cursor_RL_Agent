@@ -753,8 +753,11 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                 and plates_in(item, recipes or {}) <= started):
             demand = demands.setdefault(item, {"target": 1, "missing": 0, "parents": []})
             demand["capability"] = True
+    # Offer only consumers the deterministic builder can make: its live recipe table, checked at call time
+    # (C46c: enabled, obtainable beacon/tank options failed 115 times with "No recipe knowledge").
+    from planners.recipe_data import LINE_RECIPES as builder_recipes
     for item in sorted(consumers):
-        if (item in (recipes or {}) and plates_in(item, recipes or {}) <= started
+        if (item in builder_recipes and item in (recipes or {}) and plates_in(item, recipes or {}) <= started
                 and obtainable(recipes, item, stock or {})
                 and (enabled_recipes is None or enabled_recipes.get(item))):
             demand = demands.setdefault(item, {"target": int((stock or {}).get(item, 0)) + 1,

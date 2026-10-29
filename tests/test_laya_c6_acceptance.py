@@ -277,7 +277,8 @@ def test_v3_rejects_consumer_identity_recipe_and_counter_confounds(confound):
         assert c6.observe(consumer_facts(130, 10, 7))["status"] == "failed"
 
 
-def test_c6_consumer_goal_recovers_wait_only_menu_without_fixed_consumer():
+def test_c6_consumer_goal_recovers_wait_only_menu_without_fixed_consumer(monkeypatch):
+    from planners import recipe_data
     from training.laya_phase_acceptance import consumer_goal, CONSUMER_VERSION
     from training.laya_ops_runner import compile_options
     from training.laya_mission import phase
@@ -286,6 +287,8 @@ def test_c6_consumer_goal_recovers_wait_only_menu_without_fixed_consumer():
     sample["recipe_observations"]["another"] = copy.deepcopy(sample["recipe_observations"]["consumer"])
     recipes = {i: {"ingredients": [{"name": ITEM, "amount": 1}], "product_amount": 1, "energy_ticks": 60}
                for i in ("consumer", "another")}
+    for item in ("consumer", "another"):
+        monkeypatch.setitem(recipe_data.LINE_RECIPES, item, {"ingredients": [ITEM], "amounts": [1]})
     results = [{"ok": True, "operation": "reserve_steel_seed", "params": {}}]
     assert all(o["family"] == "wait" for o in compile_options(board, results, recipes=recipes, stock={ITEM: 20})["options"])
     consumer_goal(board, phase("C6"), {"version": CONSUMER_VERSION}, sample)
@@ -360,8 +363,10 @@ def test_consumer_progress_before_ac_output_survives_wait_choices():
 
 def test_runner_requests_catalog_consumer_closure_and_projects_goal(tmp_path, monkeypatch):
     import training.laya_ops_runner as runner
+    from planners import recipe_data
     from training.laya_mission import phase
     monkeypatch.setattr(runner, "current_phase", lambda reached: phase("C6"))
+    monkeypatch.setitem(recipe_data.LINE_RECIPES, "consumer", {"ingredients": [ITEM], "amounts": [1]})
 
     class World:
         root = None
@@ -395,3 +400,23 @@ def test_runner_requests_catalog_consumer_closure_and_projects_goal(tmp_path, mo
     runner.run(world, Policy(), journal=tmp_path / "journal.jsonl", decisions=1,
                measure_ticks=600, seed=1, run_id="catalog", session=Session())
     assert "consumer" in world.extra_recipes
+
+
+def test_consumer_goal_offers_only_consumers_the_builder_can_make(monkeypatch):
+    # C46c: enabled, obtainable beacon and tank were offered and failed 115 times with "No recipe knowledge".
+    from planners import recipe_data
+    from training.laya_phase_acceptance import consumer_goal, CONSUMER_VERSION
+    from training.laya_ops_runner import compile_options
+    from training.laya_mission import phase
+    board = {"needs": []}
+    sample = consumer_facts()
+    sample["recipe_observations"]["beacon"] = copy.deepcopy(sample["recipe_observations"]["consumer"])
+    recipes = {i: {"ingredients": [{"name": ITEM, "amount": 1}], "product_amount": 1, "energy_ticks": 60}
+               for i in ("consumer", "beacon")}
+    monkeypatch.setitem(recipe_data.LINE_RECIPES, "consumer", {"ingredients": [ITEM], "amounts": [1]})
+    monkeypatch.delitem(recipe_data.LINE_RECIPES, "beacon", raising=False)
+    consumer_goal(board, phase("C6"), {"version": CONSUMER_VERSION}, sample)
+    assert {"consumer", "beacon"} <= set(board["consumer_goal"]["recipes"])  # still observed as a fact
+    options = compile_options(board, [{"ok": True, "operation": "reserve_steel_seed", "params": {}}],
+                              recipes=recipes, stock={ITEM: 20})["options"]
+    assert {o["product"] for o in options if o["family"] == "produce"} == {"consumer"}
