@@ -124,6 +124,18 @@ def test_layout_authorization_derives_only_required_mutation_contracts() -> None
     assert "remove_entities" not in entity["approved_actions"]
 
 
+def test_layout_authorization_preserves_explicit_scope_and_rejects_incomplete_scope() -> None:
+    from planners.sandbox_infrastructure import build_layout_authorization
+
+    scope = {"surface": "training/a", "force": "training-a", "max_count": 1}
+    authorization = build_layout_authorization([_single_action_plan("place_ghost")], scope_limits=scope)
+    assert authorization["scope_limits"] == scope
+    with pytest.raises(ValueError, match="ExecutionAuthorization validation FAILED"):
+        build_layout_authorization([_single_action_plan("place_ghost")], scope_limits={"surface": "training/a"})
+    with pytest.raises(ValueError, match="cannot enforce block_filter"):
+        build_layout_authorization([_single_action_plan("place_ghost")], scope_limits={"block_filter": ["a"]})
+
+
 
 def test_sequential_compositions_share_one_canonical_connected_backbone() -> None:
     from planners.local_layout_planner import LocalLayoutPlanner

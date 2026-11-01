@@ -24,6 +24,9 @@ SCAFFOLD_REPORT_SUBDIR = Path("factorio_mod") / "scaffold_reports"
 ORE_SEED_REPORT_SUBDIR = Path("factorio_mod") / "ore_seed_reports"
 WATER_SEED_REPORT_SUBDIR = Path("factorio_mod") / "water_seed_reports"
 LAYOUT_REPORT_SUBDIR = Path("factorio_mod") / "layout_reports"
+# Must match the correlated executor's command-parameter limit in layout_executor.lua.
+LAYOUT_REQUEST_MAX_BYTES = 262144
+SHARED_OPTIMIZER_TAG_PROTOCOL = "optimizer-shared-tags-v1"
 LIVE_EXECUTION_REPORT_SUBDIR = Path("factorio_mod") / "live_execution_reports"
 RESEARCH_REPORT_SUBDIR = Path("factorio_mod") / "research_reports"
 SCIENCE_REPORT_SUBDIR = Path("factorio_mod") / "science_reports"
@@ -34,6 +37,8 @@ LOGISTIC_INVENTORY_REPORT_SUBDIR = Path("factorio_mod") / "logistic_inventory_re
 TOPOLOGY_REPORT_SUBDIR = Path("factorio_mod") / "topology_reports"
 RECIPE_CATALOG_SUBDIR = Path("factorio_mod") / "recipe_catalogs"
 RUNTIME_CATALOG_SUBDIR = Path("factorio_mod") / "runtime_catalogs"
+RESEARCH_LAB_OWNERSHIP_SUBDIR = Path("factorio_mod") / "research_lab_ownership"
+OPTIMIZER_BUILD_EVIDENCE_SUBDIR = Path("factorio_mod") / "optimizer_build_evidence"
 OPTIMIZER_CONSUMER_OBSERVATION_SUBDIR = Path("factorio_mod") / "optimizer_consumer_observations"
 
 # The mod writes one tick-stamped JSON per command and never removes any, while
@@ -240,7 +245,15 @@ class GameBridge:
     def export_ghost_observation(self, timeout: float = 120.0) -> Path:
         return self._run_and_collect("/export_ghost_observation", GHOST_OBSERVATION_SUBDIR, timeout)
 
+    @staticmethod
+    def _reject_uncorrelated_shared_tags(plan) -> None:
+        # Executors without the correlated protocol ignore plan-level tags and
+        # would place untagged ghosts, so shared tags never take this path.
+        if isinstance(plan, dict) and "optimizer_ownership" in plan:
+            raise ValueError("shared optimizer tags require a correlated layout request")
+
     def execute_ghost_plan(self, authorization: dict, ghost_plan: dict, timeout: float = 120.0) -> Path:
+        self._reject_uncorrelated_shared_tags(ghost_plan)
         payload = json.dumps({"authorization": authorization, "ghost_plan": ghost_plan}, separators=(",", ":"))
         return self._run_and_collect(f"/execute_ghost_plan {payload}", EXECUTION_REPORT_SUBDIR, timeout)
 
@@ -319,8 +332,161 @@ class GameBridge:
         return self._run_and_collect(f"/seed_water_lakes {body}", WATER_SEED_REPORT_SUBDIR, timeout)
 
     def build_layout(self, authorization: dict, build_plan: dict, timeout: float = 120.0) -> Path:
+        self._reject_uncorrelated_shared_tags(build_plan)
         body = json.dumps({"authorization": authorization, "build_plan": build_plan}, separators=(",", ":"))
         return self._run_and_collect(f"/build_layout_plan {body}", LAYOUT_REPORT_SUBDIR, timeout)
+
+    @staticmethod
+    def _validate_optimizer_tag_bytes(tags):
+        """Match the executor's UTF-8 byte limits before allocating a request ID."""
+        if not isinstance(tags, dict) or set(tags) != {
+            "optimizer_episode", "optimizer_project", "optimizer_transaction", "optimizer_plan_hash"
+        }:
+            raise ValueError("optimizer ownership tags are invalid")
+        for field in ("optimizer_episode", "optimizer_project"):
+            value = tags[field]
+            try:
+                size = len(value.encode("utf-8")) if isinstance(value, str) else 0
+            except UnicodeEncodeError as error:
+                raise ValueError("optimizer ownership tag is not valid UTF-8") from error
+            if not 1 <= size <= 128:
+                raise ValueError("optimizer ownership tag exceeds its UTF-8 byte limit")
+        for field, length in (("optimizer_transaction", 32), ("optimizer_plan_hash", 64)):
+            value = tags[field]
+            if not isinstance(value, str) or re.fullmatch(rf"[0-9a-f]{{{length}}}", value) is None:
+                raise ValueError("optimizer ownership tag digest is invalid")
+
+    @staticmethod
+    def _layout_receipt_request(authorization: dict, build_plan: dict, request_id: str, *,
+                                stream_id: str | None = None, sequence: int | None = None):
+        from jsonschema import Draft7Validator
+
+        if not isinstance(request_id, str) or not re.fullmatch(r"[0-9a-f]{32}", request_id):
+            raise ValueError("request_id must be 32 lowercase hexadecimal characters")
+        if stream_id is not None or sequence is not None:
+            if (not isinstance(stream_id, str) or not re.fullmatch(r"[0-9a-f]{16}", stream_id)
+                    or type(sequence) is not int or not 1 <= sequence <= 4294967295
+                    or request_id != f"{stream_id}{sequence:016x}"):
+                raise ValueError("stream ID, sequence, and derived request ID do not match")
+        if not isinstance(authorization, dict) or not isinstance(build_plan, dict):
+            raise ValueError("authorization and build_plan must be objects")
+        shared_tags = "optimizer_ownership" in build_plan
+        if shared_tags:
+            from planners.plan_validation import validate_build_plan
+            validate_build_plan(build_plan)
+            GameBridge._validate_optimizer_tag_bytes(build_plan["optimizer_ownership"])
+        placements = {"place_ghost", "place_ghost_no_reconcile", "place_tile_ghost", "place_entity"}
+        allowed = placements | {"configure_entity", "configure_entity_if_unit_number", "remove_entity"}
+        phases = build_plan.get("phases")
+        if not isinstance(phases, list):
+            raise ValueError("build_plan phases must be an array")
+        expected_placements = 0
+        for phase in phases:
+            if not isinstance(phase, dict) or not isinstance(phase.get("actions"), list):
+                raise ValueError("build_plan phase actions must be an array")
+            for action in phase["actions"]:
+                if (not isinstance(action, dict) or not isinstance(action.get("action_type"), str)
+                        or action["action_type"] not in allowed):
+                    raise ValueError("build_plan contains an unsupported action")
+                if "optimizer_ownership" in action:
+                    GameBridge._validate_optimizer_tag_bytes(action["optimizer_ownership"])
+                # The Lua executor includes guarded and unguarded configuration
+                # in attempted_entities/attempted_placements, but not removal.
+                expected_placements += action["action_type"] != "remove_entity"
+        try:
+            schema = json.loads((Path(__file__).resolve().parent.parent / "schemas" /
+                                 "layout_submission_receipt.schema.json").read_text(encoding="utf-8"))
+            validator = Draft7Validator(schema)
+        except (OSError, ValueError) as error:
+            raise BridgeError("Layout receipt schema is unavailable") from error
+        canonical = json.dumps({"authorization": authorization, "build_plan": build_plan},
+                               sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+        digest = hashlib.sha256(canonical.encode("ascii")).hexdigest()
+        payload = {"authorization": authorization, "build_plan": build_plan,
+                   "request_id": request_id, "request_digest": digest}
+        if stream_id is not None:
+            payload.update(stream_id=stream_id, sequence=sequence)
+        if shared_tags:
+            # A legacy correlated executor rejects this new envelope field
+            # instead of silently placing untagged ghosts.
+            payload["optimizer_tag_protocol"] = SHARED_OPTIMIZER_TAG_PROTOCOL
+        body = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+        size = len(body.encode("ascii"))
+        if size > LAYOUT_REQUEST_MAX_BYTES:
+            raise ValueError(f"correlated layout request exceeds the executor's size limit: "
+                             f"{size} > {LAYOUT_REQUEST_MAX_BYTES} bytes")
+        return body, digest, expected_placements, validator
+
+    @staticmethod
+    def _validate_layout_receipt(report, request_id, digest, expected_placements, validator, *,
+                                 stream_id=None, sequence=None):
+        version = "layout-submission-receipt-v2" if stream_id is not None else "layout-submission-receipt-v1"
+        if (not validator.is_valid(report) or report.get("request_id") != request_id
+                or report.get("request_digest") != digest
+                or report.get("receipt_version") != version
+                or (stream_id is not None and (report.get("stream_id") != stream_id or report.get("sequence") != sequence))
+                or type(report.get("tick")) is not int or report["tick"] < 0
+                or type(report.get("ok")) is not bool):
+            raise BridgeError("Layout receipt failed correlation or validation")
+        if report["ok"]:
+            count_keys = ("attempted_placements", "succeeded_placements", "already_present_placements", "failed_placements")
+            if (any(type(report.get(key)) is not int or report[key] < 0 for key in count_keys)
+                    or report["failed_placements"] != 0 or report.get("placement_failures") != []
+                    or report["attempted_placements"] != expected_placements
+                    or report["attempted_placements"] != report["succeeded_placements"] + report["already_present_placements"]):
+                raise BridgeError("Layout receipt has invalid successful placement counts")
+        elif not isinstance(report.get("error"), str) or not report["error"]:
+            raise BridgeError("Layout receipt lacks a failure reason")
+        return report
+
+    def build_layout_correlated(self, authorization: dict, build_plan: dict, *,
+                                request_id: str, timeout: float = 120.0,
+                                stream_id: str | None = None, sequence: int | None = None) -> dict:
+        """Submit one layout with a caller-persisted ID and collect its correlated receipt.
+
+        This method grants no authorization, does not retry, and does not prove
+        runtime identity or bot construction. A missing receipt is an unknown
+        outcome. The Lua cache survives only as long as its save state does.
+        """
+        body, digest, expected_placements, validator = self._layout_receipt_request(
+            authorization, build_plan, request_id, stream_id=stream_id, sequence=sequence)
+        _, report = self._collect_correlated_catalog(
+            command="/build_layout_plan " + body, subdir=LAYOUT_REPORT_SUBDIR,
+            expected_name=f"layout_{request_id}.json", timeout=timeout, label="Layout receipt",
+        )
+        return self._validate_layout_receipt(report, request_id, digest, expected_placements, validator,
+                                             stream_id=stream_id, sequence=sequence)
+
+    def read_layout_receipt(self, authorization: dict, build_plan: dict, *, request_id: str,
+                            stream_id: str | None = None, sequence: int | None = None) -> dict:
+        """Read an existing correlated receipt without sending a command or retrying."""
+        _, digest, expected_placements, validator = self._layout_receipt_request(
+            authorization, build_plan, request_id, stream_id=stream_id, sequence=sequence)
+        if not hasattr(os, "O_NOFOLLOW"):
+            raise BridgeError("Layout receipt collection requires O_NOFOLLOW")
+        path = self.script_output / LAYOUT_REPORT_SUBDIR / f"layout_{request_id}.json"
+        def unique_object(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("duplicate JSON field")
+                result[key] = value
+            return result
+        def invalid_number(_value):
+            raise ValueError("non-finite JSON number")
+        try:
+            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(descriptor, "rb") as handle:
+                if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                    raise BridgeError("Layout receipt is not a regular file")
+                raw = handle.read(CORRELATED_REPORT_MAX_BYTES + 1)
+            if len(raw) > CORRELATED_REPORT_MAX_BYTES:
+                raise BridgeError("Layout receipt exceeds size limit")
+            report = json.loads(raw, object_pairs_hook=unique_object, parse_constant=invalid_number)
+        except (OSError, ValueError, UnicodeError) as error:
+            raise BridgeError("Layout receipt is unavailable or invalid; submission outcome is unknown") from error
+        return self._validate_layout_receipt(report, request_id, digest, expected_placements, validator,
+                                             stream_id=stream_id, sequence=sequence)
 
     def verify_electronics_execution(self, timeout: float = 120.0) -> Path:
         return self._run_and_collect(
@@ -669,6 +835,45 @@ class GameBridge:
             raise BridgeError("Runtime-catalog response provenance mismatch")
         return raw
 
+    def optimizer_build_evidence(self, *, surface: str, force: str, episode_id: str,
+                                 project_id: str, transaction_id: str, plan_hash: str,
+                                 timeout: float = 60.0, include_unidentified: bool = False) -> dict:
+        """Collect tagged events; unidentified events never establish current ownership."""
+        from jsonschema import Draft7Validator
+
+        for label, value in (("surface", surface), ("force", force), ("episode_id", episode_id),
+                             ("project_id", project_id)):
+            if not isinstance(value, str) or not value or len(value.encode("utf-8")) > 128:
+                raise ValueError(f"{label} must be a non-empty string of at most 128 bytes")
+        for label, value, length in (("transaction_id", transaction_id, 32), ("plan_hash", plan_hash, 64)):
+            if not isinstance(value, str) or not re.fullmatch(rf"[0-9a-f]{{{length}}}", value):
+                raise ValueError(f"{label} must be {length} lowercase hexadecimal characters")
+        if type(include_unidentified) is not bool:
+            raise ValueError("include_unidentified must be a boolean")
+        request_id = uuid.uuid4().hex
+        tags = {"optimizer_episode": episode_id, "optimizer_project": project_id,
+                "optimizer_transaction": transaction_id, "optimizer_plan_hash": plan_hash}
+        request = {"request_id": request_id, "surface": surface, "force": force, "tags": tags}
+        _, report = self._collect_correlated_catalog(
+            command=("/optimizer_build_evidence_v3 " if include_unidentified else "/optimizer_build_evidence ")
+                    + json.dumps(request, separators=(",", ":")),
+            subdir=OPTIMIZER_BUILD_EVIDENCE_SUBDIR,
+            expected_name=f"optimizer_build_evidence_{request_id}.json", timeout=timeout,
+            label="Optimizer build evidence",
+        )
+        try:
+            schema = json.loads((Path(__file__).resolve().parent.parent / "schemas" /
+                                 ("optimizer_build_evidence_v3.schema.json" if include_unidentified
+                                  else "optimizer_build_evidence.schema.json")).read_text(encoding="utf-8"))
+            valid = Draft7Validator(schema).is_valid(report)
+        except (OSError, ValueError) as error:
+            raise BridgeError("Optimizer build evidence schema is unavailable") from error
+        if (not valid or report.get("ok") is not True
+                or any(report.get(key) != value for key, value in request.items())
+                or any(entity["tick"] > report["tick"] for entity in report["entities"])):
+            raise BridgeError("Optimizer build evidence response failed correlation or validation")
+        return report
+
     def optimizer_consumer_observation(self, *, surface: str, force: str, entity: str,
                                        position: dict, unit_number: int, timeout: float = 60.0) -> dict:
         """Collect one read-only consumer counter; the report does not prove delivery or identity."""
@@ -705,6 +910,45 @@ class GameBridge:
         if (obs["state"] == "present" and obs["products_finished"]["state"] == "available"
                 and type(obs["products_finished"]["value"]) is not int):
             raise BridgeError("Optimizer consumer observation counter is not an integer")
+        return report
+
+    def research_lab_ownership(self, *, surface: str, force: str, episode_id: str,
+                               packet_id: str, transaction_id: str, timeout: float = 60.0) -> dict:
+        """Collect correlated robot-build evidence, not runtime ownership or authority."""
+        for label, value in (("surface", surface), ("force", force),
+                             ("episode_id", episode_id), ("packet_id", packet_id)):
+            if not isinstance(value, str) or not value or len(value.encode("utf-8")) > 128:
+                raise ValueError(f"{label} must be a non-empty string of at most 128 bytes")
+        if not isinstance(transaction_id, str) or not re.fullmatch(r"[0-9a-f]{32}", transaction_id):
+            raise ValueError("transaction_id must be a 32-character lowercase hex identifier")
+        request_id = uuid.uuid4().hex
+        expected_name = f"research_lab_ownership_{request_id}.json"
+        expected = self.script_output / RESEARCH_LAB_OWNERSHIP_SUBDIR / expected_name
+        if expected.exists() or expected.is_symlink():
+            raise BridgeError("Research lab ownership response path already exists")
+        request = {"request_id": request_id, "surface": surface, "force": force,
+                   "episode_id": episode_id, "packet_id": packet_id, "transaction_id": transaction_id}
+        path = Path(self._run_and_collect(
+            "/research_lab_ownership " + json.dumps(request, separators=(",", ":")),
+            RESEARCH_LAB_OWNERSHIP_SUBDIR, timeout, expected_name=expected_name,
+        ))
+        if path != expected or path.is_symlink():
+            raise BridgeError("Research lab ownership response path mismatch or symbolic link")
+        try:
+            descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+                report = json.load(handle)
+        except (OSError, ValueError, UnicodeError) as error:
+            raise BridgeError("Research lab ownership response is unreadable") from error
+        if (not isinstance(report, dict) or report.get("ok") is not True
+                or report.get("version") != "research-lab-ownership-v1"
+                or report.get("source") != "robot_built_entity_tags"
+                or report.get("ownership_claimed") is not False
+                or report.get("dispatch_authorized") is not False
+                or any(report.get(key) != value for key, value in request.items())
+                or type(report.get("tick")) is not int or report["tick"] < 0
+                or not isinstance(report.get("entities"), list)):
+            raise BridgeError("Research lab ownership response failed correlation or validation")
         return report
 
     def logistic_inventory(self, surface: str, force: str, timeout: float = 60.0) -> Path:

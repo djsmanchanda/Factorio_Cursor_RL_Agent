@@ -97,7 +97,7 @@ def test_creation_params_carry_trash_only_for_requesters(lua) -> None:
 
 
 def test_revive_swap_preserves_contents_and_flag(lua) -> None:
-    ok = lua.eval("""(function()
+    ok, reason, replacement = lua.eval("""(function()
         stub.reset()
         local chest = stub.new_chest("requester-chest", 39.5, 32.5,
             { { valid_for_read = true, name = "iron-plate", count = 4 } })
@@ -108,6 +108,8 @@ def test_revive_swap_preserves_contents_and_flag(lua) -> None:
     inserted = lua.eval("stub.last_inserted()")
 
     assert ok is True
+    assert reason is None
+    assert replacement["name"] == "requester-chest"
     assert lua.eval("stub.destroyed_total()") == 1
     assert params["name"] == "requester-chest"
     assert params["request_filters"]["trash_not_requested"] is True
@@ -141,13 +143,15 @@ def test_player_and_planner_forces_opt_in_but_training_does_not(lua) -> None:
 
 
 def test_player_chest_is_recreated_with_trash_behavior(lua) -> None:
-    result = lua.eval("""(function()
+    result, reason, replacement = lua.eval("""(function()
         stub.reset()
         local chest = stub.new_chest("requester-chest", 1.5, 2.5, {})
         chest.force.name = "player"
         return M.revive_with_trash(stub.new_surface(false), chest)
     end)()""")
     assert result is True
+    assert reason is None
+    assert replacement["name"] == "requester-chest"
     assert lua.eval("stub.destroyed_total()") == 1
     params = lua.eval("stub.created_params()")
     assert params["request_filters"]["trash_not_requested"] is True

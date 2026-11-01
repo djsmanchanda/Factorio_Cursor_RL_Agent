@@ -1,0 +1,363 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Optimizer robot-build evidence 3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "source",
+    "request_id",
+    "tick",
+    "ok",
+    "ownership_claimed",
+    "dispatch_authorized"
+  ],
+  "properties": {
+    "version": {
+      "const": "optimizer-build-evidence-v3"
+    },
+    "source": {
+      "const": "robot_built_entity_tags"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+    },
+    "tick": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "ownership_claimed": {
+      "const": false
+    },
+    "dispatch_authorized": {
+      "const": false
+    },
+    "surface": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "force": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "tags": {
+      "$ref": "#/definitions/tags"
+    },
+    "error": {
+      "type": "string",
+      "minLength": 1
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "entity",
+          "position",
+          "tick",
+          "current"
+        ],
+        "properties": {
+          "entity": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "position": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "x",
+              "y"
+            ],
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              }
+            }
+          },
+          "unit_number": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "tick": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "current": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/current"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "state"
+                ],
+                "properties": {
+                  "state": {
+                    "const": "identity_unavailable"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "unit_number"
+              ]
+            },
+            "then": {
+              "properties": {
+                "current": {
+                  "$ref": "#/definitions/current"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "current": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "state"
+                  ],
+                  "properties": {
+                    "state": {
+                      "const": "identity_unavailable"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "current": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "not_found",
+                "unavailable",
+                "mismatch"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "direction",
+            "quality",
+            "recipe"
+          ],
+          "properties": {
+            "state": {
+              "const": "present"
+            },
+            "direction": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "state"
+                  ],
+                  "properties": {
+                    "state": {
+                      "const": "unavailable"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "state",
+                    "value"
+                  ],
+                  "properties": {
+                    "state": {
+                      "const": "available"
+                    },
+                    "value": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 15
+                    }
+                  }
+                }
+              ]
+            },
+            "quality": {
+              "$ref": "#/definitions/quality"
+            },
+            "recipe": {
+              "$ref": "#/definitions/recipe"
+            }
+          }
+        }
+      ]
+    },
+    "quality": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state"
+          ],
+          "properties": {
+            "state": {
+              "const": "unavailable"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "value"
+          ],
+          "properties": {
+            "state": {
+              "const": "available"
+            },
+            "value": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        }
+      ]
+    },
+    "recipe": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "unavailable",
+                "unset"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "value"
+          ],
+          "properties": {
+            "state": {
+              "const": "available"
+            },
+            "value": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        }
+      ]
+    },
+    "tags": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "optimizer_episode",
+        "optimizer_project",
+        "optimizer_transaction",
+        "optimizer_plan_hash"
+      ],
+      "properties": {
+        "optimizer_episode": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "optimizer_project": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "optimizer_transaction": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 32,
+          "pattern": "^[0-9a-f]{32}$"
+        },
+        "optimizer_plan_hash": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "ok": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "surface",
+          "force",
+          "tags",
+          "entities"
+        ],
+        "not": {
+          "required": [
+            "error"
+          ]
+        }
+      },
+      "else": {
+        "required": [
+          "error"
+        ]
+      }
+    }
+  ]
+}

@@ -13,7 +13,7 @@ from jsonschema import Draft7Validator
 from planners.recipe_data import _reject_fuel_entities
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_PLACEMENTS = {"place_entity", "place_ghost"}
+_PLACEMENTS = {"place_entity", "place_ghost", "place_ghost_no_reconcile"}
 INFINITY_ENTITIES = {"infinity-chest", "infinity-pipe"}
 ENTITY_FOOTPRINTS = {
     "assembling-machine-1": 3,

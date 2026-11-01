@@ -30,12 +30,15 @@
       "type": "object",
       "properties": {
         "max_count": { "type": "integer", "minimum": 0 },
+        "surface": { "type": "string", "minLength": 1 },
+        "force": { "type": "string", "minLength": 1 },
         "block_filter": {
           "type": "array",
           "items": { "type": "string" }
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "dependencies": { "surface": ["force"], "force": ["surface"] }
     },
     "authorization_timestamp": { "type": "string" },
     "authorization_source": {

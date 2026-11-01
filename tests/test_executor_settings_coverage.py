@@ -21,6 +21,8 @@ _NOT_STANDALONE_SETTINGS = {
     "fill_percentage",  # qualifies infinity_filter
     "entity", "tile", "position", "direction", "action_type", "underground_type",
     "logistic_group",   # qualifies logistic_requests
+    "expected_unit_number",  # guards configure_entity_if_unit_number
+    "optimizer_ownership", "research_lab_ownership",  # ghost tags at creation only
 }
 
 
@@ -87,7 +89,7 @@ def test_existing_entity_paths_use_the_shared_gate() -> None:
 
 def test_configuration_action_never_falls_back_to_entity_creation() -> None:
     """Recipe loans must fail if their borrowed cell vanished mid-pass."""
-    start = _EXECUTOR.index('if action.action_type == "configure_entity" then')
+    start = _EXECUTOR.index('if action.action_type == "configure_entity" or action.action_type == "configure_entity_if_unit_number" then')
     end = _EXECUTOR.index('elseif action.action_type == "place_tile_ghost"', start)
     branch = _EXECUTOR[start:end]
     assert "configure_target_missing" in branch

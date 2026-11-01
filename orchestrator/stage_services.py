@@ -236,7 +236,7 @@ def _ghost_materials(plan: dict) -> dict[str, int]:
     required: dict[str, int] = {}
     for phase in plan["phases"]:
         for action in phase["actions"]:
-            if action.get("action_type") == "place_ghost":
+            if action.get("action_type") in {"place_ghost", "place_ghost_no_reconcile"}:
                 required[action["entity"]] = required.get(action["entity"], 0) + 1
             elif action.get("action_type") == "place_tile_ghost":
                 required[action["tile"]] = required.get(action["tile"], 0) + 1
@@ -597,7 +597,7 @@ def _submit(
     forbidden = {"infinity-chest", "infinity-pipe", "electric-energy-interface"}
     for phase in plan.get("phases", []):
         for action in phase.get("actions", []):
-            if action.get("entity") in forbidden and action.get("action_type") in {"place_entity", "place_ghost"}:
+            if action.get("entity") in forbidden and action.get("action_type") in {"place_entity", "place_ghost", "place_ghost_no_reconcile"}:
                 raise StuckError(
                     f"{name}: sandbox supply entity cannot be constructed in the deterministic runtime",
                     code="direct_construction_forbidden", details={"entity": action["entity"]},
@@ -628,15 +628,20 @@ def _submit(
                 action.pop(field, None)
     converted_infrastructure = _ghostify_direct_infrastructure(plan)
     consume_plan_submission(name)
-    clear_plan_clutter(client, surface, plan, emit)
-    try:
-        relocate_obstructing_poles(
-            client, bridge, surface, plan.get("force", "player"), plan, name, emit, _submit,
-        )
-    except PoleObstruction as obstruction:
-        raise StuckError(
-            str(obstruction), code="power_pole_obstruction", details=obstruction.details,
-        ) from obstruction
+    guarded_without_preparation = all(
+        action.get("action_type") in {"configure_entity_if_unit_number", "place_ghost_no_reconcile"}
+        for phase in plan.get("phases", []) for action in phase.get("actions", [])
+    )
+    if not guarded_without_preparation:
+        clear_plan_clutter(client, surface, plan, emit)
+        try:
+            relocate_obstructing_poles(
+                client, bridge, surface, plan.get("force", "player"), plan, name, emit, _submit,
+            )
+        except PoleObstruction as obstruction:
+            raise StuckError(
+                str(obstruction), code="power_pole_obstruction", details=obstruction.details,
+            ) from obstruction
     try:
         assert_affordable(
             client, surface, plan.get("force", "player"), plan, name, emit,
@@ -699,7 +704,7 @@ def _submit(
         for phase in plan.get("phases", [])
         for action in phase.get("actions", [])
         if action.get("action_type") in {
-            "place_entity", "place_ghost", "place_tile_ghost",
+            "place_entity", "place_ghost", "place_ghost_no_reconcile", "place_tile_ghost",
         }
     )
     for attempt in range(max_retries + 1):
@@ -718,7 +723,7 @@ def _submit(
                 )
             else:
                 configured = sum(
-                    action.get("action_type") == "configure_entity"
+                    action.get("action_type") in {"configure_entity", "configure_entity_if_unit_number"}
                     for phase in plan.get("phases", [])
                     for action in phase.get("actions", [])
                 )

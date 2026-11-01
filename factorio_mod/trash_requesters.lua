@@ -73,7 +73,7 @@ function M.revive_with_trash(surface, entity)
     for _, stack in ipairs(stacks) do
       created.insert(stack)
     end
-    return true
+    return true, nil, created
   end
   surface.create_entity({
     name = "entity-ghost",

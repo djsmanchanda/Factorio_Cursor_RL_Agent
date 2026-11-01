@@ -16,6 +16,7 @@ Documentation for each schema is maintained in this README.
 - `rocket_silo_observation.schema.json` - Lua to optimizer contract for request-correlated, read-only observation of existing rocket silos for one explicit surface and force; reports stable unit identity, status, parts, recipe, auto-launch, rocket and cargo-pod facts with explicit absent/unavailable states against runtime API 2.1.21, without launch or mutation authority
 - `research_queue.schema.json` - persisted Linux deterministic runner intent and per-technology progress contract
 - `build_plan.schema.json` — Planner → Lua build plan contract
+- `layout_submission_receipt.schema.json` — Correlated layout submission result; not robot-build or runtime identity evidence
 - `goal.schema.json` — Instruction → Planner goal contract
 - `block.schema.json` — City/Planet block contract
 - `intent.schema.json` — Supervisor → Planner intent contract
@@ -27,7 +28,10 @@ Documentation for each schema is maintained in this README.
 - `planning_request.schema.json` — Intent router → planning request contract
 - `build_intent.schema.json` — Planner → build intent contract
 - `ghost_plan.schema.json` — Ghost projection → ghost plan contract
+- `research_lab_ownership.schema.json` — Correlated robot-build evidence; not dispatch authority
 - `optimizer_consumer_observation.schema.json` — Scoped consumer recipe and lifetime-counter observation; no proof of connection, consumption or commissioning
+- `optimizer_build_evidence.schema.json` — v2 identified tagged robot-build events and optional current-entity facts; no ownership or dispatch authority
+- `optimizer_build_evidence_v3.schema.json` — opt-in v3 adds events without unit identity, explicitly marked identity-unavailable; no ownership or dispatch authority
 - `electronics_world_spec.schema.json` - Survey to LocalLayoutPlanner coordinates and observed capacity contract
 - `world_spec.schema.json` - deterministic bounded planner surface, resources, and starter-kit contract
 - `training_scenario.schema.json` - isolated mini-environment, objective, construction budget, constraints, and reward-weight contract

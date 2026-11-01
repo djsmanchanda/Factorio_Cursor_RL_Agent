@@ -121,6 +121,30 @@ def test_configuration_only_plan_is_not_logged_as_zero_placement_churn(
     ]
 
 
+@pytest.mark.parametrize("action,reason", [
+    ("configure_entity_if_unit_number", "configure_target_unit_number_mismatch"),
+    ("place_ghost_no_reconcile", "guarded_ghost_position_occupied"),
+])
+def test_guarded_actions_skip_world_preparation_and_reject_mismatch(monkeypatch, action, reason):
+    plan = {"force": "player", "phases": [{"name": "guard", "actions": [{
+        "action_type": action, "entity": "requester-chest",
+        "position": {"x": 10.5, "y": 20.5}, "expected_unit_number": 42,
+    }]}]}
+    bridge = type("Bridge", (), {"build_layout": lambda *_args: {
+        "ok": False, "attempted_placements": 1, "failed_placements": 1,
+        "placement_failures": [{"reason": reason}],
+    }})()
+    monkeypatch.setattr(stage_services, "consume_plan_submission", lambda *_args: None)
+    monkeypatch.setattr(stage_services, "assert_affordable", lambda *_args: None)
+    monkeypatch.setattr(stage_services, "load_json", lambda report: report)
+    def forbidden(*_args):
+        raise AssertionError("guarded configuration must not prepare the world")
+    monkeypatch.setattr(stage_services, "clear_plan_clutter", forbidden)
+    monkeypatch.setattr(stage_services, "relocate_obstructing_poles", forbidden)
+    with pytest.raises(stage_services.StuckError):
+        stage_services._submit(object(), bridge, "nauvis", plan, "guarded", lambda _message: None)
+
+
 def test_explicit_additive_earmark_can_precede_a_missing_supply_chain(
     monkeypatch,
 ) -> None:

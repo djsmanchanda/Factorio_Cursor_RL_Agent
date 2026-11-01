@@ -5,7 +5,25 @@
  "required": [
   "phases"
  ],
+ "allOf": [
+  {"if": {"required": ["optimizer_ownership"]},
+   "then": {
+    "required": ["surface", "force", "atomic"],
+    "properties": {
+     "surface": {"type": "string", "minLength": 1},
+     "force": {"type": "string", "minLength": 1},
+     "atomic": {"const": true},
+     "phases": {"minItems": 1, "items": {"properties": {"actions": {
+      "minItems": 1,
+      "items": {"properties": {"action_type": {"const": "place_ghost_no_reconcile"}},
+       "not": {"anyOf": [{"required": ["optimizer_ownership"]}, {"required": ["research_lab_ownership"]}]}}
+     }}}}
+    }
+   }
+  }
+ ],
  "properties": {
+  "optimizer_ownership": {"$ref": "#/properties/phases/items/properties/actions/items/properties/optimizer_ownership"},
   "phases": {
    "type": "array",
    "items": {
@@ -31,14 +49,41 @@
          "type": "string",
          "enum": [
           "place_ghost",
+          "place_ghost_no_reconcile",
           "place_tile_ghost",
           "place_entity",
           "configure_entity",
+          "configure_entity_if_unit_number",
           "remove_entity"
          ]
         },
         "entity": {
          "type": "string"
+        },
+        "expected_unit_number": {
+         "type": "integer",
+         "minimum": 1,
+         "description": "Engine-assigned target identity required by guarded configuration."
+        },
+        "research_lab_ownership": {
+         "type": "object",
+         "additionalProperties": false,
+         "required": ["research_lab_episode", "research_lab_packet", "research_lab_transaction"],
+         "properties": {
+          "research_lab_episode": {"type": "string", "minLength": 1, "maxLength": 128},
+          "research_lab_packet": {"type": "string", "minLength": 1, "maxLength": 128},
+          "research_lab_transaction": {"type": "string", "pattern": "^[0-9a-f]{32}$"}
+         }
+        },
+        "optimizer_ownership": {
+         "type": "object", "additionalProperties": false,
+         "required": ["optimizer_episode", "optimizer_project", "optimizer_transaction", "optimizer_plan_hash"],
+         "properties": {
+          "optimizer_episode": {"type": "string", "minLength": 1, "maxLength": 128},
+          "optimizer_project": {"type": "string", "minLength": 1, "maxLength": 128},
+          "optimizer_transaction": {"type": "string", "minLength": 32, "maxLength": 32, "pattern": "^[0-9a-f]{32}$"},
+          "optimizer_plan_hash": {"type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}$"}
+         }
         },
         "tile": {
          "type": "string",
@@ -330,6 +375,20 @@
        },
        "allOf": [
         {
+         "if": {"required": ["research_lab_ownership"]},
+         "then": {"properties": {"action_type": {"const": "place_ghost_no_reconcile"}}}
+        },
+        {"if": {"required": ["optimizer_ownership"]},
+         "then": {"properties": {"action_type": {"const": "place_ghost_no_reconcile"}},
+                  "not": {"required": ["research_lab_ownership"]}}},
+        {
+         "if": {
+          "required": ["action_type"],
+          "properties": {"action_type": {"const": "configure_entity_if_unit_number"}}
+         },
+         "then": {"required": ["expected_unit_number"]}
+        },
+        {
          "if": {
           "required": [
            "action_type"
@@ -338,8 +397,10 @@
            "action_type": {
             "enum": [
              "place_ghost",
+             "place_ghost_no_reconcile",
              "place_entity",
              "configure_entity",
+             "configure_entity_if_unit_number",
              "remove_entity"
             ]
            }

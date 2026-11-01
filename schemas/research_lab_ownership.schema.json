@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Research lab robot-build evidence 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "source", "request_id", "tick", "ok", "ownership_claimed", "dispatch_authorized"],
+  "properties": {
+    "version": {"const": "research-lab-ownership-v1"},
+    "source": {"const": "robot_built_entity_tags"},
+    "request_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"},
+    "tick": {"type": "integer", "minimum": 0},
+    "ok": {"type": "boolean"},
+    "ownership_claimed": {"const": false},
+    "dispatch_authorized": {"const": false},
+    "surface": {"type": "string", "minLength": 1},
+    "force": {"type": "string", "minLength": 1},
+    "episode_id": {"type": "string", "minLength": 1},
+    "packet_id": {"type": "string", "minLength": 1},
+    "transaction_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "error": {"type": "string", "minLength": 1},
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["entity", "position", "unit_number", "tick", "tags"],
+        "properties": {
+          "entity": {"type": "string", "minLength": 1},
+          "position": {
+            "type": "object", "additionalProperties": false, "required": ["x", "y"],
+            "properties": {"x": {"type": "number"}, "y": {"type": "number"}}
+          },
+          "unit_number": {"type": "integer", "minimum": 1},
+          "tick": {"type": "integer", "minimum": 0},
+          "tags": {
+            "type": "object", "additionalProperties": false,
+            "required": ["research_lab_packet", "research_lab_transaction"],
+            "properties": {
+              "research_lab_packet": {"type": "string", "minLength": 1},
+              "research_lab_transaction": {"type": "string", "pattern": "^[0-9a-f]{32}$"}
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {"if": {"properties": {"ok": {"const": true}}},
+     "then": {"required": ["surface", "force", "episode_id", "packet_id", "transaction_id", "entities"], "not": {"required": ["error"]}},
+     "else": {"required": ["error"]}}
+  ]
+}

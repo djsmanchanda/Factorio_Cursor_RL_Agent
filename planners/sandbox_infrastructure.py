@@ -25,9 +25,11 @@ CANONICAL_POWER_SOURCE = (-160.0, -160.0)
 CANONICAL_ROBOPORT_HUB = (-128.0, -128.0)
 _ACTION_PERMISSIONS = {
     "place_ghost": "project_more_ghosts",
+    "place_ghost_no_reconcile": "project_more_ghosts",
     "place_tile_ghost": "project_more_ghosts",
     "place_entity": "place_core_infrastructure",
     "configure_entity": "place_core_infrastructure",
+    "configure_entity_if_unit_number": "place_core_infrastructure",
     "remove_entity": "remove_entities",
 }
 
@@ -37,8 +39,10 @@ def _iter_plans(plans: Sequence[object]) -> Iterable[dict]:
         yield entry[1] if isinstance(entry, tuple) else entry
 
 
-def build_layout_authorization(plans: Sequence[object]) -> dict:
+def build_layout_authorization(plans: Sequence[object], *, scope_limits: dict | None = None) -> dict:
     """Authorize only mutation classes actually present in these plans."""
+    if isinstance(scope_limits, dict) and "block_filter" in scope_limits:
+        raise ValueError("Layout authorization cannot enforce block_filter")
     permissions = {
         _ACTION_PERMISSIONS[action["action_type"]]
         for plan in _iter_plans(plans)
@@ -58,6 +62,7 @@ def build_layout_authorization(plans: Sequence[object]) -> dict:
         proposal=proposal,
         approved_actions=approved,
         authorization_source="policy",
+        scope_limits=scope_limits,
     ).to_dict()
 
 

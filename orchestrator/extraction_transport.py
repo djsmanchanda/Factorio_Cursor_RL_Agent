@@ -19,7 +19,7 @@ def planned_footprint_tiles(plan: dict) -> set[tuple[int, int]]:
             ENTITY_FOOTPRINTS.get(action["entity"], 1),
         )
         for phase in plan["phases"] for action in phase["actions"]
-        if action.get("action_type") in {"place_entity", "place_ghost"}
+        if action.get("action_type") in {"place_entity", "place_ghost", "place_ghost_no_reconcile"}
     ))
 
 
@@ -29,7 +29,7 @@ def planned_entity_count(plan: dict, entity: str) -> int:
         1
         for phase in plan["phases"]
         for action in phase["actions"]
-        if action.get("action_type") == "place_ghost"
+        if action.get("action_type") in {"place_ghost", "place_ghost_no_reconcile"}
         and action.get("entity") == entity
     )
 

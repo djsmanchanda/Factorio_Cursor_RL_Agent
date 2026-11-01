@@ -30,6 +30,20 @@ discovered mods on next launch.
 
 For a dedicated server, send `/snapshot` over RCON and read that server's own `script-output`, not a client-side directory. A snapshot is read-only, but raw `/sc` Lua and many other registered commands can mutate state.
 
+## Runtime identity probe
+
+`/research_lab_ownership <json>` reports robot-built entities whose ghost tags
+carry the requested `episode_id`, `packet_id`, and `transaction_id`, within an
+explicit `surface` and `force`. Supply a filename-safe `request_id`; responses
+are written under `factorio_mod/research_lab_ownership/`. The recorder captures
+the replacement unit number when the requester trash hook recreates a chest.
+It retains at most 4,096 records in save storage and fails closed after that
+capacity is exceeded; no automatic reset or pruning is provided. Lab packet
+ghosts carry a persistent transaction identifier, and the Python bridge reads
+the correlated report. Tags and request scope are caller assertions, not proof
+of lane ownership or dispatch authority. An occupied position with only an
+unbuilt ghost cannot satisfy the built-entity evidence required for retry.
+
 ## Rocket silo observation
 
 `/rocket_silo_observation <json>` exports a read-only, request-correlated
@@ -161,3 +175,9 @@ read-only export. Compile it offline with
 `python tools/survey_electronics_world.py <snapshot.json> --block-bounds -250 -250 250 250 --single-macro-block --output <world.json>`. The explicit bounds acknowledge one self-contained local macro district.
 The compiler fails closed when local source footprints are unavailable; it
 does not create inter-block belts or bot routes.
+
+
+The opt-in `/optimizer_build_evidence_v3` command includes tagged robot-build events for entities that have no unit number. Their current state is `identity_unavailable`: an entity later found at the same position could be a replacement. The original `/optimizer_build_evidence` v2 response omits those events for compatibility. Both versions share a bounded record store; overflow makes reports fail closed. These records do not authorize configuration or establish ownership.
+
+
+The read-only optimizer_consumer_observation command queries one explicitly named entity, position and unit number on the requested surface and force. Its result reports the current recipe and the engine lifetime products_finished counter, or an explicit unavailable state. It does not establish ownership, a connection to an optimizer block, consumed fluid or commissioning. Deploying this command requires the usual separately authorized mod deployment and reload.

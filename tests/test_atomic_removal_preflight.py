@@ -183,6 +183,8 @@ helpers = {
 }
 game = { tick = 101, print = function() end }
 """
+# The executor requires sibling mod modules such as optimizer_build_evidence.
+_HARNESS = f'package.path = "{EXECUTOR.parent.as_posix()}/?.lua;" .. package.path\n' + _HARNESS
 
 
 def _run(

@@ -4,9 +4,20 @@
 
 
 local shared = require("sandbox_shared")
+local optimizer_build_evidence = require("optimizer_build_evidence")
 local get_or_create_sandbox_surface = shared.get_or_create_sandbox_surface
 local get_or_create_planner_force = shared.get_or_create_planner_force
 local find_exact_entity = shared.find_exact_entity
+
+local function valid_lab_tags(tags)
+  if type(tags) ~= "table" then return false end
+  local permitted = {research_lab_episode=true, research_lab_packet=true, research_lab_transaction=true}
+  for key in pairs(tags) do if not permitted[key] then return false end end
+  local episode, packet, transaction = tags.research_lab_episode, tags.research_lab_packet, tags.research_lab_transaction
+  return type(episode) == "string" and #episode > 0 and #episode <= 128
+    and type(packet) == "string" and #packet > 0 and #packet <= 128
+    and type(transaction) == "string" and #transaction == 32 and transaction:match("^[0-9a-f]+$") ~= nil
+end
 
 local function find_exact_ghost(surface, force, inner_name, position)
   local ghosts = surface.find_entities_filtered({
@@ -766,14 +777,101 @@ local function execute_build_plan(authorization, build_plan)
   if type(build_plan.phases) ~= "table" then
     error("BuildPlan must include phases")
   end
+  local shared_tags = build_plan.optimizer_ownership
+  if shared_tags ~= nil and (not optimizer_build_evidence.valid_tags(shared_tags)
+      or build_plan.atomic ~= true or type(build_plan.surface) ~= "string" or build_plan.surface == ""
+      or type(build_plan.force) ~= "string" or build_plan.force == "" or #build_plan.phases == 0) then
+    error("Invalid shared optimizer tags or scope")
+  end
+
+  local limits = authorization.scope_limits
+  if limits ~= nil then
+    if type(limits) ~= "table" then
+      error("Authorization scope limits must be an object")
+    end
+    for key, _ in pairs(limits) do
+      if key ~= "max_count" and key ~= "surface" and key ~= "force" then
+        error("Unsupported layout authorization scope limit: " .. tostring(key))
+      end
+    end
+    if limits.max_count ~= nil and (type(limits.max_count) ~= "number"
+        or limits.max_count ~= limits.max_count or limits.max_count == math.huge
+        or limits.max_count < 0 or limits.max_count % 1 ~= 0) then
+      error("Authorization max_count must be a non-negative integer")
+    end
+    if limits.surface ~= nil or limits.force ~= nil then
+      if type(limits.surface) ~= "string" or limits.surface == ""
+          or type(limits.force) ~= "string" or limits.force == "" then
+        error("Authorization requires explicit surface and force")
+      end
+      if build_plan.surface ~= limits.surface or build_plan.force ~= limits.force then
+        error("BuildPlan surface or force does not match authorization")
+      end
+    end
+  end
 
   local required_authorization = {
     place_ghost = "project_more_ghosts",
+    place_ghost_no_reconcile = "project_more_ghosts",
     place_tile_ghost = "project_more_ghosts",
     place_entity = "place_core_infrastructure",
     configure_entity = "place_core_infrastructure",
+    configure_entity_if_unit_number = "place_core_infrastructure",
     remove_entity = "remove_entities"
   }
+  local action_count = 0
+  for _, phase in ipairs(build_plan.phases) do
+    if type(phase) ~= "table" or type(phase.actions) ~= "table" then
+      error("BuildPlan phase requires actions")
+    end
+    if shared_tags ~= nil and #phase.actions == 0 then
+      error("Shared optimizer tags require nonempty phases")
+    end
+    for _, action in ipairs(phase.actions) do
+      action_count = action_count + 1
+      if limits and limits.max_count ~= nil and action_count > limits.max_count then
+        error("BuildPlan exceeds authorization max_count")
+      end
+      if type(action) ~= "table" then
+        error("BuildPlan action must be an object")
+      end
+      local permission = required_authorization[action.action_type]
+      if not permission then
+        error("Unsupported build plan action: " .. tostring(action.action_type))
+      end
+      if not approved[permission] then
+        error("Authorization does not permit " .. permission .. " for " .. action.action_type)
+      end
+      local position = action.position
+      if type(position) ~= "table" or type(position.x) ~= "number"
+        or type(position.y) ~= "number" or position.x ~= position.x or position.y ~= position.y
+        or math.abs(position.x) == math.huge or math.abs(position.y) == math.huge then
+        error("BuildPlan action requires finite numeric position with x and y")
+      end
+      if action.action_type ~= "place_tile_ghost" and type(action.entity) ~= "string" then
+        error("BuildPlan entity action requires entity name")
+      end
+      if action.action_type == "place_tile_ghost" and type(action.tile) ~= "string" then
+        error("BuildPlan tile action requires tile name")
+      end
+      if action.direction and defines.direction[action.direction] == nil then
+        error("Unknown direction: " .. tostring(action.direction))
+      end
+      if action.research_lab_ownership ~= nil
+        and (action.action_type ~= "place_ghost_no_reconcile" or not valid_lab_tags(action.research_lab_ownership)) then
+        error("Invalid research lab ownership tags")
+      end
+      if action.optimizer_ownership ~= nil
+        and (action.action_type ~= "place_ghost_no_reconcile" or action.research_lab_ownership ~= nil
+          or not optimizer_build_evidence.valid_tags(action.optimizer_ownership)) then
+        error("Invalid optimizer ownership tags")
+      end
+      if shared_tags ~= nil and (action.action_type ~= "place_ghost_no_reconcile"
+          or action.optimizer_ownership ~= nil or action.research_lab_ownership ~= nil) then
+        error("Shared optimizer tags require only untagged nonreconciling ghosts")
+      end
+    end
+  end
   -- Optional: target an existing surface/force (e.g. "nauvis"/"player") instead
   -- of the isolated sandbox, for building directly onto a real base.
   local surface = get_or_create_sandbox_surface(build_plan.surface)
@@ -808,6 +906,26 @@ local function execute_build_plan(authorization, build_plan)
     })
   end
 
+  -- Optimizer tags must originate on the newly created ghost. An existing
+  -- ghost or entity is not evidence that this transaction placed it; reject
+  -- the whole request before any action can mutate the world. Correlated
+  -- retries use the stored receipt instead of re-running this preflight.
+  for _, phase in ipairs(build_plan.phases) do
+    for _, action in ipairs(phase.actions) do
+      if (shared_tags ~= nil or action.optimizer_ownership ~= nil)
+        and (find_exact_entity(surface, force, action.entity, action.position)
+          or find_exact_ghost(surface, force, action.entity, action.position)) then
+        record_failure(phase, action, "optimizer_tagged_position_already_occupied")
+      end
+    end
+  end
+  if #placement_failures > 0 then
+    counts.failed_placements = #placement_failures
+    counts.placement_failures = placement_failures
+    counts.error = "optimizer_tagged_position_already_occupied"
+    return counts
+  end
+
   -- Fail before any plan mutation: production construction must consume a
   -- blueprint ghost through bots, even when legacy callers request direct placement.
   if force.name == "player" then
@@ -831,36 +949,11 @@ local function execute_build_plan(authorization, build_plan)
   end
 
   if build_plan.atomic == true then
-    for _, phase in ipairs(build_plan.phases) do
-      for _, action in ipairs(phase.actions or {}) do
-        local permission = required_authorization[action.action_type]
-        if not permission then
-          error("Unsupported build plan action: " .. tostring(action.action_type))
-        end
-        if not approved[permission] then
-          error("Authorization does not permit " .. permission .. " for " .. action.action_type)
-        end
-        local position = action.position
-        if type(position) ~= "table" or type(position.x) ~= "number"
-          or type(position.y) ~= "number" then
-          error("BuildPlan action requires numeric position with x and y")
-        end
-        if action.action_type ~= "place_tile_ghost" and type(action.entity) ~= "string" then
-          error("BuildPlan entity action requires entity name")
-        end
-        if action.action_type == "place_tile_ghost" and type(action.tile) ~= "string" then
-          error("BuildPlan tile action requires tile name")
-        end
-        if action.direction and defines.direction[action.direction] == nil then
-          error("Unknown direction: " .. tostring(action.direction))
-        end
-      end
-    end
     local removals = collect_atomic_removals(surface, force, build_plan)
     local planned_placements = {}
     for _, phase in ipairs(build_plan.phases) do
       for _, action in ipairs(phase.actions or {}) do
-        if action.action_type == "place_entity" or action.action_type == "place_ghost" then
+        if action.action_type == "place_entity" or action.action_type == "place_ghost" or action.action_type == "place_ghost_no_reconcile" then
           counts.attempted_placements = counts.attempted_placements + 1
           local blocked = atomic_placement_blocked(surface, force, action, removals)
           if atomic_planned_placement_blocked(action, planned_placements) then
@@ -922,12 +1015,19 @@ local function execute_build_plan(authorization, build_plan)
         end
       end
 
-      if action.action_type == "configure_entity" then
+      if action.action_type == "configure_entity" or action.action_type == "configure_entity_if_unit_number" then
         counts.attempted_entities = counts.attempted_entities + 1
         local existing = find_exact_entity(surface, force, action.entity, position)
         if not existing then
           counts.failed_entities = counts.failed_entities + 1
           record_failure(phase, action, "configure_target_missing")
+        elseif action.action_type == "configure_entity_if_unit_number"
+          and (type(action.expected_unit_number) ~= "number"
+            or action.expected_unit_number < 1
+            or action.expected_unit_number % 1 ~= 0
+            or existing.unit_number ~= action.expected_unit_number) then
+          counts.failed_entities = counts.failed_entities + 1
+          record_failure(phase, action, "configure_target_unit_number_mismatch")
         else
           local configure_error = configure_created_entity(existing, action)
           local mismatch = configure_error or configuration_error(existing, action, direction)
@@ -963,18 +1063,23 @@ local function execute_build_plan(authorization, build_plan)
             record_failure(phase, action, "create_tile_ghost_returned_nil")
           end
         end
-      elseif action.action_type == "place_ghost" then
+      elseif action.action_type == "place_ghost" or action.action_type == "place_ghost_no_reconcile" then
         counts.attempted_ghosts = counts.attempted_ghosts + 1
         local built = find_exact_entity(surface, force, action.entity, position)
         local ghost = find_exact_ghost(surface, force, action.entity, position)
         local existing = built or ghost
         if existing then
           local configure_error = nil
-          if needs_reconfiguration(action, existing) then
+          if shared_tags ~= nil or action.optimizer_ownership ~= nil then
+            configure_error = "optimizer_tagged_position_already_occupied"
+          end
+          if action.action_type == "place_ghost" and needs_reconfiguration(action, existing) then
             configure_error = configure_created_entity(existing, action)
           end
           local mismatch = configure_error or configuration_error(existing, action, direction)
-          mismatch = repair_existing_inserter_direction(existing, action, direction, mismatch)
+          if action.action_type == "place_ghost" then
+            mismatch = repair_existing_inserter_direction(existing, action, direction, mismatch)
+          end
           if mismatch then
             counts.failed_ghosts = counts.failed_ghosts + 1
             record_failure(phase, action, mismatch)
@@ -983,7 +1088,8 @@ local function execute_build_plan(authorization, build_plan)
           end
         elseif #exact_position_occupants(surface, force, position) > 0 then
           counts.failed_ghosts = counts.failed_ghosts + 1
-          record_failure(phase, action, "exact_position_occupied_by_different_entity")
+          record_failure(phase, action, action.action_type == "place_ghost_no_reconcile"
+            and "guarded_ghost_position_occupied" or "exact_position_occupied_by_different_entity")
         else
           ghost = surface.create_entity({
             name = "entity-ghost",
@@ -991,7 +1097,8 @@ local function execute_build_plan(authorization, build_plan)
             position = { position.x, position.y },
             direction = direction,
             type = action.underground_type,
-            force = force
+            force = force,
+            tags = action.research_lab_ownership or action.optimizer_ownership or shared_tags
           })
           if ghost and ghost.valid then
             local configure_error = configure_created_entity(ghost, action)
@@ -1094,6 +1201,16 @@ local function execute_build_plan(authorization, build_plan)
   counts.removed_entities = removed_entities
   return counts
 end
+
+local function write_layout_report(report, request_id)
+  local json = helpers.table_to_json(report)
+  if report.placement_failures and #report.placement_failures == 0 then
+    json = json:gsub('"placement_failures":{}', '"placement_failures":[]')
+  end
+  local suffix = request_id or tostring(game.tick)
+  helpers.write_file("factorio_mod/layout_reports/layout_" .. suffix .. ".json", json, false)
+end
+
 commands.add_command("build_layout_plan", "Execute an authorized BuildPlan with explicit positions on planner-sandbox.", function(command)
   local ok, payload = pcall(function()
     return helpers.json_to_table(command.parameter or "")
@@ -1101,6 +1218,118 @@ commands.add_command("build_layout_plan", "Execute an authorized BuildPlan with 
   if not ok or type(payload) ~= "table" or type(payload.authorization) ~= "table" or type(payload.build_plan) ~= "table" then
     game.print("BuildPlan error: payload must include authorization and build_plan")
     return
+  end
+
+  -- Correlated calls keep the exact submitted bytes. A duplicate can replay
+  -- the receipt but never the world mutation. Save rollback or a crash before
+  -- the journal is saved can still lose this memory, so a missing receipt is
+  -- not permission to retry against an unverified runtime.
+  local request_id, digest, entry = payload.request_id, payload.request_digest, nil
+  local stream_id, sequence = payload.stream_id, payload.sequence
+  local streamed = stream_id ~= nil or sequence ~= nil
+  local correlated = request_id ~= nil or digest ~= nil or streamed
+  local shared = payload.build_plan.optimizer_ownership ~= nil
+  local protocol = payload.optimizer_tag_protocol
+  -- Legacy correlated executors reject this new envelope field before world access.
+  if (shared or protocol ~= nil) and
+      (not correlated or not shared or protocol ~= "optimizer-shared-tags-v1") then
+    game.print("BuildPlan error: shared optimizer tags require correlated protocol")
+    return
+  end
+  if correlated then
+    local valid = type(request_id) == "string" and #request_id == 32 and request_id:match("^[0-9a-f]+$")
+      and type(digest) == "string" and #digest == 64 and digest:match("^[0-9a-f]+$")
+      and type(command.parameter) == "string" and #command.parameter <= 262144
+    for key in pairs(payload) do
+      if key ~= "request_id" and key ~= "request_digest" and key ~= "authorization" and key ~= "build_plan"
+        and key ~= "stream_id" and key ~= "sequence" and key ~= "optimizer_tag_protocol" then
+        valid = false
+      end
+    end
+    if streamed then
+      valid = valid and type(stream_id) == "string" and #stream_id == 16 and stream_id:match("^[0-9a-f]+$")
+        and type(sequence) == "number" and sequence >= 1 and sequence <= 4294967295 and sequence % 1 == 0
+      if valid then valid = request_id == stream_id .. string.format("%016x", sequence) end
+    end
+    if not valid then game.print("BuildPlan error: invalid correlated request"); return end
+    if streamed then
+      -- One stream retains only its latest request. Older sequence numbers are
+      -- rejected, so bounded retention cannot turn an old retry into a new build.
+      if storage.layout_submission_streams == nil then
+        storage.layout_submission_streams = {count=0, entries={}}
+      end
+      local state = storage.layout_submission_streams
+      if type(state) ~= "table" or type(state.entries) ~= "table" or type(state.count) ~= "number"
+        or state.count < 0 or state.count % 1 ~= 0 then
+        game.print("BuildPlan error: invalid stream journal"); return
+      end
+      local legacy = storage.layout_submission_receipts
+      if legacy ~= nil and (type(legacy) ~= "table" or type(legacy.entries) ~= "table") then
+        game.print("BuildPlan error: invalid receipt journal"); return
+      end
+      if legacy and legacy.entries[request_id] ~= nil then
+        game.print("BuildPlan error: request id belongs to legacy journal"); return
+      end
+      entry = state.entries[stream_id]
+      if entry == nil then
+        if sequence ~= 1 then game.print("BuildPlan error: stream must begin at sequence 1"); return end
+        if state.count >= 128 then game.print("BuildPlan error: stream journal capacity exceeded"); return end
+        entry = {sequence=0, status="completed"}
+        state.entries[stream_id] = entry
+        state.count = state.count + 1
+      elseif type(entry) ~= "table" or type(entry.sequence) ~= "number" or entry.sequence < 1
+        or entry.sequence % 1 ~= 0 then
+        game.print("BuildPlan error: invalid stream entry"); return
+      end
+      if sequence == entry.sequence then
+        if entry.payload ~= command.parameter then
+          game.print("BuildPlan error: stream request conflicts with stored payload"); return
+        end
+        if entry.status ~= "completed" or type(entry.report) ~= "table" then
+          game.print("BuildPlan error: prior submission outcome unknown"); return
+        end
+        write_layout_report(entry.report, request_id)
+        return
+      end
+      if sequence ~= entry.sequence + 1 or entry.status ~= "completed" then
+        game.print("BuildPlan error: stream sequence is stale, skipped, or pending"); return
+      end
+      entry.sequence = sequence
+      entry.payload = command.parameter
+      entry.status = "pending"
+      entry.report = nil
+    else
+    if storage.layout_submission_receipts == nil then
+      storage.layout_submission_receipts = {count=0, entries={}}
+    end
+    local state = storage.layout_submission_receipts
+    if type(state) ~= "table" or type(state.entries) ~= "table" or type(state.count) ~= "number"
+      or state.count < 0 or state.count % 1 ~= 0 then
+      game.print("BuildPlan error: invalid receipt journal"); return
+    end
+    local streams = storage.layout_submission_streams
+    if streams ~= nil and (type(streams) ~= "table" or type(streams.entries) ~= "table") then
+      game.print("BuildPlan error: invalid stream journal"); return
+    end
+    if streams and streams.entries[string.sub(request_id, 1, 16)] ~= nil then
+      game.print("BuildPlan error: request id belongs to a stream"); return
+    end
+    entry = state.entries[request_id]
+    if entry ~= nil then
+      if type(entry) ~= "table" or entry.payload ~= command.parameter then
+        game.print("BuildPlan error: request id conflicts with stored payload"); return
+      end
+      if entry.status ~= "completed" or type(entry.report) ~= "table" then
+        game.print("BuildPlan error: prior submission outcome unknown"); return
+      end
+      write_layout_report(entry.report, request_id)
+      return
+    end
+    if state.count >= 128 then game.print("BuildPlan error: receipt journal capacity exceeded"); return end
+    entry = {payload=command.parameter, status="pending"}
+    state.entries[request_id] = entry
+    state.count = state.count + 1
+    end
   end
 
   local run_ok, result = pcall(function()
@@ -1119,10 +1348,13 @@ commands.add_command("build_layout_plan", "Execute an authorized BuildPlan with 
   else
     report.error = tostring(result)
   end
-
-  local json = helpers.table_to_json(report)
-  if run_ok and #result.placement_failures == 0 then
-    json = json:gsub('"placement_failures":{}', '"placement_failures":[]')
+  if correlated then
+    report.request_id = request_id
+    report.request_digest = digest
+    report.receipt_version = streamed and "layout-submission-receipt-v2" or "layout-submission-receipt-v1"
+    if streamed then report.stream_id, report.sequence = stream_id, sequence end
+    entry.report = report
+    entry.status = "completed"
   end
-  helpers.write_file("factorio_mod/layout_reports/layout_" .. game.tick .. ".json", json, false)
+  write_layout_report(report, request_id)
 end)
