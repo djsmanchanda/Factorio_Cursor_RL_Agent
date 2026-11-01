@@ -11,6 +11,11 @@ local function parse_force(payload)
   return payload.force, nil
 end
 
+local function valid_request_id(value)
+  return type(value) == "string" and value ~= "" and #value <= 64
+    and value:match("^[%w_-]+$") ~= nil
+end
+
 local function parse_research_payload(json_text)
   if not json_text or json_text == "" then
     return nil, "Missing research payload JSON"
@@ -22,12 +27,42 @@ local function parse_research_payload(json_text)
   if not ok or type(payload) ~= "table" then
     return nil, "Invalid research payload JSON"
   end
+  if payload.request_id ~= nil and not valid_request_id(payload.request_id) then
+    return nil, "Research request_id must contain 1-64 filename-safe characters"
+  end
   if type(payload.technology) ~= "string" or payload.technology == "" then
-    return nil, "Research payload must include technology"
+    return payload, "Research payload must include technology"
   end
   local _, force_err = parse_force(payload)
   if force_err then
-    return nil, force_err
+    return payload, force_err
+  end
+  if payload.expected_queue ~= nil then
+    if type(payload.expected_queue) ~= "table" then
+      return payload, "Research expected_queue must be an array of technology names"
+    end
+    local count = 0
+    for key, name in pairs(payload.expected_queue) do
+      if type(key) ~= "number" then
+        return payload, "Research expected_queue must be an array of technology names"
+      end
+      if type(name) ~= "string" or name == "" then
+        return payload, "Research expected_queue entries must be non-empty strings"
+      end
+      count = count + 1
+    end
+    if count ~= #payload.expected_queue then
+      return payload, "Research expected_queue must be an array of technology names"
+    end
+    if payload.expected_current ~= nil
+      and (type(payload.expected_current) ~= "string" or payload.expected_current == "") then
+      return payload, "Research expected_current must be a non-empty string"
+    end
+    if payload.replace_queue ~= nil and type(payload.replace_queue) ~= "boolean" then
+      return payload, "Research replace_queue must be a boolean"
+    end
+  elseif payload.expected_current ~= nil or payload.replace_queue ~= nil then
+    return payload, "Research expected_current and replace_queue require expected_queue"
   end
   return payload, nil
 end
@@ -50,10 +85,7 @@ local function parse_status_payload(json_text)
   if payload.technology ~= nil and (type(payload.technology) ~= "string" or payload.technology == "") then
     return nil, "Research technology must be a non-empty string"
   end
-  if payload.request_id ~= nil and (
-    type(payload.request_id) ~= "string" or payload.request_id == ""
-    or #payload.request_id > 64 or not payload.request_id:match("^[%w_-]+$")
-  ) then
+  if payload.request_id ~= nil and not valid_request_id(payload.request_id) then
     return nil, "Research request_id must contain 1-64 filename-safe characters"
   end
   return payload, nil
@@ -148,10 +180,43 @@ local function queued_or_current(force, canonical_name)
   return false
 end
 
-local function set_research(requested_name, force_name)
+local function live_queue_names(force)
+  local names = {}
+  for _, technology in ipairs(force.research_queue) do
+    names[#names + 1] = technology.name
+  end
+  return names
+end
+
+local function assert_research_guard(force, guard)
+  if not guard then
+    return
+  end
+  local current = force.current_research
+  local current_name = current and current.name or nil
+  if current_name ~= guard.expected_current then
+    error("Research current changed since observation: expected "
+      .. tostring(guard.expected_current) .. ", found " .. tostring(current_name))
+  end
+  local names = live_queue_names(force)
+  if #names ~= #guard.expected_queue then
+    error("Research queue changed since observation: expected "
+      .. #guard.expected_queue .. " entries, found " .. #names)
+  end
+  for index, expected_name in ipairs(guard.expected_queue) do
+    if names[index] ~= expected_name then
+      error("Research queue changed since observation at position " .. index)
+    end
+  end
+end
+
+local function set_research(requested_name, force_name, guard)
   -- A supplied name resolves an existing force only. The legacy nil argument
   -- retains planner-force creation for older sandbox callers.
   local force = get_or_create_planner_force(force_name)
+  -- The guard compares the live force in this same command tick, so an
+  -- observation cannot go stale between the caller's read and this mutation.
+  assert_research_guard(force, guard)
   local technology, canonical_name, requested_level = resolve_research(force, requested_name)
   local completed, state = target_state(technology, requested_level)
   if completed then
@@ -163,6 +228,10 @@ local function set_research(requested_name, force_name)
   if queued_or_current(force, canonical_name) then
     research_targets()[force.name] = requested_name
     return canonical_name, true
+  end
+  if guard and not guard.replace_queue
+    and (force.current_research ~= nil or #force.research_queue > 0) then
+    error("Research queue replacement requires replace_queue")
   end
 
   -- Factorio 2.0 appends with add_research, so explicit requests replace the queue.
@@ -180,18 +249,30 @@ end
 
 commands.add_command("set_research", "Set a research target. Parameter: JSON {technology,force?}.", function(command)
   local payload, parse_err = parse_research_payload(command.parameter)
+  local request_id = payload and valid_request_id(payload.request_id) and payload.request_id or nil
   local report = {
     tick = game.tick,
     technology = payload and payload.technology or nil,
     force = payload and payload.force or "planner"
   }
+  if request_id then
+    report.request_id = request_id
+  end
 
   if parse_err then
     report.ok = false
     report.error = parse_err
   else
+    local guard = nil
+    if payload.expected_queue ~= nil then
+      guard = {
+        expected_queue = payload.expected_queue,
+        expected_current = payload.expected_current,
+        replace_queue = payload.replace_queue == true
+      }
+    end
     local ok, canonical_name, idempotent = pcall(function()
-      return set_research(payload.technology, payload.force)
+      return set_research(payload.technology, payload.force, guard)
     end)
     report.ok = ok
     if ok then
@@ -202,8 +283,12 @@ commands.add_command("set_research", "Set a research target. Parameter: JSON {te
     end
   end
 
+  -- Unguarded legacy/manual callers still get one tick-stamped response. A
+  -- request_id names the exact response so concurrent setter calls cannot
+  -- overwrite each other or be mistaken for the wrong caller's answer.
+  local suffix = request_id or tostring(game.tick)
   local json = helpers.table_to_json(report)
-  helpers.write_file("factorio_mod/research_reports/research_" .. game.tick .. ".json", json, false)
+  helpers.write_file("factorio_mod/research_reports/research_" .. suffix .. ".json", json, false)
 end)
 
 local function science_packs_for(technology)

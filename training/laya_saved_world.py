@@ -290,8 +290,11 @@ def state_option(candidate):
             "plan_hash": sha256_hash(candidate["plan"]) if candidate.get("plan") else None,
             "summary": candidate["summary"], "features": {"entities": len(placements),
                 "new_items": sum(candidate.get("bill", {}).values()) if "bill" in candidate else None,
-                "wait_ticks": candidate.get("wait_ticks", 0)}, "scope": SCOPE,
-            "risk_tier": "ghost_submit" if placements else "read_only"}
+                "wait_ticks": candidate.get("wait_ticks", 0)},
+            "scope": ({"surface": "nauvis", "force": "player", "bounds": None}
+                      if candidate.get("family") == "launch" else SCOPE),
+            "risk_tier": "destructive_mutation" if candidate.get("family") == "launch"
+                         else "ghost_submit" if placements else "read_only"}
 
 
 def decision_state(facts, candidates, run_id, model_ref, objective, history=(), measurement=None):
@@ -320,7 +323,9 @@ def decision_state(facts, candidates, run_id, model_ref, objective, history=(), 
         "options": options,
         "provenance": {"renderer_version": PROFILE, "state_snapshot_hash": sha256_hash(facts),
             "guideline_pack": {"id": "saved-world", "version": "1.0.0", "hash": sha256_hash({"funded": True})},
-            "tool_registry": {"id": "saved-world", "version": "1.0.0", "hash": sha256_hash({"families": ["mine", "smelt", "assemble", "expand", "wait"]})},
+            "tool_registry": {"id": "saved-world", "version": "1.0.0", "hash": sha256_hash({"families":
+                ["mine", "smelt", "assemble", "expand", "wait"] +
+                (["launch"] if any(c.get("family") == "launch" for c in candidates) else [])})},
             "model": model_ref},
         "budget": {"materials_remaining": available, "construction_budget_remaining": None, "action_count_remaining": None, "elapsed_ticks_remaining": None},
         "observation_digest": {"saved_world": {"version": PROFILE, "provider_stock": {k: n["items"] for k, n in facts["networks"].items()},
@@ -402,6 +407,7 @@ class SavedWorldAdapter:
         self.code_hashes = {str(p.relative_to(ROOT)): file_hash(p) for p in (
             Path(__file__), Path(__file__).with_suffix(".lua"), ROOT / "schemas/laya_saved_world.schema.json",
             ROOT / "core/disposable_rcon_identity.py",
+            ROOT / "training/laya_launch_rocket.lua", ROOT / "tools/disposable_rocket_launch.py",
             ROOT / "training/laya_layout_stream.py", ROOT / "schemas/layout_submission_receipt.schema.json",
             ROOT / "orchestrator/game_bridge.py", ROOT / "orchestrator/guarded_configuration.py",
             ROOT / "schemas/optimizer_build_evidence.schema.json", ROOT / "schemas/optimizer_build_evidence_v3.schema.json",

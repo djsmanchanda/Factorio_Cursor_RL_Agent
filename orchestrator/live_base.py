@@ -658,6 +658,41 @@ def entity_names_at(
     return names
 
 
+def entity_unit_numbers_at(
+    client: RconClient, surface: str, force: str, positions: Sequence[Point],
+) -> dict[Point, int | None]:
+    """Read the engine-assigned identity of real (not ghost) occupants.
+
+    A unit number is allocated once per entity for the lifetime of the save and
+    is never reused. It therefore distinguishes a rebuilt entity from the one
+    an earlier observation saw at the same position; positions and names alone
+    cannot.
+    """
+    unique = tuple(dict.fromkeys(
+        (float(position[0]), float(position[1])) for position in positions
+    ))
+    if not unique:
+        return {}
+    literal = ",".join(f"{{{x},{y}}}" for x, y in unique)
+    lua = (
+        "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
+        "local out={};for i,p in ipairs({" + literal + "}) do local found='-';"
+        "for _,e in pairs(s.find_entities_filtered{position=p,radius=0.4,force=f}) do "
+        "if e.type~='entity-ghost' and math.abs(e.position.x-p[1])<0.01 and "
+        "math.abs(e.position.y-p[2])<0.01 and type(e.unit_number)=='number' then "
+        "found=tostring(e.unit_number) break end end;"
+        "out[#out+1]=i..'='..found end;rcon.print(table.concat(out,','))"
+    )
+    raw = _sc(client, lua)
+    units: dict[Point, int | None] = {}
+    for pair in raw.split(","):
+        if not pair:
+            continue
+        index, _, value = pair.partition("=")
+        units[unique[int(index) - 1]] = None if value == "-" else int(value)
+    return units
+
+
 def live_entity_positions(
     client: RconClient, surface: str, force: str, entity_name: str,
     positions: Sequence[Point],

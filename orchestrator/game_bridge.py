@@ -507,17 +507,104 @@ class GameBridge:
 
     def set_research(
         self, technology: str, timeout: float = 60.0, *, force: str | None = None,
+        expected_current: str | None = None, expected_queue: list[str] | None = None,
+        replace_queue: bool = False,
     ) -> Path:
         """Queue one technology on ``force``.
 
         Omitting ``force`` preserves the legacy planner-force command. Real
-        base callers must supply their existing force explicitly.
+        base callers must supply their existing force explicitly. Supplying
+        ``expected_queue`` opts into an atomic guard inside the mod: the live
+        current/queue must match the observation, and a non-empty queue is
+        replaced only when ``replace_queue`` is true.
         """
         payload = {"technology": technology}
         if force is not None:
             payload["force"] = force
+        expected_name = None
+        request_id = None
+        if expected_queue is not None:
+            if (not isinstance(expected_queue, list)
+                    or any(not isinstance(name, str) or not name for name in expected_queue)):
+                raise ValueError("expected_queue must be a list of non-empty strings")
+            if expected_current is not None and (
+                    not isinstance(expected_current, str) or not expected_current):
+                raise ValueError("expected_current must be a non-empty string or None")
+            if not isinstance(replace_queue, bool):
+                raise ValueError("replace_queue must be a boolean")
+            payload["expected_queue"] = list(expected_queue)
+            payload["expected_current"] = expected_current
+            payload["replace_queue"] = replace_queue
+            request_id = uuid.uuid4().hex
+            payload["request_id"] = request_id
+            expected_name = f"research_{request_id}.json"
+        elif expected_current is not None or replace_queue:
+            raise ValueError("expected_current and replace_queue require expected_queue")
         body = json.dumps(payload, separators=(",", ":"))
-        return self._run_and_collect(f"/set_research {body}", RESEARCH_REPORT_SUBDIR, timeout)
+        collected = self._run_and_collect(
+            f"/set_research {body}", RESEARCH_REPORT_SUBDIR, timeout,
+            expected_name=expected_name,
+        )
+        if request_id is not None:
+            self._validate_set_research_response(
+                collected, request_id=request_id, expected_name=expected_name,
+                technology=technology,
+                force=force if force is not None else "planner",
+            )
+        return collected
+
+    @staticmethod
+    def _validate_set_research_response(
+        path: Path, *, request_id: str, expected_name: str,
+        technology: str, force: str | None,
+    ) -> None:
+        """Reject a guarded setter response that is not this exact successful call."""
+        if path.name != expected_name:
+            raise BridgeError(
+                f"Research response {path.name!r} does not match "
+                f"expected {expected_name!r}"
+            )
+        try:
+            with Path(path).open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except (json.JSONDecodeError, OSError, ValueError) as error:
+            raise BridgeError(
+                f"Research response {path.name!r} is not readable JSON: {error}"
+            ) from error
+        if not isinstance(payload, dict):
+            raise BridgeError(
+                f"Research response {path.name!r} is not a JSON object"
+            )
+        if payload.get("request_id") != request_id:
+            raise BridgeError(
+                f"Research response {path.name!r} does not match request_id "
+                f"{request_id!r}"
+            )
+        if payload.get("ok") is not True:
+            detail = payload.get("error") or "response did not report ok"
+            raise BridgeError(
+                f"Research command failed for request {request_id!r}: {detail}"
+            )
+        if payload.get("force") != force:
+            raise BridgeError(
+                f"Research response {path.name!r} has force="
+                f"{payload.get('force')!r}, expected {force!r}"
+            )
+        if payload.get("technology") != technology:
+            raise BridgeError(
+                f"Research response {path.name!r} has technology="
+                f"{payload.get('technology')!r}, expected {technology!r}"
+            )
+        canonical = payload.get("canonical_name")
+        if not isinstance(canonical, str) or not canonical:
+            raise BridgeError(
+                f"Research response {path.name!r} has no canonical_name"
+            )
+        tick = payload.get("tick")
+        if not isinstance(tick, int) or isinstance(tick, bool):
+            raise BridgeError(
+                f"Research response {path.name!r} has no integer tick"
+            )
 
     def research_status(
         self, timeout: float = 60.0, *, force: str | None = None,

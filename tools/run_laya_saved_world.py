@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
 
 from training.laya_input_profile import require_input_profile
 from training.laya_saved_world import (
-    PROFILE, SavedWorldAdapter, SavedWorldError, decision_state, file_hash, owned_root,
+    PROFILE, SavedWorldAdapter, SavedWorldError, bounded_menu, decision_state, file_hash, owned_root,
 )
 from training.laya_starter_kit import verify_starter_kit
 
@@ -118,6 +118,8 @@ def parser():
     p.add_argument("--base-model", type=Path)
     p.add_argument("--decisions", type=int, default=10)
     p.add_argument("--measure-ticks", type=int, default=1800)
+    p.add_argument("--launch-options", action="store_true",
+                   help="Offer explicitly observed ready silos in this disposable paused world")
     p.add_argument("--objective", default="Establish and sustain iron plates and transport-belt production from actual resources.")
     p.add_argument("--update-threads", type=int, help="Factorio update-runner threads for this world (1..64)")
     p.add_argument("--cpu-affinity", help="taskset CPU list for this world (for example 0-3,8)")
@@ -156,6 +158,13 @@ def main(argv=None):
                 adapter.reconcile()
             facts = adapter.query()
             candidates, pruned = adapter.options(facts, args.seed + index)
+            if args.launch_options:
+                from tools.disposable_rocket_launch import disposable_launch_options
+                launches = disposable_launch_options(adapter, tick=facts["tick"])
+                builds = [candidate for candidate in candidates if candidate["family"] != "wait"]
+                waits = [candidate for candidate in candidates if candidate["family"] == "wait"]
+                candidates = bounded_menu(builds + launches, args.seed + index, limit=6) + waits
+                pruned["launch_observations"] = launches
             observation = {"facts": facts, "candidates": candidates, "pruning": pruned, "adapter_hashes": adapter.code_hashes}
             (evidence / f"observation-{facts['tick']}.json").write_text(json.dumps(observation, indent=2) + "\n")
             if args.action == "observe":
@@ -184,13 +193,22 @@ def main(argv=None):
             record.update(tick=facts["tick"], candidates=candidates, profile=PROFILE, status="pending")
             with journal.open("a") as out:
                 out.write(json.dumps(record) + "\n")
-            receipt = adapter.execute(selected, candidates, args.measure_ticks)
+            chosen = next((candidate for candidate in candidates if candidate["option_id"] == selected), None)
+            if chosen and chosen["family"] == "launch" and args.launch_options:
+                from tools.disposable_rocket_launch import execute_selected_disposable_launch
+                receipt = execute_selected_disposable_launch(adapter, selected=selected, presented=candidates,
+                                                             measure_ticks=args.measure_ticks)
+            else:
+                receipt = adapter.execute(selected, candidates, args.measure_ticks)
             measurement = receipt["measurement"]
             record.update(status=receipt["status"], measurement=receipt["measurement"])
             with journal.open("a") as out:
                 out.write(json.dumps(record) + "\n")
-            history.append({"decision_id": f"decision.{index}", "tick": facts["tick"], "summary": selected, "outcome": "pending"})
-            print(json.dumps({"selected": selected, "authority": record["authority"], "measurement": receipt["measurement"]}))
+            history.append({"decision_id": f"decision.{index}", "tick": facts["tick"], "summary": selected,
+                            "outcome": "completed" if receipt["status"] in {"observed", "launch_observed"} else "pending"})
+            print(json.dumps({"selected": selected, "authority": record["authority"], "status": receipt["status"],
+                              "measurement": receipt["measurement"],
+                              "launch_evidence": (receipt.get("launch_receipt") or {}).get("launch_evidence")}))
     finally:
         adapter.close()
     return 0
