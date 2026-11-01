@@ -36,8 +36,25 @@ local function sorted_parts(parts)
   return result, reasons
 end
 
-local function export_force(command)
-  local name = string.match(command.parameter or "", "^%s*(.-)%s*$")
+local function export_request(command)
+  local text = string.match(command.parameter or "", "^%s*(.-)%s*$")
+  if text:sub(1, 1) ~= "{" then return text, nil end
+  local ok, payload = pcall(function() return helpers.json_to_table(text) end)
+  if not ok or type(payload) ~= "table" then error("invalid recipe catalog request") end
+  for key, _ in pairs(payload) do
+    if key ~= "force" and key ~= "request_id" then error("unsupported recipe catalog field") end
+  end
+  if type(payload.force) ~= "string" or payload.force == "" then
+    error("recipe catalog request requires an existing force")
+  end
+  if type(payload.request_id) ~= "string" or #payload.request_id < 1 or #payload.request_id > 64
+      or not payload.request_id:match("^[%w_-]+$") then
+    error("recipe catalog request_id must contain 1-64 filename-safe characters")
+  end
+  return payload.force, payload.request_id
+end
+
+local function export_force(name)
   if name == "" then return shared.get_or_create_planner_force() end
   local force = game.forces[name]
   if not force then error("force does not exist: " .. name) end
@@ -51,16 +68,37 @@ local function primary_recipe_category(recipe)
   if (not categories) and recipe.prototype then
     categories = recipe.prototype.categories
   end
+  if type(categories) ~= "table" then return nil end
   local sorted = {}
-  for _, category in pairs(categories or {}) do
+  local seen = {}
+  local count = 0
+  for index, category in pairs(categories) do
+    if type(index) ~= "number" or index < 1 or index % 1 ~= 0
+        or type(category) ~= "string" or category == "" then return nil end
+    if seen[category] then return nil end
+    seen[category] = true
     table.insert(sorted, category)
+    count = count + 1
   end
+  for index = 1, count do if categories[index] == nil then return nil end end
   table.sort(sorted)
-  return sorted[1] or "crafting"
+  return sorted[1], sorted
 end
 
-commands.add_command("export_recipe_catalog", "Export all recipes with unlock state; optional existing force name.", function(command)
-  local force = export_force(command)
+commands.add_command("export_recipe_catalog", "Export recipes; optional existing force or JSON force/request_id.", function(command)
+  local force_name, request_id = export_request(command)
+  local force = export_force(force_name)
+  local active_mods = {}
+  local active_mods_count = 0
+  if type(script.active_mods) ~= "table" then error("active mod list unavailable") end
+  for name, version in pairs(script.active_mods) do
+    if type(name) ~= "string" or name == "" or type(version) ~= "string" or version == "" then
+      error("active mod list malformed")
+    end
+    active_mods[name] = version
+    active_mods_count = active_mods_count + 1
+  end
+  if active_mods_count == 0 then error("active mod list empty") end
   local recipes = {}
   local names = {}
   for name, recipe in pairs(force.recipes) do
@@ -78,9 +116,11 @@ commands.add_command("export_recipe_catalog", "Export all recipes with unlock st
     local reasons = {}
     for _, reason in ipairs(ingredient_reasons) do table.insert(reasons, reason) end
     for _, reason in ipairs(product_reasons) do table.insert(reasons, reason) end
+    local category, categories = primary_recipe_category(recipe)
+    if not category then table.insert(reasons, "recipe category unavailable or malformed") end
     local ticks = math.max(1, math.floor((recipe.energy or 0.5) * 60 + 0.5))
     local entry = {
-      name = name, enabled = recipe.enabled, category = primary_recipe_category(recipe),
+      name = name, enabled = recipe.enabled, category = category or "unavailable", categories = categories or {},
       energy_ticks = ticks, ingredients = ingredients, products = products,
       supported = #reasons == 0,
     }
@@ -142,8 +182,9 @@ commands.add_command("export_recipe_catalog", "Export all recipes with unlock st
       end
     end
   end
-  local payload = { version = "1.2.0", force = force.name, tick = game.tick, raw_resources = raw_resources, recipes = recipes, machines = machines, stack_sizes = stack_sizes }
-  local path = "factorio_mod/recipe_catalogs/recipe_catalog_" .. game.tick .. ".json"
+  local payload = { version = "1.3.0", force = force.name, tick = game.tick, active_mods = active_mods, active_mods_count = active_mods_count, raw_resources = raw_resources, recipes = recipes, machines = machines, stack_sizes = stack_sizes }
+  if request_id then payload.request_id = request_id end
+  local path = "factorio_mod/recipe_catalogs/recipe_catalog_" .. (request_id or game.tick) .. ".json"
   local json = helpers.table_to_json(payload)
   -- An EMPTY Lua table serialises to `{}` (object), not `[]` (array), so any
   -- ingredient-less or product-less recipe (biter-egg, the parameter-N

@@ -1,0 +1,234 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Optimizer scoped consumer observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "kind",
+    "request_id",
+    "tick",
+    "ok",
+    "ownership_claimed",
+    "dispatch_authorized"
+  ],
+  "properties": {
+    "version": {
+      "const": "optimizer-consumer-observation-v1"
+    },
+    "kind": {
+      "const": "optimizer_consumer_observation"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+    },
+    "tick": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "ownership_claimed": {
+      "const": false
+    },
+    "dispatch_authorized": {
+      "const": false
+    },
+    "surface": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "force": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "requested": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entity",
+        "unit_number",
+        "position"
+      ],
+      "properties": {
+        "entity": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "unit_number": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "position": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y"
+          ],
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    "observation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "reason"
+          ],
+          "properties": {
+            "state": {
+              "const": "unavailable"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "recipe",
+            "products_finished"
+          ],
+          "properties": {
+            "state": {
+              "const": "present"
+            },
+            "recipe": {
+              "$ref": "#/definitions/recipe"
+            },
+            "products_finished": {
+              "$ref": "#/definitions/counter"
+            }
+          }
+        }
+      ]
+    },
+    "error": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "definitions": {
+    "recipe": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "unavailable",
+                "unset"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "value"
+          ],
+          "properties": {
+            "state": {
+              "const": "available"
+            },
+            "value": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        }
+      ]
+    },
+    "counter": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state"
+          ],
+          "properties": {
+            "state": {
+              "const": "unavailable"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "value"
+          ],
+          "properties": {
+            "state": {
+              "const": "available"
+            },
+            "value": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "ok": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "surface",
+          "force",
+          "requested",
+          "observation"
+        ],
+        "not": {
+          "required": [
+            "error"
+          ]
+        }
+      },
+      "else": {
+        "required": [
+          "error"
+        ]
+      }
+    }
+  ]
+}

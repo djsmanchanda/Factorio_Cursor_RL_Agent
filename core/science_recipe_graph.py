@@ -132,7 +132,8 @@ def _is_recovery_or_transport(recipe: Mapping) -> bool:
     name = str(recipe["name"])
     if name == "scrap-recycling":
         return False
-    if recipe["category"] == "recycling" or name.endswith("-recycling"):
+    if (recipe["category"] == "recycling" or "recycling" in recipe.get("categories", [])
+            or name.endswith("-recycling")):
         return True
     return name.startswith("empty-") and name.endswith("-barrel")
 
@@ -155,6 +156,8 @@ def _normalized_recipe(recipe: Mapping) -> dict:
     }
     if "unsupported_reason" in recipe:
         result["unsupported_reason"] = recipe["unsupported_reason"]
+    if "categories" in recipe:
+        result["categories"] = list(recipe["categories"])
     return result
 
 

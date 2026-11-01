@@ -1,0 +1,225 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "rocket_launch_observation.schema.json",
+  "title": "RocketLaunchObservation",
+  "description": "Read-only rocket ascent-completion events and observation-scope reports for one explicit surface and force. on_rocket_launched fires when the rocket finishes its ascent; cargo-pod delivery is a separate event. A launch event is neither cargo delivery nor victory and grants no execution authority. Event filenames combine a caller-supplied per-arm session_id with tick and sequence; independent, collision-free history requires a fresh session identity per arm (the bridge supplies a UUID), because restoring an older save rewinds tick and sequence and a reused or missing session_id cannot guarantee uniqueness.",
+  "oneOf": [
+    {
+      "$ref": "#/definitions/launch_event"
+    },
+    {
+      "$ref": "#/definitions/scope_success"
+    },
+    {
+      "$ref": "#/definitions/scope_failure"
+    }
+  ],
+  "definitions": {
+    "position": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      }
+    },
+    "entity_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "position"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "unit_number": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "position": {
+          "$ref": "#/definitions/position"
+        }
+      }
+    },
+    "launch_event": {
+      "description": "One on_rocket_launched event: the rocket finished its ascent. Cargo-pod delivery is a separate event; this record is not victory and carries no cargo-delivery claim.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "kind",
+        "event",
+        "tick",
+        "surface",
+        "force",
+        "sequence",
+        "session_id",
+        "rocket"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "1.0.0"
+        },
+        "kind": {
+          "const": "rocket_launch"
+        },
+        "event": {
+          "const": "on_rocket_launched"
+        },
+        "tick": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "surface": {
+          "type": "string",
+          "minLength": 1
+        },
+        "force": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "description": "Filename-safe per-arm session identity supplied by the caller (bridge UUID). It is combined with tick and sequence in the filename; uniqueness is not guaranteed if the caller reuses or omits it."
+        },
+        "rocket": {
+          "$ref": "#/definitions/entity_reference"
+        },
+        "rocket_silo": {
+          "$ref": "#/definitions/entity_reference"
+        }
+      }
+    },
+    "scope_success": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "kind",
+        "ok",
+        "tick",
+        "surface",
+        "force",
+        "enabled",
+        "scope_since_tick",
+        "recorded_launches",
+        "session_started"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "1.0.0"
+        },
+        "kind": {
+          "const": "rocket_launch_scope"
+        },
+        "ok": {
+          "const": true
+        },
+        "tick": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "surface": {
+          "type": "string",
+          "minLength": 1
+        },
+        "force": {
+          "type": "string",
+          "minLength": 1
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "scope_since_tick": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recorded_launches": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "session_started": {
+          "type": "boolean",
+          "description": "True only when this request began a fresh enabled observation, including every disabled-to-enabled transition of the same scope. A fresh enabled start resets scope_since_tick and recorded_launches and adopts the caller's session_id."
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "description": "The active per-arm session identity, when one is in force. A fresh enabled start adopts the caller-supplied session_id."
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "description": "Unique client request ID used to correlate one transient scope response. Launch events never carry it."
+        }
+      }
+    },
+    "scope_failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "kind",
+        "ok",
+        "tick",
+        "surface",
+        "force",
+        "error"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "1.0.0"
+        },
+        "kind": {
+          "const": "rocket_launch_scope"
+        },
+        "ok": {
+          "const": false
+        },
+        "tick": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "surface": {
+          "type": "string"
+        },
+        "force": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string",
+          "minLength": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "description": "Unique client request ID used to correlate one transient scope response. Launch events never carry it."
+        }
+      }
+    }
+  }
+}

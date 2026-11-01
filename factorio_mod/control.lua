@@ -6,6 +6,7 @@ local trash_requesters = require("trash_requesters")
 require("world_generation")
 require("snapshot")
 require("recipe_catalog")
+require("runtime_catalog")
 require("ghost_plans")
 require("construction")
 require("upgrades")
@@ -19,6 +20,9 @@ require("science_telemetry")
 require("logistic_inventory")
 require("live_execution")
 require("spidertron_builder")
+require("optimizer_consumer_observation")
+local rocket_launch_telemetry = require("rocket_launch_telemetry")
+require("rocket_silo_observation")
 local laya_coach = require("laya_coach")
 
 script.on_event(defines.events.on_robot_built_entity, function(event)
@@ -45,6 +49,8 @@ script.on_event(defines.events.on_robot_built_entity, function(event)
     end
   end
 end)
+
+script.on_event(defines.events.on_rocket_launched, rocket_launch_telemetry.on_rocket_launched)
 
 script.on_init(function()
   shared.ensure_storage()

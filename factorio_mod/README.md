@@ -30,6 +30,58 @@ discovered mods on next launch.
 
 For a dedicated server, send `/snapshot` over RCON and read that server's own `script-output`, not a client-side directory. A snapshot is read-only, but raw `/sc` Lua and many other registered commands can mutate state.
 
+## Rocket silo observation
+
+`/rocket_silo_observation <json>` exports a read-only, request-correlated
+observation of existing rocket silos for one explicit surface and force:
+
+```json
+{"request_id":"silo-check-1","surface":"nauvis","force":"player","unit_number":7}
+```
+
+`request_id` is required and must contain 1-64 characters from
+`[A-Za-z0-9_-]`; it names the report file. `surface` and `force` must be
+non-empty names of existing game objects. `unit_number` is an optional
+non-negative integer filter; when omitted, every rocket silo owned by that
+force on that surface is reported. A malformed payload with a safe
+`request_id` writes a correlated `ok: false` report. A missing, malformed, or
+unsafe `request_id` writes nothing and cannot be correlated.
+
+Reports are written to
+`script-output/factorio_mod/rocket_silo_observations/rocket_silo_observation_<request_id>.json`,
+separate from the launch event and launch scope directories. Each silo entry
+reports:
+
+- its prototype name, save-lifetime `unit_number` and position
+- `rocket_silo_status` and entity `status` names
+- actual `rocket_parts` plus prototype `rocket_parts_required` and
+  `rocket_parts_storage_cap`
+- the current recipe, when `get_recipe()` returns one
+- `send_to_orbit_automatically` under `auto_launch`
+- the attached rocket and, only through a valid rocket, its cargo pod
+
+Every optional fact is an object with `state: "available"` and a `value`, or
+`state: "absent"` (with an optional reason), or `state: "unavailable"` with a
+reason. The observer never converts a missing or invalid engine reference into
+a normal value.
+
+Reference API: `data/factorio-2.1.21/runtime-api-2.1.21.json` (application
+version 2.1.21, API version 6). The module uses only attributes listed there.
+Provenance limits: Lua mods cannot read the live engine build, the loaded save
+identity, or a save's live runtime API version, so the reference version is
+static provenance, not live verification. `auto_launch` maps to
+`send_to_orbit_automatically` and is only meaningful for launch products whose
+prototype has an automated `send_to_orbit_mode`. This command never launches a
+rocket, mutates an entity, or grants execution authority.
+
+`GameBridge.observe_rocket_silos` generates a request ID and returns the
+schema-validated, scope- and filter-checked response as detached data. It writes
+a report but does not prune this directory. Correlation and no-follow checking
+of the final file do not authenticate the server, save, output writer, or parent
+directories; readiness is neither a launch event nor authority to launch.
+The prototype-name field is optional for older reports; readers with the older
+strict schema must be updated before they consume reports from the new exporter.
+
 ## Recipe knowledge export
 
 Run `/export_recipe_catalog player` to export every recipe known to the existing
@@ -38,6 +90,18 @@ remain available for structural planning without becoming executable. The export
 also records acquisition leaves from resource, plant, tree, and fish entities plus
 the dedicated asteroid-chunk prototype collection. It is read-only and writes under
 `script-output/factorio_mod/recipe_catalogs/`.
+Version 1.3.0 additionally records the active mod names, versions, and count;
+matching those declarations to another capture does not prove common server,
+save, or capture time. Existing 1.0–1.2 catalogs remain supported by the schema.
+The exporter records the complete sorted category set and retains its first
+category in the legacy scalar field. Missing or malformed category data marks
+the recipe unsupported rather than assuming `crafting`. Older captures without
+the set remain usable, but can conservatively reject compatible machines.
+For request correlation use `/export_recipe_catalog {"force":"player","request_id":"example"}`;
+the ID appears in the report and filename. `GameBridge.export_recipe_catalog_capture`
+requires an existing force and returns the collected bytes. It writes a report,
+does not prune catalog reports, and does not authenticate their source. The legacy
+plain-force command and `export_recipe_catalog` bridge method are unchanged.
 
 ## GhostPlan sandbox rendering
 

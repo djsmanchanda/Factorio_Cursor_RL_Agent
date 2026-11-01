@@ -16,7 +16,8 @@
    "enum": [
     "1.0.0",
     "1.1.0",
-    "1.2.0"
+    "1.2.0",
+    "1.3.0"
    ]
   },
   "fixture_provenance": {
@@ -45,6 +46,22 @@
   "force": {
    "type": "string",
    "minLength": 1
+  },
+  "request_id": {
+   "type": "string",
+   "minLength": 1,
+   "maxLength": 64,
+   "pattern": "^[A-Za-z0-9_-]+$"
+  },
+  "active_mods": {
+   "type": "object",
+   "minProperties": 1,
+   "propertyNames": { "minLength": 1 },
+   "additionalProperties": { "type": "string", "minLength": 1 }
+  },
+  "active_mods_count": {
+   "type": "integer",
+   "minimum": 1
   },
   "tick": {
    "type": "integer",
@@ -113,6 +130,12 @@
    }
   }
  },
+ "allOf": [
+  {
+   "if": { "properties": { "version": { "const": "1.3.0" } }, "required": ["version"] },
+   "then": { "required": ["active_mods", "active_mods_count"] }
+  }
+ ],
  "definitions": {
   "part": {
    "type": "object",
@@ -162,6 +185,11 @@
     "category": {
      "type": "string",
      "minLength": 1
+    },
+    "categories": {
+     "type": "array",
+     "uniqueItems": true,
+     "items": {"type": "string", "minLength": 1}
     },
     "energy_ticks": {
      "type": "integer",

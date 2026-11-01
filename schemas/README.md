@@ -12,6 +12,8 @@ Documentation for each schema is maintained in this README.
 
 - `snapshot.schema.json` - Lua to Planner snapshot contract; planner-owned bounded surfaces include versioned resource and water observations
 - `science_status.schema.json` - Lua to deterministic science observer contract for one force's research state and lab input/status telemetry
+- `rocket_launch_observation.schema.json` - Lua to optimizer contract for scope-explicit `on_rocket_launched` events (rocket finishes ascent, not cargo-pod delivery) and their correlated scope responses; observation evidence only, not victory or execution authority
+- `rocket_silo_observation.schema.json` - Lua to optimizer contract for request-correlated, read-only observation of existing rocket silos for one explicit surface and force; reports stable unit identity, status, parts, recipe, auto-launch, rocket and cargo-pod facts with explicit absent/unavailable states against runtime API 2.1.21, without launch or mutation authority
 - `research_queue.schema.json` - persisted Linux deterministic runner intent and per-technology progress contract
 - `build_plan.schema.json` — Planner → Lua build plan contract
 - `goal.schema.json` — Instruction → Planner goal contract
@@ -25,6 +27,7 @@ Documentation for each schema is maintained in this README.
 - `planning_request.schema.json` — Intent router → planning request contract
 - `build_intent.schema.json` — Planner → build intent contract
 - `ghost_plan.schema.json` — Ghost projection → ghost plan contract
+- `optimizer_consumer_observation.schema.json` — Scoped consumer recipe and lifetime-counter observation; no proof of connection, consumption or commissioning
 - `electronics_world_spec.schema.json` - Survey to LocalLayoutPlanner coordinates and observed capacity contract
 - `world_spec.schema.json` - deterministic bounded planner surface, resources, and starter-kit contract
 - `training_scenario.schema.json` - isolated mini-environment, objective, construction budget, constraints, and reward-weight contract

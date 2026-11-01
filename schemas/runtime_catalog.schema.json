@@ -1,0 +1,1188 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "runtime_catalog.schema.json",
+  "title": "RuntimeCatalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "ok",
+    "tick"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.1.0"
+    },
+    "kind": {
+      "const": "runtime_catalog"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "tick": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "error": {
+      "type": "string",
+      "minLength": 1
+    },
+    "provenance": {
+      "$ref": "#/definitions/provenance"
+    },
+    "force_state": {
+      "$ref": "#/definitions/force_state"
+    },
+    "technology_graph": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "complete", "technology_count"],
+      "properties": {
+        "version": {"const": "runtime-technology-graph-v1"},
+        "complete": {"type": "boolean"},
+        "technology_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "technologies": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/technology"
+      }
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/entity"
+      }
+    },
+    "fluids": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/fluid"
+      }
+    },
+    "unknowns": {
+      "$ref": "#/definitions/string_array"
+    },
+    "recipe_fluid_boxes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/recipe_fluid_boxes"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "ok": {
+            "const": true
+          }
+        },
+        "required": [
+          "ok"
+        ]
+      },
+      "then": {
+        "required": [
+          "provenance",
+          "force_state",
+          "technologies",
+          "entities",
+          "fluids",
+          "unknowns"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "ok": {
+            "const": false
+          }
+        },
+        "required": [
+          "ok"
+        ]
+      },
+      "then": {
+        "required": [
+          "error"
+        ]
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "recipe_fluid_boxes"
+        ]
+      },
+      "then": {
+        "properties": {
+          "provenance": {
+            "properties": {
+              "scope": {
+                "properties": {
+                  "recipe_scope": {
+                    "const": "unlocks_and_fluid_ports"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "provenance": {
+            "properties": {
+              "scope": {
+                "properties": {
+                  "recipe_scope": {
+                    "const": "unlocks_only"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "definitions": {
+    "string_array": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "nullable_string": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "nullable_number": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "nullable_integer": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "scalar_details": {
+      "type": "object",
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "boolean"
+        ]
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "export_command",
+        "export_tick",
+        "active_mods",
+        "active_mods_count",
+        "mod_signature",
+        "scope",
+        "engine_version"
+      ],
+      "properties": {
+        "export_command": {
+          "const": "export_runtime_catalog"
+        },
+        "export_tick": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "active_mods": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "active_mods_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mod_signature": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "force",
+            "surface",
+            "surface_requested",
+            "technology_scope",
+            "entity_scope",
+            "entity_types",
+            "fluid_scope",
+            "recipe_scope"
+          ],
+          "properties": {
+            "force": {
+              "type": "string",
+              "minLength": 1
+            },
+            "surface": {
+              "type": "string",
+              "minLength": 1
+            },
+            "surface_requested": {
+              "type": "boolean"
+            },
+            "technology_scope": {
+              "const": "all_force_technologies"
+            },
+            "entity_scope": {
+              "const": "selected_prototype_types"
+            },
+            "entity_types": {
+              "$ref": "#/definitions/string_array"
+            },
+            "fluid_scope": {
+              "const": "all_loaded_fluids"
+            },
+            "recipe_scope": {
+              "enum": [
+                "unlocks_only",
+                "unlocks_and_fluid_ports"
+              ]
+            }
+          }
+        },
+        "engine_version": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "reason"
+          ],
+          "properties": {
+            "available": {
+              "const": false
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            },
+            "base_mod_version": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "research_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "level": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      }
+    },
+    "force_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "research_progress",
+        "research_queue",
+        "research_enabled",
+        "bonuses"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "current_research": {
+          "$ref": "#/definitions/research_ref"
+        },
+        "previous_research": {
+          "$ref": "#/definitions/research_ref"
+        },
+        "research_progress": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "research_queue": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/research_ref"
+          }
+        },
+        "research_enabled": {
+          "type": "boolean"
+        },
+        "bonuses": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "research_ingredient": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "kind",
+        "amount"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "item"
+        },
+        "amount": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "research_trigger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "details"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "details": {
+          "$ref": "#/definitions/scalar_details"
+        }
+      }
+    },
+    "technology_research": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ingredients"
+      ],
+      "properties": {
+        "unit_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "unit_count_formula": {
+          "$ref": "#/definitions/nullable_string"
+        },
+        "unit_energy": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "unit_time_seconds": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "ingredients": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/research_ingredient"
+          }
+        },
+        "trigger": {
+          "$ref": "#/definitions/research_trigger"
+        }
+      }
+    },
+    "technology_effect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "handled",
+        "details"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "recipe": {
+          "type": "string",
+          "minLength": 1
+        },
+        "recipe_enabled": {
+          "type": "boolean"
+        },
+        "handled": {
+          "type": "boolean"
+        },
+        "details": {
+          "$ref": "#/definitions/scalar_details"
+        },
+        "unsupported_reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "handled": {
+                "const": false
+              }
+            },
+            "required": [
+              "handled"
+            ]
+          },
+          "then": {
+            "required": [
+              "unsupported_reason"
+            ]
+          }
+        }
+      ]
+    },
+    "technology": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "researched",
+        "enabled",
+        "prerequisites",
+        "successors",
+        "research",
+        "effects",
+        "unlocked_recipes",
+        "unknowns"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "researched": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "level": {
+          "$ref": "#/definitions/nullable_integer"
+        },
+        "max_level": {
+          "$ref": "#/definitions/nullable_integer"
+        },
+        "upgrade": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "allows_productivity": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "hidden": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "essential": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "visible_when_disabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "prerequisites": {
+          "$ref": "#/definitions/string_array"
+        },
+        "successors": {
+          "$ref": "#/definitions/string_array"
+        },
+        "research": {
+          "$ref": "#/definitions/technology_research"
+        },
+        "effects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/technology_effect"
+          }
+        },
+        "unlocked_recipes": {
+          "$ref": "#/definitions/string_array"
+        },
+        "unknowns": {
+          "$ref": "#/definitions/string_array"
+        }
+      }
+    },
+    "bbox": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "min_x",
+        "min_y",
+        "max_x",
+        "max_y"
+      ],
+      "properties": {
+        "min_x": {
+          "type": "number"
+        },
+        "min_y": {
+          "type": "number"
+        },
+        "max_x": {
+          "type": "number"
+        },
+        "max_y": {
+          "type": "number"
+        }
+      }
+    },
+    "placement_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "count"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "placement_recipe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "enabled"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "placement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/placement_item"
+          }
+        },
+        "recipe": {
+          "$ref": "#/definitions/placement_recipe"
+        }
+      }
+    },
+    "crafting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "categories"
+      ],
+      "properties": {
+        "categories": {
+          "$ref": "#/definitions/string_array"
+        },
+        "speed": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "ingredient_count": {
+          "$ref": "#/definitions/nullable_integer"
+        },
+        "fixed_recipe": {
+          "$ref": "#/definitions/nullable_string"
+        }
+      }
+    },
+    "effect_values": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number"
+      }
+    },
+    "effect_receiver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "base_effect"
+      ],
+      "properties": {
+        "base_effect": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/definitions/effect_values"
+            }
+          ]
+        },
+        "uses_beacon_effects": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "uses_module_effects": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "uses_surface_effects": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "modules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inventory_size_supported",
+        "allowed_effects",
+        "allowed_module_categories"
+      ],
+      "properties": {
+        "inventory_size": {
+          "$ref": "#/definitions/nullable_integer"
+        },
+        "inventory_size_supported": {
+          "type": "boolean"
+        },
+        "allowed_effects": {
+          "$ref": "#/definitions/string_array"
+        },
+        "allowed_module_categories": {
+          "$ref": "#/definitions/string_array"
+        },
+        "effect_receiver": {
+          "$ref": "#/definitions/effect_receiver"
+        }
+      }
+    },
+    "electric_energy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "buffer_capacity": {
+          "$ref": "#/definitions/nullable_number"
+        },
+        "drain": {
+          "$ref": "#/definitions/nullable_number"
+        },
+        "usage_priority": {
+          "$ref": "#/definitions/nullable_string"
+        }
+      }
+    },
+    "burner_energy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fuel_categories": {
+          "$ref": "#/definitions/string_array"
+        },
+        "fuel_inventory_size": {
+          "$ref": "#/definitions/nullable_integer"
+        },
+        "effectivity": {
+          "$ref": "#/definitions/nullable_number"
+        }
+      }
+    },
+    "fluid_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "kind"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "fluid"
+        }
+      }
+    },
+    "fluid_energy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "burns_fluid": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "fluid_usage_per_tick": {
+          "$ref": "#/definitions/nullable_number"
+        },
+        "effectivity": {
+          "$ref": "#/definitions/nullable_number"
+        },
+        "maximum_temperature": {
+          "$ref": "#/definitions/nullable_number"
+        },
+        "scale_fluid_usage": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "filter": {
+          "$ref": "#/definitions/fluid_ref"
+        }
+      }
+    },
+    "heat_energy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "connection_count": {
+          "$ref": "#/definitions/nullable_integer"
+        },
+        "default_temperature": {
+          "$ref": "#/definitions/nullable_number"
+        },
+        "max_temperature": {
+          "$ref": "#/definitions/nullable_number"
+        },
+        "max_transfer": {
+          "$ref": "#/definitions/nullable_number"
+        },
+        "specific_heat": {
+          "$ref": "#/definitions/nullable_number"
+        }
+      }
+    },
+    "energy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": [
+            "electric",
+            "burner",
+            "fluid",
+            "heat",
+            "void"
+          ]
+        },
+        "usage": {
+          "$ref": "#/definitions/nullable_number"
+        },
+        "max_usage": {
+          "$ref": "#/definitions/nullable_number"
+        },
+        "passive_usage": {
+          "$ref": "#/definitions/nullable_number"
+        },
+        "electric": {
+          "$ref": "#/definitions/electric_energy"
+        },
+        "burner": {
+          "$ref": "#/definitions/burner_energy"
+        },
+        "fluid": {
+          "$ref": "#/definitions/fluid_energy"
+        },
+        "heat": {
+          "$ref": "#/definitions/heat_energy"
+        },
+        "void": {
+          "type": "boolean"
+        },
+        "max_power_output": {
+          "$ref": "#/definitions/nullable_number"
+        }
+      }
+    },
+    "position": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      }
+    },
+    "pipe_connection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "positions": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/definitions/position"
+          }
+        },
+        "direction": {
+          "$ref": "#/definitions/nullable_integer"
+        },
+        "direction_name": {
+          "$ref": "#/definitions/nullable_string"
+        },
+        "flow_direction": {
+          "$ref": "#/definitions/nullable_string"
+        },
+        "connection_type": {
+          "$ref": "#/definitions/nullable_string"
+        },
+        "connection_category": {
+          "$ref": "#/definitions/string_array"
+        },
+        "max_underground_distance": {
+          "$ref": "#/definitions/nullable_integer"
+        }
+      }
+    },
+    "fluidbox": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pipe_connections"
+      ],
+      "properties": {
+        "index": {
+          "$ref": "#/definitions/nullable_integer"
+        },
+        "production_type": {
+          "$ref": "#/definitions/nullable_string"
+        },
+        "volume": {
+          "$ref": "#/definitions/nullable_number"
+        },
+        "filter": {
+          "$ref": "#/definitions/fluid_ref"
+        },
+        "minimum_temperature": {
+          "$ref": "#/definitions/nullable_number"
+        },
+        "maximum_temperature": {
+          "$ref": "#/definitions/nullable_number"
+        },
+        "pipe_connections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/pipe_connection"
+          }
+        }
+      }
+    },
+    "lab": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inputs"
+      ],
+      "properties": {
+        "inputs": {
+          "$ref": "#/definitions/string_array"
+        },
+        "researching_speed": {
+          "$ref": "#/definitions/nullable_number"
+        }
+      }
+    },
+    "beacon": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "supply_area_distance": {
+          "$ref": "#/definitions/nullable_number"
+        },
+        "distribution_effectivity": {
+          "$ref": "#/definitions/nullable_number"
+        }
+      }
+    },
+    "mining": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mining_speed": {
+          "$ref": "#/definitions/nullable_number"
+        },
+        "resource_categories": {
+          "$ref": "#/definitions/string_array"
+        }
+      }
+    },
+    "pump": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pumping_speed": {
+          "$ref": "#/definitions/nullable_number"
+        }
+      }
+    },
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "type",
+        "placement",
+        "fluidboxes",
+        "unknown_fields"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tile_width": {
+          "$ref": "#/definitions/nullable_integer"
+        },
+        "tile_height": {
+          "$ref": "#/definitions/nullable_integer"
+        },
+        "collision_box": {
+          "$ref": "#/definitions/bbox"
+        },
+        "selection_box": {
+          "$ref": "#/definitions/bbox"
+        },
+        "supports_direction": {
+          "type": "boolean"
+        },
+        "max_underground_distance": {
+          "$ref": "#/definitions/nullable_integer"
+        },
+        "fast_replaceable_group": {
+          "$ref": "#/definitions/nullable_string"
+        },
+        "next_upgrade": {
+          "$ref": "#/definitions/nullable_string"
+        },
+        "placement": {
+          "$ref": "#/definitions/placement"
+        },
+        "crafting": {
+          "$ref": "#/definitions/crafting"
+        },
+        "modules": {
+          "$ref": "#/definitions/modules"
+        },
+        "energy": {
+          "$ref": "#/definitions/energy"
+        },
+        "electric_pole": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["quality", "max_wire_distance", "supply_area_distance"],
+          "properties": {
+            "quality": {"const": "normal"},
+            "max_wire_distance": {"type": "number", "minimum": 0},
+            "supply_area_distance": {"type": "number", "minimum": 0}
+          }
+        },
+        "fluidboxes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/fluidbox"
+          }
+        },
+        "lab": {
+          "$ref": "#/definitions/lab"
+        },
+        "beacon": {
+          "$ref": "#/definitions/beacon"
+        },
+        "mining": {
+          "$ref": "#/definitions/mining"
+        },
+        "pump": {
+          "$ref": "#/definitions/pump"
+        },
+        "unknown_fields": {
+          "$ref": "#/definitions/string_array"
+        }
+      }
+    },
+    "fluid": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "default_temperature": {
+          "$ref": "#/definitions/nullable_number"
+        },
+        "max_temperature": {
+          "$ref": "#/definitions/nullable_number"
+        },
+        "heat_capacity": {
+          "$ref": "#/definitions/nullable_number"
+        },
+        "fuel_value": {
+          "$ref": "#/definitions/nullable_number"
+        },
+        "gas_temperature": {
+          "$ref": "#/definitions/nullable_number"
+        },
+        "emissions_multiplier": {
+          "$ref": "#/definitions/nullable_number"
+        },
+        "hidden": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "recipe_fluid_part": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fluidbox_index": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "recipe_fluid_boxes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "ingredients",
+        "products"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ingredients": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/recipe_fluid_part"
+          }
+        },
+        "products": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/recipe_fluid_part"
+          }
+        }
+      }
+    }
+  }
+}

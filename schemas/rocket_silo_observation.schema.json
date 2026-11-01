@@ -1,0 +1,281 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "rocket_silo_observation.schema.json",
+  "title": "RocketSiloObservation",
+  "description": "Read-only, request-correlated observation of existing rocket silos for one explicit surface and force. Facts are reported only when the referenced entity or prototype attribute exists and is valid; absence and unavailability are represented explicitly. Reference API: Factorio runtime-api-2.1.21.json (application_version 2.1.21, api_version 6). Mods cannot read or verify the live engine build, loaded save identity, or live API version; the reference values are static provenance, not live verification. This contract is evidence only: it grants no launch, mutation, or execution authority.",
+  "oneOf": [
+    {
+      "$ref": "#/definitions/success"
+    },
+    {
+      "$ref": "#/definitions/failure"
+    }
+  ],
+  "definitions": {
+    "position": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": {
+        "x": {"type": "number"},
+        "y": {"type": "number"}
+      }
+    },
+    "entity_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "position"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "unit_number": {"type": "integer", "minimum": 0},
+        "position": {"$ref": "#/definitions/position"}
+      }
+    },
+    "absent_fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state"],
+      "properties": {
+        "state": {"const": "absent"},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    },
+    "unavailable_fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "reason"],
+      "properties": {
+        "state": {"const": "unavailable"},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    },
+    "integer_fact": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "value"],
+          "properties": {
+            "state": {"const": "available"},
+            "value": {"type": "integer", "minimum": 0}
+          }
+        },
+        {"$ref": "#/definitions/absent_fact"},
+        {"$ref": "#/definitions/unavailable_fact"}
+      ]
+    },
+    "string_fact": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "value"],
+          "properties": {
+            "state": {"const": "available"},
+            "value": {"type": "string", "minLength": 1}
+          }
+        },
+        {"$ref": "#/definitions/absent_fact"},
+        {"$ref": "#/definitions/unavailable_fact"}
+      ]
+    },
+    "boolean_fact": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "value"],
+          "properties": {
+            "state": {"const": "available"},
+            "value": {"type": "boolean"}
+          }
+        },
+        {"$ref": "#/definitions/absent_fact"},
+        {"$ref": "#/definitions/unavailable_fact"}
+      ]
+    },
+    "position_fact": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "value"],
+          "properties": {
+            "state": {"const": "available"},
+            "value": {"$ref": "#/definitions/position"}
+          }
+        },
+        {"$ref": "#/definitions/absent_fact"},
+        {"$ref": "#/definitions/unavailable_fact"}
+      ]
+    },
+    "entity_reference_fact": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "value"],
+          "properties": {
+            "state": {"const": "available"},
+            "value": {"$ref": "#/definitions/entity_reference"}
+          }
+        },
+        {"$ref": "#/definitions/absent_fact"},
+        {"$ref": "#/definitions/unavailable_fact"}
+      ]
+    },
+    "status": {
+      "description": "rocket_silo is a defines.rocket_silo_status name; entity is a defines.entity_status name. Each fact is independently absent or unavailable when the runtime does not expose a valid value.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rocket_silo", "entity"],
+      "properties": {
+        "rocket_silo": {"$ref": "#/definitions/string_fact"},
+        "entity": {"$ref": "#/definitions/string_fact"}
+      }
+    },
+    "parts": {
+      "description": "actual is LuaEntity.rocket_parts; required is LuaEntityPrototype.rocket_parts_required; storage_cap is LuaEntityPrototype.rocket_parts_storage_cap.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actual", "required", "storage_cap"],
+      "properties": {
+        "actual": {"$ref": "#/definitions/integer_fact"},
+        "required": {"$ref": "#/definitions/integer_fact"},
+        "storage_cap": {"$ref": "#/definitions/integer_fact"}
+      }
+    },
+    "auto_launch": {
+      "description": "Maps to LuaEntity.send_to_orbit_automatically. The value is only meaningful for launch products whose prototype has an automated send_to_orbit_mode; the raw engine fact is reported without inferring applicability.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "fact"],
+      "properties": {
+        "source": {"const": "send_to_orbit_automatically"},
+        "fact": {"$ref": "#/definitions/boolean_fact"}
+      }
+    },
+    "silo": {
+      "description": "One existing rocket-silo entity. unit_number is the save-lifetime stable identity when the runtime exposes it. rocket is LuaEntity.rocket; cargo_pod is read from the valid rocket's attached_cargo_pod, never fabricated.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unit_number",
+        "position",
+        "status",
+        "parts",
+        "recipe",
+        "auto_launch",
+        "rocket",
+        "cargo_pod"
+      ],
+      "properties": {
+        "prototype_name": {"$ref": "#/definitions/string_fact"},
+        "unit_number": {"$ref": "#/definitions/integer_fact"},
+        "position": {"$ref": "#/definitions/position_fact"},
+        "status": {"$ref": "#/definitions/status"},
+        "parts": {"$ref": "#/definitions/parts"},
+        "recipe": {"$ref": "#/definitions/string_fact"},
+        "auto_launch": {"$ref": "#/definitions/auto_launch"},
+        "rocket": {"$ref": "#/definitions/entity_reference_fact"},
+        "cargo_pod": {"$ref": "#/definitions/entity_reference_fact"}
+      }
+    },
+    "requested": {
+      "description": "The caller's optional unit_number filter. absent means the request observed every rocket silo in scope.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unit_number"],
+      "properties": {
+        "unit_number": {"$ref": "#/definitions/integer_fact"}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observer",
+        "runtime_api_reference",
+        "runtime_api_version",
+        "live_engine_version_verified",
+        "limitations"
+      ],
+      "properties": {
+        "observer": {"const": "rocket_silo_observation"},
+        "runtime_api_reference": {"const": "2.1.21"},
+        "runtime_api_version": {"const": 6},
+        "live_engine_version_verified": {"const": false},
+        "limitations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9_-]+$",
+      "description": "Filename-safe correlation identity supplied by the caller. Reusing it overwrites the same report path."
+    },
+    "success": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "kind",
+        "ok",
+        "request_id",
+        "tick",
+        "surface",
+        "force",
+        "requested",
+        "silo_count",
+        "silos",
+        "provenance"
+      ],
+      "properties": {
+        "schema_version": {"const": "1.0.0"},
+        "kind": {"const": "rocket_silo_observation"},
+        "ok": {"const": true},
+        "request_id": {"$ref": "#/definitions/request_id"},
+        "tick": {"type": "integer", "minimum": 0},
+        "surface": {"type": "string", "minLength": 1},
+        "force": {"type": "string", "minLength": 1},
+        "requested": {"$ref": "#/definitions/requested"},
+        "silo_count": {"type": "integer", "minimum": 0},
+        "silos": {
+          "type": "array",
+          "items": {"$ref": "#/definitions/silo"}
+        },
+        "provenance": {"$ref": "#/definitions/provenance"}
+      }
+    },
+    "failure": {
+      "description": "A correlated rejection for a malformed request whose request_id was safe enough to name a report file. A missing or unsafe request_id writes no file.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "kind",
+        "ok",
+        "request_id",
+        "tick",
+        "surface",
+        "force",
+        "error"
+      ],
+      "properties": {
+        "schema_version": {"const": "1.0.0"},
+        "kind": {"const": "rocket_silo_observation"},
+        "ok": {"const": false},
+        "request_id": {"$ref": "#/definitions/request_id"},
+        "tick": {"type": "integer", "minimum": 0},
+        "surface": {"type": "string"},
+        "force": {"type": "string"},
+        "error": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

@@ -70,6 +70,19 @@ def test_recipe_fixture_records_export_provenance() -> None:
     }
 
 
+def test_version_13_requires_mod_metadata_while_legacy_remains_valid() -> None:
+    payload = json.loads(CATALOG.read_text(encoding="utf-8"))
+    payload["version"] = "1.3.0"
+    with pytest.raises(ValueError):
+        validate_recipe_catalog(payload)
+    payload["active_mods"] = {"base": "2.1.21"}
+    payload["active_mods_count"] = 1
+    validate_recipe_catalog(payload)
+    payload["active_mods_count"] = True
+    with pytest.raises(ValueError):
+        validate_recipe_catalog(payload)
+
+
 @pytest.mark.parametrize("name", ASSEMBLED)
 def test_line_recipe_matches_the_live_game_recipe(name: str) -> None:
     """Ingredients, amounts, output count and craft time must equal the real

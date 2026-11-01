@@ -88,7 +88,9 @@ _EXHAUSTIVE_NODE_FRAGMENTS = {
 _LUA_FILES = {
     "test_atomic_removal_preflight.py", "test_logistic_sections_lua.py",
     "test_recipe_catalog_lua.py", "test_research_lua.py",
-    "test_science_telemetry_lua.py", "test_training_lab_validation_lua.py",
+    "test_rocket_launch_telemetry_lua.py", "test_runtime_identity_probe_lua.py", "test_research_lab_ownership_lua.py",
+    "test_science_telemetry_lua.py",
+    "test_training_lab_validation_lua.py",
 }
 _LUA_NODE_FRAGMENTS = {
     "test_bootstrap_supply.py::test_generated_seed_lua_is_syntactically_valid",
