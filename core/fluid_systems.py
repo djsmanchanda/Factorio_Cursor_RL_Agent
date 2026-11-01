@@ -177,13 +177,13 @@ def _tile_owners(segments: list[dict]) -> dict[tuple, list[tuple[int, tuple]]]:
 
 
 def mixing_conflicts(segments: list[dict]):
-    """Yield (index_a, tile_a, index_b, tile_b) for every unsanctioned adjacency.
+    """Yield (index_a, tile_a, index_b, tile_b) for overlaps or unsanctioned adjacency.
 
     Comparing every tile against every other tile is quadratic in both segment
     count and segment size -- ~235k comparisons on the current electronics
     bundle, paid on every preflight because proving purity requires exhausting
-    the search. Adjacency only ever involves the four neighbouring positions, so
-    indexing tiles by position turns the scan linear in total tile count.
+    the search. Overlaps and adjacency involve only the same or four neighbouring
+    positions, so indexing tiles by position turns the scan linear in tile count.
 
     Each unordered segment pair is reported once, anchored on the
     lower-indexed segment, so `index_a < index_b` always holds.
@@ -191,10 +191,10 @@ def mixing_conflicts(segments: list[dict]):
     owners = _tile_owners(segments)
     for index_a, segment_a in enumerate(segments):
         fluid_a = segment_a.get("fluid")
-        if fluid_a is None or segment_a.get("separated_by_pump"):
+        if fluid_a is None:
             continue
         for tile_a in segment_a["tiles"]:
-            for offset_x, offset_y in _NEIGHBOUR_OFFSETS:
+            for offset_x, offset_y in ((0, 0), *_NEIGHBOUR_OFFSETS):
                 neighbours = owners.get((tile_a[0] + offset_x, tile_a[1] + offset_y))
                 if not neighbours:
                     continue
@@ -205,23 +205,24 @@ def mixing_conflicts(segments: list[dict]):
                     fluid_b = segment_b.get("fluid")
                     if fluid_b is None or fluid_b == fluid_a:
                         continue
-                    if segment_b.get("separated_by_pump"):
+                    if (offset_x or offset_y) and (segment_a.get("separated_by_pump")
+                                                   or segment_b.get("separated_by_pump")):
                         continue
                     yield index_a, tile_a, index_b, tile_b
 
 
 def validate_network_purity(segments: list[dict]) -> None:
-    """Raise ValueError naming the offending tiles when two tiles of
-    DIFFERENT, non-None fluid from different segments are orthogonally
-    adjacent and neither segment is separated_by_pump. Each segment is
+    """Raise ValueError for overlapping or adjacent different-fluid tiles.
+
+    Overlaps always conflict; adjacency is ignored when either segment has the
+    existing separated_by_pump flag. Each segment is
     {"fluid": str|None, "tiles": [(x, y)...], "separated_by_pump": bool}.
     This is the anti-mixing guard: a fluid network can hold exactly one
     fluid type, the fluid analogue of the quality jam rule."""
     for index_a, tile_a, index_b, tile_b in mixing_conflicts(segments):
-        raise ValueError(
-            f"Fluid mixing: tile {tile_a} ('{segments[index_a]['fluid']}') is adjacent to "
-            f"tile {tile_b} ('{segments[index_b]['fluid']}') without a separating pump"
-        )
+        relation = "overlaps" if tuple(tile_a) == tuple(tile_b) else "is adjacent to"
+        raise ValueError(f"Fluid mixing: tile {tile_a} ('{segments[index_a]['fluid']}') {relation} "
+                         f"tile {tile_b} ('{segments[index_b]['fluid']}')")
 
 
 def validate_pipeline_span(tiles: list[tuple], pumps: list[tuple] | None = None) -> None:

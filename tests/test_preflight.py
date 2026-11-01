@@ -87,6 +87,15 @@ def test_fluid_mixing_is_caught():
     assert (0, 0) in failure["positions"] and (1, 0) in failure["positions"]
 
 
+def test_overlapping_fluid_labels_are_reported_as_mixing():
+    bundle = {"infrastructure": [], "plans": [_entity("pipe", 0.5, 0.5)],
+              "fluid_segments": [{"fluid": "water", "tiles": [(0, 0)]},
+                                 {"fluid": "crude-oil", "tiles": [(0, 0)], "separated_by_pump": True}]}
+    result = preflight(bundle)
+    failure = next(f for f in result["failures"] if f["check"] == "fluid_mixing")
+    assert "overlaps" in failure["detail"] and failure["positions"] == [(0, 0), (0, 0)]
+
+
 # --- 5. underground span -------------------------------------------------------
 
 def test_underground_span_too_long_is_caught():

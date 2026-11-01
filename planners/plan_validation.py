@@ -26,6 +26,7 @@ ENTITY_FOOTPRINTS = {
     "pumpjack": 3,
     "offshore-pump": 2,
     "roboport": 4,
+    "rocket-silo": 9,
     "substation": 2,
     "big-electric-pole": 2,
     "electric-energy-interface": 2,

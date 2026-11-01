@@ -178,6 +178,14 @@ def test_processing_unit_acid_tile_is_the_centre_column_and_inserter_steps_aside
     assert [a["entity"] for a in _at(plan, (math.floor(cx - 1), math.floor(cy - 2)))] == ["fast-inserter"]
 
 
+def test_rocket_fuel_uses_assembler_fluid_connection_geometry():
+    plan = generate_fluid_machine_row("rocket-fuel", 2, terminal_collector=False,
+                                      chained_items={"solid-fuel"})
+    (cx, cy), _ = _machine_centres("rocket-fuel", 2)
+    assert [a["entity"] for a in _at(plan, (math.floor(cx), math.floor(cy - 2)))] == ["pipe-to-ground"]
+    assert [a["entity"] for a in _at(plan, (math.floor(cx - 1), math.floor(cy - 2)))] == ["fast-inserter"]
+
+
 def test_chemical_plant_row_keeps_the_tight_pitch_but_two_fluids_spread_it():
     assert _pitch("plastic-bar") == 3
     assert _pitch("sulfuric-acid") == 3

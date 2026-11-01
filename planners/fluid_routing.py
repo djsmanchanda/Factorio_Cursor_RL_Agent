@@ -164,7 +164,11 @@ def fluid_chain_link_segments(
     pipes, undergrounds = _link_route(from_point, to_points, trunk_x,
                                       _obstacles(list(foreign), fluid) | set(obstacle_tiles))
     return [{"fluid": fluid, "separated_by_pump": False,
-             "tiles": pipes + [tile for tile, _ in undergrounds]}]
+             "tiles": pipes + [tile for tile, _ in undergrounds],
+             "tunnel_endpoints": [
+                 (undergrounds[index][0], undergrounds[index + 1][0])
+                 for index in range(0, len(undergrounds), 2)
+             ]}]
 
 
 def generate_fluid_chain_link(

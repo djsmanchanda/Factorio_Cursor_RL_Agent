@@ -204,7 +204,7 @@ def _check_power(placements):
 # --- 4. fluid mixing: reuse core.fluid_systems.validate_network_purity -----
 
 def _fluid_mixing_failures(segments: list) -> list:
-    """Same adjacency rule as validate_network_purity, collecting every
+    """Same overlap and adjacency rules as validate_network_purity, collecting every
     offending pair instead of raising on the first.
 
     Shares mixing_conflicts' position index rather than re-deriving adjacency:
@@ -214,8 +214,9 @@ def _fluid_mixing_failures(segments: list) -> list:
     """
     return [
         {"check": "fluid_mixing",
-         "detail": f"tile {tile_a} ('{segments[index_a].get('fluid')}') is adjacent to "
-                   f"tile {tile_b} ('{segments[index_b].get('fluid')}') without a separating pump",
+         "detail": f"tile {tile_a} ('{segments[index_a].get('fluid')}') "
+                   f"{'overlaps' if tuple(tile_a) == tuple(tile_b) else 'is adjacent to'} "
+                   f"tile {tile_b} ('{segments[index_b].get('fluid')}')",
          "positions": [tile_a, tile_b]}
         for index_a, tile_a, index_b, tile_b in mixing_conflicts(segments)
     ]

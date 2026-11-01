@@ -179,6 +179,21 @@ def test_network_purity_pump_separated_different_fluids_ok():
     validate_network_purity(segments)  # no raise: pump sanctions the adjacency
 
 
+@pytest.mark.parametrize("pump_first,pump_second", [(False, False), (True, False), (False, True), (True, True)])
+def test_network_purity_rejects_different_fluids_on_same_tile_even_with_pump_flag(pump_first, pump_second):
+    segments = [
+        {"fluid": "water", "tiles": [(2, 3)], "separated_by_pump": pump_first},
+        {"fluid": "crude-oil", "tiles": [[2, 3]], "separated_by_pump": pump_second},
+    ]
+    with pytest.raises(ValueError, match="overlaps"):
+        validate_network_purity(segments)
+
+
+def test_network_purity_accepts_same_fluid_tile_reuse():
+    validate_network_purity([{"fluid": "water", "tiles": [(2, 3)]},
+                             {"fluid": "water", "tiles": [[2, 3]]}])
+
+
 def test_network_purity_adjacent_different_fluids_raises_naming_tiles():
     segments = [
         {"fluid": "water", "tiles": [(0, 0)], "separated_by_pump": False},

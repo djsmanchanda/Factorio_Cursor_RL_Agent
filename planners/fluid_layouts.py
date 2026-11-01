@@ -98,9 +98,16 @@ FLUID_RECIPES: Dict[str, dict] = {
         "fluid_ingredients": {"sulfuric-acid": 5},
         "item_products": ["processing-unit"], "item_product_amounts": {"processing-unit": 1}, "fluid_products": {},
     },
+    "rocket-fuel": {
+        "machine": "assembling-machine-2", "craft_time": 15.0,
+        "item_ingredients": ["solid-fuel"], "item_amounts": [10],
+        "fluid_ingredients": {"light-oil": 10},
+        "item_products": ["rocket-fuel"], "item_product_amounts": {"rocket-fuel": 1}, "fluid_products": {},
+    },
 }
 
-# PIPE TILE offsets (= target_position - entity.position), live-verified above.
+# PIPE TILE offsets (= target_position - entity.position), observed for the
+# machine prototype; recipe-specific fluid assignment still requires verification.
 # Where a fluidbox exposed two interchangeable connections we take exactly ONE
 # (the lowest x, then lowest y) -- a single connection carries ~4200 fluid/s,
 # far past any of these recipes, and one tile fewer means one adjacency fewer.
@@ -126,6 +133,7 @@ VERIFIED_PIPE_TILES: Dict[str, dict] = {
     "battery": {"inputs": {"sulfuric-acid": (-1, -2)}, "outputs": {}},
     "plastic-bar": {"inputs": {"petroleum-gas": (-1, -2)}, "outputs": {}},
     "processing-unit": {"inputs": {"sulfuric-acid": (0, -2)}, "outputs": {}},
+    "rocket-fuel": {"inputs": {"light-oil": (0, -2)}, "outputs": {}},
 }
 
 HEADER_WEST = -1  # westmost header column: one tile clear of the machines
