@@ -7,6 +7,7 @@ import argparse
 import socket
 import struct
 import sys
+from collections.abc import Callable
 
 SERVERDATA_AUTH = 3
 SERVERDATA_AUTH_RESPONSE = 2
@@ -19,10 +20,17 @@ class RconError(RuntimeError):
 
 
 class RconClient:
-    def __init__(self, host: str, port: int, password: str, timeout: float = 10.0):
+    def __init__(self, host: str, port: int, password: str, timeout: float = 10.0, *,
+                 socket_validator: Callable[[socket.socket], None] | None = None):
         self._sock = socket.create_connection((host, port), timeout=timeout)
         self._next_id = 1
-        self._auth(password)
+        try:
+            if socket_validator is not None and socket_validator(self._sock) is not None:
+                raise RconError("socket validator must return None or raise")
+            self._auth(password)
+        except BaseException:
+            self._sock.close()
+            raise
 
     def _send_packet(self, packet_type: int, body: str) -> int:
         packet_id = self._next_id

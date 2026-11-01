@@ -125,6 +125,11 @@ SAVE_PATH="$DATA_ROOT/saves/mod_playground.zip"
 REPO_SAVE_PATH="$REPO_ROOT/saves/mod_playground.zip"
 SECRET_PATH="$DATA_ROOT/rcon-password"
 PID_PATH="$DATA_ROOT/factorio.pid"
+# Fleet lanes add a creation-token sidecar beside the legacy PID file.  The
+# factorio.pid format stays a bare integer for every existing caller.
+START_TOKEN_PATH="$DATA_ROOT/factorio.pid.start-token.json"
+BOOT_ID_PATH="/proc/sys/kernel/random/boot_id"
+FLEET_START_TOKEN=""
 STDIN_PATH="$DATA_ROOT/factorio.stdin"
 STDIN_KEEPER_PID_PATH="$DATA_ROOT/factorio-stdin-keeper.pid"
 CONFIG_PATH="$DATA_ROOT/config.ini"
@@ -158,6 +163,314 @@ server_running() {
   [[ -f "$PID_PATH" ]] && kill -0 "$(<"$PID_PATH")" 2>/dev/null
 }
 
+process_start_token() {
+  local pid="$1" stat rest
+  local -a fields
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  stat="$(<"/proc/$pid/stat")" 2>/dev/null || return 1
+  # Field 2 (comm) may itself contain spaces and parentheses; strip through the
+  # last ") " so the array begins at field 3 (state).  Field 22 is then index 19.
+  rest="${stat##*) }"
+  read -r -a fields <<< "$rest"
+  ((${#fields[@]} >= 20)) || return 1
+  [[ "${fields[19]}" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "${fields[19]}"
+}
+
+process_state_code() {
+  local pid="$1" stat rest
+  local -a fields
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  stat="$(<"/proc/$pid/stat")" 2>/dev/null || return 1
+  rest="${stat##*) }"
+  read -r -a fields <<< "$rest"
+  ((${#fields[@]} >= 1)) || return 1
+  printf '%s\n' "${fields[0]}"
+}
+
+current_boot_id() {
+  local boot
+  IFS= read -r boot < "$BOOT_ID_PATH" 2>/dev/null || return 1
+  [[ "$boot" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] \
+    || return 1
+  printf '%s\n' "$boot"
+}
+
+# kill -0 fails for both "no such process" and "operation not permitted".  The
+# latter still means the PID exists, so classify it as present and let the
+# caller fail closed rather than deleting another user's live server record.
+process_presence() {
+  local pid="$1" error
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || { printf 'absent\n'; return 0; }
+  if [[ -e "/proc/$pid/stat" ]]; then
+    printf 'present\n'
+    return 0
+  fi
+  if kill -0 "$pid" 2>/dev/null; then
+    printf 'present\n'
+    return 0
+  fi
+  error="$(LC_ALL=C kill -0 "$pid" 2>&1 || true)"
+  case "$error" in
+    *"not permitted"*) printf 'present\n'; return 0 ;;
+    *"No such process"*) printf 'absent\n'; return 0 ;;
+  esac
+  if [[ -e "/proc/$pid" ]]; then
+    printf 'present\n'
+    return 0
+  fi
+  printf 'unknown\n'
+}
+
+# Strict full-record match: exactly one pid, creation_token and boot_id, with
+# no duplicate keys, extra fields or trailing bytes.  Anything else is corrupt
+# evidence and must never drive a signal or a cleanup.
+read_start_token_record() {
+  local record boot
+  [[ -f "$START_TOKEN_PATH" ]] || return 1
+  record="$(<"$START_TOKEN_PATH")" 2>/dev/null || return 1
+  [[ "$record" =~ ^\{[[:space:]]*\"pid\"[[:space:]]*:[[:space:]]*([1-9][0-9]*)[[:space:]]*,[[:space:]]*\"creation_token\"[[:space:]]*:[[:space:]]*([0-9]+)[[:space:]]*,[[:space:]]*\"boot_id\"[[:space:]]*:[[:space:]]*\"([0-9a-fA-F-]+)\"[[:space:]]*\}$ ]] \
+    || return 1
+  RECORDED_PID="${BASH_REMATCH[1]}"
+  RECORDED_TOKEN="${BASH_REMATCH[2]}"
+  boot="${BASH_REMATCH[3]}"
+  [[ "$boot" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] \
+    || return 1
+  RECORDED_BOOT_ID="$boot"
+  return 0
+}
+
+write_fleet_start_token() {
+  local pid="$1" token boot temporary
+  FLEET_START_TOKEN=""
+  token="$(process_start_token "$pid")" || return 1
+  # Publish the token to the caller so a later write failure can still prove
+  # ownership before any signal is sent.
+  FLEET_START_TOKEN="$token"
+  boot="$(current_boot_id)" || return 1
+  temporary="$START_TOKEN_PATH.tmp.$$"
+  ( umask 077; printf '{"pid":%s,"creation_token":%s,"boot_id":"%s"}\n' "$pid" "$token" "$boot" > "$temporary" ) \
+    || { rm -f "$temporary"; return 1; }
+  mv -f "$temporary" "$START_TOKEN_PATH" || { rm -f "$temporary"; return 1; }
+}
+
+remove_fleet_records() {
+  rm -f "$PID_PATH" 2>/dev/null || true
+  rm -f "$START_TOKEN_PATH" 2>/dev/null || true
+}
+
+# Classify a recorded PID against the creation token captured at start.
+#   owned   the live PID still carries the recorded start token
+#   gone    the PID is definitely absent or now belongs to another process
+#   unknown /proc could not be read, so ownership is unproven
+# Always returns 0; callers branch on FLEET_PID_STATE so `set -e` cannot turn
+# an unknown classification into a silent success path.
+fleet_pid_state() {
+  local pid="$1" expected="$2" presence token
+  presence="$(process_presence "$pid")"
+  case "$presence" in
+    absent)
+      FLEET_PID_STATE="gone"
+      return 0
+      ;;
+    unknown)
+      FLEET_PID_STATE="unknown"
+      return 0
+      ;;
+  esac
+  if ! token="$(process_start_token "$pid" 2>/dev/null)"; then
+    # A process may exit between the presence check and the stat read.  Only a
+    # now-provably-absent PID becomes gone; anything else stays unknown.
+    presence="$(process_presence "$pid")"
+    if [[ "$presence" == absent ]]; then
+      FLEET_PID_STATE="gone"
+    else
+      FLEET_PID_STATE="unknown"
+    fi
+    return 0
+  fi
+  if [[ "$token" != "$expected" ]]; then
+    FLEET_PID_STATE="gone"
+    return 0
+  fi
+  # A zombie has already exited.  Its token proves it was ours, and it cannot
+  # serve the lane, so treat it as gone and allow our own records to be cleaned.
+  if [[ "$(process_state_code "$pid" 2>/dev/null)" == "Z" ]]; then
+    FLEET_PID_STATE="gone"
+  else
+    FLEET_PID_STATE="owned"
+  fi
+  return 0
+}
+
+# Returns 0 only for a live PID whose /proc start time and boot ID match the
+# fleet sidecar.  Returns 1 only after proving the recorded server is absent or
+# reused.  Unknown liveness or boot evidence dies instead of guessing:
+# signaling a reused PID, deleting the only ownership record, or starting a
+# second server over a live lane is worse than a stalled lane.
+fleet_server_running() {
+  local pid boot presence token
+  RECORDED_PID=""
+  RECORDED_TOKEN=""
+  RECORDED_BOOT_ID=""
+
+  if [[ ! -f "$PID_PATH" ]]; then
+    if [[ ! -e "$START_TOKEN_PATH" ]]; then
+      return 1
+    fi
+    # A sidecar without a PID file still proves a lane may be live.  Its own
+    # PID must be classified before any evidence is removed.
+    read_start_token_record \
+      || die "fleet token record $START_TOKEN_PATH exists without $PID_PATH and is missing, corrupt, or has duplicate fields; refusing to infer lifecycle state"
+    fleet_pid_state "$RECORDED_PID" "$RECORDED_TOKEN"
+    case "$FLEET_PID_STATE" in
+      gone)
+        rm -f "$START_TOKEN_PATH" 2>/dev/null || true
+        return 1
+        ;;
+      owned)
+        die "fleet token record names live PID $RECORDED_PID but $PID_PATH is missing; refusing to delete the only ownership evidence or start another server. Inspect the lane, stop PID $RECORDED_PID if it is this server, then remove $START_TOKEN_PATH"
+        ;;
+      *)
+        die "fleet token record names PID $RECORDED_PID but its liveness cannot be verified; refusing to infer lifecycle state or delete ownership evidence. Inspect /proc/$RECORDED_PID and $START_TOKEN_PATH"
+        ;;
+    esac
+  fi
+  pid="$(<"$PID_PATH")" 2>/dev/null \
+    || die "fleet PID record is unreadable: $PID_PATH; refusing to infer lifecycle state"
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] \
+    || die "fleet PID record is invalid: $PID_PATH; refusing to infer lifecycle state"
+  presence="$(process_presence "$pid")"
+  if [[ "$presence" == absent ]]; then
+    # The PID named by the legacy record is definitely gone.  Before deleting
+    # anything, require the sidecar to agree; a sidecar naming another live
+    # process means the evidence is corrupt, not stale.
+    if [[ -e "$START_TOKEN_PATH" ]]; then
+      read_start_token_record \
+        || die "fleet PID $pid is absent but $START_TOKEN_PATH is missing, corrupt, or has duplicate fields; refusing to delete ownership evidence"
+      [[ "$RECORDED_PID" == "$pid" ]] \
+        || die "fleet creation-token record names PID $RECORDED_PID but $PID_PATH names PID $pid; refusing mismatched cleanup"
+      fleet_pid_state "$RECORDED_PID" "$RECORDED_TOKEN"
+      if [[ "$FLEET_PID_STATE" != "gone" ]]; then
+        die "fleet PID $pid is absent but $START_TOKEN_PATH still names live or unverifiable PID $RECORDED_PID; refusing to delete ownership evidence. Inspect the lane before starting another server"
+      fi
+    fi
+    remove_fleet_records
+    return 1
+  fi
+  [[ "$presence" == unknown ]] \
+    && die "fleet PID $pid liveness cannot be verified (kill and /proc evidence disagree); refusing to infer lifecycle state"
+  read_start_token_record \
+    || die "fleet server PID $pid is alive but $START_TOKEN_PATH is missing, corrupt, or has duplicate fields; refusing to infer lifecycle state"
+  [[ "$RECORDED_PID" == "$pid" ]] \
+    || die "fleet creation-token record names PID $RECORDED_PID but $PID_PATH names PID $pid; refusing mismatched cleanup"
+  boot="$(current_boot_id)" \
+    || die "cannot read the current Linux boot ID; refusing to use an unbound fleet record"
+  if [[ "$RECORDED_BOOT_ID" != "$boot" ]]; then
+    # A record can only be written while its process is live on the current
+    # boot, so a mismatch while that PID is live is corruption, not proof of a
+    # reboot.  Deleting the sidecar would discard the only evidence of lane
+    # ownership and could let a second server take over the lane.
+    die "fleet server PID $pid is alive but $START_TOKEN_PATH records boot $RECORDED_BOOT_ID instead of the current boot $boot; a corrupt record is indistinguishable from a reboot, so refusing to signal it or delete ownership evidence. Inspect the lane and process identity before removing $PID_PATH and $START_TOKEN_PATH manually"
+  fi
+  fleet_pid_state "$pid" "$RECORDED_TOKEN"
+  case "$FLEET_PID_STATE" in
+    owned)
+      return 0
+      ;;
+    gone)
+      # The recorded token may still match if the process has exited but is
+      # not reaped yet; that is a stopped server, not a reused PID.
+      presence="$(process_presence "$pid")"
+      if [[ "$presence" == "absent" ]]; then
+        remove_fleet_records
+        return 1
+      fi
+      [[ "$presence" == "unknown" ]] \
+        && die "fleet server PID $pid liveness became unverifiable; refusing to infer lifecycle state"
+      if token="$(process_start_token "$pid" 2>/dev/null)" && [[ "$token" == "$RECORDED_TOKEN" ]]; then
+        remove_fleet_records
+        return 1
+      fi
+      die "fleet server PID $pid was reused (start token no longer matches $RECORDED_TOKEN); refusing to signal it or delete ownership evidence. Inspect /proc/$pid and $START_TOKEN_PATH"
+      ;;
+    *)
+      die "fleet server PID $pid is alive but its /proc start time is unavailable; refusing to use or delete an untrusted PID"
+      ;;
+  esac
+}
+
+# Token-write failure happens after we spawned a child.  Only signal it when
+# ownership is proven; an unknown identity never signals and never deletes the
+# records, so the lane stays visibly claimed for manual inspection.
+cleanup_failed_fleet_start() {
+  local pid="$1"
+  if [[ -z "${FLEET_START_TOKEN:-}" ]]; then
+    # The token was never captured, so no live process can be proven ours.
+    case "$(process_presence "$pid")" in
+      absent)
+        remove_fleet_records
+        stop_stdin_keeper
+        die "fleet PID $pid exited before its creation token could be recorded; refused start"
+        ;;
+      *)
+        die "could not establish the identity of fleet PID $pid after a token-write failure; refusing to signal it or delete unverified records. Inspect /proc/$pid and $START_TOKEN_PATH"
+        ;;
+    esac
+  fi
+  fleet_pid_state "$pid" "$FLEET_START_TOKEN"
+  case "$FLEET_PID_STATE" in
+    owned) ;;
+    gone)
+      # Our child exited, or the PID now names a different process.  Clean only
+      # our own records; never signal the reused PID.
+      remove_fleet_records
+      stop_stdin_keeper
+      die "fleet PID $pid exited or was reused before its creation token could be recorded; refused start"
+      ;;
+    *)
+      die "could not verify the identity of fleet PID $pid after a token-write failure; refusing to signal it or delete unverified records. Inspect /proc/$pid and $START_TOKEN_PATH"
+      ;;
+  esac
+  kill -TERM "$pid" 2>/dev/null || true
+  for _ in $(seq 1 40); do
+    fleet_pid_state "$pid" "$FLEET_START_TOKEN"
+    case "$FLEET_PID_STATE" in
+      owned) sleep 0.1 ;;
+      gone) break ;;
+      *)
+        die "fleet PID $pid became unverifiable while stopping after a token-write failure; refusing to send further signals or delete ownership evidence. Inspect /proc/$pid and $START_TOKEN_PATH"
+        ;;
+    esac
+  done
+  fleet_pid_state "$pid" "$FLEET_START_TOKEN"
+  case "$FLEET_PID_STATE" in
+    owned)
+      kill -KILL "$pid" 2>/dev/null || true
+      for _ in $(seq 1 20); do
+        fleet_pid_state "$pid" "$FLEET_START_TOKEN"
+        case "$FLEET_PID_STATE" in
+          owned) sleep 0.1 ;;
+          gone) break ;;
+          *)
+            die "fleet PID $pid became unverifiable after SIGKILL; refusing to delete ownership evidence. Inspect /proc/$pid and $START_TOKEN_PATH"
+            ;;
+        esac
+      done
+      fleet_pid_state "$pid" "$FLEET_START_TOKEN"
+      [[ "$FLEET_PID_STATE" == "gone" ]] \
+        || die "fleet PID $pid still matches its recorded identity after SIGKILL; refusing to delete records for a live process"
+      ;;
+    gone) ;;
+    *)
+      die "fleet PID $pid became unverifiable while stopping after a token-write failure; refusing to delete ownership evidence. Inspect /proc/$pid and $START_TOKEN_PATH"
+      ;;
+  esac
+  remove_fleet_records
+  stop_stdin_keeper
+  die "could not record a trustworthy creation token for fleet PID $pid; terminated the process we started and refused start"
+}
+
 stop_stdin_keeper() {
   if [[ -f "$STDIN_KEEPER_PID_PATH" ]] \
     && kill -0 "$(<"$STDIN_KEEPER_PID_PATH")" 2>/dev/null; then
@@ -167,8 +480,13 @@ stop_stdin_keeper() {
 }
 
 assert_stopped() {
-  server_running && die "server is already running (PID $(<"$PID_PATH"))"
-  rm -f "$PID_PATH"
+  if (( FLEET_MODE )); then
+    fleet_server_running && die "server is already running (PID $(<"$PID_PATH"))"
+    remove_fleet_records
+  else
+    server_running && die "server is already running (PID $(<"$PID_PATH"))"
+    rm -f "$PID_PATH"
+  fi
   stop_stdin_keeper
 }
 
@@ -423,9 +741,15 @@ start_server() {
   setsid "${launch[@]}" \
     >"$DATA_ROOT/logs/factorio-stdout.log" 2>"$DATA_ROOT/logs/factorio-stderr.log" < "$STDIN_PATH" &
   echo $! > "$PID_PATH"
+  if (( FLEET_MODE )); then
+    local started_pid="$(<"$PID_PATH")"
+    write_fleet_start_token "$started_pid" || cleanup_failed_fleet_start "$started_pid"
+  fi
   for _ in $(seq 1 240); do
     grep -q "Starting RCON interface" "$DATA_ROOT/factorio-current.log" 2>/dev/null && break
-    if ! server_running; then
+    if (( FLEET_MODE )); then
+      fleet_server_running || { stop_stdin_keeper; die "server exited; inspect $DATA_ROOT/logs/factorio-stderr.log"; }
+    elif ! server_running; then
       stop_stdin_keeper
       die "server exited; inspect $DATA_ROOT/logs/factorio-stderr.log"
     fi
@@ -439,34 +763,123 @@ start_server() {
 }
 
 stop_server() {
-  if ! server_running; then
-    rm -f "$PID_PATH"
+  local running=1 pid recorded_token
+  if (( FLEET_MODE )); then
+    fleet_server_running || running=0
+  elif ! server_running; then
+    running=0
+  fi
+  if (( ! running )); then
+    if (( FLEET_MODE )); then
+      remove_fleet_records
+    else
+      rm -f "$PID_PATH"
+    fi
     stop_stdin_keeper
     echo "isolated deterministic server is already stopped"
     return
   fi
-  local pid="$(<"$PID_PATH")"
+  pid="$(<"$PID_PATH")"
+  if (( ! FLEET_MODE )); then
+    kill -INT "$pid"
+    for _ in $(seq 1 120); do
+      kill -0 "$pid" 2>/dev/null || {
+        rm -f "$PID_PATH"
+        stop_stdin_keeper
+        echo "stopped isolated deterministic server"
+        return
+      }
+      sleep 0.5
+    done
+    die "server PID $pid did not stop after SIGINT"
+  fi
+
+  recorded_token="$RECORDED_TOKEN"
+  # Re-verify immediately before signaling; a reused PID must never receive our
+  # SIGINT or SIGKILL, and an unreadable process must fail closed instead of
+  # being mistaken for a clean exit.
+  fleet_pid_state "$pid" "$recorded_token"
+  case "$FLEET_PID_STATE" in
+    owned) ;;
+    gone)
+      remove_fleet_records
+      stop_stdin_keeper
+      echo "isolated deterministic server is already stopped"
+      return
+      ;;
+    *)
+      die "fleet server PID $pid identity cannot be verified immediately before SIGINT; refusing to signal it or delete ownership evidence. Inspect /proc/$pid and $START_TOKEN_PATH"
+      ;;
+  esac
   kill -INT "$pid"
   for _ in $(seq 1 120); do
-    kill -0 "$pid" 2>/dev/null || {
-      rm -f "$PID_PATH"
+    fleet_pid_state "$pid" "$recorded_token"
+    case "$FLEET_PID_STATE" in
+      owned) sleep 0.5 ;;
+      gone)
+        remove_fleet_records
+        stop_stdin_keeper
+        echo "stopped isolated deterministic server"
+        return
+        ;;
+      *)
+        die "fleet server PID $pid liveness became unverifiable after SIGINT; refusing to send further signals or delete ownership evidence. Inspect /proc/$pid and $START_TOKEN_PATH"
+        ;;
+    esac
+  done
+  fleet_pid_state "$pid" "$recorded_token"
+  case "$FLEET_PID_STATE" in
+    owned) ;;
+    gone)
+      remove_fleet_records
       stop_stdin_keeper
       echo "stopped isolated deterministic server"
       return
-    }
-    sleep 0.5
+      ;;
+    *)
+      die "fleet server PID $pid liveness became unverifiable after SIGINT; refusing to send further signals or delete ownership evidence. Inspect /proc/$pid and $START_TOKEN_PATH"
+      ;;
+  esac
+  # SIGINT timed out but the same verified process still holds the identity.
+  kill -KILL "$pid" 2>/dev/null || true
+  for _ in $(seq 1 20); do
+    fleet_pid_state "$pid" "$recorded_token"
+    case "$FLEET_PID_STATE" in
+      owned) sleep 0.5 ;;
+      gone)
+        remove_fleet_records
+        stop_stdin_keeper
+        echo "stopped isolated deterministic server after SIGKILL"
+        return
+        ;;
+      *)
+        die "fleet server PID $pid liveness became unverifiable after SIGKILL; refusing to delete ownership evidence. Inspect /proc/$pid and $START_TOKEN_PATH"
+        ;;
+    esac
   done
-  die "server PID $pid did not stop after SIGINT"
+  die "fleet server PID $pid still matches its recorded identity after SIGKILL"
 }
 
 status_server() {
-  if server_running; then
+  local running=1
+  if (( FLEET_MODE )); then
+    fleet_server_running || running=0
+  elif ! server_running; then
+    running=0
+  fi
+  if (( running )); then
     echo "running isolated deterministic server PID $(<"$PID_PATH") game=127.0.0.1:$GAME_PORT rcon=127.0.0.1:$RCON_PORT root=$DATA_ROOT"
   else
     stop_stdin_keeper
     echo "isolated deterministic server is stopped root=$DATA_ROOT"
   fi
 }
+
+# Focused tests source this file with a valid action and then exercise the
+# helpers directly; executed callers continue to the lifecycle dispatch.
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+  return 0
+fi
 
 case "$ACTION" in
   bootstrap) bootstrap ;;

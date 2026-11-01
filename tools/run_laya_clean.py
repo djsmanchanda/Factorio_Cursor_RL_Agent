@@ -144,13 +144,15 @@ def main(argv=None) -> int:
             policy = (GuidedPolicy(args.seed, preferences=load_preferences(ROOT / settings.catalog), **policy_options)
                       if args.policy == "guided" else ExplorationPolicy(args.seed))
             if args.actions == "deterministic":
+                from tools.laya_deterministic_session import DeterministicSession
                 from training.laya_ops_runner import lifecycle_receipts, run as run_ops
                 carried = (lifecycle_receipts(paths["journal"].parent / "decision-states.jsonl")
                            if args.jumpstart else [])
+                session = DeterministicSession(adapter.root, emit=lambda line: log(f"  TOOL {line}"))
                 summary = run_ops(adapter, policy, journal=paths["journal"], decisions=args.decisions or None,
                                   measure_ticks=args.measure_ticks, seed=args.seed, run_id=run_id, emit=log,
                                   should_stop=stop.is_set, status_path=paths["status"], settings=settings,
-                                  carried=carried)
+                                  carried=carried, session=session)
             else:
                 summary = run(adapter, policy, journal=paths["journal"],
                               decisions=args.decisions or None, measure_ticks=args.measure_ticks, seed=args.seed,

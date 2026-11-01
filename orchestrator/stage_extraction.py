@@ -25,6 +25,8 @@ from planners.resource_layouts import (
     generate_shared_belt_column_expansion,
     generate_direct_mining_to_chest,
     mine_substation_positions,
+    mining_drill_positions,
+    paired_mining_drill_positions,
 )
 from planners.recipe_data import LINE_RECIPES, MACHINE_SPEEDS
 from planners.zoning_geometry import MINING_APRON_TILES, Rect
@@ -209,18 +211,6 @@ class LocalExtractionPlan:
     smelter_vertical_mirror: bool = False
     first_column_x: float | None = None
     smelter_reserved_area: tuple[Point, Point] | None = None
-
-
-def mining_drill_positions(origin: Point, machine_count: int) -> list[Point]:
-    """Centres for a south-facing drill row whose output is a local belt."""
-    ox, oy = origin
-    return [(ox + 1.5 + (3 * index), oy - 1.5) for index in range(machine_count)]
-
-def paired_mining_drill_positions(origin: Point, machine_count: int) -> list[Point]:
-    """Three-above/belt/three-below geometry for a complete mine unit."""
-    upper = mining_drill_positions(origin, machine_count)
-    belt_y = origin[1] + 0.5
-    return upper + [(x, belt_y + 2) for x, _ in upper]
 
 
 def existing_mine_service_geometry(

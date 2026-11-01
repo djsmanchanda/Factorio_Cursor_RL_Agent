@@ -54,6 +54,19 @@ _UNDERGROUND_REACH = {
 }
 
 
+def mining_drill_positions(origin: tuple[float, float], machine_count: int) -> list[tuple[float, float]]:
+    """Centres for a south-facing drill row whose output is a local belt."""
+    ox, oy = origin
+    return [(ox + 1.5 + (3 * index), oy - 1.5) for index in range(machine_count)]
+
+
+def paired_mining_drill_positions(origin: tuple[float, float], machine_count: int) -> list[tuple[float, float]]:
+    """Three-above/belt/three-below geometry for a complete mine unit."""
+    upper = mining_drill_positions(origin, machine_count)
+    belt_y = origin[1] + 0.5
+    return upper + [(x, belt_y + 2) for x, _ in upper]
+
+
 def verified_pumpjack_output_tile(site: dict) -> tuple[int, int] | None:
     """Return the rotated pumpjack connector tile for a cardinal direction."""
     offset = _PUMPJACK_OUTPUT_OFFSETS.get(site.get("direction", "north"))

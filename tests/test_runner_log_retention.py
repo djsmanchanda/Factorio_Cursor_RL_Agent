@@ -1,6 +1,7 @@
 # Path: tests/test_runner_log_retention.py
 # Purpose: Verify bounded live runner logs and durable archival of older output.
 
+import json
 import os
 from pathlib import Path
 
@@ -78,3 +79,13 @@ def test_runner_pid_record_tracks_current_process(tmp_path: Path) -> None:
         assert running_runner_pid(path) == os.getpid()
 
     assert running_runner_pid(path) is None
+
+
+def test_runner_record_rejects_a_different_boot(tmp_path: Path, monkeypatch) -> None:
+    boot_id = "12345678-1234-4234-8234-123456789abc"
+    monkeypatch.setattr("tools.runner_process._linux_boot_id", lambda: boot_id)
+    path = tmp_path / "autonomous-run.pid"
+    with runner_pid_record(path):
+        assert json.loads(path.read_text(encoding="utf-8"))["boot_id"] == boot_id
+        monkeypatch.setattr("tools.runner_process._linux_boot_id", lambda: None)
+        assert running_runner_pid(path) is None

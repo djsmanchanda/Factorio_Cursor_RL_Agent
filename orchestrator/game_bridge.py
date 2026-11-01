@@ -37,6 +37,7 @@ LOGISTIC_INVENTORY_REPORT_SUBDIR = Path("factorio_mod") / "logistic_inventory_re
 TOPOLOGY_REPORT_SUBDIR = Path("factorio_mod") / "topology_reports"
 RECIPE_CATALOG_SUBDIR = Path("factorio_mod") / "recipe_catalogs"
 RUNTIME_CATALOG_SUBDIR = Path("factorio_mod") / "runtime_catalogs"
+RUNTIME_IDENTITY_REPORT_SUBDIR = Path("factorio_mod") / "runtime_identity_probes"
 RESEARCH_LAB_OWNERSHIP_SUBDIR = Path("factorio_mod") / "research_lab_ownership"
 OPTIMIZER_BUILD_EVIDENCE_SUBDIR = Path("factorio_mod") / "optimizer_build_evidence"
 OPTIMIZER_CONSUMER_OBSERVATION_SUBDIR = Path("factorio_mod") / "optimizer_consumer_observations"
@@ -71,6 +72,7 @@ class GameBridge:
         command_timeout: float = 300.0,
         retain_reports: int = REPORT_RETENTION,
         episode_id: str | None = None,
+        socket_validator=None,
     ):
         self.script_output = Path(script_output)
         if episode_id is not None and (not isinstance(episode_id, str) or not episode_id):
@@ -81,7 +83,10 @@ class GameBridge:
         if retain_reports < 1:
             raise ValueError("retain_reports must keep at least the file just collected")
         # Long socket timeout: a megabase /snapshot can block the server for a minute+.
-        self._rcon = RconClient(host, port, password, timeout=command_timeout)
+        connection_options = {"timeout": command_timeout}
+        if socket_validator is not None:
+            connection_options["socket_validator"] = socket_validator
+        self._rcon = RconClient(host, port, password, **connection_options)
         self._poll_interval = poll_interval
         self._retain_reports = retain_reports
 
@@ -834,6 +839,174 @@ class GameBridge:
                 or provenance["active_mods_count"] != len(mods)):
             raise BridgeError("Runtime-catalog response provenance mismatch")
         return raw
+
+    def runtime_identity_probe(
+        self, surface: str, force: str, timeout: float = 60.0,
+    ) -> dict:
+        """Collect one nonce-correlated, read-only runtime identity report.
+
+        Every call generates a fresh UUID nonce, so the response filename is
+        unique to this request and a previous report cannot be reused. The
+        nonce is only a correlation token: it does not identify a save, a
+        server process, a host, or a lane, and a successful probe authorizes
+        no dispatch or game mutation. The response is read from the bridge's
+        own ``script-output`` tree; this method cannot verify who owns that
+        tree or whether the local server is the caller's intended target. It
+        returns the validated in-memory report, not a path to reread later.
+        """
+        if not isinstance(surface, str) or not surface:
+            raise ValueError("surface must be a non-empty string")
+        if not isinstance(force, str) or not force:
+            raise ValueError("force must be a non-empty string")
+        nonce = uuid.uuid4().hex
+        expected_name = f"runtime_identity_{nonce}.json"
+        body = json.dumps(
+            {"nonce": nonce, "surface": surface, "force": force},
+            separators=(",", ":"),
+        )
+
+        script_output = getattr(self, "script_output", None)
+        expected_path = None
+        if script_output is not None:
+            expected_path = (
+                Path(script_output) / RUNTIME_IDENTITY_REPORT_SUBDIR / expected_name
+            )
+            # A fresh nonce cannot legitimately have a response yet. An
+            # existing path is a collision or a stale/planted file, never this
+            # request's output, so refuse it before issuing the command.
+            if expected_path.exists() or expected_path.is_symlink():
+                raise BridgeError(
+                    "Runtime-identity response path already exists before the "
+                    f"probe: {expected_path}"
+                )
+
+        try:
+            collected = self._run_and_collect(
+                f"/runtime_identity_probe {body}", RUNTIME_IDENTITY_REPORT_SUBDIR,
+                timeout, expected_name=expected_name,
+            )
+        except BridgeError as error:
+            # The generic wait accepts only parseable JSON, so a different
+            # write can look like "no response". If this exact path exists,
+            # let the response validator report why it is unusable.
+            if ("Timed out" in str(error) and expected_path is not None
+                    and (expected_path.exists() or expected_path.is_symlink())):
+                return self._validate_runtime_identity_response(
+                    expected_path, expected_name=expected_name, nonce=nonce,
+                    surface=surface, force=force,
+                )
+            raise
+        return self._validate_runtime_identity_response(
+            collected, expected_name=expected_name, nonce=nonce,
+            surface=surface, force=force,
+        )
+
+    @staticmethod
+    def _validate_runtime_identity_response(
+        path: Path, *, expected_name: str, nonce: str,
+        surface: str, force: str,
+    ) -> dict:
+        """Return the exact decoded report after checking this probe's identity."""
+        path = Path(path)
+        if path.name != expected_name:
+            raise BridgeError(
+                f"Runtime-identity response {path.name!r} does not match "
+                f"expected {expected_name!r}"
+            )
+        if path.is_symlink():
+            raise BridgeError(
+                f"Runtime-identity response {path.name!r} is a symbolic link; "
+                "refusing to read it"
+            )
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(path, flags)
+        except OSError as error:
+            raise BridgeError(
+                f"Runtime-identity response {path.name!r} is not readable: {error}"
+            ) from error
+        try:
+            with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except (json.JSONDecodeError, OSError, ValueError) as error:
+            raise BridgeError(
+                f"Runtime-identity response {path.name!r} is not readable JSON: "
+                f"{error}"
+            ) from error
+        if not isinstance(payload, dict):
+            raise BridgeError(
+                f"Runtime-identity response {path.name!r} is not a JSON object"
+            )
+        if payload.get("schema_version") != "1.0.0":
+            raise BridgeError(
+                f"Runtime-identity response {path.name!r} has unexpected "
+                f"schema_version {payload.get('schema_version')!r}"
+            )
+        if payload.get("kind") != "runtime_identity_probe":
+            raise BridgeError(
+                f"Runtime-identity response {path.name!r} has unexpected kind "
+                f"{payload.get('kind')!r}"
+            )
+        if payload.get("nonce") != nonce:
+            raise BridgeError(
+                f"Runtime-identity response {path.name!r} does not match nonce "
+                f"{nonce!r}"
+            )
+        if payload.get("ok") is not True:
+            detail = payload.get("error") or "response did not report ok"
+            raise BridgeError(
+                f"Runtime-identity probe failed for nonce {nonce!r}: {detail}"
+            )
+        tick = payload.get("tick")
+        if not isinstance(tick, int) or isinstance(tick, bool) or tick < 0:
+            raise BridgeError(
+                f"Runtime-identity response {path.name!r} has no non-negative "
+                "integer tick"
+            )
+        for key, expected in (("surface", surface), ("force", force)):
+            block = payload.get(key)
+            if not isinstance(block, dict):
+                raise BridgeError(
+                    f"Runtime-identity response {path.name!r} has no {key} object"
+                )
+            if block.get("name") != expected:
+                raise BridgeError(
+                    f"Runtime-identity response {path.name!r} has {key}.name="
+                    f"{block.get('name')!r}, expected {expected!r}"
+                )
+            index = block.get("index")
+            if not isinstance(index, int) or isinstance(index, bool) or index < 0:
+                raise BridgeError(
+                    f"Runtime-identity response {path.name!r} has no non-negative "
+                    f"integer {key}.index"
+                )
+        active_mods = payload.get("active_mods")
+        if not isinstance(active_mods, dict) or not active_mods:
+            raise BridgeError(
+                f"Runtime-identity response {path.name!r} has no active_mods "
+                "object"
+            )
+        for name, version in active_mods.items():
+            if (not isinstance(name, str) or not name
+                    or not isinstance(version, str) or not version):
+                raise BridgeError(
+                    f"Runtime-identity response {path.name!r} has malformed "
+                    f"active_mods entry {name!r}: {version!r}"
+                )
+        count = payload.get("active_mods_count")
+        if (not isinstance(count, int) or isinstance(count, bool)
+                or count != len(active_mods)):
+            raise BridgeError(
+                f"Runtime-identity response {path.name!r} has "
+                f"active_mods_count={count!r}, expected {len(active_mods)}"
+            )
+        for flag in ("ownership_claimed", "dispatch_authorized"):
+            if payload.get(flag) is not False:
+                raise BridgeError(
+                    f"Runtime-identity response {path.name!r} must explicitly "
+                    f"report {flag}=false"
+                )
+        return payload
 
     def optimizer_build_evidence(self, *, surface: str, force: str, episode_id: str,
                                  project_id: str, transaction_id: str, plan_hash: str,

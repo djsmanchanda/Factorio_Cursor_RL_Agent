@@ -44,6 +44,51 @@ the correlated report. Tags and request scope are caller assertions, not proof
 of lane ownership or dispatch authority. An occupied position with only an
 unbuilt ghost cannot satisfy the built-entity evidence required for retry.
 
+`/runtime_identity_probe <json>` exports a small, request-correlated, read-only
+set of engine facts intended for a future disposable-lane handshake:
+
+```json
+{"nonce":"lane-probe-1","surface":"nauvis","force":"player"}
+```
+
+The `nonce` is required, must contain 1-64 characters from `[A-Za-z0-9_-]`, and
+names the report file. The command writes
+`script-output/factorio_mod/runtime_identity_probes/runtime_identity_<nonce>.json`.
+Reports contain only facts the runtime API actually exposes to mods:
+
+- `game.tick`
+- `script.active_mods` (name to version) and its count
+- The name and index of the explicitly requested surface and force, after
+  confirming both exist
+
+The report sets `ownership_claimed` and `dispatch_authorized` to `false`. It is
+evidence a caller can correlate to its own request, not proof that the server,
+save, or lane belongs to the caller. Factorio does not expose a loaded-save
+identity or engine version to Lua, so the probe reports neither; `base` in
+`active_mods` is a mod version, not a save identity. The nonce is not a
+freshness token: reusing it overwrites the prior report.
+
+An invalid payload that still has a safe nonce writes a correlated report with
+`ok: false` and an `error`. A missing, malformed, or unsafe nonce writes nothing
+and cannot be correlated. The command performs no game-state mutation, sends no
+RCON command, and grants no authority.
+
+`GameBridge.runtime_identity_probe(surface, force)` is the transport wrapper. It
+generates a fresh UUID nonce for every call, waits for only the exact
+`runtime_identity_<nonce>.json` path, and raises `BridgeError` for a missing,
+unparseable, symlinked, stale, failed, or field-mismatched response. A valid
+response must name the requested surface and force, carry a non-negative tick, a
+consistent active-mod name/version map and count, and explicitly set
+`ownership_claimed` and `dispatch_authorized` to `false`. It returns the
+validated in-memory report rather than a path that could be changed before a
+caller rereads it; callers that previously expected a path must adapt.
+
+The limits still apply: the bridge reads the `script-output` directory its
+caller configured and cannot prove which host, server process, or save produced
+it. The nonce correlates one response to one request; it is not a secret and does
+not prevent another local writer from racing the same directory. A successful
+probe is read-only evidence, not ownership or execution authority.
+
 ## Rocket silo observation
 
 `/rocket_silo_observation <json>` exports a read-only, request-correlated

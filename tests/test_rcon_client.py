@@ -41,3 +41,51 @@ def test_command_rejects_wrong_packet_type_for_matching_request() -> None:
 
     with pytest.raises(RconError, match="response type 99.*request 42"):
         client.command("/sc rcon.print('line survey')")
+
+
+def test_socket_validator_runs_before_authentication(monkeypatch):
+    sock = Mock()
+    events = []
+    monkeypatch.setattr("tools.rcon_client.socket.create_connection", lambda *args, **kwargs: sock)
+    monkeypatch.setattr(RconClient, "_auth", lambda self, password: events.append(("auth", password)))
+
+    def validate(candidate):
+        assert candidate is sock
+        events.append(("validated", None))
+
+    client = RconClient("127.0.0.1", 27015, "private", socket_validator=validate)
+    assert events == [("validated", None), ("auth", "private")]
+    client.close()
+    sock.close.assert_called_once()
+
+
+def test_game_bridge_forwards_validator_before_rcon_auth(monkeypatch, tmp_path):
+    from orchestrator.game_bridge import GameBridge
+
+    sock = Mock()
+    events = []
+    monkeypatch.setattr("tools.rcon_client.socket.create_connection", lambda *args, **kwargs: sock)
+    monkeypatch.setattr(RconClient, "_auth", lambda self, password: events.append("auth"))
+    bridge = GameBridge(tmp_path, password="private", socket_validator=lambda candidate: events.append("validated"))
+    assert events == ["validated", "auth"]
+    bridge.close()
+
+
+@pytest.mark.parametrize("mode", ["raise", "false", "auth_failure"])
+def test_failed_validation_or_auth_closes_socket_without_leaking_auth(monkeypatch, mode):
+    sock = Mock()
+    monkeypatch.setattr("tools.rcon_client.socket.create_connection", lambda *args, **kwargs: sock)
+    auth = Mock(side_effect=RconError("auth failed") if mode == "auth_failure" else None)
+    monkeypatch.setattr(RconClient, "_auth", auth)
+
+    def validate(_sock):
+        if mode == "raise":
+            raise ValueError("invalid socket")
+        if mode == "false":
+            return False
+
+    with pytest.raises((ValueError, RconError)):
+        RconClient("127.0.0.1", 27015, "private", socket_validator=validate)
+    if mode != "auth_failure":
+        auth.assert_not_called()
+    sock.close.assert_called_once()

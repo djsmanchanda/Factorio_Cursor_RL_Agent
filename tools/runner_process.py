@@ -6,6 +6,7 @@ from __future__ import annotations
 import ctypes
 import json
 import os
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -24,9 +25,13 @@ def runner_pid_record(path: Path) -> Iterator[None]:
     """Publish this process identity for dashboards and remove it on clean exit."""
     pid = os.getpid()
     token = _process_creation_token(pid)
+    boot_id = _linux_boot_id()
     path.parent.mkdir(parents=True, exist_ok=True)
+    record = {"pid": pid, "creation_token": token}
+    if boot_id is not None:
+        record["boot_id"] = boot_id
     path.write_text(
-        json.dumps({"pid": pid, "creation_token": token}) + "\n",
+        json.dumps(record) + "\n",
         encoding="utf-8",
     )
     try:
@@ -44,6 +49,10 @@ def running_runner_pid(path: Path) -> int | None:
     except (FileNotFoundError, OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
         return None
     actual = _process_creation_token(pid)
+    if "boot_id" in payload:
+        boot_id = _linux_boot_id()
+        if boot_id is None or payload["boot_id"] != boot_id:
+            return None
     return pid if actual is not None and actual == expected else None
 
 
@@ -54,6 +63,14 @@ def clear_runner_pid(path: Path, pid: int) -> None:
             path.unlink(missing_ok=True)
     except (FileNotFoundError, OSError, ValueError, TypeError, json.JSONDecodeError):
         return
+
+
+def _linux_boot_id() -> str | None:
+    try:
+        value = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="ascii").strip()
+        return str(uuid.UUID(value))
+    except (OSError, UnicodeError, ValueError):
+        return None
 
 
 def _process_creation_token(pid: int) -> int | None:

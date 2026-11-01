@@ -508,8 +508,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     ``carried`` seeds the history with an earlier segment's lifecycle receipts when a fresh controller is
     restarted on the same world; everything else starts fresh.
     """
-    from training.laya_ops import DeterministicSession
-    session = session or DeterministicSession(adapter.root, emit=lambda line: emit(f"  TOOL {line}"))
+    if session is None:
+        raise ValueError("an explicit disposable operation session is required")
     records = journal.parent / "decision-states.jsonl"
     reached: list[str] = []
     results: list[dict] = list(carried)
