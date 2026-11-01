@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import List
 
@@ -34,6 +35,22 @@ from planners.recipe_data import (
 # electrically stranded however clear the ground is.
 _SCAFFOLD_WEST_LIMIT = -14.0
 
+# "requester" is the real-world twin of "chest": identical feeder positions, but
+# every scripted infinity-chest becomes a bot-built requester-chest ghost that
+# pulls its ingredient from the logistic network, and the output collector
+# becomes a passive-provider-chest ghost that returns the product to it.
+REQUESTER_FEED_STYLE = "requester"
+LINE_FEED_STYLES = frozenset(FEED_STYLES) | {REQUESTER_FEED_STYLE}
+
+# Requester buffer rule: each feeder chest asks for REQUESTER_BUFFER_SECONDS of
+# its own share of the ingredient's steady demand (demand / feeders for that
+# ingredient), never below REQUESTER_MIN_REQUEST items so a low-rate line still
+# holds a useful reserve. Sizing from demand, not stack size, keeps the line
+# from hoarding plates the rest of the base needs.
+REQUESTER_BUFFER_SECONDS = 120
+REQUESTER_MIN_REQUEST = 10
+_ASSEMBLERS = frozenset({"assembling-machine-1", "assembling-machine-2", "assembling-machine-3"})
+
 
 class LineLayoutMixin:
     def generate_line_layout(
@@ -50,6 +67,7 @@ class LineLayoutMixin:
         chained_ingredients: "set | list | None" = None,
         terminal_collector: bool = True,
         flow_direction: str = "east",
+        machine: "str | None" = None,
     ) -> dict:
         """Deterministic single-recipe production line.
 
@@ -95,6 +113,16 @@ class LineLayoutMixin:
         keeps its chest feeders. The input belt still extends west to
         CHAINED_BELT_WEST so generate_chain_link has junction tiles to land on,
         and power is pushed west of the south connector's approach column.
+
+        feed_style="requester": same feeder positions as "chest", but for a
+        real (non-scripted) world. Each feeder is a requester-chest ghost with
+        ``logistic_requests`` (see REQUESTER_BUFFER_SECONDS) plus an inserter
+        ghost, and the output collector is a passive-provider-chest ghost. No
+        infinity entity is emitted and nothing is placed directly except the
+        local power scaffolding that strip_local_power removes.
+
+        ``machine`` optionally swaps the recipe's assembler tier (e.g.
+        assembling-machine-1 for an early world); sizing uses that tier's speed.
         """
         if recipe not in LINE_RECIPES:
             raise ValueError(f"No line recipe knowledge for: {recipe}")
@@ -107,10 +135,14 @@ class LineLayoutMixin:
             raise ValueError(f"Unknown belt tier: {belt_type}")
         if inserter_type not in INSERTER_TIERS:
             raise ValueError(f"Unknown inserter tier: {inserter_type}")
-        if feed_style not in FEED_STYLES:
+        if feed_style not in LINE_FEED_STYLES:
             raise ValueError(f"Unknown feed style: {feed_style}")
         spec = LINE_RECIPES[recipe]
-        machine = spec["machine"]
+        if machine is None:
+            machine = spec["machine"]
+        elif machine not in _ASSEMBLERS or spec["machine"] not in _ASSEMBLERS:
+            raise ValueError(f"machine override {machine!r} is only valid between assembling machines")
+        requester = feed_style == REQUESTER_FEED_STYLE
         ingredients = spec["ingredients"]
         direct_bus = set(direct_bus_ingredients or ())
         unknown_direct_bus = direct_bus.difference(ingredients)
@@ -129,7 +161,7 @@ class LineLayoutMixin:
                 if ingredient not in direct_bus
             }
             self._check_sideload_lane_capacity(
-                recipe, machine_count, belt_type, only_indices=side_indices,
+                recipe, machine_count, belt_type, only_indices=side_indices, machine=machine,
             )
         auxiliary_index = spec.get("auxiliary_ingredient_index")
         three_input = len(ingredients) == 3 and auxiliary_index == 1
@@ -148,7 +180,9 @@ class LineLayoutMixin:
                 raise ValueError(f"chained_ingredients out of range for {recipe}: {sorted(chained)}")
             if len(chained) > (3 if three_input else 2):
                 raise ValueError("Too many chained ingredients for the declared belt interfaces")
-            self._check_sideload_lane_capacity(recipe, machine_count, belt_type, only_indices=chained)
+            self._check_sideload_lane_capacity(
+                recipe, machine_count, belt_type, only_indices=chained, machine=machine,
+            )
         else:
             chained = set()
         length = machine_count * MACHINE_WIDTH
@@ -161,9 +195,28 @@ class LineLayoutMixin:
         # ingredient needs; the input belt extends west to host them.
         crafts_per_second = machine_count * MACHINE_SPEEDS[machine] / spec["craft_time"]
         feed_rate = feeder_rate(inserter_type)
-        feeders_needed = self._feeders_needed(recipe, machine_count, inserter_type)
+        feeders_needed = self._feeders_needed(recipe, machine_count, inserter_type, machine)
         feed_slots = max(feeders_needed) if not mining_feed else 0
-        belt_west = self._belt_west(recipe, machine_count, feed_style, inserter_type, mining_feed)
+        belt_west = self._belt_west(recipe, machine_count, feed_style, inserter_type, mining_feed, machine)
+
+        def placed(entity: str, position: dict, direction: "str | None" = None, **extra) -> dict:
+            """Scaffolding endpoint: a bot ghost for real worlds, else direct."""
+            action = {"action_type": "place_ghost" if requester else "place_entity",
+                      "entity": entity, "position": position}
+            if direction:
+                action["direction"] = direction
+            action.update(extra)
+            return action
+
+        def feed_chest(position: dict, index: int) -> dict:
+            if not requester:
+                return placed("infinity-chest", position, infinity_filter=ingredients[index])
+            share = spec["amounts"][index] * crafts_per_second / feeders_needed[index]
+            count = max(REQUESTER_MIN_REQUEST, math.ceil(share * REQUESTER_BUFFER_SECONDS))
+            return placed("requester-chest", position,
+                          logistic_requests=[{"name": ingredients[index], "count": count}])
+
+        collector_chest = "passive-provider-chest" if requester else "steel-chest"
 
         ghosts: List[dict] = []
         # Belts: input lane must cover every feeder inserter's drop tile.
@@ -261,10 +314,8 @@ class LineLayoutMixin:
         ]
         if terminal_collector:
             scaffolding.extend([
-                {"action_type": "place_entity", "entity": "steel-chest",
-                 "position": at(length + 1.5, 6.5)},
-                {"action_type": "place_entity", "entity": inserter_type,
-                 "position": at(length + 0.5, 6.5), "direction": "west"},
+                placed(collector_chest, at(length + 1.5, 6.5)),
+                placed(inserter_type, at(length + 0.5, 6.5), "west"),
             ])
         # Collectors scale with output demand just like feeders; extras drain
         # from the south side of the output belt into their own chests.
@@ -274,11 +325,10 @@ class LineLayoutMixin:
         for i in range(extra_collectors if terminal_collector else 0):
             x = length - 1.5 - 2 * i
             scaffolding.extend([
-                {"action_type": "place_entity", "entity": inserter_type,
-                 "position": at(x, 7.5), "direction": "north"},
-                {"action_type": "place_entity", "entity": "steel-chest", "position": at(x, 8.5)},
+                placed(inserter_type, at(x, 7.5), "north"),
+                placed(collector_chest, at(x, 8.5)),
             ])
-        if not mining_feed and feed_style in {"chest", "chained"}:
+        if not mining_feed and feed_style in {"chest", "chained", REQUESTER_FEED_STYLE}:
             # Ingredient 0 feeds from the north side, ingredient 1 from the
             # south; each west-extension tile hosts one feed point per side.
             # Chained ingredients are supplied by an upstream line instead, so
@@ -287,29 +337,23 @@ class LineLayoutMixin:
                 for slot in range(feeders_needed[0]):
                     x = -1.5 - slot
                     scaffolding.extend([
-                        {"action_type": "place_entity", "entity": "infinity-chest",
-                         "position": at(x, -1.5), "infinity_filter": ingredients[0]},
-                        {"action_type": "place_entity", "entity": inserter_type,
-                         "position": at(x, -0.5), "direction": "north"},
+                        feed_chest(at(x, -1.5), 0),
+                        placed(inserter_type, at(x, -0.5), "north"),
                     ])
             south_index = 2 if three_input else 1
             if len(ingredients) >= 2 and south_index not in chained:
                 for slot in range(feeders_needed[south_index]):
                     x = -1.5 - slot
                     scaffolding.extend([
-                        {"action_type": "place_entity", "entity": "infinity-chest",
-                         "position": at(x, 2.5), "infinity_filter": ingredients[south_index]},
-                        {"action_type": "place_entity", "entity": inserter_type,
-                         "position": at(x, 1.5), "direction": "south"},
+                        feed_chest(at(x, 2.5), south_index),
+                        placed(inserter_type, at(x, 1.5), "south"),
                     ])
             if three_input and auxiliary_index not in chained:
                 for slot in range(feeders_needed[auxiliary_index]):
                     x = -1.5 - slot
                     scaffolding.extend([
-                        {"action_type": "place_entity", "entity": "infinity-chest",
-                         "position": at(x, 9.5), "infinity_filter": ingredients[auxiliary_index]},
-                        {"action_type": "place_entity", "entity": inserter_type,
-                         "position": at(x, 8.5), "direction": "south"},
+                        feed_chest(at(x, 9.5), auxiliary_index),
+                        placed(inserter_type, at(x, 8.5), "south"),
                     ])
         elif not mining_feed and feed_style == "sideload":
             # North feeder belt (ingredient 0): a column of belt ghosts running
@@ -421,7 +465,8 @@ class LineLayoutMixin:
         _reject_fuel_entities(plan)
         return plan
 
-    def _feeders_needed(self, recipe: str, machine_count: int, inserter_type: str) -> List[int]:
+    def _feeders_needed(self, recipe: str, machine_count: int, inserter_type: str,
+                        machine: "str | None" = None) -> List[int]:
         """Per-ingredient feed-point count = ceil(demand * headroom / rate).
 
         Feed capacity is provisioned with FEED_HEADROOM (user standard: 20-25%
@@ -431,7 +476,7 @@ class LineLayoutMixin:
         arithmetic deterministic (no float division rounding drift).
         """
         spec = LINE_RECIPES[recipe]
-        crafts_per_second = machine_count * MACHINE_SPEEDS[spec["machine"]] / spec["craft_time"]
+        crafts_per_second = machine_count * MACHINE_SPEEDS[machine or spec["machine"]] / spec["craft_time"]
         feed_rate = feeder_rate(inserter_type)
         return [
             max(1, -(-int(amount * crafts_per_second * FEED_HEADROOM * 100) // int(feed_rate * 100)))
@@ -439,7 +484,8 @@ class LineLayoutMixin:
         ]
 
     def _check_sideload_lane_capacity(self, recipe: str, machine_count: int, belt_type: str,
-                                      only_indices: "set | None" = None) -> None:
+                                      only_indices: "set | None" = None,
+                                      machine: "str | None" = None) -> None:
         """Sideload gives each ingredient ONE lane; demand must fit it.
 
         Hard failure below raw demand (physically cannot keep up â€” measured
@@ -451,7 +497,7 @@ class LineLayoutMixin:
         by chained lines where just some ingredients arrive one-lane.
         """
         spec = LINE_RECIPES[recipe]
-        crafts_per_second = machine_count * MACHINE_SPEEDS[spec["machine"]] / spec["craft_time"]
+        crafts_per_second = machine_count * MACHINE_SPEEDS[machine or spec["machine"]] / spec["craft_time"]
         lane_rate = BELT_TIERS[belt_type] / 2
         for index, (ingredient, amount) in enumerate(zip(spec["ingredients"], spec["amounts"])):
             if only_indices is not None and index not in only_indices:
@@ -470,7 +516,7 @@ class LineLayoutMixin:
                 )
 
     def _belt_west(self, recipe: str, machine_count: int, feed_style: str,
-                   inserter_type: str, mining_feed: bool) -> int:
+                   inserter_type: str, mining_feed: bool, machine: "str | None" = None) -> int:
         """Westmost input-belt tile column for a line.
 
         Chest feeders push the belt one tile west per feed slot; sideload feeders
@@ -482,7 +528,7 @@ class LineLayoutMixin:
         if feed_style == "sideload" and not mining_feed:
             ingredients = LINE_RECIPES[recipe]["ingredients"]
             return SIDELOAD_SOUTH_COL if len(ingredients) == 2 else SIDELOAD_NORTH_COL
-        feeders = self._feeders_needed(recipe, machine_count, inserter_type)
+        feeders = self._feeders_needed(recipe, machine_count, inserter_type, machine)
         feed_slots = max(feeders) if not mining_feed else 0
         return -(1 + max(1, feed_slots))
 

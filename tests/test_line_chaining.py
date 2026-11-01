@@ -714,3 +714,32 @@ def test_extension_cost_reports_materials_moves_and_feeders():
     # only the extra drain collector shows up as a new steel chest.
     assert cost["materials"]["steel-chest"] == 1
     assert all(count > 0 for count in cost["materials"].values())
+
+
+# --------------------------------------------------------------------------- #
+# Requester feed (real-world twin of chest feed)
+# --------------------------------------------------------------------------- #
+
+def test_requester_feed_is_bot_buildable_and_demand_sized():
+    """Live-proven 2026-11-01: requester-fed AM1 red block measured 0.2 packs/s."""
+    planner = LocalLayoutPlanner()
+    plan = planner.generate_line_layout("automation-science-pack", 2, 0, 0, inserter_type="inserter",
+                                        feed_style="requester", machine="assembling-machine-1")
+    actions = _all_actions(plan)
+    assert not any("infinity" in a["entity"] for a in actions)
+    assert {a["entity"] for a in actions if a["entity"].startswith("assembling-machine")} == {"assembling-machine-1"}
+    requesters = [a for a in actions if a["entity"] == "requester-chest"]
+    assert requesters and all(a["action_type"] == "place_ghost" for a in requesters)
+    requested = {r["name"]: r["count"] for a in requesters for r in a["logistic_requests"]}
+    # 2 AM1 at speed 0.5 over a 5 s craft = 0.2 crafts/s; 120 s buffer of 1 per craft.
+    assert requested == {"copper-plate": 24, "iron-gear-wheel": 24}
+    assert any(a["entity"] == "passive-provider-chest" for a in actions)
+    assert not any(a["entity"] == "steel-chest" for a in actions)
+
+
+def test_requester_style_leaves_chest_style_unchanged():
+    planner = LocalLayoutPlanner()
+    chest = planner.generate_line_layout("automation-science-pack", 2, 0, 0)
+    assert any(a["entity"] == "infinity-chest" for a in _all_actions(chest))
+    with pytest.raises(ValueError, match="machine override"):
+        planner.generate_line_layout("automation-science-pack", 2, 0, 0, machine="electric-furnace")
