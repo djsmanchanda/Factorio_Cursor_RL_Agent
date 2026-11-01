@@ -10,8 +10,16 @@ from jsonschema import Draft7Validator
 
 
 def guard_configuration(actions: list[dict], report: dict, *, tags: dict,
-                        surface: str, force: str, submission_tick: int) -> list[dict]:
-    """Require one current, post-submission robot-build record for each target."""
+                        surface: str, force: str, submission_tick: int,
+                        preexisting: dict | None = None) -> list[dict]:
+    """Require one current, post-submission robot-build record for each target.
+
+    ``preexisting`` maps (entity, x, y) to the unit number observed before
+    submission for a target this transaction did not create (a shared chest or a
+    retargeted machine). It needs no build record, because the submission left it
+    untagged; configuration still binds to that unit number, and the executor
+    refuses on a mismatch. Targets absent from it keep the full build-record rule.
+    """
     version = report.get("version") if isinstance(report, dict) else None
     schema_name = {"optimizer-build-evidence-v2": "optimizer_build_evidence.schema.json",
                    "optimizer-build-evidence-v3": "optimizer_build_evidence_v3.schema.json"}.get(version)
@@ -28,6 +36,13 @@ def guard_configuration(actions: list[dict], report: dict, *, tags: dict,
     unit_counts = Counter(row["unit_number"] for row in report["entities"] if "unit_number" in row)
     for action in actions:
         position = action["position"]
+        known = (preexisting or {}).get((action["entity"], position["x"], position["y"]))
+        if known is not None:
+            if type(known) is not int or known < 1 or known in used:
+                raise ValueError("pre-existing configuration target lacks a unique unit number")
+            used.add(known)
+            guarded.append({**action, "action_type": "configure_entity_if_unit_number", "expected_unit_number": known})
+            continue
         target = (action["entity"], Fraction(position["x"]), Fraction(position["y"]))
         matches = [row for row in report["entities"]
                    if (row["entity"], Fraction(row["position"]["x"]), Fraction(row["position"]["y"])) == target]

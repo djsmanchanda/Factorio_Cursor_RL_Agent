@@ -96,3 +96,32 @@ def test_v3_empty_baseline_precedes_submission():
     baseline = report()
     baseline.update(version="optimizer-build-evidence-v3", entities=[], tick=9)
     assert require_configuration_baseline(baseline, tags=TAGS, surface="nauvis", force="player", submission_tick=10) == 9
+
+
+def test_preexisting_target_binds_to_its_pre_submission_unit_number_without_a_build_record():
+    evidence = report()
+    evidence["entities"] = []  # no robot-build record: this transaction did not create the entity
+    key = (ACTION["entity"], ACTION["position"]["x"], ACTION["position"]["y"])
+    guarded = guard_configuration([ACTION], evidence, tags=TAGS, surface="nauvis", force="player",
+                                  submission_tick=10, preexisting={key: 77})
+    assert guarded == [{**ACTION, "action_type": "configure_entity_if_unit_number", "expected_unit_number": 77}]
+
+
+def test_target_outside_preexisting_map_still_requires_a_build_record():
+    evidence = report()
+    evidence["entities"] = []
+    with pytest.raises(ValueError, match="unique current robot-build record"):
+        guard_configuration([ACTION], evidence, tags=TAGS, surface="nauvis", force="player",
+                            submission_tick=10, preexisting={("other", 0, 0): 5})
+
+
+def test_preexisting_unit_numbers_must_be_valid_and_unique():
+    key = (ACTION["entity"], ACTION["position"]["x"], ACTION["position"]["y"])
+    for bad in (0, True, "7"):
+        with pytest.raises(ValueError, match="unit number"):
+            guard_configuration([ACTION], report(), tags=TAGS, surface="nauvis", force="player",
+                                submission_tick=10, preexisting={key: bad})
+    with pytest.raises(ValueError, match="unit number"):
+        guard_configuration([ACTION, {**ACTION, "position": {"x": 3.5, "y": 2.5}}], report(), tags=TAGS,
+                            surface="nauvis", force="player", submission_tick=10,
+                            preexisting={key: 7, (ACTION["entity"], 3.5, 2.5): 7})

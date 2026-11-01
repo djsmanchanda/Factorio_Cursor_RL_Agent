@@ -323,3 +323,68 @@ def test_optimizer_tags_require_valid_nonreconciling_ghost(action, valid):
     ''')
     result = subprocess.run([LUA, '-'], input='\n'.join(scripts), text=True, capture_output=True)
     assert result.returncode == 0, result.stderr
+
+
+_SHARED_CHEST_SETUP = '''
+    created=0
+    local function new_section(group)
+        local s={valid=true,group=group,filters_count=0,slots={}}
+        function s.clear_slot(i) s.slots[i]=nil end
+        function s.set_slot(i, spec) s.slots[i]=spec; if i>s.filters_count then s.filters_count=i end end
+        function s.get_slot(i) return s.slots[i] end
+        return s
+    end
+    local holder={sections={new_section('laya-quad:east')}}
+    holder.sections[1].set_slot(1,{value='iron-plate',min=2})
+    function holder.add_section() local s=new_section(''); table.insert(holder.sections,s); return s end
+    target={valid=true,name='requester-chest',type='logistic-container',unit_number=77,
+        position={x=2.5,y=2.5},get_logistic_sections=function() return holder end}
+    holder_ref=holder
+    local surface={name='nauvis',find_entities_filtered=function() return {} end,
+        create_entity=function() created=created+1; return {valid=true} end}
+    local force={name='player'}
+    package.loaded.sandbox_shared={get_or_create_sandbox_surface=function() return surface end,
+        get_or_create_planner_force=function() return force end,find_exact_entity=function() return target end}
+    game={tick=1}; defines={direction={}}
+    prototypes={entity={['requester-chest']={collision_box={{-0.35,-0.35},{0.35,0.35}},collision_mask={layers={object=true}}}}}
+    commands={add_command=function(name, help, fn) if name == 'build_layout_plan' then execute=fn end end}
+    helpers={json_to_table=function() return payload end,
+        table_to_json=function(report) result=report; return '{}' end,write_file=function() end}
+'''
+
+
+@pytest.mark.parametrize('tagged', [False, True])
+def test_untagged_preexisting_shared_chest_is_present_but_tagged_one_is_rejected(tagged):
+    tags = ("optimizer_ownership={optimizer_episode='episode/1',optimizer_project='project',"
+            "optimizer_transaction=string.rep('a',32),optimizer_plan_hash=string.rep('b',64)},") if tagged else ""
+    scripts = [f'package.path = "{ROOT}/factorio_mod/?.lua;" .. package.path', _SHARED_CHEST_SETUP,
+               (ROOT / 'factorio_mod/layout_executor.lua').read_text(), f'''
+        payload={{authorization={{approved_actions={{'project_more_ghosts'}}}},
+          build_plan={{surface='nauvis',force='player',atomic=true,phases={{{{name='share',actions={{{{
+            action_type='place_ghost_no_reconcile',entity='requester-chest',{tags}position={{x=2.5,y=2.5}}}}}}}}}}}}}}
+        execute({{parameter='{{}}'}})
+        assert(created==0)
+        assert(result.ok=={str(not tagged).lower()})
+        if {str(tagged).lower()} then assert(result.error=='optimizer_tagged_position_already_occupied') end
+    ''']
+    result = subprocess.run([LUA, '-'], input='\n'.join(scripts), text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_guarded_configuration_of_shared_chest_keeps_the_earlier_slots_requests():
+    scripts = [f'package.path = "{ROOT}/factorio_mod/?.lua;" .. package.path', _SHARED_CHEST_SETUP,
+               (ROOT / 'factorio_mod/layout_executor.lua').read_text(), '''
+        payload={authorization={approved_actions={'place_core_infrastructure'}},
+          build_plan={surface='nauvis',force='player',atomic=true,phases={{name='configure',actions={{
+            action_type='configure_entity_if_unit_number',entity='requester-chest',expected_unit_number=77,
+            position={x=2.5,y=2.5},
+            logistic_sections={{group='laya-quad:west',multiplier=15,requests={{name='copper-plate',count=1}}}}}}}}}}
+        execute({parameter='{}'})
+        assert(result.ok==true)
+        local sections=holder_ref.sections
+        assert(#sections==2)
+        assert(sections[1].group=='laya-quad:east' and sections[1].slots[1].value=='iron-plate' and sections[1].slots[1].min==2)
+        assert(sections[2].group=='laya-quad:west' and sections[2].slots[1].value=='copper-plate')
+    ''']
+    result = subprocess.run([LUA, '-'], input='\n'.join(scripts), text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr

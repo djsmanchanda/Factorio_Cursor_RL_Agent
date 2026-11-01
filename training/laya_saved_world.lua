@@ -231,20 +231,24 @@ local function in_network(pos, id)
   return false
 end
 if request.inspect then
-  local result={built=0,pending=0,missing=0}
+  -- targets records each planned entity's state and unit number, so the adapter
+  -- can tell an entity that already stood before submission from one built by it.
+  local result={built=0,pending=0,missing=0,targets={}}
   for _, phase in ipairs(request.inspect.phases) do for _, a in ipairs(phase.actions) do
-    local found=false
+    local found=nil
     for _,e in pairs(surface.find_entities_filtered{position=a.position,name=a.entity,force=force}) do
-      if e.position.x==a.position.x and e.position.y==a.position.y then found=true end
+      if e.position.x==a.position.x and e.position.y==a.position.y then found=e end
     end
-    if found then result.built=result.built+1
+    local target={entity=a.entity,position={x=a.position.x,y=a.position.y}}
+    if found then result.built=result.built+1; target.state="built"; target.unit_number=found.unit_number
     else
       local ghost=false
       for _,e in pairs(surface.find_entities_filtered{position=a.position,type="entity-ghost",force=force}) do
         if e.ghost_name==a.entity and e.position.x==a.position.x and e.position.y==a.position.y then ghost=true end
       end
-      if ghost then result.pending=result.pending+1 else result.missing=result.missing+1 end
+      if ghost then result.pending=result.pending+1; target.state="ghost" else result.missing=result.missing+1; target.state="missing" end
     end
+    result.targets[#result.targets+1]=target
   end end
   return result
 end

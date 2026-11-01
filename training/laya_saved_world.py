@@ -369,9 +369,42 @@ SAVED_WORLD_GHOST_FIELDS = frozenset({"action_type", "entity", "position", "dire
                                       "input_priority", "output_priority"})
 
 
-def submission_plan(plan, evidence_tags=None):
-    """Ghosts lack inventories; defer every setting until construction is observed."""
+def target_key(action):
+    return (action["entity"], action["position"]["x"], action["position"]["y"])
+
+
+def preexisting_targets(plan, inspected):
+    """Configuration targets already standing before submission, keyed to their unit numbers.
+
+    Quad slots deliberately share a chest column and a slot may be retargeted, so a
+    later plan legitimately configures an entity an earlier transaction (or the
+    starter save) built. Such a target is never tagged as built by this
+    transaction; it is authorized by the unit number seen here and the executor
+    re-checks that number when it configures. A target that is only an unbuilt
+    ghost has no identity to bind and is refused.
+    """
+    states = {(t["entity"], t["position"]["x"], t["position"]["y"]): t
+              for t in (inspected or {}).get("targets", ())}
+    existing = {}
+    for action in configuration_actions(plan):
+        key = target_key(action)
+        state = states.get(key, {})
+        if state.get("state") == "built" and type(state.get("unit_number")) is int and state["unit_number"] > 0:
+            existing[key] = state["unit_number"]
+        elif state.get("state") == "ghost":
+            raise SavedWorldError("configuration target has an unowned pending ghost: %s at (%s, %s)" % key)
+    return existing
+
+
+def submission_plan(plan, evidence_tags=None, preexisting=()):
+    """Ghosts lack inventories; defer every setting until construction is observed.
+
+    Targets in ``preexisting`` are submitted untagged: the executor treats an exact
+    existing entity as already present and the optimizer ownership claim is made
+    only for entities this transaction creates.
+    """
     targets = {(a["entity"], a["position"]["x"], a["position"]["y"]) for a in configuration_actions(plan)}
+    targets -= set(preexisting)
     phases = []
     for phase in plan["phases"]:
         projected = []
@@ -384,6 +417,11 @@ def submission_plan(plan, evidence_tags=None):
             projected.append(ghost)
         phases.append({**phase, "actions": projected})
     return {**plan, "phases": phases}
+
+
+def receipt_preexisting(receipt):
+    return {(t["entity"], t["position"]["x"], t["position"]["y"]): t["unit_number"]
+            for t in receipt.get("preexisting_targets") or ()}
 
 
 def configuration_actions(plan):
@@ -448,7 +486,7 @@ class SavedWorldAdapter:
     def validate_plan(self, plan):
         validate_build_plan(plan)
 
-    def _guarded_configuration(self, plan, tags, submission_tick, baseline):
+    def _guarded_configuration(self, plan, tags, submission_tick, baseline, preexisting=None):
         configs = configuration_actions(plan)
         if not configs:
             return []
@@ -464,7 +502,7 @@ class SavedWorldAdapter:
             if report.get("version") != "optimizer-build-evidence-v3":
                 raise ValueError("configuration requires complete v3 build-event reporting")
             return guard_configuration(configs, report, tags=tags, surface=self.surface, force=self.force,
-                                       submission_tick=submission_tick)
+                                       submission_tick=submission_tick, preexisting=preexisting)
         except (ValueError, KeyError, RuntimeError, AttributeError, OSError) as error:
             raise SavedWorldError("configuration lacks current correlated robot-build evidence") from error
 
@@ -698,8 +736,19 @@ class SavedWorldAdapter:
                     atomic_json(receipt_path, receipt)
                     raise SavedWorldError("configuration evidence baseline is unavailable") from error
                 receipt["build_evidence_baseline"] = baseline
+                try:
+                    existing = preexisting_targets(candidate["plan"], self.query(inspect=candidate["plan"]))
+                except SavedWorldError:
+                    receipt.update(status="rejected", reason="configuration_target_unowned_ghost")
+                    atomic_json(receipt_path, receipt)
+                    raise
+                # Journaled before submission so a resumed reconcile reuses the same identities.
+                receipt["preexisting_targets"] = [{"entity": e, "position": {"x": x, "y": y}, "unit_number": unit}
+                                                  for (e, x, y), unit in existing.items()]
                 atomic_json(receipt_path, receipt)
-            ghosts = submission_plan(candidate["plan"], tags)
+            else:
+                existing = {}
+            ghosts = submission_plan(candidate["plan"], tags, existing)
             authorization = build_layout_authorization([ghosts])
             def prepared(request):
                 receipt.update(status="submitting", layout_request=request)
@@ -717,7 +766,8 @@ class SavedWorldAdapter:
         owned = self.query(inspect=candidate["plan"]) if candidate.get("plan") else None
         if owned and owned["pending"] == 0 and owned["missing"] == 0:
             configs = self._guarded_configuration(candidate["plan"], receipt.get("build_evidence_tags"),
-                                                  receipt["submission"].get("tick"), receipt.get("build_evidence_baseline"))
+                                                  receipt["submission"].get("tick"), receipt.get("build_evidence_baseline"),
+                                                  receipt_preexisting(receipt))
             if configs:
                 self._submit_configuration(configs, receipt, receipt_path, phase="configure-observed-build")
                 self.advance(measure_ticks)
@@ -791,7 +841,8 @@ class SavedWorldAdapter:
                     raise SavedWorldError(f"legacy configuration outcome needs review: {path.name}")
                 configs = self._guarded_configuration(candidate["plan"], receipt.get("build_evidence_tags"),
                                                       (receipt.get("submission") or {}).get("tick"),
-                                                      receipt.get("build_evidence_baseline"))
+                                                      receipt.get("build_evidence_baseline"),
+                                                      receipt_preexisting(receipt))
                 if configs:
                     self._submit_configuration(configs, receipt, path, phase="finish-selected-configuration")
                 receipt["status"] = "observed"

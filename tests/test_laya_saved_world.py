@@ -230,6 +230,94 @@ def test_built_configuration_requires_matching_robot_units(tmp_path, missing_evi
     assert all(a["action_type"] == "place_ghost_no_reconcile" for p in adapter.bridge.ghosts["phases"] for a in p["actions"])
 
 
+def _preexisting_adapter(tmp_path, standing, ghost=()):
+    """Adapter whose world already holds `standing` entities (name -> unit number) of the candidate plan."""
+    adapter = object.__new__(SavedWorldAdapter)
+    adapter.root = tmp_path
+    candidate = next(c for c in compile_candidates(facts()) if c["family"] == "assemble")
+    option_id = candidate["option_id"]
+    tick = [100]
+    def query(candidates=None, inspect=None):
+        if candidates: return {"validations": {option_id: {"reason": None}}}
+        if inspect:
+            targets = [{"entity": a["entity"], "position": a["position"],
+                        "state": "built" if a["entity"] in standing else "ghost" if a["entity"] in ghost else "missing",
+                        **({"unit_number": standing[a["entity"]]} if a["entity"] in standing else {})}
+                       for a in (x for ph in inspect["phases"] for x in ph["actions"])]
+            return {"built": len(standing), "pending": 0, "missing": 0, "targets": targets}
+        value = copy.deepcopy(facts()); value["tick"] = tick[0]; return value
+    adapter.query = query
+    adapter.validate_plan = lambda _plan: None
+    adapter.advance = lambda ticks: tick.__setitem__(0, tick[0] + ticks)
+    class Bridge:
+        def __init__(self): self.ghosts = None; self.configs = None
+        def build_layout_correlated(self, _authorization, plan, **_kwargs):
+            if plan["phases"][0]["actions"][0]["action_type"] == "configure_entity_if_unit_number":
+                self.configs = plan
+            else:
+                self.ghosts = plan
+            return {"ok": True, "tick": 100}
+        def optimizer_build_evidence(self, *, surface, force, episode_id, project_id, transaction_id, plan_hash, **_kw):
+            tags = {"optimizer_episode": episode_id, "optimizer_project": project_id,
+                    "optimizer_transaction": transaction_id, "optimizer_plan_hash": plan_hash}
+            tagged = ([] if self.ghosts is None else
+                      [a for p in self.ghosts["phases"] for a in p["actions"] if a.get("optimizer_ownership")])
+            entities = [{"entity": a["entity"], "position": a["position"], "unit_number": 500 + i, "tick": 101,
+                         "current": {"state": "present", "direction": {"state": "available", "value": 0},
+                                     "quality": {"state": "available", "value": "normal"},
+                                     "recipe": {"state": "unset"}}} for i, a in enumerate(tagged)]
+            return {"version": "optimizer-build-evidence-v3", "source": "robot_built_entity_tags", "request_id": "req",
+                    "tick": tick[0], "ok": True, "ownership_claimed": False, "dispatch_authorized": False,
+                    "surface": surface, "force": force, "tags": tags, "entities": entities}
+    adapter.bridge = Bridge()
+    return adapter, candidate, option_id
+
+
+@pytest.mark.parametrize("standing_names", [
+    ["passive-provider-chest", "requester-chest"],  # second quad slot sharing the chest column
+    ["assembling-machine-1"],                        # slot retargeted: existing assembler gets a new recipe
+])
+def test_preexisting_targets_are_untagged_and_configured_by_their_unit_number(tmp_path, standing_names):
+    standing = {name: 70 + i for i, name in enumerate(standing_names)}
+    adapter, candidate, option_id = _preexisting_adapter(tmp_path, standing)
+    receipt = adapter.execute(option_id, [candidate], measure_ticks=600)
+    assert receipt["status"] == "observed"
+    submitted = [a for p in adapter.bridge.ghosts["phases"] for a in p["actions"]]
+    # Standing entities stay in the request (the executor verifies them) but carry no ownership claim.
+    assert {a["entity"] for a in submitted if not a.get("optimizer_ownership")} >= set(standing)
+    assert all(not a.get("optimizer_ownership") for a in submitted if a["entity"] in standing)
+    assert all(a.get("optimizer_ownership") for a in submitted
+               if a["entity"] not in standing and a["entity"] in {"passive-provider-chest", "assembling-machine-1", "requester-chest"})
+    configured = {a["entity"]: a for p in adapter.bridge.configs["phases"] for a in p["actions"]}
+    assert set(configured) == {"passive-provider-chest", "assembling-machine-1", "requester-chest"}
+    assert all(a["action_type"] == "configure_entity_if_unit_number" for a in configured.values())
+    for name, unit in standing.items():
+        assert configured[name]["expected_unit_number"] == unit
+    for name in set(configured) - set(standing):
+        assert configured[name]["expected_unit_number"] >= 500  # robot-built, correlated to this transaction
+    # The shared chest keeps the group-keyed section request that preserves the earlier slot's requests.
+    assert configured["requester-chest"]["logistic_sections"][0]["group"].startswith("laya-quad:")
+    journal = {(t["entity"], t["unit_number"]) for t in receipt["preexisting_targets"]}
+    assert journal == set(standing.items())
+
+
+def test_nothing_preexisting_keeps_every_configuration_target_tagged(tmp_path):
+    adapter, candidate, option_id = _preexisting_adapter(tmp_path, {})
+    receipt = adapter.execute(option_id, [candidate], measure_ticks=600)
+    assert receipt["preexisting_targets"] == []
+    tagged = {a["entity"] for p in adapter.bridge.ghosts["phases"] for a in p["actions"] if a.get("optimizer_ownership")}
+    assert tagged == {"passive-provider-chest", "assembling-machine-1", "requester-chest"}
+
+
+def test_unowned_pending_ghost_target_is_refused_before_submission(tmp_path):
+    adapter, candidate, option_id = _preexisting_adapter(tmp_path, {}, ghost={"requester-chest"})
+    with pytest.raises(SavedWorldError, match="unowned pending ghost"):
+        adapter.execute(option_id, [candidate], measure_ticks=600)
+    assert adapter.bridge.ghosts is None
+    record = json.loads(next((tmp_path / "evidence").glob("transaction-*.json")).read_text())
+    assert record["status"] == "rejected" and record["reason"] == "configuration_target_unowned_ghost"
+
+
 @pytest.mark.parametrize("outcome", ["lost_response", "after_response", "journal_failure", "rejected"])
 def test_configuration_interruptions_are_correlated_and_never_resent(tmp_path, outcome, monkeypatch):
     adapter = object.__new__(SavedWorldAdapter)
