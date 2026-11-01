@@ -22,6 +22,7 @@ import copy
 import json
 import math
 import random
+from contextlib import contextmanager
 from dataclasses import dataclass
 import time
 import traceback
@@ -39,12 +40,14 @@ from training.laya_factory_status import apply_to_state, compact_status, compile
 from training.laya_mission import MISSION_ID, current_phase, phase_reached
 from training.laya_guided_policy import load_preferences, matches, option_features
 from training.laya_power import POLES, power_variants, world_obstacles
+from training.laya_experiment_context import reservation_view
 from training.laya_site_plan import (base_zones, draw_command, load_plan, plan_options, reservation_reason,
                                     ring_expand_candidates, save_plan)
 from training.laya_lines import line_candidates
 from training.laya_starters import STARTER_ORE, starter_bill, starter_candidates
 from training.laya_saved_world import (SAVED_WORLD_GHOST_FIELDS, SavedWorldAdapter, SavedWorldError,
-                                       compile_candidates, decision_state, required_check_reason)
+                                       compile_candidates, decision_state, evaluate_required_checks,
+                                       required_check_reason)
 from training import laya_mall_slots as mall_slots
 from training.laya_mall_block import mall_cell_candidates
 
@@ -114,6 +117,8 @@ class LiveWorld(SavedWorldAdapter):
         if not 0.25 <= speed <= 8:
             raise SavedWorldError("live speed must be 0.25..8")
         self.speed = speed
+        # Optional capability (tools/optimizer_block_runtime.OptimizerBlocks), injected by the CLI; None = off.
+        self.optimizer_blocks = None
         # The shared helper requires a paused clock for stepped exactness. One
         # /sc command runs inside a single tick, so a live snapshot is still
         # atomic; drop only that assertion and fail closed if it changes.
@@ -140,12 +145,25 @@ class LiveWorld(SavedWorldAdapter):
                 "phases": [{"name": "laya-configure", "actions": actions}]}
         return load_json(self.bridge.build_layout(build_layout_authorization([plan]), plan, timeout=30))
 
-    def execute(self, selected, presented, measure_ticks=1800):
+    def execute(self, selected, presented, measure_ticks=1800, check_verifier=None):
         candidate = next((c for c in presented if c["option_id"] == selected), None)
         if candidate and candidate.get("family") == "retarget":
             return mall_slots.execute_retarget(self, candidate, measure_ticks)
+        if candidate and candidate.get("family") == "optimizer-block" and check_verifier is None:
+            # Laya's selection goes through the capability's verified, clock-paused transaction; the verified
+            # adapter path below is only reached from inside it (with its own verifier).
+            if self.optimizer_blocks is None:
+                raise SavedWorldError("optimizer blocks are not enabled for this runner")
+            try:
+                return self.optimizer_blocks.execute(self, candidate, selected, measure_ticks)
+            except SavedWorldError as error:
+                if "ghost submission failed" in str(error):
+                    self._close_failed_submissions()
+                raise
         try:
-            return super().execute(selected, presented, measure_ticks)
+            if check_verifier is None:
+                return super().execute(selected, presented, measure_ticks)
+            return super().execute(selected, presented, measure_ticks, check_verifier=check_verifier)
         except SavedWorldError as error:
             if "ghost submission failed" in str(error):
                 self._close_failed_submissions()
@@ -175,6 +193,30 @@ class LiveWorld(SavedWorldAdapter):
         """Resources per land-grid parcel over a wide square (read-only, a few chunked commands)."""
         from training.laya_land_grid import survey
         return survey(self.bridge.command, origin, radius)
+
+    def pause(self) -> int:
+        """Pause the game clock and return the tick it is frozen at (fails closed if it keeps moving)."""
+        self.bridge.command('/sc game.tick_paused=true; game.ticks_to_run=0; rcon.print("paused")')
+        previous = None
+        for _ in range(30):
+            now = self.tick()
+            if now == previous:
+                return now
+            previous = now
+            time.sleep(0.1)
+        raise SavedWorldError("game clock did not pause")
+
+    @contextmanager
+    def clock_paused(self):
+        """Transaction boundary for real-time mutation: no tick elapses between a re-query and its submission.
+
+        Yields the frozen tick and always restores the live clock, including on failure.
+        """
+        tick = self.pause()
+        try:
+            yield tick
+        finally:
+            self.go_live()
 
     def go_live(self) -> None:
         self.bridge.command(f'/sc game.tick_paused=false; game.ticks_to_run=0; game.speed={self.speed}; rcon.print("live")')
@@ -350,13 +392,18 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
                  retargets: Sequence[Mapping] = (), placed: Sequence[Mapping] = (),
                  request_multiplier: int | None = None, reservation_mode: str = 'strict',
                  additional_candidates: Sequence[Mapping] = (), observe_unlinked: bool = False,
-                 additional_observations: Mapping | None = None) -> dict:
+                 additional_observations: Mapping | None = None,
+                 external_check: Callable[[Mapping, Mapping], tuple[str | None, Mapping | None]] | None = None) -> dict:
     """Group legal options by the unmet need they serve.
 
     Each sampled build is offered with its power alternatives (training/laya_power.py).
     Construction items that legal checks report missing (``item_shortfall``)
     become ``stock:<item>`` needs served by assembling that item.  Sampling per
     need is seeded exploration of sites; it never ranks needs or options.
+
+    ``external_check`` is the opt-in capability for external (optimizer) candidates: it re-runs their
+    required checks on the same query that just validated them and returns ``(reason, evidence)``.
+    Without it external candidates are observation only, exactly as before.
     """
     rng = random.Random(seed)
     if additional_observations is not None and not isinstance(additional_observations, Mapping):
@@ -415,6 +462,7 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     reasons: dict[str, Counter] = defaultdict(Counter)
     external_results = []
     external_needs = set()
+    admitted_external: list[tuple[str, dict]] = []
     seen_external = {c["option_id"] for c in proposed}
     for candidate in additional_candidates:
         if (not isinstance(candidate, Mapping) or not isinstance(candidate.get("option_id"), str)
@@ -426,15 +474,18 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
             raise ValueError("additional candidate option ID is not unique")
         seen_external.add(option_id)
         unlinked = candidate["product"] not in unmet
-        if unlinked and (not observe_unlinked or candidate["product"] in known_needs):
+        if unlinked and ((not observe_unlinked and external_check is None) or candidate["product"] in known_needs):
             continue
         need = None if unlinked else f"item:{candidate['product']}"
+        if unlinked and external_check is not None:
+            need = f"optimizer:{candidate['product']}"  # Selectable though the board has no such need; Laya may still choose it.
         # This path is observation only until it can recheck the binding and
         # ledger immediately before dispatch and validate the entire site.
         required_reason = required_check_reason(candidate, external=True)
         plan = candidate["plan"]
         validation = None
         missing = {}
+        admitted = None
         try:
             missing = _candidate_funding_shortfalls(candidate)
         except (ValueError, TypeError, KeyError):
@@ -451,7 +502,12 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
                 reason = "external_plan_invalid"
                 missing = {}
             else:
-                if required_reason in {"invalid_required_checks", "optimizer_required_checks_missing"}:
+                land_reason = (reservation_reason(land_plan, {**candidate, "plan": _build_only(candidate)})
+                               if external_check is not None and site_plan else None)
+                if land_reason:
+                    reason = land_reason  # Land reserved for another purpose is a hard rule here too.
+                    missing = {}
+                elif required_reason in {"invalid_required_checks", "optimizer_required_checks_missing"}:
                     reason = required_reason
                     missing = {}
                 else:
@@ -468,9 +524,18 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
                         reason = "construction_bill_changed"
                     elif missing:
                         reason = "construction_reservation_shortfall"
+                    elif external_check is not None:
+                        reason, evidence = external_check(candidate, validation)
+                        if not reason and candidate.get("check_evidence") is not None and evidence != candidate["check_evidence"]:
+                            reason = "required_check_facts_changed"  # A fact the offer relied on moved since it was composed.
+                        if not reason:
+                            admitted = {**candidate, "check_evidence": evidence, "bill": validation.get("bill") or candidate["bill"],
+                                        "draws": requested_items(candidate), "need_id": need}
                     else:
                         reason = required_reason or "external_dispatch_unimplemented"
-        if not unlinked:
+        if admitted is not None:
+            admitted_external.append((need, admitted))
+        elif not unlinked or external_check is not None:
             external_needs.add(need)
             reasons[need][reason] += 1
             rejected[reason.split(":", 1)[0]] += 1
@@ -481,7 +546,9 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
                 shortfalls[item] += 1
         summary = {"option_id": option_id, "need_id": need, "reason": reason,
                    "required_check_reason": required_reason, "dispatch_reason": "external_dispatch_unimplemented"}
-        if unlinked:
+        if admitted is not None:
+            summary.update(selectable=True, dispatch_reason=None, required_check_reason=None)
+        if unlinked and external_check is None:
             summary["demand_status"] = "not_in_status_board"
             summary["product"] = candidate["product"]
         if option_id in additional_observations:
@@ -547,6 +614,8 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
         return legal
 
     legal = check(by_need)
+    for need, option in admitted_external:  # Only with the external_check capability: verified, selectable options.
+        legal.setdefault(need, []).append(option)
     stock_groups: dict[str, list] = defaultdict(list)
     stock = [c for c in [*(_compile(facts, set(shortfalls), seed, request_multiplier) if shortfalls else ()),
                          *mall_cell_candidates(facts, site_plan, set(shortfalls), obstacles=obstacles)]
@@ -578,7 +647,11 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     needs, options, seen, omitted_needs = [], [], set(), []
     for need in ordered:
         shown = []
-        for c in _sample({need: legal[need]}, per_need, rng):
+        # Verified site alternatives are all shown ("where" is the policy's choice, not a sampling outcome);
+        # ordinary options of the same need are still sampled as before.
+        blocks = [c for c in legal[need] if c["family"] == "optimizer-block"]
+        rest = [c for c in legal[need] if c["family"] != "optimizer-block"]
+        for c in blocks + (_sample({need: rest}, per_need, rng) if rest else []):
             if c["option_id"] not in seen and all(c["option_id"] != s["option_id"] for s in shown):
                 shown.append(c)  # One copy per option id, within a need as well as across needs.
         if not shown:
@@ -692,6 +765,9 @@ def build_state(facts: Mapping, menu: Mapping, board: Mapping, phase: Mapping, r
         and isinstance(item["validation"].get("power_topology_diagnostic"), Mapping)]
     if power_diagnostics:
         state["observation_digest"]["optimizer_power"] = power_diagnostics[:8]
+    blocks = [{"option_id": o["option_id"], **o["optimizer_facts"]} for o in menu["options"] if o.get("optimizer_facts")]
+    if blocks:
+        state["observation_digest"]["optimizer_blocks"] = blocks[:3]
     if menu.get('line_site_diagnostics'):state['observation_digest']['line_site_diagnostics']=menu['line_site_diagnostics']
     if settings.dependency_context:
         from training.laya_experiment_context import dependency_context
@@ -723,7 +799,8 @@ def _option_record(option: Mapping) -> dict:
             "bill": option.get("bill"), "draws": option.get("draws"), "wait_ticks": option.get("wait_ticks"),
             "plan_hash": sha256_hash(plan) if plan else None, "coverage_reach": option.get("coverage_reach"),
             "slot": option.get("slot"), "next_slot": option.get("next_slot"),
-            "entities": dict(Counter(a["entity"] for a in plan["phases"][0]["actions"])) if plan else None}
+            "entities": dict(Counter(a["entity"] for a in plan["phases"][0]["actions"])) if plan else None,
+            **({"optimizer_facts": option["optimizer_facts"]} if option.get("optimizer_facts") else {})}
 
 
 def _training_record(path: Path, **fields: Any) -> None:
@@ -866,6 +943,12 @@ def _draw_zones(adapter: Any, plan: Mapping, emit: Callable[[str], None]) -> Non
         emit(f"  ZONES NOT DRAWN: {type(error).__name__}: {str(error)[:160]}")
 
 
+def _journal_events(blocks: Any, journal: Path, run_id: str) -> None:
+    """Persist the optimizer capability's funnel events (never_offered ... measured)."""
+    for event in blocks.drain_events():
+        _append(journal, {"run_id": run_id, **event})
+
+
 def _plan_decision(facts: Mapping, board: Mapping, phase: Mapping, policy: "Policy", record: dict, journal: Path,
                    run_id: str, history: list, emit: Callable[[str], None], settings: Settings = Settings(),
                    surveyed: Mapping | None = None) -> dict:
@@ -914,6 +997,10 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
     loop continues; it stops safely after ``MAX_CONSECUTIVE_FAILURES`` in a
     row.  It never falls back to another decision maker.
     """
+    # Opt-in capability (``--optimizer-blocks``): the provider also verifies, executes and reconciles its blocks.
+    blocks = candidate_provider if getattr(candidate_provider, "execute", None) else None
+    if blocks is not None:
+        _append(journal, {"run_id": run_id, "event": "capability", "optimizer_blocks": True})
     reached: list[str] = list(initial_reached)
     history: list[dict] = []
     measurement = None
@@ -939,6 +1026,9 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
         try:
             adapter.reconcile()
             facts = adapter.query()
+            if blocks is not None:
+                blocks.reconcile(adapter, facts)  # Receipt- and entity-based; never resends.
+                _journal_events(blocks, journal, run_id)
             samples.append((facts["tick"], dict(facts["production"]), dict(facts["consumption"])))
             measurement = rolling_measurement(samples, settings.rate_window_ticks) or measurement
             if settings.max_game_ticks and facts["tick"] - samples[0][0] >= settings.max_game_ticks:
@@ -985,10 +1075,13 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
             retargets = (mall_slots.sync(adapter, facts, board, stock_demand, gates, emit,
                                         gate_scale=settings.mall_gate_scale,buildable_multiplier=settings.mall_buildable_multiplier)
                          if settings.mall_slots and hasattr(adapter, "configure") else [])
+            last_query: dict = {}
+
             def validate_candidates(candidates):
                 prepare = getattr(candidate_provider, "prepare_validation", None)
                 requested = prepare(candidates) if prepare is not None else list(candidates)
                 snapshot = adapter.query(requested)
+                last_query["snapshot"] = snapshot  # The required checks read this same query.
                 values = snapshot["validations"]
                 diagnostic = getattr(candidate_provider, "validate", None)
                 if diagnostic is not None:
@@ -996,6 +1089,13 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                 if type(snapshot.get("tick")) is int:
                     return {key: {**value, "observed_tick": snapshot["tick"]} for key, value in values.items()}
                 return values
+            external_check = None
+            if blocks is not None:
+                if hasattr(blocks, "set_land_check"):
+                    blocks.set_land_check(lambda pseudo: reservation_reason(
+                        reservation_view(site_plan, settings.reservation_mode), {"family": "optimizer-block", "plan": pseudo}))
+                external_check = lambda candidate, entry: evaluate_required_checks(  # noqa: E731
+                    candidate, blocks.verify, adapter, entry, last_query["snapshot"], external=True)
             external = candidate_provider(adapter, facts, board) if candidate_provider else ()
             describe = getattr(candidate_provider, "describe", None)
             demand_observations = describe(facts, board, external) if describe is not None else {}
@@ -1006,7 +1106,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                                 request_multiplier=settings.request_multiplier,reservation_mode=settings.reservation_mode,
                                 additional_candidates=external,
                                 observe_unlinked=bool(getattr(candidate_provider, "observe_unlinked", False)),
-                                additional_observations=demand_observations)
+                                additional_observations=demand_observations, external_check=external_check)
             # Items the checks found short become small demand targets on the next board.
             stock_demand = {item: settings.stock_rate for item in menu["shortfalls"]}
             state = build_state(facts, menu, board, phase, run_id, policy.model_ref, history, measurement, settings)
@@ -1023,6 +1123,9 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                           omitted_needs=menu.get("omitted_needs"),
                           summary=chosen["summary"])
             _append(journal, record)  # Durable before any mutation.
+            if blocks is not None:
+                blocks.observe_decision(index=index, tick=facts["tick"], menu=menu, chosen_id=choice["option_id"])
+                _journal_events(blocks, journal, run_id)
             emit(f"DECISION {index} phase={phase['phase_id']} tick={facts['tick']} need={choice['need_id']} "
                  f"p={choice['probability']:.3f} authority={policy.authority}"
                  + (f" rules={','.join(sorted(set(choice['rules'])))}" if choice.get("rules") else "")
@@ -1056,7 +1159,11 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                         "distribution": distribution, "choice": choice}
             try:
                 receipt = adapter.execute(choice["option_id"], menu["options"], measure_ticks)
+                if blocks is not None:
+                    _journal_events(blocks, journal, run_id)
             except Exception as error:
+                if blocks is not None:
+                    _journal_events(blocks, journal, run_id)
                 _training_record(records, **training, outcome={"status": "failed", "error_type": type(error).__name__,
                                                                "error": str(error)[:500]})
                 raise
@@ -1104,6 +1211,10 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                 summary["stop"] = "safe_stop_after_repeated_failures"
                 emit(f"SAFE STOP: {MAX_CONSECUTIVE_FAILURES} consecutive failures; last: {str(error)[:200]}")
                 break
+    if blocks is not None:
+        summary["optimizer_blocks"] = {"funnel": dict(blocks.registry["funnel"]),
+                                       "never_offered_reasons": dict(blocks.registry.get("never_offered_reasons", {})),
+                                       "projects": {p["project_id"]: p["state"] for p in blocks.registry["projects"].values()}}
     _append(journal, {"run_id": run_id, "event": "summary", **summary})
     emit(f"SUMMARY: stop={summary['stop']} decisions={summary['decisions']} failures={summary['failures']} "
          f"phases={','.join(reached) or 'none'}")

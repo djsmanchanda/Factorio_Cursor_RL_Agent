@@ -79,6 +79,9 @@ def main(argv=None) -> int:
     p.add_argument("--variant", type=Path, help="Variant JSON (docs/rl/laya_variants/); default: the current workflow")
     p.add_argument("--optimizer-candidate", type=Path,
                    help="Pinned observation-only optimizer candidate JSON for the geometry runner")
+    p.add_argument("--optimizer-blocks", action="store_true",
+                   help="Capability (default off): offer verified optimizer red-science blocks as selectable geometry-run "
+                        "options on this disposable live world; Laya decides whether, when and where to build one")
     p.add_argument("--until-phase", help="Experiment window: stop once this phase is reached")
     p.add_argument("--max-game-ticks", type=int, help="Experiment window: stop after this many game ticks")
     p.add_argument("--experiment", help="Experiment id recorded with the run")
@@ -96,6 +99,9 @@ def main(argv=None) -> int:
     args = p.parse_args(argv)
     if args.optimizer_candidate and (args.action != "run" or args.actions != "geometry"):
         p.error("--optimizer-candidate requires run with --actions geometry")
+    if args.optimizer_blocks and (args.action != "run" or args.actions != "geometry" or args.stepped
+                                  or args.optimizer_candidate):
+        p.error("--optimizer-blocks requires a live run with --actions geometry and no --optimizer-candidate")
     root = owned_root(args.root)
     resume=load_bundle(args.resume_bundle) if args.resume_bundle else None
     if args.action == "prepare":
@@ -134,7 +140,7 @@ def main(argv=None) -> int:
     started = local_stamp()
     log = RunLog(paths["log"], paths["heartbeat"])
     summary = {"decisions": 0, "failures": 0, "phases_reached": [], "stop": "runner_error"}
-    optimizer_metadata = None
+    optimizer_metadata = blocks_metadata = None
     with runner_pid_record(paths["pid"]):
         adapter = SavedWorldAdapter(root) if args.stepped else LiveWorld(root, speed)
         manifest = json.loads((root / "manifest.json").read_text())
@@ -145,6 +151,11 @@ def main(argv=None) -> int:
                   game=f"127.0.0.1:{manifest['game_port']}", root=root, log=paths["log"])
         try:
             candidate_provider = None
+            if args.optimizer_blocks:
+                from tools.optimizer_block_runtime import OptimizerBlocks
+                candidate_provider = adapter.optimizer_blocks = OptimizerBlocks(root, run_id=run_id)
+                blocks_metadata = {"enabled": True, "registry": str(candidate_provider.path)}
+                log("OPTIMIZER BLOCKS: capability ON; verified block options are offered, execution is clock-paused and receipted")
             if args.optimizer_candidate:
                 from tools.optimizer_saved_world import load_optimizer_candidate_config
                 candidate_provider, optimizer_metadata = load_optimizer_candidate_config(args.optimizer_candidate, adapter)
@@ -189,6 +200,7 @@ def main(argv=None) -> int:
              "window": {"until_phase": settings.until_phase, "max_game_ticks": settings.max_game_ticks}}
     if resume:index['resume_checkpoint']={'path':str(args.resume_bundle),'save_sha256':resume['files']['source.zip']}
     if optimizer_metadata:index['optimizer_candidate']=optimizer_metadata
+    if blocks_metadata:index['optimizer_blocks']={**blocks_metadata,'funnel':summary.get('optimizer_blocks')}
     with RUN_INDEX.open("a") as out:
         out.write(json.dumps(index) + "\n")
     try:
