@@ -14,7 +14,7 @@ from orchestrator import autonomous_builder as builder
 from orchestrator import stage_services
 from orchestrator.mall_builder import compact_mall_project_bill
 from orchestrator.material_reservations import (
-    MaterialReservationLedger, set_active_material_ledger,
+    MaterialReservationError, MaterialReservationLedger, set_active_material_ledger,
 )
 from orchestrator.parts_mall import MaterialShortage
 from planners.plan_validation import actions
@@ -33,6 +33,109 @@ def _ledger(tmp_path: Path) -> MaterialReservationLedger:
         tmp_path / "script-output" / "factorio_cursor_rl",
         episode_id="episode-1", surface="nauvis", force="player",
     )
+
+
+@pytest.mark.parametrize("bad", [True, 1.9, "2", -1, float("nan")])
+@pytest.mark.parametrize("field", ["bill", "stock"])
+def test_invalid_funding_counts_fail_without_changing_ledger(tmp_path, bad, field):
+    ledger = _ledger(tmp_path)
+    ledger.declare("existing", {"pipe": 1}, {"pipe": 1}, hold_until_producing=True)
+    before_bytes = ledger.path.read_bytes()
+    before_projects, before_revision = dict(ledger.projects), ledger.revision
+    bill = {"pipe": bad} if field == "bill" else {"pipe": 1}
+    stock = {"pipe": bad} if field == "stock" else {"pipe": 1}
+    with pytest.raises(MaterialReservationError):
+        ledger.declare("new", bill, stock, hold_until_producing=True)
+    assert ledger.projects == before_projects
+    assert ledger.revision == before_revision
+    assert ledger.path.read_bytes() == before_bytes
+
+
+def test_invalid_stock_cannot_transition_existing_project(tmp_path):
+    ledger = _ledger(tmp_path)
+    ledger.declare("oil", {"pipe": 2}, {"pipe": 2}, hold_until_producing=True)
+    before = ledger.path.read_bytes()
+    with pytest.raises(MaterialReservationError):
+        ledger.mark_constructing("oil", {"pipe": 1.9})
+    assert ledger.projects["oil"].state == "ready"
+    assert ledger.projects["oil"].reserved == {"pipe": 2}
+    assert ledger.path.read_bytes() == before
+
+
+@pytest.mark.parametrize("bad", [0, 1, "false", None])
+def test_invalid_hold_flag_cannot_silently_release_reservation(tmp_path, bad):
+    ledger = _ledger(tmp_path)
+    ledger.declare("oil", {"pipe": 2}, {"pipe": 2}, hold_until_producing=True)
+    before = ledger.path.read_bytes()
+    with pytest.raises(MaterialReservationError):
+        ledger.declare("oil", {"pipe": 2}, {"pipe": 2}, hold_until_producing=bad)
+    assert ledger.path.read_bytes() == before
+    payload = json.loads(before)
+    payload["projects"][0]["hold_until_producing"] = bad
+    ledger.path.write_text(json.dumps(payload))
+    with pytest.raises(MaterialReservationError):
+        _ledger(tmp_path)
+
+
+@pytest.mark.parametrize("field", ["required", "reserved"])
+@pytest.mark.parametrize("bad", [True, 1.9, "2"])
+def test_malformed_persisted_project_counts_are_not_coerced(tmp_path, field, bad):
+    ledger = _ledger(tmp_path)
+    ledger.declare("oil", {"pipe": 2}, {"pipe": 2}, hold_until_producing=True)
+    payload = json.loads(ledger.path.read_text())
+    payload["projects"][0][field]["pipe"] = bad
+    ledger.path.write_text(json.dumps(payload))
+    with pytest.raises(MaterialReservationError):
+        _ledger(tmp_path)
+
+
+def test_zero_stock_and_bootstrap_insertions_remain_valid(tmp_path):
+    ledger = _ledger(tmp_path)
+    project = ledger.declare("oil", {"pipe": 2}, {"pipe": 0}, hold_until_producing=True)
+    assert project.state == "supply_wait"
+    ledger.record_bootstrap_supply("fixture", {"pipe": 2}, {"pipe": 0})
+    assert _ledger(tmp_path).bootstrap_supply["fixture"]["inserted"] == {}
+
+
+@pytest.mark.parametrize("bad", [True, 1.5, "1", -1])
+def test_bootstrap_inserted_counts_are_not_coerced(tmp_path, bad):
+    ledger = _ledger(tmp_path)
+    with pytest.raises(MaterialReservationError):
+        ledger.record_bootstrap_supply("fixture", {"pipe": 2}, {"pipe": bad})
+    assert ledger.bootstrap_supply == {}
+    assert not ledger.path.exists()
+
+
+def test_bad_stock_does_not_rebalance_existing_reservations(tmp_path):
+    ledger = _ledger(tmp_path)
+    ledger.declare("oil", {"pipe": 2}, {"pipe": 2}, hold_until_producing=True)
+    before = ledger.path.read_bytes()
+    for operation in (lambda: ledger.shortage_targets("oil", {"pipe": False}),
+                      lambda: ledger.allocatable_stock({"pipe": 1.5})):
+        with pytest.raises(MaterialReservationError):
+            operation()
+        assert ledger.projects["oil"].reserved == {"pipe": 2}
+        assert ledger.path.read_bytes() == before
+
+
+def test_read_only_allocation_does_not_hide_a_later_persisted_revision(tmp_path):
+    ledger = _ledger(tmp_path)
+    ledger.declare("first", {"pipe": 2}, {"pipe": 4}, hold_until_producing=True)
+    ledger.declare("second", {"pipe": 2}, {"pipe": 4}, hold_until_producing=True)
+    before_projects, before_revision, before_file = dict(ledger.projects), ledger.revision, ledger.path.read_bytes()
+    assert ledger.allocatable_stock({"pipe": 3}, claimant="first") == {"pipe": 2}
+    assert ledger.projects == before_projects and ledger.revision == before_revision
+    assert ledger.path.read_bytes() == before_file
+    assert ledger.shortage_targets("second", {"pipe": 3}) == {"pipe": 4}
+    assert ledger.revision == before_revision + 1
+    assert ledger.projects["second"].reserved == {"pipe": 1}
+    reloaded = _ledger(tmp_path)
+    assert reloaded.revision == ledger.revision and reloaded.projects == ledger.projects
+    changed_file = ledger.path.read_bytes()
+    ledger.shortage_targets("second", {"pipe": 3})
+    assert ledger.revision == before_revision + 1 and ledger.path.read_bytes() == changed_file
+    assert ledger.shortage_targets("second", {"pipe": 4}) == {}
+    assert ledger.revision == before_revision + 2 and ledger.projects["second"].state == "ready"
 
 
 def test_nested_projects_reserve_two_bootstrap_chests_before_either_builds(

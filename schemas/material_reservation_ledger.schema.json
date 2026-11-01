@@ -1,12 +1,20 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "material_reservation_ledger.schema.json",
-  "title": "Deterministic Material Reservation Ledger 1",
+  "title": "Deterministic Material Reservation Ledger 1 and 2",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "episode_id", "surface", "force", "revision", "projects"],
+  "allOf": [
+    {"if": {"properties": {"version": {"const": 1}}},
+     "then": {"properties": {"projects": {"items": {"not": {"required": ["construction_binding"]}}}}}},
+    {"if": {"properties": {"version": {"const": 2}}},
+     "then": {"properties": {"projects": {"contains": {"required": ["construction_binding"]},
+       "items": {"if": {"properties": {"project_id": {"pattern": "^optimizer:"}}, "required": ["project_id"]},
+                 "then": {"required": ["construction_binding"]}}}}}}
+  ],
   "properties": {
-    "version": { "const": 1 },
+    "version": { "enum": [1, 2] },
     "episode_id": { "$ref": "#/definitions/nonEmptyString" },
     "surface": { "$ref": "#/definitions/nonEmptyString" },
     "force": { "$ref": "#/definitions/nonEmptyString" },
@@ -54,6 +62,8 @@
     "project": {
       "type": "object",
       "additionalProperties": false,
+      "allOf": [{"if": {"required": ["construction_binding"]},
+                  "then": {"properties": {"hold_until_producing": {"const": true}}}}],
       "required": [
         "project_id", "target_item", "state", "required", "reserved",
         "source_producers", "expected_rates", "eta_seconds", "priority",
@@ -80,6 +90,25 @@
         "priority": { "type": "integer", "minimum": 0 },
         "sequence": { "type": "integer", "minimum": 1 },
         "hold_until_producing": { "type": "boolean" },
+        "construction_binding": {
+          "type": "object", "additionalProperties": false,
+          "required": ["scope", "project_id", "transaction_id", "plan_hash"],
+          "properties": {
+            "scope": {
+              "type": "object", "additionalProperties": false,
+              "required": ["instance_id", "manifest_digest", "surface", "force"],
+              "properties": {
+                "instance_id": { "$ref": "#/definitions/nonEmptyString" },
+                "manifest_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                "surface": { "$ref": "#/definitions/nonEmptyString" },
+                "force": { "$ref": "#/definitions/nonEmptyString" }
+              }
+            },
+            "project_id": { "$ref": "#/definitions/nonEmptyString" },
+            "transaction_id": { "$ref": "#/definitions/nonEmptyString" },
+            "plan_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          }
+        },
         "revision": { "type": "integer", "minimum": 1 }
       }
     }

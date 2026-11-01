@@ -90,6 +90,12 @@ LINE_RECIPES: Dict[str, dict] = {
         "amounts": [2, 4, 2], "product_amount": 1, "craft_time": 6.0,
         "auxiliary_ingredient_index": 1,
     },
+    "low-density-structure": {
+        "machine": "assembling-machine-2",
+        "ingredients": ["copper-plate", "plastic-bar", "steel-plate"],
+        "amounts": [20, 5, 2], "product_amount": 1, "craft_time": 15.0,
+        "auxiliary_ingredient_index": 1,
+    },
     "processing-unit": {
         "machine": "assembling-machine-2",
         "ingredients": ["electronic-circuit", "advanced-circuit"],
