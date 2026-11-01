@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Paused optimizer stock refresh journal",
+  "type": "object", "additionalProperties": false,
+  "required": ["version", "refresh_id", "status", "candidate_id", "binding", "artifact_sha256", "episode_id", "network_anchor", "observation", "expected_revision", "available_stock"],
+  "properties": {
+    "version": {"const": "optimizer-stock-refresh-v1"},
+    "refresh_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "status": {"enum": ["prepared", "applied"]},
+    "candidate_id": {"type": "string", "pattern": "^optimizer\\.[0-9a-f]{64}$"},
+    "binding": {"type": "object", "additionalProperties": false, "required": ["scope", "project_id", "transaction_id", "plan_hash"], "properties": {
+      "scope": {"type": "object", "additionalProperties": false, "required": ["instance_id", "manifest_digest", "surface", "force"], "properties": {
+        "instance_id": {"type": "string", "minLength": 1}, "manifest_digest": {"$ref": "#/definitions/digest"},
+        "surface": {"const": "nauvis"}, "force": {"const": "player"}}},
+      "project_id": {"type": "string", "minLength": 1}, "transaction_id": {"type": "string", "minLength": 1}, "plan_hash": {"$ref": "#/definitions/digest"}}},
+    "artifact_sha256": {"$ref": "#/definitions/digest"},
+    "episode_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"},
+    "network_anchor": {"type": "object", "additionalProperties": false, "required": ["x", "y"], "properties": {"x": {"type": "number"}, "y": {"type": "number"}}},
+    "observation": {"type": "object", "additionalProperties": false, "required": ["status", "tick", "network", "ledger_revision", "items"], "properties": {
+      "status": {"const": "available"}, "tick": {"$ref": "#/definitions/count"}, "network": {"type": "string", "minLength": 1},
+      "ledger_revision": {"$ref": "#/definitions/count"}, "items": {"type": "object", "minProperties": 1, "additionalProperties": {
+        "type": "object", "additionalProperties": false,
+        "required": ["required", "observed_inventory", "ghost_claims", "competing_ledger_holds", "project_ledger_hold", "available_after_claims", "shortfall_after_claims"],
+        "properties": {"required": {"type": "integer", "minimum": 1}, "observed_inventory": {"$ref": "#/definitions/count"},
+          "ghost_claims": {"$ref": "#/definitions/count"}, "competing_ledger_holds": {"$ref": "#/definitions/count"},
+          "project_ledger_hold": {"$ref": "#/definitions/count"}, "available_after_claims": {"$ref": "#/definitions/count"}, "shortfall_after_claims": {"$ref": "#/definitions/count"}}
+      }}}},
+    "expected_revision": {"$ref": "#/definitions/count"}, "available_stock": {"$ref": "#/definitions/counts"},
+    "resulting_revision": {"$ref": "#/definitions/count"}, "resulting_state": {"enum": ["ready", "supply_wait"]},
+    "resulting_reservations": {"$ref": "#/definitions/counts"}
+  },
+  "allOf": [
+    {"if": {"properties": {"status": {"const": "prepared"}}}, "then": {"not": {"anyOf": [{"required": ["resulting_revision"]}, {"required": ["resulting_state"]}, {"required": ["resulting_reservations"]}]}}},
+    {"if": {"properties": {"status": {"const": "applied"}}}, "then": {"required": ["resulting_revision", "resulting_state", "resulting_reservations"]}}
+  ],
+  "definitions": {"digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "count": {"type": "integer", "minimum": 0},
+    "counts": {"type": "object", "additionalProperties": {"$ref": "#/definitions/count"}}}
+}

@@ -1,0 +1,201 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Observation-only optimizer candidate configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "scope",
+    "episode_id",
+    "project_id",
+    "transaction_id",
+    "artifact_sha256",
+    "plan_sha256",
+    "throughput",
+    "network_anchor",
+    "artifact"
+  ],
+  "properties": {
+    "version": {
+      "const": "optimizer-candidate-config-v1"
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instance_id",
+        "manifest_digest",
+        "surface",
+        "force"
+      ],
+      "properties": {
+        "instance_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "manifest_digest": {
+          "$ref": "#/definitions/digest"
+        },
+        "surface": {
+          "const": "nauvis"
+        },
+        "force": {
+          "const": "player"
+        }
+      }
+    },
+    "episode_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "transaction_id": {
+      "type": "string",
+      "minLength": 32,
+      "maxLength": 32,
+      "pattern": "^[0-9a-f]+$"
+    },
+    "artifact_sha256": {
+      "$ref": "#/definitions/digest"
+    },
+    "plan_sha256": {
+      "$ref": "#/definitions/digest"
+    },
+    "throughput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "output",
+        "target",
+        "unit"
+      ],
+      "properties": {
+        "output": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "unit": {
+          "enum": [
+            "items/tick",
+            "items/second",
+            "fluid/tick",
+            "fluid/second"
+          ]
+        }
+      }
+    },
+    "network_anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      }
+    },
+    "artifact": {
+      "type": "object"
+    },
+    "fluid_catalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sha256",
+        "json"
+      ],
+      "properties": {
+        "sha256": {
+          "$ref": "#/definitions/digest"
+        },
+        "json": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16777216
+        }
+      }
+    },
+    "demand_model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "catalog_json",
+        "provenance",
+        "boundaries",
+        "preferences"
+      ],
+      "properties": {
+        "catalog_json": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16777216
+        },
+        "provenance": {
+          "type": "object"
+        },
+        "boundaries": {
+          "type": "array",
+          "maxItems": 10000,
+          "items": {
+            "type": "object"
+          }
+        },
+        "preferences": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "underground_mask": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sha256",
+        "json"
+      ],
+      "properties": {
+        "sha256": {
+          "$ref": "#/definitions/digest"
+        },
+        "json": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1048576
+        }
+      }
+    }
+  },
+  "definitions": {
+    "digest": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]+$"
+    }
+  },
+  "dependencies": {
+    "underground_mask": [
+      "fluid_catalog"
+    ]
+  }
+}

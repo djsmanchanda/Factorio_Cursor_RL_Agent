@@ -18,6 +18,7 @@ says so.
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 import random
@@ -33,6 +34,7 @@ from orchestrator.laya_knowledge import load_guideline_context
 from core.local_time import local_stamp
 from orchestrator.laya_operations import sha256_hash
 from orchestrator.laya_state import validate_state
+from planners.plan_validation import actions, validate_build_plan
 from training.laya_factory_status import apply_to_state, compact_status, compile_status
 from training.laya_mission import MISSION_ID, current_phase, phase_reached
 from training.laya_guided_policy import load_preferences, matches, option_features
@@ -41,7 +43,8 @@ from training.laya_site_plan import (base_zones, draw_command, load_plan, plan_o
                                     ring_expand_candidates, save_plan)
 from training.laya_lines import line_candidates
 from training.laya_starters import STARTER_ORE, starter_bill, starter_candidates
-from training.laya_saved_world import SavedWorldAdapter, SavedWorldError, compile_candidates, decision_state
+from training.laya_saved_world import (SAVED_WORLD_GHOST_FIELDS, SavedWorldAdapter, SavedWorldError,
+                                       compile_candidates, decision_state, required_check_reason)
 from training import laya_mall_slots as mall_slots
 from training.laya_mall_block import mall_cell_candidates
 
@@ -149,17 +152,18 @@ class LiveWorld(SavedWorldAdapter):
             raise
 
     def _close_failed_submissions(self) -> None:
-        """An atomic submission that failed placed nothing: close its receipt as rejected (instead of
-        ``pending``, which stops every later decision) and remember the blocked footprints."""
+        """Close only executor failures known to occur before placement."""
+        from training.laya_layout_stream import atomic_json
         blocked_path = self.root / "evidence" / BLOCKED_FOOTPRINTS
         blocked = json.loads(blocked_path.read_text()) if blocked_path.exists() else []
         for path in (self.root / "evidence").glob("transaction-*.json"):
             receipt = json.loads(path.read_text())
             submission = receipt.get("submission") or {}
-            if receipt.get("status") != "pending" or submission.get("ok") is not False:
+            if (receipt.get("status") not in {"pending", "submission_failed"} or submission.get("ok") is not False
+                    or submission.get("error") not in {"atomic_footprint_blocked", "direct_construction_forbidden"}):
                 continue
             receipt.update(status="rejected", reason=f"submission_failed:{submission.get('error')}")
-            path.write_text(json.dumps(receipt, indent=2) + "\n")
+            atomic_json(path, receipt)
             blocked += [{"entity": f["entity"], "position": f["position"]}
                         for f in submission.get("placement_failures") or [] if f.get("position")]
         blocked_path.write_text(json.dumps(blocked) + "\n")
@@ -318,11 +322,35 @@ def _compile(facts: Mapping, products: set[str], seed: int, request_multiplier: 
     return candidates
 
 
+def _candidate_funding_shortfalls(candidate: Mapping) -> dict[str, int]:
+    """Validate the persisted allocation facts attached to a partial hold."""
+    if "funding_status" not in candidate:
+        return {}
+    funding, bill = candidate["funding_status"], candidate.get("bill")
+    if (not isinstance(funding, Mapping) or set(funding) != {"state", "reserved", "shortfalls"}
+            or funding["state"] != "supply_wait" or not isinstance(bill, Mapping) or not bill
+            or not isinstance(funding["reserved"], Mapping) or not isinstance(funding["shortfalls"], Mapping)
+            or any(not isinstance(item, str) or not item or type(count) is not int or count <= 0
+                   for item, count in bill.items())
+            or any(item not in bill or type(count) is not int or count < 0 or count > bill[item]
+                   for item, count in funding["reserved"].items())
+            or any(not isinstance(item, str) or not item or type(count) is not int or count <= 0
+                   for item, count in funding["shortfalls"].items())):
+        raise ValueError("invalid held allocation")
+    missing = {item: count - funding["reserved"].get(item, 0) for item, count in bill.items()
+               if count > funding["reserved"].get(item, 0)}
+    if not missing or dict(funding["shortfalls"]) != missing:
+        raise ValueError("inconsistent held allocation")
+    return missing
+
+
 def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int, *,
                  site_plan: Mapping | None = None, starters: frozenset | set = frozenset(),
                  per_need_checked: int = 6, per_need_shown: int = 2,
                  retargets: Sequence[Mapping] = (), placed: Sequence[Mapping] = (),
-                 request_multiplier: int | None = None, reservation_mode: str = 'strict') -> dict:
+                 request_multiplier: int | None = None, reservation_mode: str = 'strict',
+                 additional_candidates: Sequence[Mapping] = (), observe_unlinked: bool = False,
+                 additional_observations: Mapping | None = None) -> dict:
     """Group legal options by the unmet need they serve.
 
     Each sampled build is offered with its power alternatives (training/laya_power.py).
@@ -331,9 +359,13 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     need is seeded exploration of sites; it never ranks needs or options.
     """
     rng = random.Random(seed)
+    if additional_observations is not None and not isinstance(additional_observations, Mapping):
+        raise ValueError("additional observations must be a mapping")
+    additional_observations = additional_observations or {}
     from training.laya_experiment_context import reservation_view
     land_plan = reservation_view(site_plan, reservation_mode)
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
+    known_needs = {n["item"] for n in board["needs"]}
     proposed = _compile(facts, unmet, seed, request_multiplier)
     # Iron, copper and stone start with direct starters (drills feeding furnaces); the
     # generator's single-drill-into-chest mines and requester-fed furnaces are not offered.
@@ -381,6 +413,99 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     rejected: Counter = Counter()
     shortfalls: Counter = Counter()
     reasons: dict[str, Counter] = defaultdict(Counter)
+    external_results = []
+    external_needs = set()
+    seen_external = {c["option_id"] for c in proposed}
+    for candidate in additional_candidates:
+        if (not isinstance(candidate, Mapping) or not isinstance(candidate.get("option_id"), str)
+                or not candidate["option_id"] or not isinstance(candidate.get("product"), str)
+                or not candidate["product"] or not isinstance(candidate.get("plan"), Mapping)):
+            raise ValueError("additional candidate requires option ID, product and plan")
+        option_id = candidate["option_id"]
+        if option_id in seen_external:
+            raise ValueError("additional candidate option ID is not unique")
+        seen_external.add(option_id)
+        unlinked = candidate["product"] not in unmet
+        if unlinked and (not observe_unlinked or candidate["product"] in known_needs):
+            continue
+        need = None if unlinked else f"item:{candidate['product']}"
+        # This path is observation only until it can recheck the binding and
+        # ledger immediately before dispatch and validate the entire site.
+        required_reason = required_check_reason(candidate, external=True)
+        plan = candidate["plan"]
+        validation = None
+        missing = {}
+        try:
+            missing = _candidate_funding_shortfalls(candidate)
+        except (ValueError, TypeError, KeyError):
+            reason = "external_funding_invalid"
+        else:
+            try:
+                validate_build_plan(plan)
+                placements = list(actions(plan))
+                if (plan.get("surface") != "nauvis" or plan.get("force") != "player" or plan.get("atomic") is not True
+                        or not placements or any(a.get("action_type") != "place_ghost"
+                                                 or set(a) - SAVED_WORLD_GHOST_FIELDS for a in placements)):
+                    raise ValueError("external candidate requires explicitly scoped funded ghosts")
+            except (ValueError, TypeError, KeyError):
+                reason = "external_plan_invalid"
+                missing = {}
+            else:
+                if required_reason in {"invalid_required_checks", "optimizer_required_checks_missing"}:
+                    reason = required_reason
+                    missing = {}
+                else:
+                    results = validate([copy.deepcopy(candidate)])
+                    validation = results.get(option_id) if isinstance(results, Mapping) else None
+                    if not isinstance(validation, Mapping):
+                        reason = "external_validation_missing"
+                        validation = None
+                    elif validation.get("reason") is not None and not isinstance(validation["reason"], str):
+                        reason = "external_validation_invalid"
+                    elif validation.get("reason"):
+                        reason = validation["reason"]
+                    elif "bill" in candidate and validation.get("bill") != candidate["bill"]:
+                        reason = "construction_bill_changed"
+                    elif missing:
+                        reason = "construction_reservation_shortfall"
+                    else:
+                        reason = required_reason or "external_dispatch_unimplemented"
+        if not unlinked:
+            external_needs.add(need)
+            reasons[need][reason] += 1
+            rejected[reason.split(":", 1)[0]] += 1
+            missing_items = set(missing)
+            if reason.startswith("item_shortfall:"):
+                missing_items.add(reason.split(":", 1)[1])
+            for item in missing_items:
+                shortfalls[item] += 1
+        summary = {"option_id": option_id, "need_id": need, "reason": reason,
+                   "required_check_reason": required_reason, "dispatch_reason": "external_dispatch_unimplemented"}
+        if unlinked:
+            summary["demand_status"] = "not_in_status_board"
+            summary["product"] = candidate["product"]
+        if option_id in additional_observations:
+            model_demand = additional_observations[option_id]
+            if not isinstance(model_demand, Mapping):
+                raise ValueError("additional demand observation must be a mapping")
+            summary["model_demand"] = copy.deepcopy(model_demand)
+        if validation is not None:
+            summary["validation"] = copy.deepcopy(validation)
+            snapshot = summary["validation"].get("fluid_topology_snapshot")
+            if isinstance(snapshot, Mapping):
+                # Journal a bounded digest; the raw observation is evidence for the validator, not the log.
+                summary["validation"]["fluid_topology_snapshot"] = {
+                    "sha256": sha256_hash(snapshot), "tick": snapshot.get("tick"), "complete": snapshot.get("complete"),
+                    "entities": len(snapshot.get("entities") or ())}
+            power_snapshot = summary["validation"].get("power_topology_snapshot")
+            if isinstance(power_snapshot, Mapping):
+                summary["validation"]["power_topology_snapshot"] = {
+                    "sha256": sha256_hash(power_snapshot), "tick": power_snapshot.get("tick"),
+                    "complete": power_snapshot.get("complete"), "poles": len(power_snapshot.get("poles") or ())}
+        for key in ("funding_context", "funding_status", "stock_observation", "optimizer_binding", "optimizer_artifact_sha256", "bill"):
+            if key in candidate:
+                summary[key] = copy.deepcopy(candidate[key])
+        external_results.append(summary)
 
     def check(groups):
         expanded = {}
@@ -470,10 +595,10 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     options.extend(waits)
     needs.append({"need_id": "wait", "condition": "available", "options": [w["option_id"] for w in waits]})
     # Needs with no legal option, and why: observation, not a remedy.
-    blocked = {need: dict(reasons[need]) for need in sorted(set(by_need) | set(stock_groups) | set(pre_rejected))
+    blocked = {need: dict(reasons[need]) for need in sorted(set(by_need) | set(stock_groups) | set(pre_rejected) | external_needs)
                if need not in legal}
     for item in sorted(unmet):
-        if f"item:{item}" not in by_need and f"item:{item}" not in legal:
+        if f"item:{item}" not in by_need and f"item:{item}" not in legal and f"item:{item}" not in external_needs:
             blocked[f"item:{item}"] = {"no_candidate": 1}
     # Kit items the phase's still-unbuilt starters will need, so side builds can see what they would take.
     goal_reserve: dict[str, int] = {}
@@ -482,10 +607,11 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
         if need and need.get("goal_required_per_s", need.get("required", 0)) > 0 and plate not in starters:
             for name, count in starter_bill(plate).items():
                 goal_reserve[name] = goal_reserve.get(name, 0) + count
-    return {"needs": needs, "options": options, "proposed": len(proposed), "blocked": blocked,
+    return {"needs": needs, "options": options, "proposed": len(proposed) + len(external_results), "blocked": blocked,
             "rejected": dict(rejected), "shortfalls": dict(shortfalls), "goal_reserve": goal_reserve,
             "land_rejections": {k: v for k, v in land_examples.items() if k in blocked},
             "line_site_diagnostics": line_diagnostics,
+            "additional_candidate_results": external_results,
             "omitted_needs": omitted_needs}
 
 
@@ -551,6 +677,21 @@ def build_state(facts: Mapping, menu: Mapping, board: Mapping, phase: Mapping, r
     visible_history = [{k:v for k,v in h.items() if k!='experiment_outcome'} for h in history]
     state = decision_state(facts, menu["options"], run_id, model_ref, objective, visible_history, measurement)
     apply_to_state(state, board)
+    model_demands = [{"option_id": item["option_id"], **item["model_demand"]}
+                     for item in menu.get("additional_candidate_results", ()) if "model_demand" in item]
+    if model_demands:
+        state["observation_digest"]["optimizer_demand"] = model_demands[:8]
+    power_fields = ("status", "reason", "snapshot_tick", "anchor_grid", "generator_type_present",
+                    "planned_poles", "same_grid_candidates", "potential_other_grid_count", "reasons", "evidence_limit",
+                    "dispatch_authorized")
+    power_diagnostics = [{"option_id": item["option_id"], **{
+        key: item["validation"]["power_topology_diagnostic"][key] for key in power_fields
+        if key in item["validation"]["power_topology_diagnostic"]}}
+        for item in menu.get("additional_candidate_results", ())
+        if isinstance(item.get("validation"), Mapping)
+        and isinstance(item["validation"].get("power_topology_diagnostic"), Mapping)]
+    if power_diagnostics:
+        state["observation_digest"]["optimizer_power"] = power_diagnostics[:8]
     if menu.get('line_site_diagnostics'):state['observation_digest']['line_site_diagnostics']=menu['line_site_diagnostics']
     if settings.dependency_context:
         from training.laya_experiment_context import dependency_context
@@ -764,7 +905,8 @@ def _plan_decision(facts: Mapping, board: Mapping, phase: Mapping, policy: "Poli
 def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, measure_ticks: int,
         seed: int, run_id: str, emit: Callable[[str], None] = lambda _: None,
         should_stop: Callable[[], bool] = lambda: False, status_path: Path | None = None,
-        settings: Settings = Settings(), initial_reached: Sequence[str] = ()) -> dict:
+        settings: Settings = Settings(), initial_reached: Sequence[str] = (),
+        candidate_provider: Callable[[Any, Mapping, Mapping], Sequence[Mapping]] | None = None) -> dict:
     """Observe -> board -> menu -> choose -> execute -> measure, journaling each step.
 
     ``decisions=None`` runs until the mission completes, the safe-stop rule
@@ -843,11 +985,28 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
             retargets = (mall_slots.sync(adapter, facts, board, stock_demand, gates, emit,
                                         gate_scale=settings.mall_gate_scale,buildable_multiplier=settings.mall_buildable_multiplier)
                          if settings.mall_slots and hasattr(adapter, "configure") else [])
-            menu = compile_menu(facts, board, lambda cs: adapter.query(list(cs))["validations"], seed + index,
+            def validate_candidates(candidates):
+                prepare = getattr(candidate_provider, "prepare_validation", None)
+                requested = prepare(candidates) if prepare is not None else list(candidates)
+                snapshot = adapter.query(requested)
+                values = snapshot["validations"]
+                diagnostic = getattr(candidate_provider, "validate", None)
+                if diagnostic is not None:
+                    values = diagnostic(adapter, facts, candidates, snapshot)
+                if type(snapshot.get("tick")) is int:
+                    return {key: {**value, "observed_tick": snapshot["tick"]} for key, value in values.items()}
+                return values
+            external = candidate_provider(adapter, facts, board) if candidate_provider else ()
+            describe = getattr(candidate_provider, "describe", None)
+            demand_observations = describe(facts, board, external) if describe is not None else {}
+            menu = compile_menu(facts, board, validate_candidates, seed + index,
                                 site_plan=site_plan, starters=_starters_submitted(adapter), retargets=retargets,
                                 placed=_submitted_entities(adapter),
                                 per_need_checked=settings.per_need_checked, per_need_shown=settings.per_need_shown,
-                                request_multiplier=settings.request_multiplier,reservation_mode=settings.reservation_mode)
+                                request_multiplier=settings.request_multiplier,reservation_mode=settings.reservation_mode,
+                                additional_candidates=external,
+                                observe_unlinked=bool(getattr(candidate_provider, "observe_unlinked", False)),
+                                additional_observations=demand_observations)
             # Items the checks found short become small demand targets on the next board.
             stock_demand = {item: settings.stock_rate for item in menu["shortfalls"]}
             state = build_state(facts, menu, board, phase, run_id, policy.model_ref, history, measurement, settings)
@@ -859,6 +1018,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                           board=compact, menu={n["need_id"]: n["options"] for n in menu["needs"]},
                           rejected=menu["rejected"], shortfalls=menu["shortfalls"], blocked=menu["blocked"],
                           land_rejections=menu.get("land_rejections"), choice=choice,
+                          additional_candidate_results=menu["additional_candidate_results"],
                           no_legal_build=not any(o["family"] != "wait" for o in menu["options"]),
                           omitted_needs=menu.get("omitted_needs"),
                           summary=chosen["summary"])
@@ -892,6 +1052,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                         "no_legal_build": no_legal_build,
                         "authority": policy.authority, "state": state, "options": [_option_record(o) for o in menu["options"]],
                         "blocked": menu["blocked"], "land_rejections": menu.get("land_rejections"),
+                        "additional_candidate_results": menu["additional_candidate_results"],
                         "distribution": distribution, "choice": choice}
             try:
                 receipt = adapter.execute(choice["option_id"], menu["options"], measure_ticks)

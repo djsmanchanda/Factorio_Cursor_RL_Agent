@@ -32,6 +32,9 @@ Documentation for each schema is maintained in this README.
 - `optimizer_consumer_observation.schema.json` — Scoped consumer recipe and lifetime-counter observation; no proof of connection, consumption or commissioning
 - `optimizer_build_evidence.schema.json` — v2 identified tagged robot-build events and optional current-entity facts; no ownership or dispatch authority
 - `optimizer_build_evidence_v3.schema.json` — opt-in v3 adds events without unit identity, explicitly marked identity-unavailable; no ownership or dispatch authority
+- `optimizer_stock_refresh.schema.json` — Prepared/applied journal for an opt-in paused stock refresh; assertions are not runtime authentication or dispatch authority
+- `optimizer_submission_transaction.schema.json` — Offline per-transaction journal binding a fully held bound optimizer request, ledger revision/digest and correlated receipt; uncertain attempts are never resent; grants no dispatch authority
+- `optimizer_candidate_config.schema.json` — Pinned, observation-only saved-world optimizer candidate configuration, optionally including exact runtime-catalog bytes, audited underground mask facts and a recipe-demand model for diagnostic facts; nested artifact is independently revalidated and grants no dispatch authority
 - `electronics_world_spec.schema.json` - Survey to LocalLayoutPlanner coordinates and observed capacity contract
 - `world_spec.schema.json` - deterministic bounded planner surface, resources, and starter-kit contract
 - `training_scenario.schema.json` - isolated mini-environment, objective, construction budget, constraints, and reward-weight contract

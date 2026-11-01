@@ -3,6 +3,9 @@
 import copy
 import json
 
+import pytest
+
+from orchestrator.laya_operations import sha256_hash
 from training.laya_clean_runner import ExplorationPolicy, build_state, compile_menu, need_of, run
 from training.laya_factory_status import compile_status
 from training.laya_mission import current_phase, phase, phase_reached
@@ -106,6 +109,114 @@ def test_loop_journals_before_acting_and_survives_isolated_failures(tmp_path):
     pending = [r for r in rows if r.get("status") == "pending"]
     assert len(pending) == 3 and all(r["authority"] == "exploration" for r in pending)
     assert [r["event"] for r in rows].count("failure") == 1 and rows[-1]["event"] == "summary"
+
+
+def test_loop_records_blocked_external_candidate_without_changing_its_geometry(tmp_path):
+    from training.laya_saved_world import OPTIMIZER_REQUIRED_CHECKS
+    adapter = FakeAdapter()
+    candidate = {"option_id": "optimizer.test", "family": "optimizer-block", "product": "iron-plate",
+                 "plan": {"surface": "nauvis", "force": "player", "atomic": True, "phases": [
+                     {"name": "one", "actions": [{"action_type": "place_ghost", "entity": "pipe",
+                                                  "position": {"x": 0.5, "y": 0.5}}]},
+                     {"name": "two", "actions": [{"action_type": "place_ghost", "entity": "pipe",
+                                                  "position": {"x": 1.5, "y": 0.5}}]}]},
+                 "required_checks": list(OPTIMIZER_REQUIRED_CHECKS)}
+    original = copy.deepcopy(candidate)
+    snapshot = {"version": "fluid-topology-snapshot-v1", "tick": 100, "complete": True,
+                "entities": [{"name": "pipe", "ghost": True}] * 3}
+    normal_query = adapter.query
+    def query(candidates=None):
+        if candidates and candidates[0]["option_id"] == "optimizer.test":
+            assert candidates == [original] and candidates[0] is not candidate
+            return {"tick": 100, "validations": {"optimizer.test": {"reason": "surface_pipe_world_contact",
+                    "surface_pipe_contacts": {"contacts": 1, "unknown": 0, "complete": True},
+                    "fluid_topology_snapshot": copy.deepcopy(snapshot)}}}
+        return normal_query(candidates)
+    adapter.query = query
+    calls = []
+    def provider(world, observed, board):
+        assert world is adapter and observed["tick"] == 100
+        assert any(need["item"] == "iron-plate" for need in board["needs"])
+        calls.append(True)
+        return [candidate]
+    diagnostic_calls = []
+    def diagnostic(world, observed, candidates, response):
+        assert world is adapter and observed["tick"] == 100
+        diagnostic_calls.append(True)
+        values = dict(response["validations"])
+        if candidates[0]["option_id"] == "optimizer.test":
+            values["optimizer.test"] = {**values["optimizer.test"], "fluid_topology_diagnostic": {
+                "status": "unverified", "dispatch_authorized": False}}
+        return values
+    provider.validate = diagnostic
+    journal = tmp_path / "j.jsonl"
+    summary = run(adapter, ExplorationPolicy(0), journal=journal, decisions=2, measure_ticks=300,
+                  seed=0, run_id="t", candidate_provider=provider)
+    rows = [json.loads(line) for line in journal.read_text().splitlines()]
+    pending = next(row for row in rows if row.get("status") == "pending")
+    assert summary["failures"] == 0 and calls == [True] and diagnostic_calls
+    assert pending["additional_candidate_results"] == [{"option_id": "optimizer.test", "need_id": "item:iron-plate",
+        "reason": "surface_pipe_world_contact", "required_check_reason": "required_check_unimplemented:fluid_purity",
+        "dispatch_reason": "external_dispatch_unimplemented", "validation": {"reason": "surface_pipe_world_contact",
+            "surface_pipe_contacts": {"contacts": 1, "unknown": 0, "complete": True}, "observed_tick": 100,
+            "fluid_topology_snapshot": {"sha256": sha256_hash(snapshot), "tick": 100, "complete": True,
+                                        "entities": 3},
+            "fluid_topology_diagnostic": {"status": "unverified", "dispatch_authorized": False}}}]
+    assert "optimizer.test" not in adapter.executed and candidate == original
+
+
+def test_external_candidates_stay_unselectable_even_if_required_checks_are_later_implemented(monkeypatch):
+    monkeypatch.setattr("training.laya_clean_runner.required_check_reason", lambda *_args, **_kwargs: None)
+    candidate = {"option_id": "optimizer.future", "family": "optimizer-block", "product": "iron-plate",
+                 "plan": {"surface": "nauvis", "force": "player", "atomic": True,
+                          "phases": [{"name": "test", "actions": [{"action_type": "place_ghost", "entity": "pipe",
+                                                                      "position": {"x": 0.5, "y": 0.5}}]}]}}
+    board = compile_status(facts(), {"iron-plate": 0.5})
+    normal = validator()
+    def validate(candidates):
+        if candidates[0]["option_id"] == candidate["option_id"]:
+            return {candidate["option_id"]: {"reason": None}}
+        return normal(candidates)
+    menu = compile_menu(facts(), board, validate, 1, additional_candidates=[candidate])
+    assert candidate["option_id"] not in {option["option_id"] for option in menu["options"]}
+    assert menu["additional_candidate_results"][0]["reason"] == "external_dispatch_unimplemented"
+
+
+@pytest.mark.parametrize("case,expected", [("invalid", "external_plan_invalid"),
+                                         ("invalid_funding", "external_funding_invalid"),
+                                         ("missing", "external_validation_missing"),
+                                         ("changed_bill", "construction_bill_changed"),
+                                         ("shortfall", "item_shortfall:pipe")])
+def test_external_candidate_validation_failures_remain_blocked(case, expected):
+    from training.laya_saved_world import OPTIMIZER_REQUIRED_CHECKS
+    candidate = {"option_id": "optimizer.bad", "family": "optimizer-block", "product": "iron-plate",
+                 "bill": {"pipe": 1}, "required_checks": list(OPTIMIZER_REQUIRED_CHECKS),
+                 "plan": {"surface": "nauvis", "force": "player", "atomic": True,
+                          "phases": [{"name": "test", "actions": [{"action_type": "place_ghost", "entity": "pipe",
+                                                                      "position": {"x": 0.5, "y": 0.5}}]}]}}
+    if case == "invalid":
+        candidate["plan"]["phases"][0]["actions"][0]["action_type"] = "place_entity"
+    elif case == "invalid_funding":
+        candidate["funding_status"] = {"state": "supply_wait", "reserved": {}, "shortfalls": {"pipe": 0}}
+    calls = []
+    normal = validator()
+    def validate(candidates):
+        if candidates[0]["option_id"] == candidate["option_id"]:
+            calls.append(True)
+            if case == "shortfall":
+                return {candidate["option_id"]: {"reason": "item_shortfall:pipe"}}
+            return {} if case == "missing" else {candidate["option_id"]: {"bill": {"pipe": 2}}}
+        return normal(candidates)
+    board = compile_status(facts(), {"iron-plate": 0.5})
+    menu = compile_menu(facts(), board, validate, 1, additional_candidates=[candidate])
+    assert menu["additional_candidate_results"][0]["reason"] == expected
+    assert menu["additional_candidate_results"][0]["dispatch_reason"] == "external_dispatch_unimplemented"
+    assert candidate["option_id"] not in {option["option_id"] for option in menu["options"]}
+    assert bool(calls) == (case not in {"invalid", "invalid_funding"})
+    if case == "invalid_funding":
+        assert "pipe" not in menu["shortfalls"]
+    if case == "shortfall":
+        assert menu["shortfalls"]["pipe"] == 1
 
 
 def test_loop_stops_safely_after_repeated_failures(tmp_path):
@@ -326,3 +437,108 @@ def test_a_failed_atomic_submission_is_closed_and_its_footprint_avoided(tmp_path
     assert json.loads((tmp_path / "evidence" / "transaction-x.json").read_text())["status"] == "rejected"
     adapter = type("A", (), {"root": tmp_path})()
     assert {"entity": "electric-mining-drill", "position": {"x": 60.5, "y": 5.5}} in _submitted_entities(adapter)
+
+
+def test_failure_after_placement_begins_is_not_treated_as_atomic_rejection(tmp_path):
+    import json
+    from training.laya_clean_runner import LiveWorld
+    (tmp_path / "evidence").mkdir()
+    path = tmp_path / "evidence/transaction-x.json"
+    receipt = {"status": "submission_failed", "submission": {"ok": False,
+               "error": "1 placement(s) failed", "succeeded_placements": 1, "placement_failures": []}}
+    path.write_text(json.dumps(receipt))
+    world = LiveWorld.__new__(LiveWorld)
+    world.root = tmp_path
+    world._close_failed_submissions()
+    assert json.loads(path.read_text())["status"] == "submission_failed"
+
+
+def test_known_preflight_failure_in_correlated_receipt_is_closed(tmp_path):
+    import json
+    from training.laya_clean_runner import LiveWorld
+    (tmp_path / "evidence").mkdir()
+    path = tmp_path / "evidence/transaction-x.json"
+    path.write_text(json.dumps({"status": "submission_failed", "submission": {
+        "ok": False, "error": "atomic_footprint_blocked", "placement_failures": []}}))
+    world = LiveWorld.__new__(LiveWorld)
+    world.root = tmp_path
+    world._close_failed_submissions()
+    assert json.loads(path.read_text())["status"] == "rejected"
+
+
+def test_unlinked_external_proposal_is_observed_without_inventing_demand():
+    from training.laya_saved_world import OPTIMIZER_REQUIRED_CHECKS
+    candidate = {"option_id": "optimizer.unlinked", "family": "optimizer-block", "product": "petroleum-gas",
+                 "bill": {"pipe": 4}, "funding_status": {"state": "supply_wait", "reserved": {},
+                                                          "shortfalls": {"pipe": 4}},
+                 "required_checks": list(OPTIMIZER_REQUIRED_CHECKS),
+                 "plan": {"surface": "nauvis", "force": "player", "atomic": True,
+                          "phases": [{"name": "test", "actions": [{"action_type": "place_ghost", "entity": "pipe",
+                                                                     "position": {"x": 0.5, "y": 0.5}}]}]}}
+    board = compile_status(facts(), {"iron-plate": 0.5})
+    normal = validator()
+    seen = []
+    def validate(candidates):
+        if candidates[0]["option_id"] == candidate["option_id"]:
+            seen.append(copy.deepcopy(candidates))
+            return {candidate["option_id"]: {"reason": "item_shortfall:pipe", "bill": candidate["bill"]}}
+        return normal(candidates)
+    baseline = compile_menu(facts(), board, validate, 3, additional_candidates=[candidate])
+    assert baseline["additional_candidate_results"] == [] and not seen
+    observed = compile_menu(facts(), board, validate, 3, additional_candidates=[candidate], observe_unlinked=True)
+    assert seen == [[candidate]]
+    result, = observed["additional_candidate_results"]
+    assert result["need_id"] is None and result["demand_status"] == "not_in_status_board"
+    assert result["product"] == "petroleum-gas"
+    assert result["reason"] == "item_shortfall:pipe"
+    assert result["dispatch_reason"] == "external_dispatch_unimplemented"
+    assert all(option["option_id"] != candidate["option_id"] for option in observed["options"])
+    for key in ("needs", "options", "blocked", "rejected", "shortfalls"):
+        assert observed[key] == baseline[key]
+    satisfied = copy.deepcopy(board)
+    satisfied["needs"].append({"item": "petroleum-gas", "condition": "satisfied"})
+    seen.clear()
+    menu = compile_menu(facts(), satisfied, validate, 3, additional_candidates=[candidate], observe_unlinked=True)
+    assert menu["additional_candidate_results"] == [] and not seen
+
+
+def test_runner_journals_unlinked_candidate_without_promoting_it(tmp_path):
+    from training.laya_saved_world import OPTIMIZER_REQUIRED_CHECKS
+    adapter = FakeAdapter()
+    candidate = {"option_id": "optimizer.oil", "family": "optimizer-block", "product": "petroleum-gas",
+                 "plan": {"surface": "nauvis", "force": "player", "atomic": True,
+                          "phases": [{"name": "test", "actions": [{"action_type": "place_ghost", "entity": "pipe",
+                                                                     "position": {"x": 0.5, "y": 0.5}}]}]},
+                 "required_checks": list(OPTIMIZER_REQUIRED_CHECKS)}
+    normal_query = adapter.query
+    def query(candidates=None):
+        if candidates and candidates[0]["option_id"] == candidate["option_id"]:
+            assert candidates[0].get("inspect_underground_tiles") is True
+            return {"tick": 100, "validations": {candidate["option_id"]: {"reason": "fluid_unknown"}}}
+        return normal_query(candidates)
+    adapter.query = query
+    def provider(_world, _observed, _board):
+        return [candidate]
+    provider.observe_unlinked = True
+    provider.prepare_validation = lambda candidates: [
+        {**c, "inspect_underground_tiles": True} if c["option_id"] == candidate["option_id"] else c
+        for c in candidates]
+    def describe(_facts, _board, proposals):
+        assert proposals == [candidate]
+        return {candidate["option_id"]: {"status": "unavailable", "reason": "test", "dispatch_authorized": False}}
+    provider.describe = describe
+    journal = tmp_path / "j.jsonl"
+    result = run(adapter, ExplorationPolicy(0), journal=journal, decisions=2, measure_ticks=300, seed=0,
+                 run_id="unlinked", candidate_provider=provider)
+    rows = [json.loads(line) for line in journal.read_text().splitlines()]
+    decision = next(row for row in rows if row.get("status") == "pending")
+    assert result["failures"] == 0
+    observed, = decision["additional_candidate_results"]
+    assert observed["demand_status"] == "not_in_status_board" and observed["need_id"] is None
+    assert observed["reason"] == "fluid_unknown" and observed["dispatch_reason"] == "external_dispatch_unimplemented"
+    assert observed["model_demand"]["status"] == "unavailable"
+    records = [json.loads(line) for line in (tmp_path / "decision-states.jsonl").read_text().splitlines()]
+    state_evidence = records[-1]["state"]["observation_digest"]["optimizer_demand"]
+    assert state_evidence == [{"option_id": candidate["option_id"], "status": "unavailable",
+                               "reason": "test", "dispatch_authorized": False}]
+    assert candidate["option_id"] not in adapter.executed

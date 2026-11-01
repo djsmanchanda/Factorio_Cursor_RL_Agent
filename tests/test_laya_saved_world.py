@@ -129,6 +129,188 @@ def test_interrupted_submission_is_not_automatically_replayed(tmp_path):
         adapter.reconcile()
 
 
+@pytest.mark.parametrize("lost_response", [False, True])
+def test_correlated_submission_is_journaled_and_never_replayed_during_recovery(tmp_path, lost_response):
+    adapter = object.__new__(SavedWorldAdapter)
+    adapter.root = tmp_path
+    candidate = compile_candidates(facts())[0]
+    option_id = candidate["option_id"]
+    adapter.validate_plan = lambda _plan: None
+    adapter.query = lambda candidates=None, inspect=None: (
+        {"validations": {option_id: {"reason": None}}} if candidates else facts())
+    def stop_after_submission(_ticks):
+        raise RuntimeError("test interruption")
+    adapter.advance = stop_after_submission
+    class Bridge:
+        def __init__(self): self.calls = 0; self.report = None
+        def optimizer_build_evidence(self, *, surface, force, episode_id, project_id, transaction_id, plan_hash,
+                                     timeout, include_unidentified):
+            assert include_unidentified is True
+            tags = {"optimizer_episode": episode_id, "optimizer_project": project_id,
+                    "optimizer_transaction": transaction_id, "optimizer_plan_hash": plan_hash}
+            return {"version": "optimizer-build-evidence-v3", "source": "robot_built_entity_tags",
+                    "request_id": "baseline", "tick": 100, "ok": True, "ownership_claimed": False,
+                    "dispatch_authorized": False, "surface": surface, "force": force, "tags": tags, "entities": []}
+        def build_layout_correlated(self, authorization, plan, *, request_id, stream_id, sequence, timeout):
+            self.calls += 1
+            transaction = next((tmp_path / "evidence").glob("transaction-*.json"))
+            durable = json.loads(transaction.read_text())
+            assert durable["status"] == "submitting" and durable["layout_request"]["request_id"] == request_id
+            assert durable["build_evidence_baseline"]["entities"] == []
+            self.report = {"ok": True, "request_id": request_id}
+            if lost_response: raise TimeoutError("lost response")
+            return self.report
+        def read_layout_receipt(self, authorization, plan, *, request_id, stream_id, sequence):
+            assert request_id == self.report["request_id"]
+            return self.report
+    adapter.bridge = Bridge()
+    with pytest.raises(TimeoutError if lost_response else RuntimeError):
+        adapter.execute(option_id, [candidate])
+    transaction = next((tmp_path / "evidence").glob("transaction-*.json"))
+    record = json.loads(transaction.read_text())
+    assert record["status"] == ("submitting" if lost_response else "submission_received")
+    with pytest.raises(SavedWorldError, match="needs review"):
+        adapter.reconcile()
+    assert adapter.bridge.calls == 1
+    record = json.loads(transaction.read_text())
+    assert record["status"] == ("submission_recovered" if lost_response else "submission_received")
+    assert json.loads((tmp_path / "evidence/layout-stream.json").read_text())["pending"] is None
+
+
+@pytest.mark.parametrize("missing_evidence", [False, True])
+def test_built_configuration_requires_matching_robot_units(tmp_path, missing_evidence):
+    adapter = object.__new__(SavedWorldAdapter)
+    adapter.root = tmp_path
+    candidate = next(c for c in compile_candidates(facts()) if c["family"] == "assemble")
+    option_id = candidate["option_id"]
+    tick = [100]
+    def query(candidates=None, inspect=None):
+        if candidates: return {"validations": {option_id: {"reason": None}}}
+        if inspect: return {"built": 10, "pending": 0, "missing": 0}
+        value = copy.deepcopy(facts()); value["tick"] = tick[0]; return value
+    adapter.query = query
+    adapter.validate_plan = lambda _plan: None
+    adapter.advance = lambda ticks: tick.__setitem__(0, tick[0] + ticks)
+    class Bridge:
+        def __init__(self): self.ghosts = None; self.configs = None
+        def build_layout_correlated(self, _authorization, plan, **_kwargs):
+            action = plan["phases"][0]["actions"][0]
+            if action["action_type"] == "configure_entity_if_unit_number":
+                self.configs = plan
+                record = json.loads(next((tmp_path / "evidence").glob("transaction-*.json")).read_text())
+                assert record["status"] == "configuration_submitting"
+                assert record["configuration_request"]["sequence"] == 2
+            else:
+                self.ghosts = plan
+            return {"ok": True, "tick": 100}
+        def optimizer_build_evidence(self, *, surface, force, episode_id, project_id, transaction_id, plan_hash, timeout, include_unidentified):
+            assert include_unidentified is True
+            tags = {"optimizer_episode": episode_id, "optimizer_project": project_id,
+                    "optimizer_transaction": transaction_id, "optimizer_plan_hash": plan_hash}
+            tagged = ([] if self.ghosts is None else
+                      [a for p in self.ghosts["phases"] for a in p["actions"] if a.get("optimizer_ownership")])
+            entities = [] if missing_evidence or self.ghosts is None else [{"entity": a["entity"], "position": a["position"],
+                "unit_number": i + 1, "tick": 101, "current": {"state": "present",
+                "direction": {"state": "available", "value": 0}, "quality": {"state": "available", "value": "normal"},
+                "recipe": {"state": "unset"}}} for i, a in enumerate(tagged)]
+            return {"version": "optimizer-build-evidence-v3", "source": "robot_built_entity_tags", "request_id": "req",
+                    "tick": tick[0], "ok": True, "ownership_claimed": False, "dispatch_authorized": False,
+                    "surface": surface, "force": force, "tags": tags, "entities": entities}
+    adapter.bridge = Bridge()
+    if missing_evidence:
+        with pytest.raises(SavedWorldError, match="lacks current correlated"):
+            adapter.execute(option_id, [candidate], measure_ticks=600)
+        assert adapter.bridge.configs is None
+    else:
+        receipt = adapter.execute(option_id, [candidate], measure_ticks=600)
+        assert receipt["status"] == "observed"
+        configured = [a for phase in adapter.bridge.configs["phases"] for a in phase["actions"]]
+        assert configured and all(a["action_type"] == "configure_entity_if_unit_number" and a["expected_unit_number"] > 0
+                                  for a in configured)
+    assert all(a["action_type"] == "place_ghost_no_reconcile" for p in adapter.bridge.ghosts["phases"] for a in p["actions"])
+
+
+@pytest.mark.parametrize("outcome", ["lost_response", "after_response", "journal_failure", "rejected"])
+def test_configuration_interruptions_are_correlated_and_never_resent(tmp_path, outcome, monkeypatch):
+    adapter = object.__new__(SavedWorldAdapter)
+    adapter.root = tmp_path
+    candidate = next(c for c in compile_candidates(facts()) if c["family"] == "assemble")
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    transaction = evidence / f"transaction-{'a' * 32}.json"
+    transaction.write_text(json.dumps({"status": "construction_pending", "candidate": candidate,
+        "configuration_protocol": "correlated-v1", "submission": {"ok": True, "tick": 100}}))
+    adapter.query = lambda inspect=None: {"pending": 0, "missing": 0} if inspect else {"tick": 300}
+    action = {"action_type": "configure_entity_if_unit_number", "entity": "assembling-machine-1",
+              "position": {"x": 0, "y": 0}, "expected_unit_number": 7, "recipe": "iron-gear-wheel"}
+    adapter._guarded_configuration = lambda *_args: [action]
+    class Bridge:
+        def __init__(self): self.calls = 0; self.report = None
+        def build_layout_correlated(self, _authorization, plan, *, request_id, stream_id, sequence, timeout):
+            self.calls += 1
+            record = json.loads(transaction.read_text())
+            assert record["status"] == "configuration_submitting"
+            assert record["configuration_request"]["request_id"] == request_id
+            self.report = {"ok": outcome != "rejected", "request_id": request_id}
+            if outcome == "lost_response": raise TimeoutError("response lost after command")
+            return self.report
+        def read_layout_receipt(self, _authorization, _plan, *, request_id, stream_id, sequence):
+            assert self.report["request_id"] == request_id
+            return self.report
+    adapter.bridge = Bridge()
+    if outcome == "after_response":
+        adapter.query = lambda inspect=None: ({"pending": 0, "missing": 0} if inspect else
+                                             (_ for _ in ()).throw(RuntimeError("interrupted after response")))
+    with monkeypatch.context() as patcher:
+        if outcome == "journal_failure":
+            from training import laya_saved_world as module
+            real_atomic_json = module.atomic_json
+            def fail_receipt_save(path, value):
+                if value.get("status") == "configuration_received":
+                    raise RuntimeError("configuration receipt write failed")
+                return real_atomic_json(path, value)
+            patcher.setattr(module, "atomic_json", fail_receipt_save)
+        with pytest.raises((TimeoutError, RuntimeError)):
+            adapter.reconcile()
+    with pytest.raises(SavedWorldError, match="configuration outcome needs review"):
+        adapter.reconcile()
+    assert adapter.bridge.calls == 1
+    record = json.loads(transaction.read_text())
+    assert record["status"] == {"lost_response": "configuration_recovered",
+                               "after_response": "configuration_received",
+                               "journal_failure": "configuration_recovered",
+                               "rejected": "configuration_failed"}[outcome]
+    assert json.loads((evidence / "layout-stream.json").read_text())["pending"] is None
+
+
+def test_legacy_pending_configuration_requires_review_before_replay(tmp_path):
+    adapter = object.__new__(SavedWorldAdapter)
+    adapter.root = tmp_path
+    candidate = next(c for c in compile_candidates(facts()) if c["family"] == "assemble")
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    (evidence / f"transaction-{'a' * 32}.json").write_text(json.dumps(
+        {"status": "construction_pending", "candidate": candidate, "submission": {"ok": True, "tick": 100}}))
+    adapter.query = lambda inspect=None: {"pending": 0, "missing": 0}
+    adapter._guarded_configuration = lambda *_args: pytest.fail("legacy transaction reached configuration")
+    with pytest.raises(SavedWorldError, match="legacy configuration outcome needs review"):
+        adapter.reconcile()
+
+
+def test_changed_live_bill_rejects_before_submission(tmp_path):
+    adapter = object.__new__(SavedWorldAdapter)
+    adapter.root = tmp_path
+    candidate = compile_candidates(facts())[0]
+    candidate["bill"] = {"inserter": 1}
+    adapter.validate_plan = lambda _plan: None
+    adapter.query = lambda candidates=None: ({"validations": {candidate["option_id"]: {"bill": {"inserter": 2}}}}
+                                             if candidates else facts())
+    adapter.bridge = object()
+    with pytest.raises(SavedWorldError, match="bill changed"):
+        adapter.execute(candidate["option_id"], [candidate])
+    assert json.loads(next((tmp_path / "evidence").glob("transaction-*.json")).read_text())["status"] == "rejected"
+
+
 def test_cli_profile_gate_runs_before_connection_or_pending_configuration(monkeypatch, tmp_path):
     from tools import run_laya_saved_world
     checkpoint = tmp_path / "checkpoint"
@@ -168,3 +350,569 @@ def test_quad_chest_inventory_settings_are_deferred_until_bot_construction():
     assert any(a.get("recipe") for a in configs)
     assert all(a["action_type"] == "configure_entity" for a in configs)
     assert original == candidate["plan"]
+
+
+_SURVEY_LUA_FIXTURE = r"""
+local function recipe(name, ingredients, products, opts)
+  opts = opts or {}
+  return {enabled=opts.enabled ~= false, ingredients=ingredients or {},
+    products=products or {}, energy=opts.energy or .5,
+    categories=opts.categories or {'crafting'}, productivity_bonus=opts.productivity_bonus or 0}
+end
+local function item(name, amount) return {name=name,type="item",amount=amount} end
+local function fluid(name, amount) return {name=name,type="fluid",amount=amount} end
+request={extra_recipes=__EXTRA_RECIPES__, bounds={x_min=0,x_max_exclusive=0,y_min=0,y_max_exclusive=0}}
+local recipes={
+  ['iron-plate']=recipe('iron-plate',{item('iron-ore',1)},{item('iron-plate',1)}),
+  ['electric-furnace']=recipe('electric-furnace',{item('advanced-circuit',1),item('steel-plate',1)},{item('electric-furnace',1)}),
+  ['advanced-circuit']=recipe('advanced-circuit',{item('plastic-bar',2),item('electronic-circuit',1)},{item('advanced-circuit',1)}),
+  ['electronic-circuit']=recipe('electronic-circuit',{item('iron-plate',1)},{item('electronic-circuit',1)}),
+  ['plastic-bar']=recipe('plastic-bar',{fluid('petroleum-gas',20),item('coal',1)},{item('plastic-bar',2)}),
+  ['automation-science-pack']=recipe('automation-science-pack',{item('iron-plate',1),item('copper-plate',1)},{item('automation-science-pack',1)}),
+  ['disabled-thing']=recipe('disabled-thing',{item('iron-plate',1)},{item('disabled-thing',1)},{enabled=false}),
+  ['pumpjack']=recipe('pumpjack',{item('steel-plate',1),item('automation-science-pack',1)},{item('pumpjack',1)}),
+__MALFORMED_RECIPES__
+}
+local recipe_count=0
+for _ in pairs(recipes) do recipe_count=recipe_count+1 end
+local production={['automation-science-pack']=42,['plastic-bar']=9,['advanced-circuit']=4}
+local consumption={['automation-science-pack']=7,['plastic-bar']=2,['advanced-circuit']=1}
+local stats={get_input_count=function(name) return production[name] or 0 end,
+  get_output_count=function(name) return consumption[name] or 0 end}
+local surface={find_entities_filtered=function() return {} end}
+game={tick=100,tick_paused=true,ticks_to_run=0,surfaces={nauvis=surface},players={},
+  forces={player={name='player',recipes=recipes,technologies={},
+    get_item_production_statistics=function() return stats end}}}
+defines={entity_status={},inventory={chest=1},direction={north=0,west=4,east=8,south=12}}
+script={active_mods={base='2.1.23'}}
+prototypes={
+  item={['iron-plate']={},['iron-ore']={},['advanced-circuit']={},['steel-plate']={},
+    ['plastic-bar']={},['electronic-circuit']={},['coal']={},['automation-science-pack']={},
+    ['copper-plate']={},['disabled-thing']={},['electric-furnace']={},['pumpjack']={}},
+  entity={
+    ['assembling-machine-1']={type='assembling-machine',ingredient_count=2,
+      crafting_categories={crafting=true},get_crafting_speed=function() return .5 end},
+    ['electric-furnace']={type='furnace',ingredient_count=2,
+      crafting_categories={crafting=true},get_crafting_speed=function() return 2 end},
+  }}
+"""
+
+
+def _run_survey_lua(extra_recipes=(), assertions="", malformed="", setup=""):
+    import shutil
+    import subprocess
+    lua = shutil.which("lua")
+    if lua is None:
+        pytest.skip("Lua interpreter required for saved-world survey tests")
+    requested = "{" + ",".join(json.dumps(name) for name in extra_recipes) + "}"
+    fixture = (_SURVEY_LUA_FIXTURE.replace("__EXTRA_RECIPES__", requested)
+               .replace("__MALFORMED_RECIPES__", malformed))
+    source = Path("training/laya_saved_world.lua").read_text()
+    body = fixture + "\n" + setup + "\nlocal facts=(function()\n" + source + "\nend)()\n" + assertions
+    result = subprocess.run([lua, "-"], input=body, text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.lua
+def test_fluid_prototype_survey_reports_capability_and_unknowns_without_authorizing():
+    _run_survey_lua(setup="""
+prototypes.entity['empty']={type='container',fluidbox_prototypes={}}
+prototypes.entity['fluid']={type='pipe',fluidbox_prototypes={[3]={}}}
+prototypes.entity['missing']={type='container'}
+prototypes.entity['bad']={type='container',fluidbox_prototypes='unsupported'}
+prototypes.entity['throws']=setmetatable({type='container'}, {__index=function(_, key)
+  if key=='fluidbox_prototypes' then error('unavailable') end end})
+request.candidates={{option_id='check',required_checks={'fluid_purity'},plan={phases={{actions={
+  {entity='empty'},{entity='fluid'},{entity='missing'},{entity='bad'},{entity='throws'},
+  {entity='absent'} }}}}},
+  {option_id='ordinary',plan={phases={{actions={{entity='empty'}}}}}}}
+""", assertions="""
+local result=facts.validations.check
+assert(result.reason=='no_construction_network')
+local survey=result.fluid_prototype_survey
+assert(survey.actions==6 and survey.without_fluidboxes==1 and survey.with_fluidboxes==1 and survey.unknown==4)
+assert(facts.validations.ordinary.fluid_prototype_survey==nil)
+""")
+
+
+@pytest.mark.lua
+def test_underground_survey_reports_existing_and_ghost_competitors_and_unknowns():
+    _run_survey_lua(setup="""
+surface.find_entities_filtered=function(filter)
+  if filter.name=='pipe-to-ground' then return {
+    {name='pipe-to-ground',position={x=3.5,y=.5},direction=4},
+    {name='pipe-to-ground',position={x=4.5,y=.5},direction=12},
+    {name='pipe-to-ground',position={x=11.5,y=.5},direction=4}}
+  end
+  if filter.type=='entity-ghost' and filter.area then return {
+    {ghost_name='pipe-to-ground',position={x=5.5,y=.5},direction=4},
+    {ghost_name='pipe-to-ground',position={x=6.5,y=.5}},
+    {ghost_name='transport-belt',position={x=7.5,y=.5},direction=4}}
+  end
+  return {}
+end
+request.candidates={{option_id='pipes',required_checks={'fluid_purity'},plan={phases={{actions={
+  {entity='pipe-to-ground',position={x=.5,y=.5},direction='west'} }}}}}}
+""", assertions="""
+local result=facts.validations.pipes
+assert(result.reason=='no_construction_network')
+local survey=result.underground_competitors
+assert(survey.planned==1 and survey.conflicts==2 and survey.unknown==1 and survey.complete==true)
+""")
+
+
+@pytest.mark.lua
+def test_underground_survey_fails_closed_on_missing_scan_and_limit():
+    _run_survey_lua(setup="""
+surface.find_entities_filtered=function(filter)
+  if filter.name=='pipe-to-ground' and filter.area and filter.area[1][1]>=10 then
+    local truncated={}
+    for i=1,4097 do truncated[i]={name='pipe-to-ground'} end
+    return truncated
+  end
+  if filter.name=='pipe-to-ground' then error('scan unavailable') end
+  return {}
+end
+local one={entity='pipe-to-ground',position={x=.5,y=.5},direction='west'}
+local many={}
+for i=1,257 do many[i]=one end
+request.candidates={
+  {option_id='missing',required_checks={'fluid_purity'},plan={phases={{actions={one}}}}},
+  {option_id='limited',required_checks={'fluid_purity'},plan={phases={{actions=many}}}},
+  {option_id='truncated',required_checks={'fluid_purity'},plan={phases={{actions={
+    {entity='pipe-to-ground',position={x=25.5,y=.5},direction='west'}}}}}}}
+""", assertions="""
+local missing=facts.validations.missing.underground_competitors
+assert(missing.planned==1 and missing.unknown==1 and missing.conflicts==0)
+local limited=facts.validations.limited.underground_competitors
+assert(limited.planned==257 and limited.complete==false and limited.unknown==256)
+assert(facts.validations.truncated.underground_competitors.complete==false)
+""")
+
+
+@pytest.mark.lua
+def test_surface_pipe_survey_reports_adjacent_and_overlapping_pipes_and_ghosts():
+    _run_survey_lua(setup="""
+surface.find_entities_filtered=function(filter)
+  if type(filter.name)=='table' and filter.area then return {
+    {name='pipe',position={x=1.5,y=.5}},
+    {name='pipe-to-ground',position={x=1.5,y=1.5}},
+    {name='pipe',position={x=.5,y=.5}},
+    {name='pipe',position={x=2,y=.5}}}
+  end
+  if filter.type=='entity-ghost' and filter.area then return {
+    {ghost_name='pipe-to-ground',position={x=.5,y=1.5}},
+    {ghost_name='transport-belt',position={x=-.5,y=.5}}}
+  end
+  return {}
+end
+request.candidates={{option_id='surface',required_checks={'fluid_purity'},plan={phases={{actions={
+  {entity='pipe',position={x=.5,y=.5}}}}}}}}
+""", assertions="""
+local survey=facts.validations.surface.surface_pipe_contacts
+assert(survey.planned==1 and survey.contacts==3 and survey.unknown==1 and survey.complete==true)
+assert(facts.validations.surface.reason=='no_construction_network')
+""")
+
+
+@pytest.mark.lua
+def test_surface_pipe_survey_marks_unreadable_and_truncated_scans_unverified():
+    _run_survey_lua(setup="""
+surface.find_entities_filtered=function(filter)
+  if type(filter.name)=='table' and filter.area then
+    if filter.area[1][1] < 0 then error('scan unavailable') end
+    local truncated={}
+    for i=1,4097 do truncated[i]={name='pipe'} end
+    return truncated
+  end
+  return {}
+end
+local function candidate(id,x)
+  return {option_id=id,required_checks={'fluid_purity'},plan={phases={{actions={
+    {entity='pipe',position={x=x,y=.5}}}}}}}
+end
+local many={}
+for i=1,2049 do many[i]={entity='pipe',position={x=.5,y=.5}} end
+request.candidates={candidate('missing',.5),candidate('truncated',10.5),
+  {option_id='limited',required_checks={'fluid_purity'},plan={phases={{actions=many}}}}}
+""", assertions="""
+local missing=facts.validations.missing.surface_pipe_contacts
+assert(missing.planned==1 and missing.unknown==1 and missing.contacts==0)
+assert(facts.validations.truncated.surface_pipe_contacts.complete==false)
+assert(facts.validations.limited.surface_pipe_contacts.planned==2049)
+assert(facts.validations.limited.surface_pipe_contacts.complete==false)
+""")
+
+
+@pytest.mark.lua
+def test_underground_competitor_rejects_a_funded_covered_candidate():
+    _run_survey_lua(setup="""
+request.bounds={x_min=-32,y_min=-32,x_max_exclusive=32,y_max_exclusive=32}
+local net={network_id=1,all_construction_robots=2,available_construction_robots=2,all_logistic_robots=0}
+local port={name='roboport',type='roboport',position={x=0,y=0},energy=100,logistic_network=net,
+  prototype={construction_radius=20,logistic_radius=10}}
+local storage={prototype={logistic_mode='storage'},position={x=0,y=0},
+  get_inventory=function() return {get_contents=function() return {['pipe-to-ground']=3} end} end}
+surface.find_logistic_network_by_position=function() return net end
+surface.can_place_entity=function() return true end
+surface.find_entities_filtered=function(filter)
+  if type(filter.name)=='table' and filter.area and filter.area[1][1] > 5 then return {{name='pipe'}} end
+  if type(filter.name)=='table' and filter.area and filter.area[1][1] < -10 then return {
+    {name='pipe',position={x=-9.5,y=.5}}} end
+  if filter.name=='pipe-to-ground' and filter.area and filter.area[1][1]>=0 then return {
+    {name='pipe-to-ground',position={x=12.5,y=.5}}} end
+  if filter.name=='pipe-to-ground' and filter.area then return {
+    {name='pipe-to-ground',position={x=3.5,y=.5},direction=4}} end
+  if filter.type=='logistic-container' then return {storage} end
+  if filter.type then return {} end
+  if filter.position then return {} end
+  return {port}
+end
+prototypes.entity['pipe-to-ground']={type='pipe-to-ground',fluidbox_prototypes={{}},
+  items_to_place_this={{name='pipe-to-ground',count=1}}}
+local function candidate(id,direction,x)
+  return {option_id=id,network_anchor={x=0,y=0},required_checks={'fluid_purity'},
+    plan={phases={{actions={{action_type='place_ghost',entity='pipe-to-ground',
+      position={x=x or .5,y=.5},direction=direction}}}}}}
+end
+request.candidates={candidate('conflict','west'),candidate('clear','east'),candidate('unknown','west',10.5),
+                    candidate('surface','east',-10.5),candidate('surface_unknown','east',8.5)}
+""", assertions="""
+assert(facts.validations.conflict.reason=='underground_world_competitor')
+assert(facts.validations.conflict.underground_competitors.conflicts==1)
+assert(facts.validations.clear.reason==nil and facts.validations.clear.bill['pipe-to-ground']==1)
+assert(facts.validations.clear.underground_competitors.conflicts==0)
+assert(facts.validations.unknown.reason=='underground_world_unverified')
+assert(facts.validations.surface.reason=='surface_pipe_world_contact')
+assert(facts.validations.surface_unknown.reason=='surface_pipe_world_unverified')
+""")
+
+
+@pytest.mark.lua
+def test_survey_inventories_every_force_recipe_and_item_product_counter():
+    _run_survey_lua(assertions="""
+assert(facts.recipe_catalog.version == '1.2.0')
+assert(facts.recipe_catalog.force == 'player' and facts.recipe_catalog.surface == 'nauvis')
+assert(facts.recipe_catalog.tick == facts.tick and facts.recipe_catalog.tick == 100)
+assert(facts.recipe_catalog.source == 'force.recipes' and facts.recipe_catalog.complete == true)
+assert(facts.recipe_catalog.document == 'saved-world-recipe-survey')
+assert(facts.recipe_catalog.metadata_only == true)
+assert(facts.recipe_catalog.category_metadata_unsupported == 0)
+assert(facts.recipe_catalog.recipe_count == 8)
+assert(facts.recipe_observations['iron-plate'].category == 'crafting')
+assert(type(facts.recipe_observations['iron-plate'].categories[1]) == 'string')
+assert(facts.recipe_observations['iron-plate'].categories[1] == 'crafting')
+assert(facts.recipe_observations['pumpjack'].categories[1] == 'crafting')
+assert(facts.recipe_observations['disabled-thing'].enabled == false)
+assert(facts.enabled_recipes['automation-science-pack'] == true)
+assert(facts.enabled_recipes['disabled-thing'] == nil)
+assert(facts.recipe_observations['plastic-bar'].enabled == true)
+assert(facts.recipe_observations['plastic-bar'].ingredients[1].type == 'fluid')
+assert(facts.recipe_observations['advanced-circuit'].machine_speeds['assembling-machine-1'] == .5)
+assert(facts.recipe_observations['advanced-circuit'].energy_ticks == 30)
+assert(facts.recipe_observations['plastic-bar'].machine_speeds['electric-furnace'] == 2)
+assert(facts.production['automation-science-pack'] == 42)
+assert(facts.consumption['automation-science-pack'] == 7)
+assert(facts.production['plastic-bar'] == 9 and facts.consumption['plastic-bar'] == 2)
+assert(facts.recipes['iron-plate'])
+assert(facts.recipes['plastic-bar'] == nil)
+assert(facts.recipes['advanced-circuit'] == nil)
+""")
+
+
+@pytest.mark.lua
+def test_no_extra_recipes_leaves_the_baseline_menu_unchanged():
+    _run_survey_lua(assertions="""
+local menu={}
+for name in pairs(facts.recipes) do menu[#menu+1]=name end
+table.sort(menu)
+assert(table.concat(menu, ',') == 'electric-furnace,electronic-circuit,iron-plate,pumpjack')
+assert(facts.recipes['automation-science-pack'] == nil)
+assert(facts.recipes['advanced-circuit'] == nil)
+assert(facts.recipes['plastic-bar'] == nil)
+""")
+
+
+_MALFORMED_CATEGORY_RECIPES = """
+  ['bad-category-numbers']=recipe('bad-category-numbers',{item('iron-plate',1)},{item('bad-category-numbers',1)},{categories={1,2}}),
+  ['bad-category-map']=recipe('bad-category-map',{item('iron-plate',1)},{item('bad-category-map',1)},{categories={crafting=true}}),
+"""
+
+
+@pytest.mark.lua
+def test_malformed_category_metadata_fails_closed_and_marks_the_survey_incomplete():
+    _run_survey_lua(malformed=_MALFORMED_CATEGORY_RECIPES, assertions="""
+assert(facts.recipe_catalog.complete == false)
+assert(facts.recipe_catalog.category_metadata_unsupported == 2)
+for _,name in ipairs({'bad-category-numbers','bad-category-map'}) do
+  local observation=facts.recipe_observations[name]
+  assert(observation and #observation.categories == 0)
+  assert(observation.category == nil)
+  assert(next(observation.machine_speeds) == nil)
+end
+assert(facts.recipe_observations['iron-plate'].category == 'crafting')
+assert(facts.recipe_observations['iron-plate'].machine_speeds['assembling-machine-1'] == .5)
+""")
+
+
+@pytest.mark.lua
+def test_extra_recipes_only_widen_observation_and_keep_fluid_recipes_out_of_the_build_menu():
+    _run_survey_lua(extra_recipes=("advanced-circuit",), assertions="""
+assert(facts.recipes['advanced-circuit'])
+assert(facts.recipes['pumpjack'])
+assert(facts.enabled_recipes['plastic-bar'] == true)
+assert(facts.recipes['plastic-bar'] == nil)
+assert(facts.recipes['disabled-thing'] == nil)
+assert(facts.recipes['automation-science-pack'] == nil)
+assert(facts.production['plastic-bar'] == 9)
+""")
+
+
+def test_query_request_carries_demanded_recipes_without_changing_the_fact_scope():
+    from training.laya_saved_world import BOUNDS, _query_request
+    request = _query_request(extra_recipes=("advanced-circuit", "plastic-bar"))
+    assert request["extra_recipes"] == ["advanced-circuit", "plastic-bar"]
+    assert request["bounds"] == BOUNDS and request["bounds"] is not BOUNDS
+    assert request["candidates"] is None and request["inspect"] is None
+    assert _query_request()["extra_recipes"] == []
+
+
+def test_saved_world_schema_accepts_recipe_survey_and_completeness_metadata():
+    from training.laya_saved_world import FACTS_VALIDATOR
+    payload = {
+        "version": "saved-world-v1", "tick": 100, "surface": "nauvis", "force": "player",
+        "mods": {"base": "2.1.23"}, "networks": {}, "ports": [], "poles": [], "machines": [],
+        "resources": [], "player_stock": {}, "researched": {}, "pending_ghosts": 0,
+        "production": {"automation-science-pack": 42},
+        "consumption": {"automation-science-pack": 7},
+        "enabled_recipes": {"automation-science-pack": True},
+        "recipe_observations": {"automation-science-pack": {
+            "enabled": True,
+            "ingredients": [{"name": "iron-plate", "type": "item", "amount": 1}],
+            "products": [{"name": "automation-science-pack", "type": "item", "amount": 1}],
+            "category": "crafting", "categories": ["crafting"],
+            "machine_speeds": {"assembling-machine-1": 0.5},
+            "energy_ticks": 30, "productivity_bonus": 0}},
+        "recipe_catalog": {"version": "1.2.0", "force": "player", "tick": 100,
+                           "surface": "nauvis", "recipe_count": 1,
+                           "source": "force.recipes", "complete": True,
+                           "document": "saved-world-recipe-survey", "metadata_only": True,
+                           "category_metadata_unsupported": 0},
+        "recipes": {},
+    }
+    FACTS_VALIDATOR.validate(payload)
+    incomplete = copy.deepcopy(payload)
+    incomplete["recipe_catalog"].update(complete=False, category_metadata_unsupported=1)
+    incomplete["recipe_observations"]["automation-science-pack"]["categories"] = []
+    incomplete["recipe_observations"]["automation-science-pack"].pop("category")
+    FACTS_VALIDATOR.validate(incomplete)
+
+
+_FLUID_SNAPSHOT_SETUP = """
+prototypes.entity['pipe']={type='pipe',fluidbox_prototypes={{index=1}}}
+prototypes.entity['chemical-plant']={type='assembling-machine',fluidbox_prototypes={{index=1},{index=2}}}
+local function built(name, kind, x, y, boxes, fluids, extra)
+  local e={name=name,type=kind,position={x=x,y=y},direction=4,force={name='player'},mirroring=false,unit_number=9,
+    prototype=prototypes.entity[name],
+    get_fluid_box_prototype=function(i) if i==2 then return {{index=2},{index=3}} end return {index=i} end,
+    has_fluid_segment=function(i) return true end,
+    get_fluid_segment_fluid=function(i) return fluids[i] and {name=fluids[i],amount=5} or nil end,
+    get_fluid=function(i) return nil end,
+    get_fluid_filter=function(i) return nil end,
+    get_recipe=function() return {name='sulfuric-acid'} end}
+  for k,v in pairs(extra or {}) do e[k]=v end
+  return e
+end
+local found={built('pipe','pipe',3.5,.5,1,{'water'}),
+  built('chemical-plant','assembling-machine',8.5,.5,2,{'water'})}
+local ghost={ghost_name='pipe',ghost_type='pipe',position={x=4.5,y=.5},direction=0,force={name='enemy'},
+  mirroring=false,ghost_prototype=prototypes.entity['pipe']}
+local belt={ghost_name='transport-belt',ghost_type='transport-belt',position={x=5.5,y=.5},direction=0,
+  force={name='player'},mirroring=false,ghost_prototype={fluidbox_prototypes={}}}
+surface.find_entities_filtered=function(filter)
+  if filter.type=='entity-ghost' and filter.area then return {ghost,belt} end
+  if type(filter.type)=='table' then
+    assert(filter.area and filter.limit==20001)
+    return found
+  end
+  return {}
+end
+request.candidates={{option_id='fluid',required_checks={'fluid_purity'},plan={phases={{actions={
+  {entity='pipe',position={x=.5,y=.5}},{entity='pipe',position={x=2.5,y=1.5}} }}}}}}
+"""
+
+
+@pytest.mark.lua
+def test_power_snapshot_is_same_tick_opt_in_and_records_pole_identity():
+    _run_survey_lua(setup="""
+surface.name='nauvis'
+local pole={name='medium-electric-pole',type='electric-pole',position={x=.5,y=1.5},
+  unit_number=42, quality={name='normal'},electric_network_id=7,
+  prototype={get_max_wire_distance=function(q) assert(q=='normal'); return 9 end,
+    get_supply_area_distance=function(q) assert(q=='normal'); return 3.5 end}}
+local generator={name='steam-engine',type='generator',electric_network_id=7}
+surface.find_entities_filtered=function(filter)
+  if filter.force and filter.type==nil then return {pole,generator} end
+  return {}
+end
+request.candidates={{option_id='power',inspect_power_topology=true,plan={phases={{actions={}}}}},
+  {option_id='ordinary',plan={phases={{actions={}}}}}}
+""", assertions="""
+local s=facts.validations.power.power_topology_snapshot
+assert(s.version=='optimizer-power-snapshot-v1' and s.tick==100 and s.complete==true)
+assert(s.surface=='nauvis' and s.force=='player' and s.mods.base=='2.1.23')
+assert(#s.poles==1 and s.poles[1].unit_number==42 and s.poles[1].quality=='normal')
+assert(s.poles[1].wire==9 and s.poles[1].grid=='7' and s.poles[1].generated==true)
+assert(facts.validations.ordinary.power_topology_snapshot==nil)
+""")
+
+
+@pytest.mark.lua
+def test_power_snapshot_limit_marks_observation_incomplete():
+    _run_survey_lua(setup="""
+surface.name='nauvis'
+local pole={name='medium-electric-pole',type='electric-pole',position={x=.5,y=1.5},
+  unit_number=42, quality={name='normal'},electric_network_id=7,
+  prototype={get_max_wire_distance=function() return 9 end,get_supply_area_distance=function() return 3.5 end}}
+local poles={}; for i=1,5001 do poles[i]=pole end
+surface.find_entities_filtered=function(filter)
+  if filter.force and filter.type==nil then return poles end
+  return {}
+end
+request.candidates={{option_id='power',inspect_power_topology=true,plan={phases={{actions={}}}}}}
+""", assertions="""
+local s=facts.validations.power.power_topology_snapshot
+assert(s.complete==false and #s.poles==5000)
+""")
+
+
+@pytest.mark.lua
+def test_fluid_topology_snapshot_separates_observed_built_identity_from_ghosts():
+    _run_survey_lua(setup=_FLUID_SNAPSHOT_SETUP + """
+prototypes.entity['assembling-machine-1'].fluidbox_prototypes={}
+prototypes.entity['electric-furnace'].fluidbox_prototypes={}
+""", assertions="""
+local s=facts.validations.fluid.fluid_topology_snapshot
+assert(s.version=='fluid-topology-snapshot-v1' and s.complete==true and s.forces=='all' and s.tick==100)
+assert(s.area.x_min==-16 and s.area.y_min==-16 and s.area.x_max_exclusive==19 and s.area.y_max_exclusive==18)
+assert(#s.entities==3)
+local pipe,plant,ghost=s.entities[1],s.entities[2],s.entities[3]
+assert(pipe.name=='pipe' and pipe.ghost==false and pipe.direction=='east' and pipe.unit_number==9)
+assert(pipe.fluidboxes[1].readable==true and pipe.fluidboxes[1].segment_fluid=='water' and pipe.recipe==nil)
+assert(plant.recipe=='sulfuric-acid' and plant.fluidboxes[1].readable==true)
+assert(plant.fluidboxes[2].readable==false and plant.fluidboxes[2].segment_fluid==nil)
+assert(ghost.ghost==true and ghost.force=='enemy' and ghost.fluidboxes==nil and ghost.unit_number==nil)
+assert(facts.validations.fluid.reason=='no_construction_network')
+""")
+
+
+@pytest.mark.lua
+def test_fluid_topology_snapshot_is_incomplete_when_prototypes_are_unreadable():
+    # The fixture's machine prototypes lack fluidbox data, so fluid types cannot be enumerated.
+    _run_survey_lua(setup=_FLUID_SNAPSHOT_SETUP, assertions="""
+local s=facts.validations.fluid.fluid_topology_snapshot
+assert(s.complete==false and #s.entities==0)
+""")
+
+
+def test_saved_world_configuration_refuses_legacy_event_reports(tmp_path):
+    adapter = object.__new__(SavedWorldAdapter)
+    adapter.root = tmp_path
+    candidate = next(c for c in compile_candidates(facts()) if c["family"] == "assemble")
+    class Bridge:
+        def optimizer_build_evidence(self, **kwargs):
+            assert kwargs["include_unidentified"] is True
+            return {"version": "optimizer-build-evidence-v2"}
+    adapter.bridge = Bridge()
+    tags = {"optimizer_episode": "e", "optimizer_project": "p",
+            "optimizer_transaction": "a" * 32, "optimizer_plan_hash": "b" * 64}
+    baseline = {"version": "optimizer-build-evidence-v3", "source": "robot_built_entity_tags",
+                "request_id": "baseline", "tick": 100, "ok": True, "ownership_claimed": False,
+                "dispatch_authorized": False, "surface": "nauvis", "force": "player", "tags": tags, "entities": []}
+    with pytest.raises(SavedWorldError, match="lacks current correlated"):
+        adapter._guarded_configuration(candidate["plan"], tags, 100, baseline)
+
+
+@pytest.mark.parametrize("mode", ["legacy", "nonempty", "stale", "unavailable"])
+def test_configuration_baseline_failure_prevents_ghost_submission(tmp_path, mode):
+    adapter = object.__new__(SavedWorldAdapter)
+    adapter.root = tmp_path
+    candidate = next(c for c in compile_candidates(facts()) if c["family"] == "assemble")
+    adapter.validate_plan = lambda _plan: None
+    adapter.query = lambda candidates=None: ({"validations": {candidate["option_id"]: {"reason": None}}}
+                                             if candidates else facts())
+    class Bridge:
+        def optimizer_build_evidence(self, *, surface, force, episode_id, project_id, transaction_id, plan_hash,
+                                     timeout, include_unidentified):
+            if mode == "unavailable":
+                raise OSError("probe unavailable")
+            tags = {"optimizer_episode": episode_id, "optimizer_project": project_id,
+                    "optimizer_transaction": transaction_id, "optimizer_plan_hash": plan_hash}
+            events = ([{"entity": "pipe", "position": {"x": 1.5, "y": 2.5}, "tick": 99,
+                        "current": {"state": "identity_unavailable"}}] if mode == "nonempty" else [])
+            return {"version": "optimizer-build-evidence-v2" if mode == "legacy" else "optimizer-build-evidence-v3",
+                    "source": "robot_built_entity_tags", "request_id": "req", "tick": 99 if mode == "stale" else 100, "ok": True,
+                    "ownership_claimed": False, "dispatch_authorized": False, "surface": surface,
+                    "force": force, "tags": tags, "entities": events}
+        def build_layout_correlated(self, *_args, **_kwargs):
+            pytest.fail("unverified baseline reached ghost submission")
+    adapter.bridge = Bridge()
+    with pytest.raises(SavedWorldError, match="baseline is unavailable"):
+        adapter.execute(candidate["option_id"], [candidate])
+    receipt = json.loads(next((tmp_path / "evidence").glob("transaction-*.json")).read_text())
+    assert receipt["status"] == "rejected" and receipt["reason"] == "configuration_evidence_baseline_unavailable"
+
+
+@pytest.mark.lua
+def test_fluid_snapshot_does_not_scan_tiles_without_explicit_request():
+    _run_survey_lua(setup=_FLUID_SNAPSHOT_SETUP + """
+prototypes.entity['assembling-machine-1'].fluidbox_prototypes={}
+prototypes.entity['electric-furnace'].fluidbox_prototypes={}
+surface.get_tile=function() error('unexpected tile scan') end
+""", assertions="""
+local s=facts.validations.fluid.fluid_topology_snapshot
+assert(s.complete==true and s.tiles==nil)
+""")
+
+
+def test_query_keeps_request_data_containing_lua_comment_marker(tmp_path):
+    """Regression (live 2026-11-01): comment stripping cut request JSON at "--"."""
+    import re
+    adapter = object.__new__(SavedWorldAdapter)
+    adapter.root = tmp_path
+    adapter.lua_source = "local probe = request.inspect -- trailing comment\nreturn {echo = probe}"
+    adapter._check_instance = lambda: None
+    adapter.quad_centers = lambda: []
+    sent = []
+
+    class Bridge:
+        script_output = tmp_path
+
+        def command(self, cmd):
+            sent.append(cmd)
+            name = re.search(r'helpers\.write_file\("([^"]+)"', cmd).group(1)
+            (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / name).write_text(json.dumps({"ok": True, "value": {"echo": "kept"}}))
+            return "saved-world-report"
+
+    adapter.bridge = Bridge()
+    adapter.query(inspect={"note": "a--b"})
+    assert '"note":"a--b"' in sent[0] and "trailing comment" not in sent[0]
+
+
+def test_query_without_report_surfaces_server_reply(tmp_path):
+    adapter = object.__new__(SavedWorldAdapter)
+    adapter.root = tmp_path
+    adapter.lua_source = "return {}"
+    adapter._check_instance = lambda: None
+    adapter.quad_centers = lambda: []
+
+    class Bridge:
+        script_output = tmp_path
+
+        def command(self, cmd):
+            return "Cannot execute command. Error: unfinished long string"
+
+    adapter.bridge = Bridge()
+    with pytest.raises(SavedWorldError, match="unfinished long string"):
+        adapter.query(inspect={})

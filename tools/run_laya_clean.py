@@ -67,13 +67,18 @@ def main(argv=None) -> int:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--stepped", action="store_true", help="Paused fixed-tick stepping instead of live play")
     p.add_argument("--speed", type=float, default=1.0, help="Live game speed")
-    p.add_argument("--no-helper", action="store_true", help="Skip the post-run Laya Helper review")
+    helper = p.add_mutually_exclusive_group()
+    helper.add_argument("--helper", action="store_true", help="Start the read-only Laya Helper observer")
+    helper.add_argument("--no-helper", dest="helper", action="store_false", help="Disable the Laya Helper observer (default)")
+    p.set_defaults(helper=False)
     p.add_argument("--actions", choices=["geometry", "deterministic"], default="geometry",
                    help="deterministic: Laya chooses among the deterministic runtime's operations "
                         "(training/laya_ops_runner.py); geometry: Laya's own build generators")
     p.add_argument("--policy", choices=["guided", "exploration"], default="guided",
                    help="guided: doc-rule preferences + exploration floor; exploration: uniform")
     p.add_argument("--variant", type=Path, help="Variant JSON (docs/rl/laya_variants/); default: the current workflow")
+    p.add_argument("--optimizer-candidate", type=Path,
+                   help="Pinned observation-only optimizer candidate JSON for the geometry runner")
     p.add_argument("--until-phase", help="Experiment window: stop once this phase is reached")
     p.add_argument("--max-game-ticks", type=int, help="Experiment window: stop after this many game ticks")
     p.add_argument("--experiment", help="Experiment id recorded with the run")
@@ -89,6 +94,8 @@ def main(argv=None) -> int:
                    help="Restart a fresh controller on this already-running world after a stall or failure "
                         "(experiment): carry only earlier segments' lifecycle receipts")
     args = p.parse_args(argv)
+    if args.optimizer_candidate and (args.action != "run" or args.actions != "geometry"):
+        p.error("--optimizer-candidate requires run with --actions geometry")
     root = owned_root(args.root)
     resume=load_bundle(args.resume_bundle) if args.resume_bundle else None
     if args.action == "prepare":
@@ -127,6 +134,7 @@ def main(argv=None) -> int:
     started = local_stamp()
     log = RunLog(paths["log"], paths["heartbeat"])
     summary = {"decisions": 0, "failures": 0, "phases_reached": [], "stop": "runner_error"}
+    optimizer_metadata = None
     with runner_pid_record(paths["pid"]):
         adapter = SavedWorldAdapter(root) if args.stepped else LiveWorld(root, speed)
         manifest = json.loads((root / "manifest.json").read_text())
@@ -135,9 +143,15 @@ def main(argv=None) -> int:
                   variant=f"{tag['variant_id']} {tag['variant_hash'][:19]}", experiment=args.experiment or "-",
                   window=f"until={settings.until_phase or '-'} max_ticks={settings.max_game_ticks or '-'}",
                   game=f"127.0.0.1:{manifest['game_port']}", root=root, log=paths["log"])
-        if not args.no_helper:  # Live observer from RUN START; it writes the final review after RUN END.
-            log("LAYA HELPER: observing " + launch_helper(run_id, paths["log"], root.resolve()))
         try:
+            candidate_provider = None
+            if args.optimizer_candidate:
+                from tools.optimizer_saved_world import load_optimizer_candidate_config
+                candidate_provider, optimizer_metadata = load_optimizer_candidate_config(args.optimizer_candidate, adapter)
+                log(f"OPTIMIZER CANDIDATE: observation only; plan={optimizer_metadata['plan_sha256']} "
+                    f"episode={optimizer_metadata['funding_context']['episode_id']}")
+            if args.helper:  # Opt-in observer writes its final review after RUN END.
+                log("LAYA HELPER: observing " + launch_helper(run_id, paths["log"], root.resolve()))
             if not args.stepped:
                 adapter.go_live()
                 log(f"LIVE: game unpaused at speed {speed:g}; decisions are taken while the factory runs")
@@ -157,7 +171,8 @@ def main(argv=None) -> int:
                 summary = run(adapter, policy, journal=paths["journal"],
                               decisions=args.decisions or None, measure_ticks=args.measure_ticks, seed=args.seed,
                               run_id=run_id, emit=log, should_stop=stop.is_set, status_path=paths["status"],
-                              settings=settings, initial_reached=resume['phases_reached'] if resume else ())
+                              settings=settings, initial_reached=resume['phases_reached'] if resume else (),
+                              candidate_provider=candidate_provider)
             if args.export_checkpoint:
                 export_bundle(adapter,args.export_checkpoint,summary)
             if stop.is_set():
@@ -173,6 +188,7 @@ def main(argv=None) -> int:
              "ended": local_stamp(), "summary": summary, "seed": args.seed, "speed": speed, **tag,
              "window": {"until_phase": settings.until_phase, "max_game_ticks": settings.max_game_ticks}}
     if resume:index['resume_checkpoint']={'path':str(args.resume_bundle),'save_sha256':resume['files']['source.zip']}
+    if optimizer_metadata:index['optimizer_candidate']=optimizer_metadata
     with RUN_INDEX.open("a") as out:
         out.write(json.dumps(index) + "\n")
     try:
