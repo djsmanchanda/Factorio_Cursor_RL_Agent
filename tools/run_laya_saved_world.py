@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import shutil
 import subprocess
@@ -25,6 +26,7 @@ def manager(root, action, extra=()):
     manifest = json.loads((root / "manifest.json").read_text())
     return subprocess.run([
         "bash", str(root / "frozen/scripts/manage_linux_deterministic_server.sh"), action,
+        "--runtime-root", os.environ["LAYA_CHECKPOINT_RUNTIME_ROOT"],
         "--root", str(root / "server"), "--fleet-mode", "--bootstrap-profile", "supplied-v1",
         "--game-port", str(manifest["game_port"]), "--rcon-port", str(manifest["rcon_port"]),
         "--source-save", str(root / "baseline.zip"), *extra,

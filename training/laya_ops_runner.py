@@ -829,7 +829,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         status_path: Path | None = None, settings: Settings = Settings(), session: Any = None,
         carried: list[dict] = (), recovery: dict | None = None,
         checkpoint_dir: Path | None = None, checkpoint_ticks: int = 54000,
-        recovery_wall_seconds: float = 0) -> dict:
+        recovery_wall_seconds: float = 0, initial_reached=(), strict_target=None, checkpoint_callback=None, loaded_tick=None) -> dict:
     """Observe -> board -> operations -> choose -> run one -> record, until the mission ends or stalls.
 
     ``carried`` seeds the history with an earlier segment's lifecycle receipts when a fresh controller is
@@ -854,7 +854,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                               logical_episode_id=recovery["session"]["episode_id"] if recovery else None)
     session.stock_networks = lambda: adapter.query().get("networks")
     records = journal.parent / "decision-states.jsonl"
-    reached: list[str] = []
+    reached: list[str] = list(initial_reached)
     results: list[dict] = list(carried)
     if carried:
         emit(f"JUMPSTART: restarting on the same world with {len(carried)} lifecycle receipt(s) from earlier "
@@ -881,6 +881,10 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             summary["laya_acceptance"]["C6"] = evidence
             _append(journal, {"run_id": run_id, "event": "laya_acceptance", "phase": "C6", **evidence})
 
+    from training.laya_segment_evidence import current_predicates, stop_classification
+    import os
+    summary['loaded_tick'] = loaded_tick
+    summary['seed'] = seed
     accept = getattr(session, "acceptance", None)
 
     def check_acceptance(event: str) -> None:
@@ -904,6 +908,21 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                           "fresh": fresh, "checks": getattr(session, "acceptance_checks", None),
                           "production_service": summary.get("production_service"),
                           "foundations": getattr(session, "foundation_observations", None)})
+        tick = session._history[-1].tick if getattr(session, '_history', None) else None
+        current, evidence = current_predicates(session) if 'error' not in statuses else ({}, {})
+        row = {'event':'strict_current', 'run_id':run_id, 'at':event, 'tick':tick,
+               'loaded_tick':summary['loaded_tick'], 'statuses':current, 'predicate_evidence':evidence,
+               'decisions':summary['decisions'], 'elapsed_seconds':time.monotonic()-active_started}
+        summary.setdefault('strict_current', []).append(row)
+        summary['strict_current_at_end'] = current
+        _append(journal,row)
+        if checkpoint_callback is not None and 'error' not in statuses:
+            summary['_checkpoint_boundary'] = {'pid':os.getpid(), 'run_id':run_id,
+                                               'operation_active':False, 'decisions':summary['decisions']}
+            try:
+                checkpoint_callback(adapter,session,statuses,summary,results)
+            finally:
+                summary.pop('_checkpoint_boundary',None)
     if not recovery:
         check_acceptance("start")
         _append(journal, {"run_id": run_id, "event": "laya_acceptance", "phase": "C6", **c6.snapshot()})
@@ -952,6 +971,9 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
 
     while decisions is None or index + 1 < decisions:
         index += 1
+        if strict_target and summary.get('strict_current_at_end', {}).get(strict_target) is True:
+            summary['stop'] = 'strict_target_reached'
+            break
         if should_stop():
             summary["stop"] = "stopped"
             break
@@ -990,7 +1012,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         record_c6()
         samples.append((facts["tick"], dict(facts["production"]), dict(facts["consumption"])))
         measurement = rolling_measurement(samples, settings.rate_window_ticks) or measurement
-        if settings.max_game_ticks and facts["tick"] - samples[0][0] >= settings.max_game_ticks:
+        if settings.max_game_ticks and facts["tick"] - (loaded_tick if loaded_tick is not None else samples[0][0]) >= settings.max_game_ticks:
             summary["stop"] = "window_timeout"
             break
         get_phase = lambda: research_phase(reached, objective.targets(research)) if objective else current_phase(reached)
@@ -1007,8 +1029,11 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             stall.update(since=0, best_gap=math.inf)
             phase = get_phase()
             board = compile_status(facts, phase["targets"], measurement) if phase else None
+        if strict_target and summary.get('strict_current_at_end', {}).get(strict_target) is True:
+            summary['stop'] = 'strict_target_reached'
+            break
         if phase is None:
-            summary["stop"] = "mission_complete"
+            summary["stop"] = "phase_ladder_complete"
             break
         if settings.until_phase and settings.until_phase in reached:
             summary["stop"] = "window_reached"
@@ -1140,7 +1165,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                     "decision_timing": summary["decision_timing"],
                                     "decisions": index + 1, "failures": summary["failures"],
                                     "authority": policy.authority})
-        if summary["decisions"] % 10 == 0:
+        if checkpoint_callback is not None or summary["decisions"] % 10 == 0:
             check_acceptance(f"decision {index}")
         gap = _goal_gap(compile_status(after, phase["targets"], measurement))
         # Progress is measurable change, not a busy signal (a loan that never finishes once kept a run alive for
@@ -1215,6 +1240,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         # Receipt, progress guard and acceptance state belong to one generation.
         save_checkpoint(after["tick"])
     check_acceptance("end")
+    summary['stop_classification'] = stop_classification(summary['stop'])
     if checkpoint_dir is not None and samples:
         save_checkpoint(adapter.query()["tick"], final=True)
     summary["cumulative_wall_seconds"] = elapsed_before + time.monotonic() - active_started

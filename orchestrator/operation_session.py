@@ -86,13 +86,13 @@ class DeterministicSession:
 
     def __init__(self, root: Path, *, goal_item: str = "automation-science-pack",
                  reference_point: tuple[float, float] = (0.0, 0.0), emit: Callable[[str], None] = print,
-                 logical_episode_id: str | None = None) -> None:
+                 logical_episode_id: str | None = None, origin_episode_id: str | None = None) -> None:
         import json
         manifest = json.loads((root / "manifest.json").read_text())
         server = root / "server"
         password = (server / "rcon-password").read_text().strip()
         self.script_output = server / "script-output"
-        self.episode_id = logical_episode_id or f"laya-{root.name}"
+        self.episode_id = origin_episode_id or logical_episode_id or f"laya-{root.name}"
         self.reference_point = reference_point
         self.emit = emit
         self.stock_networks = lambda: None
@@ -388,7 +388,8 @@ class DeterministicSession:
         self.foundation_facts = {plate: _foundation_ready(snapshot, name)
                                  for plate, name in (("iron-plate", "iron"), ("copper-plate", "copper"),
                                                      ("stone-brick", "stone"))}
-        self._history = (self._history + [snapshot])[-20:]
+        if not self._history or snapshot != self._history[-1]:
+            self._history = (self._history + [snapshot])[-20:]
         # Fresh: the stateless predicates on this sample. The evaluator's latch answers "passed" forever once
         # reached, so a latched final could not show a regression (review 2026-10-20).
         fresh = {m.checkpoint_id: evaluate_milestone(m.checkpoint_id, snapshot, baseline=self._baseline,
@@ -404,6 +405,22 @@ class DeterministicSession:
             for cid, r in fresh.items() if not r.passed}
         # Historical (monotonic) statuses: reached once, passed for the rest of the run.
         return {cid: "passed" if cid in self._evaluator.reached else r.status.value for cid, r in fresh.items()}
+
+    def export_restart_state(self, *, mod_scope: str) -> dict:
+            from training.laya_restart_state import export_restart_state
+            if not hasattr(self, "_evaluator") or self._baseline is None:
+                raise ValueError("Strict acceptance baseline has not been observed")
+            return export_restart_state(self.script_output, self.episode_id, mod_scope,
+                                        self._baseline, self._history, self._evaluator)
+
+    def restore_restart_acceptance(self, state) -> None:
+            from training.laya_restart_state import RestartState
+            if (not isinstance(state, RestartState) or state.episode_id != self.episode_id
+                    or state.script_output != self.script_output.resolve()):
+                raise ValueError("Restart state does not match session identity")
+            if hasattr(self, "_evaluator"):
+                raise ValueError("Cannot replace initialized strict acceptance state")
+            self._baseline, self._history, self._evaluator = state.baseline, list(state.history), state.evaluator
 
     def close(self) -> None:
         set_active_material_ledger(None)
