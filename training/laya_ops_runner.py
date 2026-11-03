@@ -162,8 +162,13 @@ def ladder_rungs(result: Mapping) -> int | None:
     return CHEMICAL_BOOTSTRAP_LADDER.index(rung)
 
 
-def shortages(results: list[dict], sources: dict | None = None) -> dict[str, int]:
-    """Items the latest material shortage of each operation still asks for (``sources``: item -> plates blocked)."""
+def shortages(results: list[dict], sources: dict | None = None,
+              owners: dict | None = None) -> dict[str, int]:
+    """Items the latest material shortage of each operation still asks for.
+
+    ``sources``: item -> bare parent items (used for goal propagation). ``owners``: item -> the
+    failing operation and parent (``produce:plastic-bar``), kept for the child's ownership fact.
+    """
     latest: dict[tuple, dict] = {}
     for r in results:
         params = r.get("params") or {}
@@ -176,9 +181,12 @@ def shortages(results: list[dict], sources: dict | None = None) -> dict[str, int
                 missing = int(count) - int(available.get(item, 0))
                 if missing > 0:
                     short[item] = max(short[item], missing)
+                    params = r.get("params") or {}
+                    parent = params.get("recipe") or params.get("item")
                     if sources is not None:
-                        params = r.get("params") or {}
-                        sources.setdefault(item, set()).add(params.get("recipe") or params.get("item"))
+                        sources.setdefault(item, set()).add(parent)
+                    if owners is not None:
+                        owners.setdefault(item, set()).add(f"{r['operation']}:{parent}")
     return dict(short)
 
 
@@ -614,7 +622,9 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     current_materials = material_results(results, transactions)
     stuck = unchanged_failures(current_materials, stock or {})
     sources: dict[str, set] = {}
-    stages, codes, short = plate_stages(results), last_codes(results, tick), shortages(current_materials, sources)
+    stages, codes = plate_stages(results), last_codes(results, tick)
+    owners: dict[str, set] = {}
+    short = shortages(current_materials, sources, owners)
     for plate, ready in (foundations or {}).items():
         if ready is True and stages.get(plate) == "starter":
             stages[plate] = "foundation"
@@ -706,8 +716,12 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                   and obtainable(recipes, i, stock or {})} if recipes else short
     levels = shortage_levels(current_materials)
     # A small construction blocker is still a legal choice beside larger unrelated bills.
+    # ``sources`` already names the operation each missing item blocks; keep that ownership link on
+    # the demand so the option carries prerequisite_for/goal_need instead of looking like unrelated
+    # stock (live C50 stall seed 80904: oil-refinery was short 2 for plastic-bar and carried parents []).
     demands = {item: {"target": levels.get(item, int((stock or {}).get(item, 0)) + missing),
-                      "missing": missing, "capability": False, "parents": []}
+                      "missing": missing, "capability": False,
+                      "parents": sorted(owners.get(item, ()))}
                for item, missing in (sorted(producible.items(), key=lambda kv: -kv[1]) if slots else ())}
     # Typed prerequisites remain selectable alongside construction shortages.
     # They can establish upstream capability that obtainable() cannot yet prove (e.g. plastic before oil).
