@@ -27,7 +27,7 @@ import time
 import dataclasses
 import copy
 from collections import Counter
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -600,10 +600,35 @@ def saturated_feedstock(machines: list[Mapping], recipes: Mapping, stock: Mappin
     return found
 
 
+def loan_holds(results: list[dict], loans: Sequence[Mapping] | None = None) -> dict[str, dict]:
+    """Items whose latest request deferred because a seed loan for that item is still active.
+
+    The builder reports "borrowed <cell> cell is producing temporary <item> for the <item> seed"
+    while the loan runs. Re-picking the same option only re-enters that gate, so it is held until
+    the loan disappears from the economics survey (completion, cancellation or invalidated owner).
+    """
+    active = {str(loan.get("target_item")) for loan in (loans or ()) if loan.get("target_item")}
+    latest = {_key(r): r for r in results}
+    holds: dict[str, dict] = {}
+    for key, r in latest.items():
+        if r.get("ok") or r.get("code") != "production_prerequisite_deferred":
+            continue
+        message = str(r.get("message") or "")
+        marker = " for the "
+        if "seed" not in message or marker not in message:
+            continue
+        seed = message.rsplit(marker, 1)[1].split(" seed", 1)[0]
+        if seed != key[1] or seed not in active:
+            continue
+        holds[seed] = {"message": message[:120]}
+    return holds
+
+
 def compile_options(board: Mapping, results: list[dict], tick: int | None = None, recipes: Mapping | None = None,
                     stock: Mapping[str, int] | None = None, machines: list[Mapping] | None = None,
                     growable: tuple[str, ...] = (), enabled_recipes: Mapping | None = None,
-                    transactions: Mapping | None = None, foundations: Mapping | None = None) -> dict:
+                    transactions: Mapping | None = None, foundations: Mapping | None = None,
+                    loans: Sequence[Mapping] | None = None) -> dict:
     """Operations worth offering now, each tagged with the need it serves and the facts rules weigh.
 
     ``foundations`` (plate -> observed ready) advances a plate past "starter" when the world shows its foundation
@@ -619,6 +644,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
         if ready is True and stages.get(plate) == "starter":
             stages[plate] = "foundation"
     prerequisites = named_prerequisites(results)
+    loan_held = loan_holds(results, loans)
     for item, demand in prerequisites.items():
         sources.setdefault(item, set()).update(parent.split(":", 1)[1] for parent in demand["parents"])
     for tx in (transactions or {}).values():
@@ -686,6 +712,8 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
         chain = plates_in(item, recipes or {})
         if codes.get(("mall_slot", item)) != "ok" and chain and chain <= started and (
                 not recipes or obtainable(recipes, item, stock or {})):
+            if item in loan_held:
+                continue  # a seed loan for this item is in flight; re-picking only re-enters the gate
             options.append({
                 "option_id": f"op.mall_slot.{item}", "family": "mall_slot", "product": item, "need_id": f"stock:{item}",
                 "summary": f"mall slot for {item}", "params": {"item": item},
@@ -752,6 +780,8 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
             demand = demands.setdefault(item, {"target": 1, "missing": 0, "parents": []})
             demand["capability"] = True
     for item, demand in demands.items():
+        if item in loan_held:
+            continue  # a seed loan for this item is in flight
         # The tooling's stock_target is a network level (the mall's stock gate), not a delta: asking for the
         # bare shortage gated a drill cell at 4 while the network held 6 and the starter needed 8.
         have = int((stock or {}).get(item, 0))
@@ -1051,7 +1081,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                               facts.get("machines"), getattr(session, "growable", ()),
                                               enabled_recipes=facts.get("enabled_recipes"),
                                               transactions=(economics or {}).get("transactions"),
-                                              foundations=getattr(session, "foundation_facts", None)),
+                                              foundations=getattr(session, "foundation_facts", None),
+                                              loans=(economics or {}).get("loans")),
                               results, economics, reconcile_loans=settings.mall_loan_reconciliation)
         if objective:
             menu = add_research_options(menu, board, research, facts, objective)
