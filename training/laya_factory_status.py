@@ -152,7 +152,8 @@ def _diagnose(item: str, recipe: Mapping | None, buckets: Mapping[str, int], mac
     if recipe is None:
         return "recipe_unavailable"
     if machine_count == 0:
-        return "unbuilt"
+        # Stock alone can cover the need (e.g. gears made elsewhere): no machine is not a shortage then.
+        return "satisfied" if stock >= required * STOCKED_SECONDS else "unbuilt"
     for bucket, condition in (("power", "power_limited"), ("starved", "input_starved"), ("blocked", "output_blocked")):
         if buckets.get(bucket, 0) * 2 > machine_count:
             return condition
@@ -274,6 +275,7 @@ def compact_status(board: Mapping, limit: int = 12) -> dict:
         row = {"item": need["item"], "condition": need["condition"],
                "required": round(need["required_per_s"], 3),
                "measured": None if need["measured_per_s"] is None else round(need["measured_per_s"], 3),
+               "consumed": None if need.get("consumed_per_s") is None else round(need["consumed_per_s"], 3),
                "capacity": None if need["capacity_per_s"] is None else round(need["capacity_per_s"], 3),
                "machines": sum(need["machines"].values()), "stock": need["stock"]}
         if "goal_required_per_s" in need and abs(need["goal_required_per_s"] - need["required_per_s"]) > 1e-9:

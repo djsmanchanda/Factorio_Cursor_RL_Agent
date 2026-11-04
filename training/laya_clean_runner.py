@@ -386,6 +386,24 @@ def _candidate_funding_shortfalls(candidate: Mapping) -> dict[str, int]:
     return missing
 
 
+def _placement_bill(candidate: Mapping) -> dict[str, int]:
+    """Entities the candidate's plan places (the validator returns no bill when an item is short)."""
+    bill: Counter = Counter()
+    for phase in (candidate.get("plan") or {}).get("phases", []):
+        for action in phase.get("actions", []):
+            if action.get("action_type") in {"place_entity", "place_ghost", "place_ghost_no_reconcile"}:
+                bill[str(action["entity"])] += 1
+    return dict(bill)
+
+
+def _available(facts: Mapping, candidate: Mapping, item: str) -> int:
+    """Unreserved network stock of ``item`` for the candidate's network (all networks if it names none)."""
+    networks = facts.get("networks") or {}
+    own = networks.get(str(candidate.get("network")))
+    return sum(int(n.get("items", {}).get(item, 0)) - int((n.get("reserved") or {}).get(item, 0))
+               for n in ([own] if own else networks.values()))
+
+
 def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int, *,
                  site_plan: Mapping | None = None, starters: frozenset | set = frozenset(),
                  per_need_checked: int = 6, per_need_shown: int = 2,
@@ -458,7 +476,17 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
             by_need[_need_key(reach_facts, candidate, unmet)].append(candidate)
 
     rejected: Counter = Counter()
-    shortfalls: Counter = Counter()
+    shortfalls: Counter = Counter()  # Blocked candidates per short item.
+    unit_shortfalls: dict[str, int] = {}  # Most units of the item any blocked candidate lacks (bill - stock).
+    pending_units: dict[str, int] = {}  # Most units of the item any blocked candidate needs in total.
+
+    def note_units(item: str, candidate: Mapping, bill: Mapping, missing: Mapping | None = None) -> None:
+        needed = int(bill.get(item, 0))
+        lacking = int((missing or {}).get(item) or max(1, needed - _available(facts, candidate, item)))
+        if needed:
+            pending_units[item] = max(pending_units.get(item, 0), needed)
+        unit_shortfalls[item] = max(unit_shortfalls.get(item, 0), lacking)
+
     reasons: dict[str, Counter] = defaultdict(Counter)
     external_results = []
     external_needs = set()
@@ -544,6 +572,7 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
                 missing_items.add(reason.split(":", 1)[1])
             for item in missing_items:
                 shortfalls[item] += 1
+                note_units(item, candidate, candidate.get("bill") or _placement_bill(candidate), missing)
         summary = {"option_id": option_id, "need_id": need, "reason": reason,
                    "required_check_reason": required_reason, "dispatch_reason": "external_dispatch_unimplemented"}
         if admitted is not None:
@@ -607,7 +636,9 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
                     reasons[need][reason] += 1
                     rejected[reason.split(":", 1)[0]] += 1
                     if reason.startswith("item_shortfall:"):
-                        shortfalls[reason.split(":", 1)[1]] += 1
+                        item = reason.split(":", 1)[1]
+                        shortfalls[item] += 1
+                        note_units(item, candidate, candidate.get("bill") or _placement_bill(candidate))
                     continue
                 legal[need].append({**candidate, "bill": result.get("bill") or {}, "draws": requested_items(candidate),
                                      "need_id": need})
@@ -667,6 +698,10 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
               "wait_ticks": ticks, "need_id": "wait"} for ticks in WAIT_TICKS]
     options.extend(waits)
     needs.append({"need_id": "wait", "condition": "available", "options": [w["option_id"] for w in waits]})
+    # Needs that have options but also blocked candidates: the blocked reasons stay visible (top 4 per need).
+    blocked_alternatives = {
+        need: dict(sorted(reasons[need].items(), key=lambda kv: (-kv[1], kv[0]))[:4])
+        for need in sorted(legal) if legal[need] and reasons.get(need)}
     # Needs with no legal option, and why: observation, not a remedy.
     blocked = {need: dict(reasons[need]) for need in sorted(set(by_need) | set(stock_groups) | set(pre_rejected) | external_needs)
                if need not in legal}
@@ -681,7 +716,9 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
             for name, count in starter_bill(plate).items():
                 goal_reserve[name] = goal_reserve.get(name, 0) + count
     return {"needs": needs, "options": options, "proposed": len(proposed) + len(external_results), "blocked": blocked,
-            "rejected": dict(rejected), "shortfalls": dict(shortfalls), "goal_reserve": goal_reserve,
+            "blocked_alternatives": blocked_alternatives,
+            "rejected": dict(rejected), "shortfalls": dict(shortfalls), "unit_shortfalls": unit_shortfalls,
+            "pending_units": pending_units, "goal_reserve": goal_reserve,
             "land_rejections": {k: v for k, v in land_examples.items() if k in blocked},
             "line_site_diagnostics": line_diagnostics,
             "additional_candidate_results": external_results,
@@ -768,6 +805,9 @@ def build_state(facts: Mapping, menu: Mapping, board: Mapping, phase: Mapping, r
     blocks = [{"option_id": o["option_id"], **o["optimizer_facts"]} for o in menu["options"] if o.get("optimizer_facts")]
     if blocks:
         state["observation_digest"]["optimizer_blocks"] = blocks[:3]
+    supply = {key: menu[key] for key in ("unit_shortfalls", "blocked_alternatives") if menu.get(key)}
+    if supply:  # Per-item units short and why needs with options still have blocked candidates.
+        state["observation_digest"]["supply_facts"] = supply
     if menu.get('line_site_diagnostics'):state['observation_digest']['line_site_diagnostics']=menu['line_site_diagnostics']
     if settings.dependency_context:
         from training.laya_experiment_context import dependency_context
@@ -1015,6 +1055,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
     stall = {"since": 0, "best_gap": math.inf}
     samples: list[tuple[int, Mapping, Mapping]] = []
     stock_demand: dict[str, float] = {}
+    pending_units: dict[str, int] = {}  # Largest per-item need of blocked builds, from the previous menu.
     gates: dict = {}  # Mall slot gates applied this run: position -> (product, gated).
     index = -1
     while decisions is None or index + 1 < decisions:
@@ -1073,7 +1114,8 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                 summary["decisions"] += 1
                 continue
             retargets = (mall_slots.sync(adapter, facts, board, stock_demand, gates, emit,
-                                        gate_scale=settings.mall_gate_scale,buildable_multiplier=settings.mall_buildable_multiplier)
+                                        gate_scale=settings.mall_gate_scale,buildable_multiplier=settings.mall_buildable_multiplier,
+                                        pending_units=pending_units)
                          if settings.mall_slots and hasattr(adapter, "configure") else [])
             last_query: dict = {}
 
@@ -1109,6 +1151,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                                 additional_observations=demand_observations, external_check=external_check)
             # Items the checks found short become small demand targets on the next board.
             stock_demand = {item: settings.stock_rate for item in menu["shortfalls"]}
+            pending_units = menu.get("pending_units") or {}
             state = build_state(facts, menu, board, phase, run_id, policy.model_ref, history, measurement, settings)
             choice = policy.choose(state, menu)
             distribution = choice.pop("distribution", None)
@@ -1117,6 +1160,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
             record.update(event="decision", tick=facts["tick"], phase=phase["phase_id"], status="pending",
                           board=compact, menu={n["need_id"]: n["options"] for n in menu["needs"]},
                           rejected=menu["rejected"], shortfalls=menu["shortfalls"], blocked=menu["blocked"],
+                          unit_shortfalls=menu.get("unit_shortfalls"), blocked_alternatives=menu.get("blocked_alternatives"),
                           land_rejections=menu.get("land_rejections"), choice=choice,
                           additional_candidate_results=menu["additional_candidate_results"],
                           no_legal_build=not any(o["family"] != "wait" for o in menu["options"]),
