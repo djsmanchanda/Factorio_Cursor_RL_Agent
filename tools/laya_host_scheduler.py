@@ -52,6 +52,7 @@ DEFAULT_REGISTRY = ROOT / "data/laya-experiments"
 OCCUPYING = {"preparing", "running"}
 ACTIVE_QUEUE = {"queued", "preparing", "running"}
 DECISION = re.compile(r"^\+(\d+)s DECISION \d+ .*?\btick=(\d+)", re.M)
+RUN_SPEED = re.compile(r"^RUN START: .*?\bspeed=([0-9.]+)")
 TAIL_BYTES = 262144
 PROTOCOL = 1
 SOURCE_HASH = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
@@ -184,6 +185,17 @@ def _tail(path: Path, size: int = TAIL_BYTES) -> str:
         return handle.read().decode(errors="replace")
 
 
+def world_speed(log: Path) -> float:
+    """Live game speed the runner logged at start; worlds without it ran at 1x."""
+    try:
+        with log.open("rb") as handle:
+            match = RUN_SPEED.match(handle.readline(4096).decode(errors="replace"))
+    except OSError:
+        return 1.0
+    speed = float(match.group(1)) if match else 1.0
+    return speed if speed > 0 else 1.0
+
+
 def world_ups(world: Path, window_s: float) -> float | None:
     """Measured game updates per second from one runner's decision log."""
     log = world / "logs/laya-runner.log"
@@ -275,13 +287,20 @@ def discover(registry: Path, *, now: float | None = None, stale_seconds: float =
 
 
 def measure(cohorts: list[Cohort], *, window_s: float) -> dict[str, Any]:
+    # Floors and the climb use 1x-equivalent UPS (measured / game speed) so a
+    # floor means the same share of target speed for 1x and 2x cohorts.
     samples: list[float] = []
+    measured: list[float] = []
+    speeds: set[float] = set()
     unstable: list[str] = []
     for cohort in cohorts:
         for world in cohort.worlds:
             ups = world_ups(world, window_s)
             if ups is not None:
-                samples.append(ups)
+                speed = world_speed(world / "logs/laya-runner.log")
+                measured.append(ups)
+                samples.append(ups / speed)
+                speeds.add(speed)
             if _world_unstable(world, window_s):
                 unstable.append(f"{cohort.name}:{world.name}")
     return {
@@ -292,6 +311,8 @@ def measure(cohorts: list[Cohort], *, window_s: float) -> dict[str, Any]:
         "ups_p98": _percentile(samples, 0.02),
         "ups_mean": statistics.fmean(samples) if samples else None,
         "total_ups": sum(samples) if samples else None,
+        "measured_ups_mean": statistics.fmean(measured) if measured else None,
+        "game_speeds": sorted(speeds),
         "unstable": unstable,
         "temp_c": _package_temp_c(),
         "available_gb": _available_gb(),
