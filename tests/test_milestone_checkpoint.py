@@ -114,6 +114,16 @@ def test_capture_requires_quiescence_and_registered_sidecars(tmp_path):
         )
 
 
+def test_capture_rejects_save_at_a_different_tick(tmp_path):
+    root = _root(tmp_path)
+    with pytest.raises(checkpoint.MilestoneCheckpointError, match="saved tick differs"):
+        checkpoint.capture(root, client=FakeClient(root), checkpoint_id="C2",
+            generation_id="mismatch", run_id="run-1", lineage_id="lineage-1",
+            capture_tick=1233, predicate_version="metal-v1", predicate_evidence={},
+            creator_commit="abcdef0123456789", mod_hashes={"mod": "hash"},
+            quiescence_check=lambda: True, controller_handshake=lambda: True)
+
+
 def test_verify_rejects_creator_manifest_tampering_and_path_traversal(tmp_path):
     root = _root(tmp_path)
     bundle = checkpoint.capture(

@@ -326,9 +326,11 @@ def capture(
     except Exception as error:
         raise MilestoneCheckpointError("Factorio server_save command failed") from error
     try:
-        tick = int(response) if capture_tick is None else int(capture_tick)
+        tick = int(response)
     except (TypeError, ValueError) as error:
         raise MilestoneCheckpointError("server_save did not return a numeric capture tick") from error
+    if capture_tick is not None and tick != int(capture_tick):
+        raise MilestoneCheckpointError("saved tick differs from predicate capture tick")
     if tick < 0:
         raise MilestoneCheckpointError("capture tick cannot be negative")
     _wait_for_save(saved, timeout)
