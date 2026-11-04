@@ -3613,13 +3613,14 @@ def _dense_bootstrap_mall_enabled(
     long_handed_ready = "long-handed-inserter" in LINE_RECIPES
     if not long_handed_ready:
         return False
-    if not _iron_starter_released(client, surface, force):
+    # The dense bay is legal once the iron pioneer is gone. On a checkpoint restart no swap runs
+    # in-process, so the in-process ledger flags stay false; the world-state probe (foundations
+    # ready and both direct starters absent) is the same evidence and must open the gate too.
+    if not (_iron_starter_released(client, surface, force)
+            or _metal_starter_transition_complete(client, surface, force)):
         return False
-    return bool(
-        _STARTUP_METAL_STARTERS_OBSERVED
-        and long_handed_ready
-        and not _independent_mall_ready(client, surface, force)
-    )
+    return bool(long_handed_ready
+                and not _independent_mall_ready(client, surface, force))
 
 
 def _quad_bootstrap_mall_enabled(
