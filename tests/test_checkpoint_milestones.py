@@ -32,7 +32,7 @@ def _snapshot(**overrides):
 def test_default_registry_is_ordered_and_versioned_with_advanced_circuit_milestone():
     milestones = default_milestones()
     assert [item.checkpoint_id for item in milestones] == ["C0", "C1", "C2", "C3", "C4", "C5", "C6"]
-    assert all(item.predicate_version.endswith("-v1") for item in milestones)
+    assert [item.predicate_version for item in milestones] == [f"c{i}-v1" for i in range(6)] + ["c6-v2"]
     assert milestones[-1].name == "advanced_circuit_consumption"
 
 
@@ -107,6 +107,30 @@ def test_c5_ignores_preproduction_history_from_c0_lane():
 
 
 def test_c6_proves_advanced_circuit_production_and_new_owned_consumer_output():
+    baseline = {
+        "production": {"advanced-circuit": {"produced": 1}},
+        "recipes": {"processing-unit": {"owned": True, "ingredients": ["advanced-circuit"], "output_count": 0}},
+    }
+    current = {
+        "production": {"advanced-circuit": {"produced": 2}},
+        "recipes": {"processing-unit": {"owned": True, "ingredients": ["advanced-circuit"], "output_count": 1}},
+    }
+    assert evaluate_milestone("C6", current, baseline=baseline).passed
+
+
+def test_c6_v2_rejects_a_logistics_chest_as_the_production_consumer():
+    baseline = {
+        "production": {"advanced-circuit": {"produced": 1}},
+        "recipes": {"passive-provider-chest": {"owned": True, "ingredients": ["advanced-circuit"], "output_count": 0}},
+    }
+    current = {
+        "production": {"advanced-circuit": {"produced": 2}},
+        "recipes": {"passive-provider-chest": {"owned": True, "ingredients": ["advanced-circuit"], "output_count": 1}},
+    }
+    assert not evaluate_milestone("C6", current, baseline=baseline).passed
+
+
+def test_c6_v2_accepts_a_production_consumer():
     baseline = {
         "production": {"advanced-circuit": {"produced": 1}},
         "recipes": {"processing-unit": {"owned": True, "ingredients": ["advanced-circuit"], "output_count": 0}},
