@@ -49,7 +49,7 @@ IN_PROGRESS = {"temporary_mall_batch", "production_prerequisite_deferred", "rati
 FLUID_STARVED = ("fluid_ingredient_shortage", "no_input_fluid")
 # Receipts that put something into the world (training/laya_ops.receipt); a reservation or a wait does not.
 BUILT = {"producing", "submitted", "prerequisite_advanced"}
-STALL_TICKS = 18000  # five game minutes without measurable progress (loan batches are slow by design)
+STALL_TICKS = 40000  # guard-sensitivity arm: ~11 game minutes without measurable progress
 # Game time a run may go without a new proxy phase or strict acceptance, however busy it is. Cohort 7 part a
 # (96 runs, 2.1.22): the longest gap that still ended in a new milestone was 206,803 ticks (base-s78010; the C5
 # runs 144,255 and 110,392); four C0 loops went 379k-405k ticks without one. 80 minutes sits between.
