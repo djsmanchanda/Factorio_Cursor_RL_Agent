@@ -600,8 +600,38 @@ def saturated_feedstock(machines: list[Mapping], recipes: Mapping, stock: Mappin
     return found
 
 
-def add_c6_consumer_options(menu: dict, phase: Mapping, facts: Mapping) -> dict:
-    """Offer the permanent consumer service while the C6 advanced-circuit goal is active."""
+def service_construction_blocks(results: list[dict], stock: Mapping[str, int]) -> dict[str, dict]:
+    """Production services whose last attempt was short of its own construction bill.
+
+    Re-picking a blocked service only re-enters the same bill; hold it until the missing items are
+    stocked. The shortage items themselves are already offered by ``shortages``.
+    """
+    latest = {}
+    for result in results:
+        if result.get("operation") == "production_service":
+            latest[(result.get("params") or {}).get("item")] = result
+    blocked = {}
+    for item, result in latest.items():
+        if not item or result.get("ok") or result.get("code") != "material_shortage":
+            continue
+        details = result.get("details") or {}
+        available = details.get("available") or {}
+        missing = {name: int(count) - int(available.get(name, 0))
+                   for name, count in (details.get("required") or {}).items()}
+        missing = {name: count for name, count in missing.items() if count > 0}
+        if missing and any(int(stock.get(name, 0)) < count for name, count in missing.items()):
+            blocked[item] = missing
+    return blocked
+
+
+def add_c6_consumer_options(menu: dict, phase: Mapping, facts: Mapping,
+                            results: list[dict] | None = None,
+                            stock: Mapping[str, int] | None = None) -> dict:
+    """Offer the permanent consumer service while the C6 advanced-circuit goal is active.
+
+    A service whose last attempt was short of its construction bill is held while that bill is
+    unstocked: the missing items are already offered, so re-picking the service only loops.
+    """
     if phase.get("phase_id") not in {"C6", "S1"}:
         return menu
     catalog = facts.get("recipe_observations")
@@ -610,6 +640,8 @@ def add_c6_consumer_options(menu: dict, phase: Mapping, facts: Mapping) -> dict:
         return menu
     option_id = "op.production_service.productivity-module"
     if any(option["option_id"] == option_id for option in menu["options"]):
+        return menu
+    if "productivity-module" in service_construction_blocks(results or [], stock or {}):
         return menu
     menu["options"].append({"option_id": option_id, "family": "production_service",
         "product": "productivity-module", "need_id": "service:productivity-module",
@@ -1075,7 +1107,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                               foundations=getattr(session, "foundation_facts", None)),
                               results, economics, reconcile_loans=settings.mall_loan_reconciliation)
         if settings.production_service:
-            menu = add_c6_consumer_options(menu, phase, facts)
+            menu = add_c6_consumer_options(menu, phase, facts, results, stock)
         if objective:
             menu = add_research_options(menu, board, research, facts, objective)
         from training.laya_decision_pacing import apply_waits, multiplier
