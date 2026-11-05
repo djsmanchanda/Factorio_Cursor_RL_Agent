@@ -79,7 +79,7 @@ class OptimizerBlocks:
     """Candidate provider, verifier host, executor and reconciler for requester-fed optimizer blocks."""
 
     def __init__(self, root, *, run_id, game_version=None, margin=2, max_options=3, max_site_attempts=8,
-                 warmup_ticks=1800, window_ticks=3600, min_ratio=0.9, max_build_ticks=7200):
+                 warmup_ticks=1800, window_ticks=3600, min_ratio=0.9, max_build_ticks=7200, wait_for=None):
         self.root, _manifest = proposals.verify_disposable(root)
         self.run_id, self.game_version, self.margin = run_id, game_version, margin
         self.max_options, self.max_site_attempts = max_options, max_site_attempts
@@ -93,6 +93,10 @@ class OptimizerBlocks:
         self.halted: str | None = None
         self._base = None
         self._land_check = None
+        # Offer nothing until this item is made during the run (user 2026-11-06: wait for oil and plastic
+        # before making red; requester chests need advanced circuits). Production facts are cumulative from
+        # the base save, so the first observed count is the baseline.
+        self.wait_for, self._wait_base = wait_for, None
         self.observe_unlinked = True
         self._events: list[dict] = []
 
@@ -166,6 +170,11 @@ class OptimizerBlocks:
         blocked = self.blocking_reason()
         if blocked:
             return self._none(blocked, projects=[p["project_id"] for p in self.projects("selected", "submitted", "unresolved")])
+        if self.wait_for:
+            made = int((facts.get("production") or {}).get(self.wait_for, 0) or 0)
+            self._wait_base = made if self._wait_base is None else self._wait_base
+            if made <= self._wait_base:
+                return self._none(f"waiting_for_{self.wait_for}")
         needs = [n for n in board["needs"] if n.get("item") == PACK]
         if needs and all(n.get("condition") == "satisfied" for n in needs):
             return self._none("need_satisfied")

@@ -153,7 +153,8 @@ def main(argv=None) -> int:
             candidate_provider = None
             if args.optimizer_blocks:
                 from tools.optimizer_block_runtime import OptimizerBlocks
-                candidate_provider = adapter.optimizer_blocks = OptimizerBlocks(root, run_id=run_id)
+                # Requester-fed red block waits for plastic made in this run (red science is an S1 goal, after C4/C6).
+                candidate_provider = adapter.optimizer_blocks = OptimizerBlocks(root, run_id=run_id, wait_for="plastic-bar")
                 blocks_metadata = {"enabled": True, "registry": str(candidate_provider.path)}
                 log("OPTIMIZER BLOCKS: capability ON; verified block options are offered, execution is clock-paused and receipted")
             if args.optimizer_candidate:

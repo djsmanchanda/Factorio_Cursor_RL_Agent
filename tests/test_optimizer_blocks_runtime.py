@@ -210,6 +210,17 @@ def test_manager_offers_up_to_three_disjoint_sites_with_stable_identity_and_fact
     assert {c["optimizer_facts"]["project_id"]: blocks.offers[c["option_id"]].transaction_id for c in again} == ids
 
 
+def test_block_waits_for_plastic_made_during_the_run(manager):
+    """User 2026-11-06: wait for oil and plastic before making red (requester chests need advanced circuits)."""
+    adapter, ctx, blocks = manager
+    world = make_world(adapter, ctx.root)
+    blocks.wait_for = "plastic-bar"
+    facts = {**world["facts"], "production": {"plastic-bar": 392}}  # Cumulative from the base save.
+    assert blocks(adapter, facts, {"needs": []}) == [] and blocks.last["reason"] == "waiting_for_plastic-bar"
+    assert blocks(adapter, facts, {"needs": []}) == [] and adapter.paused_log == []  # Nothing composed while waiting.
+    assert blocks(adapter, {**facts, "production": {"plastic-bar": 393}}, {"needs": []})
+
+
 def test_manager_names_why_nothing_was_offered(manager):
     adapter, ctx, blocks = manager
     world = make_world(adapter, ctx.root, wf(items={k: v for k, v in world_facts()["networks"]["1"]["items"].items()
