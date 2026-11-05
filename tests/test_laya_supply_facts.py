@@ -82,3 +82,15 @@ def test_compact_status_carries_consumption():
     assert all("consumed" in row for row in rows.values())
     unmeasured = {row["item"]: row for row in compact_status(compile_status(world, phase("C1")["targets"]))["needs"]}
     assert all(row["consumed"] is None for row in unmeasured.values())
+
+
+def test_an_unfunded_external_build_becomes_stock_demand():
+    """An optimizer block the network cannot fund counts as a blocked build: its short items get stock needs."""
+    world = facts()
+    world["networks"]["1"]["items"]["requester-chest"] = 1
+    board = compile_status(world, phase("C1")["targets"])
+    legal = lambda cs: {c["option_id"]: {"reason": None, "bill": {"assembling-machine-1": 1}} for c in cs}  # noqa: E731
+    menu = compile_menu(world, board, legal, seed=1, external_shortfalls={"requester-chest": 2})
+    assert menu["shortfalls"]["requester-chest"] == 1
+    assert menu["unit_shortfalls"]["requester-chest"] == 2
+    assert menu["pending_units"]["requester-chest"] == 3  # Stock 1 + 2 lacking.

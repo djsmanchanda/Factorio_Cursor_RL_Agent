@@ -411,7 +411,8 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
                  request_multiplier: int | None = None, reservation_mode: str = 'strict',
                  additional_candidates: Sequence[Mapping] = (), observe_unlinked: bool = False,
                  additional_observations: Mapping | None = None,
-                 external_check: Callable[[Mapping, Mapping], tuple[str | None, Mapping | None]] | None = None) -> dict:
+                 external_check: Callable[[Mapping, Mapping], tuple[str | None, Mapping | None]] | None = None,
+                 external_shortfalls: Mapping[str, int] | None = None) -> dict:
     """Group legal options by the unmet need they serve.
 
     Each sampled build is offered with its power alternatives (training/laya_power.py).
@@ -422,6 +423,9 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     ``external_check`` is the opt-in capability for external (optimizer) candidates: it re-runs their
     required checks on the same query that just validated them and returns ``(reason, evidence)``.
     Without it external candidates are observation only, exactly as before.
+
+    ``external_shortfalls`` (item -> units lacking) is a build the provider could not offer because
+    the network cannot fund it; it counts as one more blocked candidate, so its items get stock needs.
     """
     rng = random.Random(seed)
     if additional_observations is not None and not isinstance(additional_observations, Mapping):
@@ -645,6 +649,10 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
         return legal
 
     legal = check(by_need)
+    for item, lacking in (external_shortfalls or {}).items():  # An unfunded external build, e.g. an optimizer block.
+        shortfalls[item] += 1
+        unit_shortfalls[item] = max(unit_shortfalls.get(item, 0), int(lacking))
+        pending_units[item] = max(pending_units.get(item, 0), _available(facts, {}, item) + int(lacking))
     for need, option in admitted_external:  # Only with the external_check capability: verified, selectable options.
         legal.setdefault(need, []).append(option)
     stock_groups: dict[str, list] = defaultdict(list)
@@ -1141,6 +1149,8 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
             external = candidate_provider(adapter, facts, board) if candidate_provider else ()
             describe = getattr(candidate_provider, "describe", None)
             demand_observations = describe(facts, board, external) if describe is not None else {}
+            last = getattr(candidate_provider, "last", None) or {}
+            unfunded = (last.get("detail") or {}).get("short") if last.get("reason") == "unfunded" else None
             menu = compile_menu(facts, board, validate_candidates, seed + index,
                                 site_plan=site_plan, starters=_starters_submitted(adapter), retargets=retargets,
                                 placed=_submitted_entities(adapter),
@@ -1148,7 +1158,8 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                                 request_multiplier=settings.request_multiplier,reservation_mode=settings.reservation_mode,
                                 additional_candidates=external,
                                 observe_unlinked=bool(getattr(candidate_provider, "observe_unlinked", False)),
-                                additional_observations=demand_observations, external_check=external_check)
+                                additional_observations=demand_observations, external_check=external_check,
+                                external_shortfalls=unfunded)
             # Items the checks found short become small demand targets on the next board.
             stock_demand = {item: settings.stock_rate for item in menu["shortfalls"]}
             pending_units = menu.get("pending_units") or {}
