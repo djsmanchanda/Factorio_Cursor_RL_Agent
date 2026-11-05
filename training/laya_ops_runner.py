@@ -751,6 +751,15 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                 and plates_in(item, recipes or {}) <= started):
             demand = demands.setdefault(item, {"target": 1, "missing": 0, "parents": []})
             demand["capability"] = True
+    # C6 consumer: c6-v2 needs a production consumer of advanced circuits, but the phase goal only
+    # names advanced-circuit. Offer one supported solid consumer so the policy can build the sink.
+    if ("advanced-circuit" in goal and "productivity-module" not in goal
+            and int((stock or {}).get("productivity-module", 0)) < 1
+            and (recipes or {}).get("productivity-module")
+            and obtainable(recipes or {}, "productivity-module", stock or {})):
+        demands.setdefault("productivity-module", {"target": 1, "missing": 0, "capability": True,
+                                                   "parents": ["produce:advanced-circuit"]})
+        sources.setdefault("productivity-module", set()).add("advanced-circuit")
     for item, demand in demands.items():
         # The tooling's stock_target is a network level (the mall's stock gate), not a delta: asking for the
         # bare shortage gated a drill cell at 4 while the network held 6 and the starter needed 8.
