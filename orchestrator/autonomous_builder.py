@@ -7714,6 +7714,24 @@ def _reserve_compact_mall_project(
             ),
         )
     stock = live_base.transferable_items(client, surface, force)
+    # PPC bootstrap deadlock: a passive-provider-chest needs 1 advanced circuit, and every AC cell's
+    # bill needs 1 PPC. If a non-AC cell spends the last PPC first, AC can never start and PPC can
+    # never be made. Keep the last PPC for the advanced-circuit cell.
+    try:
+        advanced_started = _production_started(
+            client, surface, force, "advanced-circuit",
+        )
+    except Exception:
+        advanced_started = True  # unknown telemetry must not preempt the existing bill path
+    if (item != "advanced-circuit"
+            and int(bill.get("passive-provider-chest", 0)) > 0
+            and int(stock.get("passive-provider-chest", 0)) <= 1
+            and not advanced_started):
+        raise ProductionPrerequisiteDeferred(
+            "keeping the last passive-provider-chest for the advanced-circuit cell",
+            code="ppc_reserved_for_ac", state="supply_wait",
+            details={"item": item, "reserved": "passive-provider-chest"},
+        )
     sources, rates = _material_sources_and_rates(
         client, surface, force, bill, stock,
     )
