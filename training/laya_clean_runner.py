@@ -102,11 +102,13 @@ RECIPE_LINE_LIVE = ('if e.type~="mining-drill" then local recipe=e.get_recipe();
                     'if ok and prev then local n=prev.name; if type(n)~="string" then n=n and n.name end; m.recipe=n end end end')
 COLLISION_RETURN = 'then return "collision" end'
 # Live: the refused entity, its tile, and what is there (tile name plus non-ore entity types, e.g.
-# "water" or "grass-1|tree+simple-entity"), so refusals the facts cannot explain become evidence.
+# "water" or "grass-1|tree+cliff"), so refusals the facts cannot explain become evidence. Minable
+# rocks read as "rock" (the saved-world check clears trees and rocks; see clearable_blocker).
 COLLISION_RETURN_LIVE = ('then return "collision:"..a.entity.."@"..p.x..","..p.y.."#"..(function() '
                          'local t=surface.get_tile(p.x,p.y) local kinds={} '
                          'for _,e in pairs(surface.find_entities_filtered{area={{p.x-2,p.y-2},{p.x+2,p.y+2}}}) do '
-                         'if e.type~="resource" and e.type~="character" then kinds[e.type]=true end end '
+                         'if e.type~="resource" and e.type~="character" then '
+                         'kinds[(e.type=="simple-entity" and clearable_obstacle(e)) and "rock" or e.type]=true end end '
                          'local names={} for k in pairs(kinds) do names[#names+1]=k end table.sort(names) '
                          'return ((t and t.valid and t.name) or "?")..(#names>0 and ("|"..table.concat(names,"+")) or "") '
                          'end)() end')
@@ -971,6 +973,16 @@ BLOCKED_FOOTPRINTS = "blocked-footprints.json"  # where the game refused an atom
 REFUSED_SITE = re.compile(r"^(collision:([^@:]+))@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)(?:#(.*))?$")
 
 
+UNBUILDABLE_TILE = re.compile(r"water|lava|space|void|out-of-map")  # terrain no robot can clear
+
+
+def clearable_blocker(blocker: str | None) -> bool:
+    """True when a live refusal's blocker ("tile|kind+kind") is only trees and minable rocks on buildable
+    ground: construction robots clear those under a ghost, so the footprint is not blocked for good."""
+    tile, _, kinds = (blocker or "").partition("|")
+    return bool(kinds) and set(kinds.split("+")) <= {"tree", "rock"} and not UNBUILDABLE_TILE.search(tile)
+
+
 def split_refused_sites(validations: Mapping[str, Mapping]) -> tuple[dict, list[dict]]:
     """Strip ``@x,y`` from live collision reasons; return the plain results and the refused footprints.
 
@@ -982,8 +994,10 @@ def split_refused_sites(validations: Mapping[str, Mapping]) -> tuple[dict, list[
         match = REFUSED_SITE.match(result.get("reason") or "") if isinstance(result, Mapping) else None
         if match:
             result = {**result, "reason": match.group(1)}
-            refused.append({"entity": match.group(2), "position": {"x": float(match.group(3)), "y": float(match.group(4))},
-                            **({"blocker": match.group(5)} if match.group(5) else {})})
+            # Trees and rocks alone are cleared by robots under the ghost, so they never block a footprint for good.
+            if not clearable_blocker(match.group(5)):
+                refused.append({"entity": match.group(2), "position": {"x": float(match.group(3)), "y": float(match.group(4))},
+                                **({"blocker": match.group(5)} if match.group(5) else {})})
         plain[option_id] = result
     return plain, refused
 

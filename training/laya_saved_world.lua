@@ -535,6 +535,63 @@ local function fluid_topology_snapshot(plan, include_tiles)
   end
   return snapshot
 end
+-- A player's blueprint builds ghosts over trees and rocks and bots clear them. A tree or a
+-- minable rock (simple-entity) is therefore not a collision; anything else still is.
+-- Mirrored by factorio_mod/layout_executor.lua, which orders their deconstruction before the ghost.
+local function clearable_obstacle(e)
+  local ok,kind,minable=pcall(function() return e.type,e.minable end)
+  return ok and (kind=="tree" or (kind=="simple-entity" and minable==true))
+end
+local function mask_layers(prototype)
+  local mask=prototype and prototype.collision_mask
+  return type(mask)=="table" and (mask.layers or mask) or nil
+end
+-- True when the footprint is refused only by clearable obstacles: terrain does not collide, at
+-- least one overlapping entity exists, and every overlapping entity is a tree or minable rock.
+-- Fails closed (false) on anything unreadable, on ghosts, and on entities of unknown mask.
+local function footprint_blocked_only_by_clearable(prototype, a)
+  local ok,result=pcall(function()
+    local layers,box=mask_layers(prototype),prototype.collision_box
+    if not layers or not box then return false end
+    local lt,rb=box.left_top or box[1],box.right_bottom or box[2]
+    local l,t,r,b=lt.x or lt[1],lt.y or lt[2],rb.x or rb[1],rb.y or rb[2]
+    local direction=defines.direction[a.direction or "north"]
+    if direction==defines.direction.east or direction==defines.direction.west then
+      l,t,r,b=-b,l,-t,r
+    elseif direction~=defines.direction.north and direction~=defines.direction.south then
+      local radius=math.max(math.abs(l),math.abs(t),math.abs(r),math.abs(b))
+      l,t,r,b=-radius,-radius,radius,radius
+    end
+    local p=a.position
+    local area={{p.x+l+0.001,p.y+t+0.001},{p.x+r-0.001,p.y+b-0.001}}
+    for x=math.floor(area[1][1]),math.ceil(area[2][1])-1 do
+      for y=math.floor(area[1][2]),math.ceil(area[2][2])-1 do
+        local tile=surface.get_tile(x,y)
+        if not tile or not tile.valid then return false end
+        for layer,enabled in pairs(layers) do
+          if enabled==true and tile.collides_with(layer) then return false end
+        end
+      end
+    end
+    local saw=false
+    for _,e in pairs(surface.find_entities_filtered{area=area}) do
+      if e.valid then
+        if e.type=="entity-ghost" or e.type=="tile-ghost" then return false end
+        local other=mask_layers(e.prototype)
+        local overlaps=other==nil
+        for layer,enabled in pairs(layers) do
+          if enabled==true and other and other[layer]==true then overlaps=true end
+        end
+        if overlaps then
+          if not clearable_obstacle(e) then return false end
+          saw=true
+        end
+      end
+    end
+    return saw
+  end)
+  return ok and result==true
+end
 local function validate(candidate)
   local network=candidate.network
   if candidate.network_anchor then
@@ -567,7 +624,7 @@ local function validate(candidate)
       end
       if not exists then
         bill[item.name]=(bill[item.name] or 0)+item.count
-        if not surface.can_place_entity{name=a.entity,position=p,direction=defines.direction[a.direction or "north"],type=a.underground_type,force=force} then return "collision" end
+        if not surface.can_place_entity{name=a.entity,position=p,direction=defines.direction[a.direction or "north"],type=a.underground_type,force=force} and not footprint_blocked_only_by_clearable(prototype,a) then return "collision" end
       end
       if a.recipe then
         local r=force.recipes[a.recipe]

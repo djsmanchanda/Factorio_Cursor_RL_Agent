@@ -182,7 +182,16 @@ local function terrain_blocks_placement(surface, action, area)
   return false
 end
 
-local function blocked_only_by_removals(surface, action, direction, removals)
+-- Trees and minable rocks: a player's blueprint builds over them and robots clear them. Plans opt in
+-- with build_plan.clear_natural_obstacles (saved-world disposable runs); others still treat them as collisions.
+-- Mirrored by training/laya_saved_world.lua, which makes the same call when validating.
+local function clearable_obstacle(entity)
+  if not entity or not entity.valid then return false end
+  local ok, kind, minable = pcall(function() return entity.type, entity.minable end)
+  return ok and (kind == "tree" or (kind == "simple-entity" and minable == true))
+end
+
+local function blocked_only_by_removals(surface, action, direction, removals, clear_natural)
   local area = oriented_collision_area(action, direction)
   if not area or terrain_blocks_placement(surface, action, area) then return false end
   local candidate_layers = collision_layers(prototypes.entity[action.entity])
@@ -191,7 +200,7 @@ local function blocked_only_by_removals(surface, action, direction, removals)
     if entity.valid then
       local entity_prototype = entity.prototype or prototypes.entity[entity.name]
       if masks_overlap(candidate_layers, collision_layers(entity_prototype)) then
-        if removals[entity] then
+        if removals[entity] or (clear_natural and clearable_obstacle(entity)) then
           saw_removal = true
         else
           return false
@@ -202,7 +211,7 @@ local function blocked_only_by_removals(surface, action, direction, removals)
   return saw_removal
 end
 
-local function atomic_placement_blocked(surface, force, action, removals)
+local function atomic_placement_blocked(surface, force, action, removals, clear_natural)
   local position = action.position
   if find_exact_entity(surface, force, action.entity, position) ~= nil then
     return false
@@ -225,7 +234,27 @@ local function atomic_placement_blocked(surface, force, action, removals)
   end)
   if not ok then return true end
   if can_place == true then return false end
-  return not blocked_only_by_removals(surface, action, direction, removals)
+  return not blocked_only_by_removals(surface, action, direction, removals, clear_natural)
+end
+
+-- Order deconstruction of the trees and rocks in a ghost's footprint before the ghost is created, as a
+-- blueprint does. Returns the number ordered, or nil plus a reason when one cannot be ordered.
+local function order_obstacle_deconstruction(surface, force, action, direction)
+  local area = oriented_collision_area(action, direction)
+  local layers = collision_layers(prototypes.entity[action.entity])
+  if not area or not layers then return 0 end
+  local ordered = 0
+  for _, entity in pairs(surface.find_entities_filtered({ area = area })) do
+    if entity.valid and clearable_obstacle(entity)
+      and masks_overlap(layers, collision_layers(entity.prototype or prototypes.entity[entity.name])) then
+      if entity.to_be_deconstructed() or entity.order_deconstruction(force) then
+        ordered = ordered + 1
+      else
+        return nil, "obstacle_deconstruction_refused"
+      end
+    end
+  end
+  return ordered
 end
 
 local function atomic_planned_placement_blocked(action, planned_actions)
@@ -955,7 +984,7 @@ local function execute_build_plan(authorization, build_plan)
       for _, action in ipairs(phase.actions or {}) do
         if action.action_type == "place_entity" or action.action_type == "place_ghost" or action.action_type == "place_ghost_no_reconcile" then
           counts.attempted_placements = counts.attempted_placements + 1
-          local blocked = atomic_placement_blocked(surface, force, action, removals)
+          local blocked = atomic_placement_blocked(surface, force, action, removals, build_plan.clear_natural_obstacles == true)
           if atomic_planned_placement_blocked(action, planned_placements) then
             blocked = true
           end
@@ -970,6 +999,25 @@ local function execute_build_plan(authorization, build_plan)
       counts.failed_placements = #placement_failures
       counts.placement_failures = placement_failures
       counts.error = "atomic_footprint_blocked"
+      return counts
+    end
+  end
+
+  -- Clear first, then place: robots remove the trees and rocks and build the ghost on the cleared tiles.
+  if build_plan.clear_natural_obstacles == true then
+    for _, phase in ipairs(build_plan.phases) do
+      for _, action in ipairs(phase.actions or {}) do
+        if action.action_type == "place_ghost" or action.action_type == "place_ghost_no_reconcile" then
+          local direction = action.direction and defines.direction[action.direction] or nil
+          local ordered, reason = order_obstacle_deconstruction(surface, force, action, direction)
+          if not ordered then record_failure(phase, action, reason) end
+        end
+      end
+    end
+    if #placement_failures > 0 then
+      counts.failed_placements = #placement_failures
+      counts.placement_failures = placement_failures
+      counts.error = "obstacle_deconstruction_refused"
       return counts
     end
   end

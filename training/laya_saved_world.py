@@ -416,7 +416,8 @@ def submission_plan(plan, evidence_tags=None, preexisting=()):
                 ghost["optimizer_ownership"] = dict(evidence_tags)
             projected.append(ghost)
         phases.append({**phase, "actions": projected})
-    return {**plan, "phases": phases}
+    # Trees and rocks in a footprint are cleared by robots under the ghost, as a blueprint does.
+    return {**plan, "phases": phases, "clear_natural_obstacles": True}
 
 
 def receipt_preexisting(receipt):
