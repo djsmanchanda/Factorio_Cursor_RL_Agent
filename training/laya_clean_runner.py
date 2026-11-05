@@ -22,6 +22,7 @@ import copy
 import json
 import math
 import random
+import re
 from contextlib import contextmanager
 from dataclasses import dataclass
 import time
@@ -133,10 +134,12 @@ class LiveWorld(SavedWorldAdapter):
         if RECIPE_LINE not in self.lua_source:
             raise SavedWorldError("saved-world helper changed; machine recipe line not found")
         self.lua_source = self.lua_source.replace(RECIPE_LINE, RECIPE_LINE_LIVE)
-        # Name the colliding entity so journals separate relay-pole from machine collisions.
+        # Name the refused entity and where, so journals separate relay-pole from machine collisions
+        # and the refused tile can be learned (split_refused_sites).
         if COLLISION_RETURN not in self.lua_source:
             raise SavedWorldError("saved-world helper changed; collision check not found")
-        self.lua_source = self.lua_source.replace(COLLISION_RETURN, 'then return "collision:"..a.entity end')
+        self.lua_source = self.lua_source.replace(
+            COLLISION_RETURN, 'then return "collision:"..a.entity.."@"..p.x..","..p.y end')
 
     def configure(self, actions: list[dict]) -> dict:
         """Reconfigure existing entities through the mod's configure_entity (no placement, no items)."""
@@ -948,6 +951,38 @@ def _built_counts(adapter: Any) -> dict[str, int]:
 BLOCKED_FOOTPRINTS = "blocked-footprints.json"  # where the game refused an atomic build
 
 
+REFUSED_SITE = re.compile(r"^(collision:([^@:]+))@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$")
+
+
+def split_refused_sites(validations: Mapping[str, Mapping]) -> tuple[dict, list[dict]]:
+    """Strip ``@x,y`` from live collision reasons; return the plain results and the refused footprints.
+
+    The live check names the candidate's own entity that the world refused (not the thing in the
+    way), so the footprint is where Laya may not place that entity again.
+    """
+    plain, refused = {}, []
+    for option_id, result in validations.items():
+        match = REFUSED_SITE.match(result.get("reason") or "") if isinstance(result, Mapping) else None
+        if match:
+            result = {**result, "reason": match.group(1)}
+            refused.append({"entity": match.group(2), "position": {"x": float(match.group(3)), "y": float(match.group(4))}})
+        plain[option_id] = result
+    return plain, refused
+
+
+def remember_refused_sites(root: Any, refused: Sequence[Mapping]) -> None:
+    """Append footprints the live check refused to the run's blocked footprints, so every generator
+    clears them from the next decision on (otherwise the same nearest sites are offered and refused forever)."""
+    if not root or not refused:
+        return
+    path = Path(root, "evidence", BLOCKED_FOOTPRINTS)
+    known = json.loads(path.read_text()) if path.exists() else []
+    merged = known + [r for i, r in enumerate(refused) if r not in known and r not in refused[:i]]
+    if len(merged) > len(known):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(merged) + "\n")
+
+
 def _submitted_entities(adapter: Any) -> list[dict]:
     """Entities of every build Laya submitted (belts, inserters, chests are not in the facts), plus
     footprints the game refused at submission, so those sites are not offered again."""
@@ -1134,7 +1169,8 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                 requested = prepare(candidates) if prepare is not None else list(candidates)
                 snapshot = adapter.query(requested)
                 last_query["snapshot"] = snapshot  # The required checks read this same query.
-                values = snapshot["validations"]
+                values, refused = split_refused_sites(snapshot["validations"])
+                remember_refused_sites(getattr(adapter, "root", None), refused)
                 diagnostic = getattr(candidate_provider, "validate", None)
                 if diagnostic is not None:
                     values = diagnostic(adapter, facts, candidates, snapshot)
