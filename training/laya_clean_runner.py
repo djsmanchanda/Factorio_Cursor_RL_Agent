@@ -71,6 +71,8 @@ class Settings:
     # Gated, rotating mall slots (training/laya_mall_slots.py). Default since 2026-10-05: C2 was
     # 0/141 and 0/186 without them, 40/173 with them (data/laya-experiments/variety-20261005).
     mall_slots: bool = True
+    # Treatment switch: offer a permanent C6 advanced-circuit consumer service (default off).
+    production_service: bool = False
     land_model: str = "patch"  # "grid": 64-tile parcels on a corridor lattice (training/laya_land_grid.py)
     mall_gate_scale: float = 1.0
     mall_buildable_multiplier: int = 5

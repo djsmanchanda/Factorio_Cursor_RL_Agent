@@ -600,6 +600,27 @@ def saturated_feedstock(machines: list[Mapping], recipes: Mapping, stock: Mappin
     return found
 
 
+def add_c6_consumer_options(menu: dict, phase: Mapping, facts: Mapping) -> dict:
+    """Offer the permanent consumer service while the C6 advanced-circuit goal is active."""
+    if phase.get("phase_id") != "C6":
+        return menu
+    catalog = facts.get("recipe_observations")
+    recipe = catalog.get("productivity-module") if isinstance(catalog, Mapping) else None
+    if not isinstance(recipe, Mapping) or recipe.get("enabled") is not True:
+        return menu
+    option_id = "op.production_service.productivity-module"
+    if any(option["option_id"] == option_id for option in menu["options"]):
+        return menu
+    menu["options"].append({"option_id": option_id, "family": "production_service",
+        "product": "productivity-module", "need_id": "service:productivity-module",
+        "params": {"item": "productivity-module", "stock_target": 10, "minimum_machines": 2},
+        "summary": "build a permanent productivity-module consumer line",
+        "features": {"goal_need": True, "bill_known": False, "sustained_service_verified": False}})
+    menu["needs"].append({"need_id": "service:productivity-module", "condition": "available",
+                          "options": [option_id]})
+    return menu
+
+
 def compile_options(board: Mapping, results: list[dict], tick: int | None = None, recipes: Mapping | None = None,
                     stock: Mapping[str, int] | None = None, machines: list[Mapping] | None = None,
                     growable: tuple[str, ...] = (), enabled_recipes: Mapping | None = None,
@@ -1053,6 +1074,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                               transactions=(economics or {}).get("transactions"),
                                               foundations=getattr(session, "foundation_facts", None)),
                               results, economics, reconcile_loans=settings.mall_loan_reconciliation)
+        if settings.production_service:
+            menu = add_c6_consumer_options(menu, phase, facts)
         if objective:
             menu = add_research_options(menu, board, research, facts, objective)
         from training.laya_decision_pacing import apply_waits, multiplier

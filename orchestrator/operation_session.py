@@ -43,7 +43,7 @@ PROFILE = "reduced-v1"  # no seed stock: every construction item is produced in 
 # What each operation promises when it returns normally (training/laya_ops_runner reads ``code``):
 # produce/mall_slot/steel promise a producing output; ensure_produced returns None after building only ONE
 # missing stage, which is progress but not the requested postcondition.
-PRODUCING_OPERATIONS = {"produce", "mall_slot", "steel", "grow", "scale_production"}
+PRODUCING_OPERATIONS = {"produce", "mall_slot", "steel", "grow", "scale_production", "production_service"}
 SUBMITTING_OPERATIONS = {"starter", "foundation", "extend"}  # their layout is submitted (bots build it)
 
 
@@ -139,6 +139,12 @@ class DeterministicSession:
             # stock_target is the network level wanted; the cell is capped there, so it stops when the need is met.
             "produce": lambda item, stock_target=1, finite=True: ab.produce_to_demand(
                 c, b, SURFACE, FORCE, item, ref, emit, stock_target=stock_target, finite=finite),
+            # A permanent production service: the deterministic line builder, with the cell sized for a
+            # real consumer line rather than a one-off batch. upgrade_bootstrap=True keeps it outside the
+            # bootstrap mall cap.
+            "production_service": lambda item, stock_target=10, minimum_machines=2: ab.ensure_produced(
+                c, b, SURFACE, FORCE, item, ref, emit, upgrade_bootstrap=True,
+                stock_target=max(1, int(stock_target)), minimum_machines=max(1, int(minimum_machines))),
             # One more gear/cable cell when every existing one runs flat out and other cells starve for it.
             "grow": lambda item, machines: ab.grow_producer(c, b, SURFACE, FORCE, item, ref, emit, machines=machines),
             # A standing slot in the bootstrap mall pool (the deterministic runner's "production prep").
