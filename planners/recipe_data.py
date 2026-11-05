@@ -17,6 +17,11 @@ LINE_RECIPES: Dict[str, dict] = {
         "machine": "assembling-machine-2", "ingredients": ["iron-plate"],
         "amounts": [1], "product_amount": 2, "craft_time": 0.5,
     },
+    "productivity-module": {
+        "machine": "assembling-machine-2",
+        "ingredients": ["advanced-circuit", "electronic-circuit"],
+        "amounts": [5, 5], "product_amount": 1, "craft_time": 15.0,
+    },
     "electronic-circuit": {
         "machine": "assembling-machine-2", "ingredients": ["copper-cable", "iron-plate"],
         "amounts": [3, 1], "product_amount": 1, "craft_time": 0.5,

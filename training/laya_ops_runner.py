@@ -602,7 +602,7 @@ def saturated_feedstock(machines: list[Mapping], recipes: Mapping, stock: Mappin
 
 def add_c6_consumer_options(menu: dict, phase: Mapping, facts: Mapping) -> dict:
     """Offer the permanent consumer service while the C6 advanced-circuit goal is active."""
-    if phase.get("phase_id") != "C6":
+    if phase.get("phase_id") not in {"C6", "S1"}:
         return menu
     catalog = facts.get("recipe_observations")
     recipe = catalog.get("productivity-module") if isinstance(catalog, Mapping) else None
