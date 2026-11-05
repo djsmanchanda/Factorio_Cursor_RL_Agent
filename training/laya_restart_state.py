@@ -198,8 +198,14 @@ def import_restart_state(bundle: dict, script_output: Path, *, episode_id: str, 
     if type(bundle["version"]) is not int or bundle["version"] != VERSION or bundle["scope"] != scope:
         raise ValueError("Restart version or scope mismatch")
     evaluator = CheckpointEvaluator()
-    if bundle["milestones"] != _milestones(evaluator):
-        raise ValueError("Strict milestone definitions differ")
+    current = _milestones(evaluator)
+    if bundle["milestones"] != current:
+        # A newer version of an unreached milestone (c6-v2) may differ; reached ones must not.
+        reached_ids = set(bundle.get("reached") or ())
+        current_by_id = {item["id"]: item for item in current}
+        if any(item["id"] in reached_ids and current_by_id.get(item["id"]) != item
+               for item in bundle["milestones"]):
+            raise ValueError("Strict milestone definitions differ")
     baseline = _decode_typed(bundle["baseline"], FactorySnapshot)
     history = bundle["history"]
     if not isinstance(history, list) or not 1 <= len(history) <= MAX_HISTORY:
