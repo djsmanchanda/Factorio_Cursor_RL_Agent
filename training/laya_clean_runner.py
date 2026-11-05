@@ -1062,7 +1062,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
     if site_plan:
         _draw_zones(adapter, site_plan, emit)
     summary = {"decisions": 0, "failures": 0, "phases_reached": reached, "stop": "decision_budget"}
-    stall = {"since": 0, "best_gap": math.inf}
+    stall = {"since": 0, "best_gap": math.inf, "best_short": math.inf}
     samples: list[tuple[int, Mapping, Mapping]] = []
     stock_demand: dict[str, float] = {}
     pending_units: dict[str, int] = {}  # Largest per-item need of blocked builds, from the previous menu.
@@ -1090,7 +1090,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
             built = _built_counts(adapter)
             board = compile_status(facts, phase["targets"], measurement, built, stock_demand) if phase else None
             while phase and phase_reached(board):
-                stall.update(since=0, best_gap=math.inf)
+                stall.update(since=0, best_gap=math.inf, best_short=math.inf)
                 reached.append(phase["phase_id"])
                 _append(journal, {"run_id": run_id, "event": "phase_reached", "phase": phase["phase_id"], "tick": facts["tick"]})
                 emit(f"PHASE REACHED: {phase['phase_id']} {phase['name']} at tick {facts['tick']}")
@@ -1249,8 +1249,12 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
             # Untagged coverage serves no current need, so it does not count as progress.
             # A retarget only re-plans an existing slot; it counts once the goal gap moves.
             served = chosen["family"] not in ("wait", "retarget") and chosen.get("need_id") != "coverage"
-            progressed = (served and receipt["status"] == "observed") or gap < stall["best_gap"] * 0.95
+            # Funding blocked builds is progress too: fewer units short than ever before in this phase.
+            short = sum((menu.get("unit_shortfalls") or {}).values())
+            progressed = ((served and receipt["status"] == "observed") or gap < stall["best_gap"] * 0.95
+                          or short < stall["best_short"])
             stall["best_gap"] = min(stall["best_gap"], gap)
+            stall["best_short"] = min(stall["best_short"], short)
             stall["since"] = 0 if progressed else stall["since"] + 1
             if stall["since"] >= settings.stall_decisions:
                 summary["stop"] = "stalled"

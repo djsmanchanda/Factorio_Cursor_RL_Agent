@@ -310,6 +310,28 @@ def test_loop_stops_as_stalled_when_only_waiting_without_progress(tmp_path):
     assert summary["stop"] == "stalled" and summary["decisions"] == STALL_DECISIONS + 2
 
 
+def test_funding_a_blocked_build_counts_as_progress(tmp_path):
+    """Live 2026-11-05 d0: retargets cut the iron line's shortage 6 drills -> 0 but the run stopped as stalled."""
+    class WaitOnly(FakeAdapter):
+        def query(self, candidates=None):
+            if candidates is not None:
+                return {"validations": {c["option_id"]: {"reason": "collision"} for c in candidates}}
+            return copy.deepcopy(self.world)
+
+    class Funding:  # An unfunded external build whose shortage shrinks every decision.
+        short = 40
+
+        def __call__(self, adapter, facts, board):
+            self.short -= 1
+            self.last = {"reason": "unfunded", "detail": {"short": {"iron-gear-wheel": self.short}}}
+            return []
+
+    from training.laya_clean_runner import STALL_DECISIONS
+    summary = run(WaitOnly(), ExplorationPolicy(0), journal=tmp_path / "j.jsonl", decisions=STALL_DECISIONS + 6,
+                  measure_ticks=300, seed=0, run_id="t", candidate_provider=Funding())
+    assert summary["stop"] != "stalled"
+
+
 def test_every_decision_is_recorded_for_fine_tuning(tmp_path):
     from training.laya_guided_policy import GuidedPolicy
     journal = tmp_path / "j.jsonl"
