@@ -44,7 +44,7 @@ from training.laya_power import POLES, power_variants, world_obstacles
 from training.laya_experiment_context import reservation_view
 from training.laya_site_plan import (base_zones, draw_command, load_plan, plan_options, reservation_reason,
                                     ring_expand_candidates, save_plan)
-from training.laya_lines import line_candidates
+from training.laya_lines import clear_of, line_candidates
 from training.laya_starters import STARTER_ORE, starter_bill, starter_candidates
 from training.laya_saved_world import (SAVED_WORLD_GHOST_FIELDS, SavedWorldAdapter, SavedWorldError,
                                        compile_candidates, decision_state, evaluate_required_checks,
@@ -453,6 +453,11 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     line_diagnostics = {}
     proposed += line_candidates(facts, site_plan, {p for p in plates if p in starters}, obstacles=obstacles,diagnostics=line_diagnostics)
     proposed += ring_expand_candidates(facts, site_plan)
+    # Coverage hops clear placed and refused footprints like every other family; the generators'
+    # fixed hops and the ring know no obstacles, so a refused roboport site was offered forever.
+    proposed = [c for c in proposed if c["family"] != "expand" or clear_of(_build_only(c)["phases"][0]["actions"], obstacles)]
+    # Power relays route around the same obstacles (a refused pole tile is nudged, not re-offered).
+    power_facts = {**facts, "layout_obstacles": [*(facts.get("layout_obstacles") or ()), *placed]}
     pre_rejected: dict[str, Counter] = defaultdict(Counter)
     land_examples: dict[str, list] = defaultdict(list)
 
@@ -615,7 +620,7 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
         for need in sorted(groups):
             builds = list(groups[need])
             rng.shuffle(builds)
-            variants = [v for c in builds[:per_need_checked] for v in power_variants(c, facts)]
+            variants = [v for c in builds[:per_need_checked] for v in power_variants(c, power_facts)]
             if builds and not variants:
                 reasons[need]["no_power_layout"] += 1
             expanded[need] = []
