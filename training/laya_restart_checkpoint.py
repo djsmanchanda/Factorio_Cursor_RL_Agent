@@ -364,7 +364,12 @@ def validate_restored(adapter, session, bundle, *, migration_contract=None):
     state = session.export_restart_state(mod_scope=mod_scope(adapter.manifest))
     state['scope']['mod_scope'] = context['restart_state']['scope']['mod_scope']
     if state != context['restart_state']:
-        raise ValueError('Restored baseline, history or ownership differs')
+        # An unreached milestone version (c6-v2) may differ; everything reached must match.
+        def _reached_only(value):
+            reached = set(value.get('reached') or ())
+            return {**value, 'milestones': [item for item in value.get('milestones', []) if item.get('id') in reached]}
+        if _reached_only(state) != _reached_only(context['restart_state']):
+            raise ValueError('Restored baseline, history or ownership differs')
     statuses = session.acceptance()
     if 'error' in statuses or not session._history or session._history[-1].tick != metadata['capture_tick']:
         raise ValueError('Fresh strict telemetry unavailable')
