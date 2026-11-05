@@ -643,9 +643,13 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
                     reasons[need][reason] += 1
                     rejected[reason.split(":", 1)[0]] += 1
                     if reason.startswith("item_shortfall:"):
-                        item = reason.split(":", 1)[1]
-                        shortfalls[item] += 1
-                        note_units(item, candidate, candidate.get("bill") or _placement_bill(candidate))
+                        # The live check lists every item the network cannot cover (``missing``), so each
+                        # becomes a stock need at once instead of surfacing one after another.
+                        missing = result.get("missing") if isinstance(result.get("missing"), Mapping) else {}
+                        bill = candidate.get("bill") or _placement_bill(candidate)
+                        for item in {reason.split(":", 1)[1], *missing}:
+                            shortfalls[item] += 1
+                            note_units(item, candidate, bill, missing)
                     continue
                 legal[need].append({**candidate, "bill": result.get("bill") or {}, "draws": requested_items(candidate),
                                      "need_id": need})

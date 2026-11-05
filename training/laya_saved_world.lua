@@ -581,16 +581,22 @@ local function validate(candidate)
       end
     end
   end
-  for name,count in pairs(bill) do
-    if (net.items[name] or 0)-(net.reserved[name] or 0)<count then return "item_shortfall:"..name end
+  -- Every item the network cannot cover, so a blocked build shows its whole shortage at once.
+  local names,missing,first={},nil,nil
+  for name in pairs(bill) do names[#names+1]=name end
+  table.sort(names)
+  for _,name in ipairs(names) do
+    local lacking=bill[name]-((net.items[name] or 0)-(net.reserved[name] or 0))
+    if lacking>0 then missing=missing or {}; missing[name]=lacking; first=first or name end
   end
+  if first then return "item_shortfall:"..first,nil,missing end
   return nil,bill
 end
 if request.candidates then
   local results={}
   for _, c in ipairs(request.candidates) do
-    local reason,bill=validate(c)
-    local result={reason=reason,bill=bill}
+    local reason,bill,missing=validate(c)
+    local result={reason=reason,bill=bill,missing=missing}
     if c.inspect_power_topology==true then
       local poles={}
       for i=1,math.min(#facts.poles,5000) do poles[i]=facts.poles[i] end

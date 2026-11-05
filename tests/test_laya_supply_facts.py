@@ -108,3 +108,17 @@ def test_an_unfunded_item_nothing_enabled_can_make_gets_no_stock_need():
     legal = lambda cs: {c["option_id"]: {"reason": None, "bill": {"assembling-machine-1": 1}} for c in cs}  # noqa: E731
     menu = compile_menu(world, board, legal, seed=1, external_shortfalls={"requester-chest": 2})
     assert "requester-chest" not in menu["shortfalls"] and menu["unit_shortfalls"]["requester-chest"] == 2
+
+
+def test_every_item_a_blocked_build_lacks_becomes_a_stock_need():
+    """Live 2026-11-05 e1: the check named one missing item at a time, so a line was funded item after item."""
+    world = facts()
+    board = compile_status(world, phase("C1")["targets"])
+
+    def validate(candidates):
+        return {c["option_id"]: ({"reason": "item_shortfall:inserter", "missing": {"inserter": 3, "transport-belt": 5}}
+                                 if c["family"] == "assemble" else {"reason": None, "bill": {"assembling-machine-1": 1}})
+                for c in candidates}
+    menu = compile_menu(world, board, validate, seed=1, per_need_checked=12)
+    assert menu["shortfalls"]["transport-belt"] == menu["shortfalls"]["inserter"] > 0
+    assert menu["unit_shortfalls"]["transport-belt"] == 5 and menu["unit_shortfalls"]["inserter"] == 3
