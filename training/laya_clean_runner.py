@@ -36,7 +36,7 @@ from core.local_time import local_stamp
 from orchestrator.laya_operations import sha256_hash
 from orchestrator.laya_state import validate_state
 from planners.plan_validation import actions, validate_build_plan
-from training.laya_factory_status import apply_to_state, compact_status, compile_status
+from training.laya_factory_status import apply_to_state, compact_status, compile_status, makeable
 from training.laya_mission import MISSION_ID, current_phase, phase_reached
 from training.laya_guided_policy import load_preferences, matches, option_features
 from training.laya_power import POLES, power_variants, world_obstacles
@@ -650,8 +650,10 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
 
     legal = check(by_need)
     for item, lacking in (external_shortfalls or {}).items():  # An unfunded external build, e.g. an optimizer block.
-        shortfalls[item] += 1
         unit_shortfalls[item] = max(unit_shortfalls.get(item, 0), int(lacking))
+        if not makeable(item, facts.get("recipes") or {}):
+            continue  # Visible as a shortfall, but no stock need: nothing enabled can make it yet.
+        shortfalls[item] += 1
         pending_units[item] = max(pending_units.get(item, 0), _available(facts, {}, item) + int(lacking))
     for need, option in admitted_external:  # Only with the external_check capability: verified, selectable options.
         legal.setdefault(need, []).append(option)

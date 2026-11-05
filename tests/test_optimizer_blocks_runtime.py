@@ -482,6 +482,17 @@ def test_observe_decision_records_each_funnel_stage(manager):
     assert json.loads(blocks.path.read_text())["funnel"]["selected"] == 1
 
 
+def test_a_block_the_menu_skipped_for_a_satisfied_need_is_not_a_check_failure(manager):
+    adapter, ctx, blocks = manager
+    wait = {"option_id": "wait.300", "family": "wait"}
+    blocks.offers = {"optimizer.x": object()}  # Offered by the provider ...
+    blocks.observe_decision(index=1, tick=10, menu={"options": [wait], "additional_candidate_results": []},
+                            chosen_id="wait.300")  # ... but the menu recorded no result for it.
+    rejected = {"options": [wait], "additional_candidate_results": [{"option_id": "optimizer.x", "reason": "x"}]}
+    blocks.observe_decision(index=2, tick=20, menu=rejected, chosen_id="wait.300")
+    assert [e.get("reason") for e in blocks.drain_events()] == ["need_satisfied", "check_failed"]
+
+
 # --------------------------------------------------------------------------- the runner loop wiring
 
 class Provider:

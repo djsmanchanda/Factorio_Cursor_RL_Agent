@@ -83,6 +83,16 @@ def goal_demand(targets: Mapping[str, float], recipes: Mapping[str, Mapping]) ->
             for item in demand}
 
 
+def makeable(item: str, recipes: Mapping[str, Mapping], _path: tuple[str, ...] = ()) -> bool:
+    """Whether ``item`` can be made from raw resources through enabled recipes (``facts["recipes"]``)."""
+    if item in RAW_ITEMS:
+        return True
+    recipe = recipes.get(item)
+    if recipe is None or item in _path:
+        return False
+    return all(makeable(part["name"], recipes, _path + (item,)) for part in recipe["ingredients"])
+
+
 def machine_rate(machine: str, item: str, recipe: Mapping | None) -> float | None:
     """Theoretical items/s of one machine on ``item``; ``None`` when unknown."""
     if recipe is None:

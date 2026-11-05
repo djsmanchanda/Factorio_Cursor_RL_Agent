@@ -254,9 +254,10 @@ class OptimizerBlocks:
         if not shown:
             reason, detail = self.last["reason"] or "check_failed", dict(self.last["detail"])
             if self.offers:  # Offered by the provider but removed by the menu's own legality checks.
-                reason = "check_failed"
-                detail = {"menu_results": [{"option_id": r["option_id"], "reason": r.get("reason")}
-                                           for r in menu.get("additional_candidate_results", ())]}
+                results = [{"option_id": r["option_id"], "reason": r.get("reason")}
+                           for r in menu.get("additional_candidate_results", ())]
+                # No result at all: the menu skipped the block because the board has no unmet need for its product.
+                reason, detail = ("check_failed", {"menu_results": results}) if results else ("need_satisfied", {})
             stage = "never_offered"
         elif chosen_id in shown:
             stage, reason, detail = "selected", None, {"option_id": chosen_id}

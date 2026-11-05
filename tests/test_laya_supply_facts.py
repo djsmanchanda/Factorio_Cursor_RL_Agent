@@ -94,3 +94,17 @@ def test_an_unfunded_external_build_becomes_stock_demand():
     assert menu["shortfalls"]["requester-chest"] == 1
     assert menu["unit_shortfalls"]["requester-chest"] == 2
     assert menu["pending_units"]["requester-chest"] == 3  # Stock 1 + 2 lacking.
+
+
+def test_an_unfunded_item_nothing_enabled_can_make_gets_no_stock_need():
+    """Live 2026-11-05 c0: requester chests need advanced circuits (no recipe yet); slots retargeted to them starved."""
+    from training.laya_factory_status import makeable
+    world = facts()
+    recipes = world.setdefault("recipes", {})
+    recipes["requester-chest"] = {"ingredients": [{"name": "advanced-circuit", "amount": 3}], "product_amount": 1}
+    recipes.pop("advanced-circuit", None)
+    assert not makeable("requester-chest", recipes) and makeable("iron-ore", recipes)
+    board = compile_status(world, phase("C1")["targets"])
+    legal = lambda cs: {c["option_id"]: {"reason": None, "bill": {"assembling-machine-1": 1}} for c in cs}  # noqa: E731
+    menu = compile_menu(world, board, legal, seed=1, external_shortfalls={"requester-chest": 2})
+    assert "requester-chest" not in menu["shortfalls"] and menu["unit_shortfalls"]["requester-chest"] == 2
