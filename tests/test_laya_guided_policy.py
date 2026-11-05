@@ -148,3 +148,17 @@ def test_builds_whose_inputs_nobody_makes_are_flagged():
     assert option_features(s, m)["asm.c"]["inputs_missing"]
     s["observation_digest"]["factory_status"]["needs"][0]["measured"] = 0.2
     assert not option_features(s, m)["asm.c"]["inputs_missing"]
+
+
+def test_deepest_bottleneck_is_the_deepest_link_on_the_menu():
+    """Live 2026-11-05 b: poles starved of steel, ore unservable -- steel, not ore, is the deepest actionable input."""
+    from training.laya_guided_policy import option_features
+    s = {"observation_digest": {"factory_status": {"bottleneck": [
+        "medium-electric-pole:input_starved <- steel-plate:unbuilt <- iron-plate:under_capacity <- iron-ore:short"]}}}
+    m = {"options": [{"option_id": "wait.300", "family": "wait", "need_id": "wait"},
+                     {"option_id": "pole", "family": "assemble", "need_id": "item:medium-electric-pole"},
+                     {"option_id": "steel", "family": "smelt", "need_id": "item:steel-plate"}],
+         "needs": []}
+    features = option_features(s, m)
+    assert features["steel"]["deepest_bottleneck"] and not features["pole"]["deepest_bottleneck"]
+    assert features["pole"]["in_bottleneck"]

@@ -39,7 +39,15 @@ def option_features(state: Mapping, menu: Mapping) -> dict[str, dict]:
     status = (state.get("observation_digest") or {}).get("factory_status") or {}
     chains = [chain.split(" <- ") for chain in status.get("bottleneck") or []]
     in_chain = {link.split(":")[0] for chain in chains for link in chain}
-    deepest = {chain[-1].split(":")[0] for chain in chains if chain}
+    # Deepest unmet input Laya can act on: the last link with a build on this menu. A deeper link with
+    # no option (e.g. ore that only comes via starters) cannot be served and would hide its consumer.
+    actionable = {o["need_id"].split(":", 1)[1] for o in menu["options"]
+                  if o["family"] != "wait" and ":" in (o.get("need_id") or "")}
+    deepest = set()
+    for chain in chains:
+        items = [link.split(":")[0] for link in chain]
+        if items:
+            deepest.add(next((item for item in reversed(items) if item in actionable), items[-1]))
     # Items the phase goals need (goal rate > 0), as opposed to stock-chain-only items.
     goal_items = {row["item"] for row in status.get("needs") or [] if row.get("goal", row.get("required") or 0) > 0}
     phase = (state.get("observation_digest") or {}).get("mission_phase")
