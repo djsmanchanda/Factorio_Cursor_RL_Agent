@@ -305,11 +305,21 @@ def capture(adapter, session, checkpoint, summary, results, *, run_id, already_p
             adapter.bridge.command('/sc game.tick_paused=false')
 
 
+def _predicate_version(checkpoint_id):
+    from orchestrator.checkpoint_milestones import default_milestones
+    return next((item.predicate_version for item in default_milestones()
+                 if item.checkpoint_id == checkpoint_id), None)
+
+
 def restore(bundle, root, *, migration_contract=None):
     from training.laya_restart_state import import_restart_state
     metadata, context = load(bundle)
     if context['predicate_sha256'] != predicate_hash():
-        raise ValueError('Restoring code has a different strict predicate source')
+        # A newer milestone version (c6-v2) changes the whole-file hash while the origin
+        # predicate is unchanged. Accept only when the bundle's origin version still matches.
+        version = (metadata.get('predicate') or {}).get('version')
+        if not version or version != _predicate_version(metadata.get('checkpoint_id')):
+            raise ValueError('Restoring code has a different strict predicate source')
     manifest = json.loads((Path(root) / 'manifest.json').read_text())
     if manifest.get('production_authority') is not False or manifest.get('runtime') != 'disposable_saved_world':
         raise ValueError('Checkpoint reload must be disposable')
