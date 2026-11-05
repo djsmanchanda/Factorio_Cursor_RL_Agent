@@ -142,6 +142,20 @@ def predecessors_done(registry, names):
     return True
 
 
+def _milestone_versions(path):
+    """Predicate version per checkpoint from an arm's MilestoneDefinition calls (AST, no import)."""
+    import ast
+    versions = {}
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if (isinstance(node, ast.Call) and getattr(node.func, "id", "") == "MilestoneDefinition"
+                and len(node.args) >= 3):
+            try:
+                versions[ast.literal_eval(node.args[0])] = ast.literal_eval(node.args[2])
+            except Exception:
+                continue
+    return versions
+
+
 def enqueue(repo, registry, spec):
     """Freeze immutable Git arms and every planned job before any dispatch."""
     name = spec['name']
@@ -281,8 +295,18 @@ def enqueue(repo, registry, spec):
             if predicate is not None and predicate != current:
                 raise ValueError('Strict predicate source differs between arms')
             predicate = current
+            arm_versions = _milestone_versions(code/'orchestrator/checkpoint_milestones.py')
             for job in jobs:
-                if job['bundle'] and load_checkpoint(job['bundle'])[1]['predicate_sha256'] != current:
+                if not job['bundle']:
+                    continue
+                bundle_meta, bundle_ctx = load_checkpoint(job['bundle'])
+                if bundle_ctx['predicate_sha256'] == current:
+                    continue
+                # A newer milestone version (c6-v2) changes the whole-file hash while the origin
+                # predicate is unchanged. Accept only when the origin version still matches.
+                origin = bundle_meta.get('checkpoint_id')
+                bundle_version = ((bundle_meta.get('predicate') or {}).get('version'))
+                if not bundle_version or arm_versions.get(origin) != bundle_version:
                     raise ValueError('Checkpoint predicate source differs from frozen arm')
             if config.get('variant'):
                 variant = (code/config['variant']).resolve()
