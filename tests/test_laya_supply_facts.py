@@ -122,3 +122,10 @@ def test_every_item_a_blocked_build_lacks_becomes_a_stock_need():
     menu = compile_menu(world, board, validate, seed=1, per_need_checked=12)
     assert menu["shortfalls"]["transport-belt"] == menu["shortfalls"]["inserter"] > 0
     assert menu["unit_shortfalls"]["transport-belt"] == 5 and menu["unit_shortfalls"]["inserter"] == 3
+
+
+def test_stock_never_satisfies_a_phase_goal_with_no_machine():
+    """Live 2026-11-05 g0: 776 cables in stock hid the C1 copper-cable goal, so no cable build was offered."""
+    recipe = {"ingredients": [{"name": "copper-plate", "amount": 1}], "product_amount": 2, "energy_ticks": 30}
+    assert _diagnose("copper-cable", recipe, {}, 0, 0.5, None, 0.0, stock=776, goal=True) == "unbuilt"
+    assert _diagnose("copper-cable", recipe, {}, 0, 0.5, None, 0.0, stock=776) == "satisfied"

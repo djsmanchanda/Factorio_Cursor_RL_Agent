@@ -151,7 +151,8 @@ def _upgrade_fact(machines: Sequence[Mapping], item: str, recipe: Mapping | None
 
 
 def _diagnose(item: str, recipe: Mapping | None, buckets: Mapping[str, int], machine_count: int,
-              required: float, capacity: float | None, measured: float | None, stock: int = 0) -> str:
+              required: float, capacity: float | None, measured: float | None, stock: int = 0,
+              goal: bool = False) -> str:
     """Describe the measured condition of one need; never prescribe a remedy."""
     if measured is not None and measured >= required * SATISFIED_SHARE:
         return "satisfied"
@@ -162,8 +163,9 @@ def _diagnose(item: str, recipe: Mapping | None, buckets: Mapping[str, int], mac
     if recipe is None:
         return "recipe_unavailable"
     if machine_count == 0:
-        # Stock alone can cover the need (e.g. gears made elsewhere): no machine is not a shortage then.
-        return "satisfied" if stock >= required * STOCKED_SECONDS else "unbuilt"
+        # Stock alone can cover an input (e.g. gears made elsewhere): no machine is not a shortage then.
+        # A phase goal is judged on its measured rate (laya_mission.phase_reached), so stock never covers it.
+        return "satisfied" if not goal and stock >= required * STOCKED_SECONDS else "unbuilt"
     for bucket, condition in (("power", "power_limited"), ("starved", "input_starved"), ("blocked", "output_blocked")):
         if buckets.get(bucket, 0) * 2 > machine_count:
             return condition
@@ -216,7 +218,7 @@ def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Ma
             if per_machine:
                 machines_needed[tier] = math.ceil(required / per_machine - 1e-9)
         condition = _diagnose(item, recipe, buckets, len(machines), required, capacity, measured,
-                              int(stock.get(item, 0)))
+                              int(stock.get(item, 0)), goal=item in targets)
         if condition == "unbuilt" and built.get(item, 0) > 0:
             condition = "built_idle"  # Built by the runner but never ran (usually starved of input).
         needs.append({
