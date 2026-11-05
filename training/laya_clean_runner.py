@@ -101,6 +101,15 @@ RECIPE_LINE_LIVE = ('if e.type~="mining-drill" then local recipe=e.get_recipe();
                     'if not m.recipe and e.type=="furnace" then local ok,prev=pcall(function() return e.previous_recipe end); '
                     'if ok and prev then local n=prev.name; if type(n)~="string" then n=n and n.name end; m.recipe=n end end end')
 COLLISION_RETURN = 'then return "collision" end'
+# Live: the refused entity, its tile, and what is there (tile name plus non-ore entity types, e.g.
+# "water" or "grass-1|tree+simple-entity"), so refusals the facts cannot explain become evidence.
+COLLISION_RETURN_LIVE = ('then return "collision:"..a.entity.."@"..p.x..","..p.y.."#"..(function() '
+                         'local t=surface.get_tile(p.x,p.y) local kinds={} '
+                         'for _,e in pairs(surface.find_entities_filtered{area={{p.x-2,p.y-2},{p.x+2,p.y+2}}}) do '
+                         'if e.type~="resource" and e.type~="character" then kinds[e.type]=true end end '
+                         'local names={} for k in pairs(kinds) do names[#names+1]=k end table.sort(names) '
+                         'return ((t and t.valid and t.name) or "?")..(#names>0 and ("|"..table.concat(names,"+")) or "") '
+                         'end)() end')
 PAUSED_ASSERTION = 'assert(game.tick_paused and game.ticks_to_run == 0, "saved-world clock must be paused")'
 
 Validator = Callable[[Sequence[Mapping]], Mapping[str, Mapping]]
@@ -138,8 +147,7 @@ class LiveWorld(SavedWorldAdapter):
         # and the refused tile can be learned (split_refused_sites).
         if COLLISION_RETURN not in self.lua_source:
             raise SavedWorldError("saved-world helper changed; collision check not found")
-        self.lua_source = self.lua_source.replace(
-            COLLISION_RETURN, 'then return "collision:"..a.entity.."@"..p.x..","..p.y end')
+        self.lua_source = self.lua_source.replace(COLLISION_RETURN, COLLISION_RETURN_LIVE)
 
     def configure(self, actions: list[dict]) -> dict:
         """Reconfigure existing entities through the mod's configure_entity (no placement, no items)."""
@@ -960,7 +968,7 @@ def _built_counts(adapter: Any) -> dict[str, int]:
 BLOCKED_FOOTPRINTS = "blocked-footprints.json"  # where the game refused an atomic build
 
 
-REFUSED_SITE = re.compile(r"^(collision:([^@:]+))@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$")
+REFUSED_SITE = re.compile(r"^(collision:([^@:]+))@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)(?:#(.*))?$")
 
 
 def split_refused_sites(validations: Mapping[str, Mapping]) -> tuple[dict, list[dict]]:
@@ -974,7 +982,8 @@ def split_refused_sites(validations: Mapping[str, Mapping]) -> tuple[dict, list[
         match = REFUSED_SITE.match(result.get("reason") or "") if isinstance(result, Mapping) else None
         if match:
             result = {**result, "reason": match.group(1)}
-            refused.append({"entity": match.group(2), "position": {"x": float(match.group(3)), "y": float(match.group(4))}})
+            refused.append({"entity": match.group(2), "position": {"x": float(match.group(3)), "y": float(match.group(4))},
+                            **({"blocker": match.group(5)} if match.group(5) else {})})
         plain[option_id] = result
     return plain, refused
 
