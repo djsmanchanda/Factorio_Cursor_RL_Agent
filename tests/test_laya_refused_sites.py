@@ -67,7 +67,7 @@ def test_live_collision_reasons_become_blocked_footprints(tmp_path):
 
 def test_the_live_refusal_names_what_is_on_the_tile():
     plain, refused = split_refused_sites({"x": {"reason": "collision:roboport@58,-24#water"},
-                                          "y": {"reason": "collision:transport-belt@81.5,-22.5#grass-1|tree"}})
+                                          "y": {"reason": "collision:transport-belt@81.5,-22.5#grass-1|cliff"}})
     assert [r["reason"] for r in plain.values()] == ["collision:roboport", "collision:transport-belt"]
-    assert [r.get("blocker") for r in refused] == ["water", "grass-1|tree"]
+    assert [r.get("blocker") for r in refused] == ["water", "grass-1|cliff"]
     assert refused[0]["position"] == {"x": 58.0, "y": -24.0}
