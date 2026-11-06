@@ -6238,15 +6238,22 @@ def _emit_loan_cell_telemetry(
     try:
         missing = "-"
         scarcest = 0.0
+        # C58-C77 (2026-11-06): the AC requester held plastic-bar 0 in 79% of
+        # 1,978 lines while the base held 50+, and `missing` (base-wide) stayed
+        # "-", so the reachability probe never ran. Name the ingredient the
+        # requester itself lacks a craft of, independent of base-wide stock.
+        starved = "-"
+        driest = 1.0
         for item, amount in ingredients:
-            short = (
-                float(amount)
-                - float(contents.get(item, 0))
-                - float(actual.get(item, 0))
-            )
+            held = float(contents.get(item, 0))
+            short = float(amount) - held - float(actual.get(item, 0))
             if short > scarcest:
                 scarcest = short
                 missing = item
+            if amount > 0 and held / float(amount) < driest:
+                driest = held / float(amount)
+                starved = item
+        probe = missing if missing != "-" else starved
         baseline = loan.step_baseline_finished or 0
         crafts_done = (
             max(0, int(products_finished) - int(baseline))
@@ -6275,15 +6282,15 @@ def _emit_loan_cell_telemetry(
         # that ambiguity into one number: network>0 means a bot-delivery
         # fault, network==0 means a coverage/segmentation fault.
         far = "?"
-        if missing != "-":
+        if probe != "-":
             try:
                 network_count = live_base.network_item_count(
-                    client, surface, force, loan.requester_position, missing,
+                    client, surface, force, loan.requester_position, probe,
                 )
             except Exception:  # noqa: BLE001 -- diagnostic only
                 network_count = None
             if network_count is not None:
-                far = f"{missing}={network_count}"
+                far = f"{probe}={network_count}"
         emit(
             f"  LOAN CELL TELEMETRY: {step.recipe} at {loan.machine_position} "
             f"bill {int(actual.get(loan.target_item, 0))}/{loan.target_count}"
@@ -6292,7 +6299,8 @@ def _emit_loan_cell_telemetry(
             f"/{need if need is not None else '?'} "
             f"| requester {requester} net {net} missing {missing} "
             f"| pool {pool} free | loans {table}"
-            + (f" | reachable {far}" if missing != "-" and far != "?" else "")
+            + (f" | starved {starved}" if missing == "-" and starved != "-" else "")
+            + (f" | reachable {far}" if far != "?" else "")
         )
     except Exception as error:
         emit(f"  LOAN CELL TELEMETRY skipped: {error}")
