@@ -162,3 +162,23 @@ def test_deepest_bottleneck_is_the_deepest_link_on_the_menu():
     features = option_features(s, m)
     assert features["steel"]["deepest_bottleneck"] and not features["pole"]["deepest_bottleneck"]
     assert features["pole"]["in_bottleneck"]
+
+
+def test_inputs_a_blocked_goal_build_is_short_of_are_goal_blockers():
+    """Live 2026-11-05 h1: plate lines blocked short of drills, drills starved of circuits, circuits rarely picked."""
+    from training.laya_guided_policy import option_features
+    s = {"observation_digest": {"factory_status": {
+        "needs": [{"item": "iron-plate", "goal": 3.0}, {"item": "electric-mining-drill", "goal": 0.0}],
+        "bottleneck": ["electric-mining-drill:input_starved <- electronic-circuit:unbuilt <- iron-plate:under_capacity",
+                       "splitter:input_starved <- electronic-circuit:unbuilt <- iron-plate:under_capacity"]}}}
+    slot = {"from": "electronic-circuit", "idle": False, "stocked": False, "permanent": False, "from_goal": False}
+    m = {"options": [{"option_id": "drill", "family": "retarget", "need_id": "item:electric-mining-drill"},
+                     {"option_id": "circuit", "family": "retarget", "need_id": "item:electronic-circuit"},
+                     {"option_id": "splitter", "family": "retarget", "need_id": "item:splitter", "slot": slot},
+                     {"option_id": "plate", "family": "smelt", "need_id": "item:iron-plate"}],
+         "needs": [], "blocked": {"item:iron-plate": {"item_shortfall:electric-mining-drill": 6},
+                                  "stock:splitter": {"item_shortfall:inserter": 2}}}
+    f = option_features(s, m)
+    assert f["drill"]["goal_blocker"] and f["circuit"]["goal_blocker"]
+    assert not f["splitter"]["goal_blocker"] and not f["plate"]["goal_blocker"]  # side item; goal items keep goal_need
+    assert f["splitter"]["slot_from_goal_blocker"] and not f["drill"]["slot_from_goal_blocker"]

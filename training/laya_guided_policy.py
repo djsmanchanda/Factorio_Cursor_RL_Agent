@@ -66,6 +66,15 @@ def option_features(state: Mapping, menu: Mapping) -> dict[str, dict]:
 
     goal_builds = [o for o in menu["options"] if o["family"] != "wait" and is_goal(o)]
     goal_options = bool(goal_builds)
+    # Items a blocked goal build is short of (menu["blocked"] item_shortfall reasons), plus the deeper links of
+    # their bottleneck chains: making these is what unblocks the goal (live 2026-11-05 h1: lines short of drills,
+    # drills starved of circuits, while side builds took the slots).
+    blockers = {reason.split(":", 1)[1] for need, reasons in (menu.get("blocked") or {}).items()
+                if need.split(":", 1)[-1] in goal_items for reason in reasons if reason.startswith("item_shortfall:")}
+    for chain in chains:
+        items = [link.split(":")[0] for link in chain]
+        if items and items[0] in blockers:
+            blockers.update(items[1:])
 
     def spend(option: Mapping) -> dict[str, int]:
         """What a build takes from the network: its bill plus what its requester chests will pull in."""
@@ -95,12 +104,14 @@ def option_features(state: Mapping, menu: Mapping) -> dict[str, dict]:
             "condition": conditions.get(need), "phase": phase, "in_bottleneck": item in in_chain,
             "deepest_bottleneck": item in deepest, "others_available": others,
             "goal_need": item in goal_items, "goal_options_available": goal_options,
+            "goal_blocker": item in blockers and item not in goal_items,
             "starves_goal": starves_goal(option),
             # Retargets of an existing mall slot (training/laya_mall_slots.py): what giving the slot away costs.
             "slot_free": bool(option.get("slot")) and (option["slot"]["idle"] or option["slot"]["stocked"]),
             "slot_permanent": bool(option.get("slot")) and option["slot"]["permanent"],
             "slot_from_goal": bool(option.get("slot")) and option["slot"]["from_goal"],
             "slot_recent": bool(option.get("slot")) and option["slot"].get("recent", False),
+            "slot_from_goal_blocker": bool(option.get("slot")) and option["slot"].get("from") in blockers,
             # Lines: the nearest free site to the item block's anchor (training/laya_lines.next_slot).
             "next_slot": bool(option.get("next_slot")),
             # A side build that would leave less than the unbuilt goal starters need (menu["goal_reserve"]).

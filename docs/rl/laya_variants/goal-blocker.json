@@ -1,0 +1,10 @@
+{
+  "version": "1.0.0",
+  "variant_id": "goal-blocker",
+  "description": "Unblock goals: options making an item a blocked goal build is short of (or a deeper input of it) x3; baseline goal weights unchanged. Live 2026-11-05 h1: plate lines short of drills, drills starved of circuits.",
+  "catalog_patch": {
+    "mission.phase-goals-first": {"prefer": [{"when": {"goal_need": true}, "weight": 3.0},
+                                              {"when": {"goal_need": false, "goal_options_available": true}, "weight": 0.2},
+                                              {"when": {"goal_blocker": true}, "weight": 3.0}]}
+  }
+}
