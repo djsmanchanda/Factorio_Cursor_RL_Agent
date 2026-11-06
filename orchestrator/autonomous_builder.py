@@ -10435,7 +10435,7 @@ def _emit_iteration_limit_verdict(
 #: ingredient. None means every ingredient; a set narrows the treatment.
 #: C80b telemetry: plastic was starved at the AC requester with reachable
 #: plastic > 0 in 59/59 lines, so bots were not completing the last tiles.
-_DIRECT_DELIVERY_ITEMS: frozenset[str] | None = None
+_DIRECT_DELIVERY_ITEMS: frozenset[str] | None = frozenset({"plastic-bar"})
 
 
 def _deliver_cell_ingredients(
