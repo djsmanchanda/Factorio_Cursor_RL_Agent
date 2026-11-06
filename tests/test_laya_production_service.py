@@ -15,8 +15,8 @@ def test_productivity_module_has_a_line_recipe():
     assert spec["amounts"] == [5, 5] and spec["craft_time"] == 15.0
 
 
-def test_the_service_is_off_by_default_and_a_producing_operation():
-    assert Settings().production_service is False
+def test_the_service_is_enabled_on_this_branch_and_a_producing_operation():
+    assert Settings().production_service is True
     assert "production_service" in PRODUCING_OPERATIONS
 
 

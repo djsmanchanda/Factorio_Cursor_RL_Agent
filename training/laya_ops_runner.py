@@ -600,6 +600,29 @@ def saturated_feedstock(machines: list[Mapping], recipes: Mapping, stock: Mappin
     return found
 
 
+def add_cable_capacity_option(menu: dict, board: Mapping, phase: Mapping, facts: Mapping) -> dict:
+    """Offer one permanent copper-cable capacity cell when the AC cell is input-starved on cable."""
+    if phase.get("phase_id") not in {"C6", "S1"}:
+        return menu
+    need = next((n for n in board.get("needs") or () if n.get("item") == "advanced-circuit"), None)
+    if not need or need.get("condition") != "input_starved":
+        return menu
+    if "copper-cable" not in (facts.get("recipes") or {}):
+        return menu
+    option_id = "op.production_service.copper-cable"
+    if any(option["option_id"] == option_id for option in menu["options"]):
+        return menu
+    menu["options"].append({"option_id": option_id, "family": "production_service",
+        "product": "copper-cable", "need_id": "service:copper-cable",
+        "params": {"item": "copper-cable", "stock_target": 40, "minimum_machines": 6,
+                   "upgrade_bootstrap": True, "allow_promotion": True},
+        "summary": "add a permanent copper-cable capacity cell",
+        "features": {"goal_need": True, "bill_known": False, "sustained_service_verified": False}})
+    menu["needs"].append({"need_id": "service:copper-cable", "condition": "available",
+                          "options": [option_id]})
+    return menu
+
+
 def add_c6_consumer_options(menu: dict, phase: Mapping, facts: Mapping) -> dict:
     """Offer the permanent consumer service while the C6 advanced-circuit goal is active."""
     if phase.get("phase_id") not in {"C6", "S1"}:
@@ -1076,6 +1099,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                               results, economics, reconcile_loans=settings.mall_loan_reconciliation)
         if settings.production_service:
             menu = add_c6_consumer_options(menu, phase, facts)
+        if settings.cable_capacity:
+            menu = add_cable_capacity_option(menu, board, phase, facts)
         if objective:
             menu = add_research_options(menu, board, research, facts, objective)
         from training.laya_decision_pacing import apply_waits, multiplier
