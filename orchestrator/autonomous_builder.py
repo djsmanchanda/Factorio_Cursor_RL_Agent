@@ -7988,7 +7988,7 @@ def _build_assembled_stage(
     client: RconClient, bridge: GameBridge, surface: str, force: str, item: str,
     reference_point: Point, emit: Callable[[str], None], plan: _LinePlan,
     mall_provider: Point | None, *, upgrade_bootstrap: bool,
-    stock_gate_target: int | None = None,
+    stock_gate_target: int | None = None, permanent_consumer: bool = False,
 ) -> None:
     """Build one stage for an assembled item, once its inputs have sources."""
     # The pre-advanced-circuit budget is global. Previously only optional demand cells
@@ -8023,7 +8023,8 @@ def _build_assembled_stage(
                 )
             except Exception:
                 pair_completion = False
-        if _mall_slot_cap_reached(committed, slot_limit) and not pair_completion:
+        if (not permanent_consumer
+                and _mall_slot_cap_reached(committed, slot_limit) and not pair_completion):
             emit(
                 f"  BOOTSTRAP MALL CAP: {committed}/"
                 f"{slot_limit} assemblers are committed; "
@@ -8650,7 +8651,7 @@ def ensure_produced(
     minimum_machines: int = 1, allow_promotion: bool = True,
     stock_gate_target: int | None = None, storage_limit: int | None = None,
     fill_provider: bool = False, blocking_stock_target: int | None = None,
-    temporary_mall: bool = False,
+    temporary_mall: bool = False, permanent_consumer: bool = False,
 ) -> Point | None:
     """Returns the item's real output chest position if it's already producing;
     otherwise builds exactly ONE missing stage (the deepest unmet ingredient
@@ -8761,7 +8762,7 @@ def ensure_produced(
                 stock_gate_target or 0, temporary_target,
             )
             fill_provider = False
-    if not upgrade_bootstrap and _MATERIAL_RESERVATION_LEDGER is not None:
+    if not permanent_consumer and not upgrade_bootstrap and _MATERIAL_RESERVATION_LEDGER is not None:
         loan_wait = _service_bootstrap_loan(
             client, bridge, surface, force, item, reference_point, emit,
         )
@@ -8878,7 +8879,7 @@ def ensure_produced(
         _build_assembled_stage(
             client, bridge, surface, force, item, reference_point, emit, plan,
             mall_provider, upgrade_bootstrap=upgrade_bootstrap,
-            stock_gate_target=stock_gate_target,
+            stock_gate_target=stock_gate_target, permanent_consumer=permanent_consumer,
         )
         return None
     build_mining_stage(client, bridge, surface, force, item, reference_point, emit)

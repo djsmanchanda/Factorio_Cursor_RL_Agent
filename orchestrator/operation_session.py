@@ -143,10 +143,10 @@ class DeterministicSession:
             # real consumer line rather than a one-off batch. upgrade_bootstrap=True keeps it outside the
             # bootstrap mall cap.
             "production_service": lambda item, stock_target=10, minimum_machines=2,
-                upgrade_bootstrap=True, allow_promotion=True: ab.ensure_produced(
+                upgrade_bootstrap=True, allow_promotion=True, permanent_consumer=False: ab.ensure_produced(
                 c, b, SURFACE, FORCE, item, ref, emit, upgrade_bootstrap=bool(upgrade_bootstrap),
                 stock_target=max(1, int(stock_target)), minimum_machines=max(1, int(minimum_machines)),
-                allow_promotion=bool(allow_promotion)),
+                allow_promotion=bool(allow_promotion), permanent_consumer=bool(permanent_consumer)),
             # One more gear/cable cell when every existing one runs flat out and other cells starve for it.
             "grow": lambda item, machines: ab.grow_producer(c, b, SURFACE, FORCE, item, ref, emit, machines=machines),
             # A standing slot in the bootstrap mall pool (the deterministic runner's "production prep").

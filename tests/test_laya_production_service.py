@@ -26,7 +26,7 @@ def test_c6_and_s1_offer_the_sized_consumer_service_once():
         option = next(o for o in menu["options"] if o["option_id"] == "op.production_service.productivity-module")
         assert option["params"] == {"item": "productivity-module", "stock_target": 1,
                                      "minimum_machines": 1, "upgrade_bootstrap": False,
-                                     "allow_promotion": False}
+                                     "allow_promotion": False, "permanent_consumer": True}
         assert add_c6_consumer_options(menu, phase, FACTS)["options"].count(option) == 1
 
 
