@@ -4,7 +4,8 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Generator, Mapping
+from dataclasses import dataclass
 
 from orchestrator import chemical_survey, extraction_state, live_base, resource_patches
 from orchestrator.oil_transaction import OilTransactionStore
@@ -1184,8 +1185,11 @@ def _plan_opening_oil_cell(
     reference: Point, service_stage: ServiceStage,
     emit: Callable[[str], None], *, target_output: str,
 ) -> dict | None:
-    """Freeze all construction geometry before releasing any oil packet."""
-    include_sulfur = target_output == "sulfur"
+    """Freeze all construction geometry before releasing any oil packet.
+
+    Observation and the coal-mine side effect stay here; the geometry is the
+    pure `_oil_cell_planner`, answered survey by survey from the live world.
+    """
     oil = live_base.nearest_resource(client, surface, "crude-oil", reference)
     if oil is None:
         raise StuckError("No crude-oil patch found within the local 400-tile search")
@@ -1193,8 +1197,7 @@ def _plan_opening_oil_cell(
     cell = _find_oil_cell_site(client, surface, oil_pos)
     if cell is None:
         raise StuckError("No ore-free 64x44 area found near the crude-oil source")
-    ox, oy = round(cell[0]), round(cell[1])
-    cell_centre = (ox + 32.0, oy + 22.0)
+    cell_centre = (round(cell[0]) + 32.0, round(cell[1]) + 22.0)
     coal = ensure_coal_mine(
         client, bridge, surface, force, cell_centre, service_stage, emit,
         prefer_nearest_patch=True,
@@ -1207,7 +1210,6 @@ def _plan_opening_oil_cell(
             "No ore-free 12x12 plastic site found between the local coal mine "
             "and oil refinery"
         )
-    px, py = round(plastic_site[0]), round(plastic_site[1])
     water = chemical_survey.nearest_offshore_pump_site(
         client, surface, cell_centre,
     )
@@ -1217,19 +1219,178 @@ def _plan_opening_oil_cell(
         patch_tiles = _crude_patch_tiles(client, surface, oil_pos)
     except Exception:
         patch_tiles = []
+    facts = OilCellFacts(
+        target_output=target_output, oil_position=oil_pos, cell_origin=cell,
+        coal=coal, plastic_site=plastic_site, water=water,
+        patch_tiles=tuple(patch_tiles),
+    )
+    return _drive_oil_cell_planner(
+        _oil_cell_planner(facts, emit),
+        lambda survey: _read_oil_survey(client, surface, force, survey),
+    )
+
+
+@dataclass(frozen=True)
+class OilCellFacts:
+    """Already-observed inputs of one opening oil cell; no live handles."""
+
+    target_output: str
+    oil_position: Point
+    #: Raw `_find_oil_cell_site` answer: the 64x44 district origin.
+    cell_origin: Point
+    #: Coal belt source returned by `ensure_coal_mine`.
+    coal: Point
+    #: Raw `_find_plastic_site` answer: the 12x12 plastic row origin.
+    plastic_site: Point
+    #: `chemical_survey.nearest_offshore_pump_site` record.
+    water: Mapping[str, object]
+    patch_tiles: tuple[Point, ...] = ()
+
+
+@dataclass(frozen=True)
+class OilSurvey:
+    """One bounded read the pure planner needs before it can continue.
+
+    ``occupied`` answers `live_base.occupied_tiles(min, max, **flags)`,
+    ``water`` answers `live_base.water_tiles(min, max)`, and ``coal_route``
+    answers `preflight_ingredient_transport(**flags)` as (actions, belt type)
+    or None. A failed best-effort read answers as an empty tile set.
+    """
+
+    kind: str
+    min_point: Point | None = None
+    max_point: Point | None = None
+    flags: tuple[tuple[str, object], ...] = ()
+    best_effort: bool = False
+
+
+class MissingOilSurvey(LookupError):
+    """The pure planner needs a survey the caller did not supply."""
+
+    def __init__(self, survey: OilSurvey) -> None:
+        super().__init__(f"oil-cell plan needs survey {survey.kind} {survey.min_point}..{survey.max_point}")
+        self.survey = survey
+
+
+@dataclass(frozen=True)
+class OilCellPlan:
+    """Frozen opening oil-cell intent plus derived build facts."""
+
+    #: Exact `OilTransactionStore` intent: plans, links, ordered packets, coal.
+    intent: dict
+    log: tuple[str, ...] = ()
+
+    @property
+    def packets(self) -> list[tuple[str, dict]]:
+        return self.intent["packets"]
+
+    @property
+    def power_plan(self) -> dict:
+        return dict(self.packets)["chemical_power_backbone"]
+
+    def _merged(self) -> dict:
+        return _merge(*(plan for _name, plan in self.packets))
+
+    @property
+    def bill_of_materials(self) -> dict[str, int]:
+        return _ghost_materials(self._merged())
+
+    @property
+    def footprint_tiles(self) -> set[tuple[int, int]]:
+        merged = self._merged()
+        return planned_footprint_tiles(merged) | {
+            tuple(tile) for tile in merged.get("reserved_tiles", ())
+        }
+
+    @property
+    def bounds(self) -> tuple[Point, Point]:
+        """Bounding box of every positioned action, without margin."""
+        return _area(self._merged(), margin=0)
+
+
+def plan_oil_cell_intent(
+    facts: OilCellFacts, surveys: Mapping[OilSurvey, object],
+) -> OilCellPlan:
+    """Plan the opening oil cell from recorded facts and surveys, without I/O.
+
+    Raises `MissingOilSurvey` naming the first read `surveys` lacks; geometry
+    failures raise `StuckError` exactly as the live planner does.
+    """
+    log: list[str] = []
+
+    def answer(survey: OilSurvey) -> object:
+        try:
+            return surveys[survey]
+        except KeyError:
+            raise MissingOilSurvey(survey) from None
+
+    intent = _drive_oil_cell_planner(_oil_cell_planner(facts, log.append), answer)
+    return OilCellPlan(intent=intent, log=tuple(log))
+
+
+def _drive_oil_cell_planner(
+    planner: Generator[OilSurvey, object, dict],
+    answer: Callable[[OilSurvey], object],
+) -> dict:
+    try:
+        survey = next(planner)
+        while True:
+            survey = planner.send(answer(survey))
+    except StopIteration as done:
+        return done.value
+
+
+def _read_oil_survey(
+    client: RconClient, surface: str, force: str, survey: OilSurvey,
+) -> object:
+    """Answer one planner survey from the live world."""
+    flags = dict(survey.flags)
+    if survey.kind == "coal_route":
+        return preflight_ingredient_transport(
+            client, surface, force, flags.pop("recipe"), flags.pop("ingredient"),
+            flags.pop("source"), flags.pop("feed"), flags.pop("machine_count"),
+            **{**flags, "additional_blocked": set(flags["additional_blocked"])},
+        )
+    try:
+        if survey.kind == "occupied":
+            return live_base.occupied_tiles(
+                client, surface, survey.min_point, survey.max_point, **flags,
+            )
+        if survey.kind == "water":
+            return live_base.water_tiles(
+                client, surface, survey.min_point, survey.max_point,
+            )
+    except Exception:
+        if survey.best_effort:
+            return set()
+        raise
+    raise ValueError(f"unknown oil survey kind {survey.kind!r}")
+
+
+def _oil_cell_planner(
+    facts: OilCellFacts, note: Callable[[str], None],
+) -> Generator[OilSurvey, object, dict]:
+    """Pure opening oil-cell geometry; yields each bounded survey it needs."""
+    target_output = facts.target_output
+    include_sulfur = target_output == "sulfur"
+    oil_pos = facts.oil_position
+    ox, oy = round(facts.cell_origin[0]), round(facts.cell_origin[1])
+    cell_centre = (ox + 32.0, oy + 22.0)
+    coal = facts.coal
+    px, py = round(facts.plastic_site[0]), round(facts.plastic_site[1])
+    water = dict(facts.water)
+    patch_tiles = list(facts.patch_tiles)
     # A crude tile is only the required resource overlap.  Survey the complete
     # 3x3 body before choosing a well, so a nearby pole, pipe, water tile, or
     # clutter cannot poison the all-or-nothing source packet.
     patch_points = [oil_pos, *patch_tiles]
-    try:
-        pumpjack_blocked = live_base.occupied_tiles(
-            client, surface,
-            (min(x for x, _ in patch_points) - 4, min(y for _, y in patch_points) - 4),
-            (max(x for x, _ in patch_points) + 5, max(y for _, y in patch_points) + 5),
-            include_resources=False, include_clutter=True,
-        )
-    except Exception:
-        pumpjack_blocked = set()
+    pumpjack_blocked = set((yield OilSurvey(
+        "occupied",
+        (min(x for x, _ in patch_points) - 4, min(y for _, y in patch_points) - 4),
+        (max(x for x, _ in patch_points) + 5, max(y for _, y in patch_points) + 5),
+        flags=(("include_resources", False), ("include_clutter", True)),
+        best_effort=True,
+    )))
     pumpjack_sites = pumpjack_sites_for_patch(
         patch_tiles, oil_pos, cell_centre, blocked_tiles=pumpjack_blocked,
     )
@@ -1237,12 +1398,12 @@ def _plan_opening_oil_cell(
         raise StuckError("No legal pumpjack footprint on the selected crude-oil patch")
     oil_site, *extra_sites = pumpjack_sites
     if extra_sites:
-        emit(
+        note(
             f"  OIL DISTRICT: {len(pumpjack_sites)} pumpjacks to saturate the "
             f"{REFINERY_CRUDE_DRAW_PER_SECOND:.0f}/s refinery draw "
             f"({len(patch_tiles)} crude tiles surveyed)"
         )
-    emit(
+    note(
         f"  OIL DISTRICT: plastic at {(px, py)} between refinery "
         f"{cell_centre} and local coal belt {coal}"
     )
@@ -1260,21 +1421,18 @@ def _plan_opening_oil_cell(
         (min(y for _, y in normal_tiles) + max(y for _, y in normal_tiles) + 1) / 2,
     )
     layout_points = [oil_site["output"], plastic_gas, *normal_tiles]
-    try:
-        live_layout_blocked = live_base.occupied_tiles(
-            client, surface,
-            (
-                min(x for x, _ in layout_points) - 24,
-                min(y for _, y in layout_points) - 24,
-            ),
-            (
-                max(x for x, _ in layout_points) + 24,
-                max(y for _, y in layout_points) + 24,
-            ),
-            include_water=False,
-        )
-    except Exception:
-        live_layout_blocked = set()
+    live_layout_blocked = set((yield OilSurvey(
+        "occupied",
+        (
+            min(x for x, _ in layout_points) - 24,
+            min(y for _, y in layout_points) - 24,
+        ),
+        (
+            max(x for x, _ in layout_points) + 24,
+            max(y for _, y in layout_points) + 24,
+        ),
+        flags=(("include_water", False),), best_effort=True,
+    )))
     layout_blocked = set(live_layout_blocked)
     layout_blocked |= _planned_hard_tiles(plastic)
     for site in pumpjack_sites:
@@ -1311,14 +1469,14 @@ def _plan_opening_oil_cell(
         ]
     except ValueError:
         refinery["reserved_tiles"] = []
-    emit(
+    note(
         f"  OIL LAYOUT: {refinery_choice.shape} {refinery_direction}"
         f"{'/' + refinery_mirror if refinery_mirror else ''} refinery row selected; "
         f"estimated pipe bill={refinery_choice.pipe_tiles}, "
         f"poles={refinery_choice.pole_count}, land={refinery_choice.occupied_tiles}, "
         f"expansion seam={refinery_choice.expansion_seam_tiles}"
     )
-    emit(
+    note(
         f"  OIL DISTRICT: chemical processing at "
         f"{(refinery_ox, refinery_oy)} near crude source {oil_pos}; "
         f"pumpjack faces {oil_site['direction']} toward its local pipe"
@@ -1346,7 +1504,7 @@ def _plan_opening_oil_cell(
     plastic_flow_direction = transform_direction(
         "east", direction=plastic_choice.direction, mirror=plastic_choice.mirror,
     )
-    emit(
+    note(
         f"  OIL LAYOUT: {plastic_choice.shape} {plastic_choice.direction}"
         f"{'/' + plastic_choice.mirror if plastic_choice.mirror else ''} plastic row selected; "
         f"estimated pipe bill={plastic_choice.pipe_tiles}, "
@@ -1385,18 +1543,17 @@ def _plan_opening_oil_cell(
     if include_sulfur:
         endpoints.extend((sulfur_gas, sulfur_water))
     margin = 24
-    hard = live_base.occupied_tiles(
-        client, surface,
-        (min(x for x, _ in endpoints) - margin, min(y for _, y in endpoints) - margin),
-        (max(x for x, _ in endpoints) + margin, max(y for _, y in endpoints) + margin),
-        include_water=False,
+    route_min = (
+        min(x for x, _ in endpoints) - margin, min(y for _, y in endpoints) - margin,
     )
+    route_max = (
+        max(x for x, _ in endpoints) + margin, max(y for _, y in endpoints) + margin,
+    )
+    hard = set((yield OilSurvey(
+        "occupied", route_min, route_max, flags=(("include_water", False),),
+    )))
     hard |= _planned_hard_tiles(*active_plans)
-    terrain_water = live_base.water_tiles(
-        client, surface,
-        (min(x for x, _ in endpoints) - margin, min(y for _, y in endpoints) - margin),
-        (max(x for x, _ in endpoints) + margin, max(y for _, y in endpoints) + margin),
-    )
+    terrain_water = set((yield OilSurvey("water", route_min, route_max)))
     terrain_water -= hard
     endpoint_tiles = {(math.floor(x), math.floor(y)) for x, y in endpoints}
     terrain_water -= endpoint_tiles
@@ -1468,7 +1625,7 @@ def _plan_opening_oil_cell(
     for link_name, source, targets, fluid, existing_tiles in requested_links:
         if targets is None:
             targets = [_nearest_crude_tile(foreign, source)]
-            emit(
+            note(
                 f"  FLUID ROUTE: {link_name} taps the crude trunk at "
                 f"{targets[0]} instead of running to the refinery"
             )
@@ -1481,13 +1638,13 @@ def _plan_opening_oil_cell(
             foreign.extend(segments)
             dives = _link_dive_tiles(segments, hard)
             if dives:
-                emit(
+                note(
                     f"  FLUID ROUTE: {fluid} dives under "
                     f"{len(dives)} blocked tile(s) with pipe-to-ground "
                     "instead of detouring"
                 )
             if crossed_water:
-                emit(
+                note(
                     f"  FLUID ROUTE: {fluid} has no bounded land detour; "
                     "using a water crossing with landfill endpoints"
                 )
@@ -1495,15 +1652,16 @@ def _plan_opening_oil_cell(
             raise StuckError(
                 f"{fluid} cannot be routed from {source} to {targets}: {error}"
             ) from error
-    route = preflight_ingredient_transport(
-        client, surface, force, "plastic-bar", "coal", coal, plastic_feed, 2,
-        max_belt_route_tiles=_CHEMICAL_BELT_ROUTE_LIMIT,
-        additional_blocked=planned_footprint_tiles(
+    route = yield OilSurvey("coal_route", flags=(
+        ("recipe", "plastic-bar"), ("ingredient", "coal"), ("source", coal),
+        ("feed", plastic_feed), ("machine_count", 2),
+        ("max_belt_route_tiles", _CHEMICAL_BELT_ROUTE_LIMIT),
+        ("additional_blocked", frozenset(planned_footprint_tiles(
             _merge(*active_plans, *(link for _name, link in links))
-        ),
-        mode="belt", destination_is_belt=True,
-        destination_belt_direction=plastic_flow_direction,
-    )
+        ))),
+        ("mode", "belt"), ("destination_is_belt", True),
+        ("destination_belt_direction", plastic_flow_direction),
+    ))
     if route is None:
         raise StuckError("plastic coal route unexpectedly selected logistics")
     coal_actions, coal_belt_type = route
