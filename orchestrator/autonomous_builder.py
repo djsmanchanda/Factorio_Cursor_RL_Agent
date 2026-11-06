@@ -4643,6 +4643,7 @@ def build_conversion_stage(
     belt_type: str = _DEFAULT_BELT,
     inserter_type: str | None = None,
     allow_logistic_inputs: bool = False,
+    terminal_provider_only: bool = False,
     flow_direction: str = "east",
     side_tap_output: bool = False,
     direct_sideload_ingredients: frozenset[str] = frozenset(),
@@ -4717,7 +4718,7 @@ def build_conversion_stage(
             )
         elif power_anchor == "substation":
             emit("  STEEL STARTER POWER: using the stocked substation; no new pole recipe required")
-    _publish_output_chest(plan)
+    _publish_output_chest(plan, limit=1 if terminal_provider_only else None)
     modes, feed_positions, preflighted, direct_belt_input = _conversion_feed_plan(
         client, bridge, surface, force, recipe, plan, ingredient_sources,
         machine_count, belt_type, flow_direction, emit,
@@ -8220,6 +8221,7 @@ def _build_assembled_stage(
         build_conversion_stage(
             client, bridge, surface, force, item, sources, reference_point, emit,
             allow_logistic_inputs=not upgrade_bootstrap,
+            terminal_provider_only=upgrade_bootstrap,
         )
     return None
 
