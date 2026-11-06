@@ -7,20 +7,23 @@ import copy
 import heapq
 import math
 import time
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Generator, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from typing import Callable
 
 from core.science_recipe_graph import validate_current_builder_target
 from orchestrator.controller_budget import consume_plan_submission, consume_wait
-from orchestrator import extraction_state, live_base, resource_patches
+from orchestrator import extraction_state, live_base
 from orchestrator.game_bridge import GameBridge, load_json
 from orchestrator.material_reservations import active_material_ledger
 from orchestrator.parts_mall import MaterialShortage
 from orchestrator.placement_clutter import clear_plan_clutter
 from orchestrator.pole_obstruction import PoleObstruction, relocate_obstructing_poles
 from orchestrator.power_district import append_plan_reservation
-from orchestrator.roboport_placement import clear_chain_positions
+from orchestrator.reach_survey import (
+    MissingReachSurvey, ReachSurvey, drive_reach_planner, read_reach_survey,
+)
+from orchestrator.roboport_placement import clear_chain_planner, clear_chain_positions
 from orchestrator.work_state import WorkStateSignal
 from planners.belt_bridge import _ROUTE_SEARCH_MARGIN
 from planners.infrastructure import POLE_SPECS
@@ -1137,10 +1140,10 @@ def _long_reach_bridge_hops(
     return paths.get(len(points) - 1)
 
 
-def _hookup_pole_position(
-    client: RconClient, surface: str, consumer: Point,
-    blocked: set[tuple[int, int]], toward: Point, pole_name: str,
-) -> Point | None:
+def _plan_hookup_pole_position(
+    consumer: Point, blocked: set[tuple[int, int]], toward: Point,
+    pole_name: str,
+) -> Generator[ReachSurvey, object, Point | None]:
     """Where to park the pole that will actually SUPPLY an unwired consumer.
 
     A pole chain that merely arrives near a consumer does not power it: the
@@ -1148,18 +1151,18 @@ def _hookup_pole_position(
     full spacing apart, so the last one can stop well outside that area -- which
     is how a bridged roboport ends up built, connected and still dead.
     """
-    candidates = _hookup_pole_candidates(
-        client, surface, consumer, blocked, toward, pole_name,
+    candidates = yield from _plan_hookup_pole_candidates(
+        consumer, blocked, toward, pole_name,
     )
     if not candidates:
         return None
     return min(candidates, key=lambda spot: distance(spot, toward))
 
 
-def _hookup_pole_candidates(
-    client: RconClient, surface: str, consumer: Point,
-    blocked: set[tuple[int, int]], toward: Point, pole_name: str,
-) -> list[Point]:
+def _plan_hookup_pole_candidates(
+    consumer: Point, blocked: set[tuple[int, int]], toward: Point,
+    pole_name: str,
+) -> Generator[ReachSurvey, object, list[Point]]:
     """Return legal terminal-pole positions covering ``consumer``.
 
     Keep this separate from the chooser so a fully occupied supply area can
@@ -1167,7 +1170,7 @@ def _hookup_pole_candidates(
     live occupancy survey.  The distinction is useful when a stage's own
     ghosts filled the area before its power anchor was reserved.
     """
-    entity = live_base.entity_at(client, surface, consumer)
+    entity = yield ReachSurvey("entity_at", position=consumer)
     footprint = ENTITY_FOOTPRINTS.get(entity["name"], 1) if entity else 1
     reach = POLE_SPECS[pole_name]["supply"] + footprint / 2
     span = math.ceil(reach)
@@ -1223,50 +1226,53 @@ def _corridor_preference(placements: list[tuple[str, Point]]) -> tuple:
     return len(placements), land, placements
 
 
-def extend_power(
-    client: RconClient, bridge: GameBridge, surface: str, force: str,
-    near_position: Point, emit: Callable[[str], None], *,
-    reserved_tiles: set[tuple[int, int]] | None = None,
-    detailed: bool = False,
-    avoid_resources: bool = True,
-    _retried: bool = False,
-) -> bool | PowerExtensionResult:
-    """Connect `near_position` to a network that actually generates power.
+@dataclass(frozen=True)
+class PowerBridgeFacts:
+    """Already-known inputs of one power hookup; no live handles."""
 
-    Handles both shapes of power fault. If a pole stands at `near_position` its
-    network is bridged to a powered one; if NO pole stands there -- a roboport
-    or machine that was never wired at all -- a chain is run out and terminated
-    on a pole whose supply area covers it. The default boolean says whether the
-    position is usable or a bridge was submitted. Callers that need to size a
-    grid can request ``detailed`` and distinguish physical coverage from an
-    actual network change.
+    near_position: Point
+    #: Sibling plans' future footprint the bridge must route around.
+    reserved_tiles: frozenset[tuple[int, int]] = frozenset()
+    avoid_resources: bool = True
+    #: The live client can answer Lua surveys (`hasattr(client, "command")`);
+    #: offline geometry callers skip the resource and stock refinements.
+    live_client: bool = True
 
-    A hop can lose its tile between the collision survey and the bots' arrival:
-    a concurrent build's own substation ghost lands exactly there (live,
-    2026-08-22 02:46). That is infrastructure-in-flight, not a wall -- replan
-    once on fresh ground instead of ending the run. `reserved_tiles` are a
-    sibling plan's future footprint: an emergency pole must route around that
-    footprint just as it would around built infrastructure.
 
-    ``avoid_resources=False`` is reserved for temporary direct-starter
-    hookup: its planned poles intentionally stand on the same disposable ore
-    patch and are leaf-pruned when the starter retires. Persistent power
-    corridors continue to preserve mineable resource tiles.
+@dataclass(frozen=True)
+class PowerBridgePlan:
+    """What one power hookup needs, before anything is placed.
+
+    ``outcome`` is ``bridge`` (place ``placements`` from the powered
+    ``anchor``), ``generating`` (own network already generates),
+    ``in_supply`` (already inside a powered pole's supply area) or
+    ``unpowered`` (no generated network to reach).
     """
-    bridge_key = (surface, force)
-    pending_since = _PENDING_POWER_BRIDGES.pop(bridge_key, None)
-    waited_for_pending = pending_since is not None
-    if pending_since is not None:
-        remaining = _POWER_BRIDGE_SETTLE_SECONDS - (
-            time.monotonic() - pending_since
-        )
-        if remaining > 0:
-            consume_wait(f"power_bridge_settle@{near_position}")
-            time.sleep(remaining)
-    own_network = live_base.pole_network_id(client, surface, near_position)
-    target = live_base.nearest_powered_pole(
-        client, surface, force, near_position, exclude_network_id=own_network,
-        avoid_resources=avoid_resources,
+
+    outcome: str
+    placements: tuple[tuple[str, Point], ...] = ()
+    anchor: Point | None = None
+    anchor_name: str | None = None
+    own_network: int | None = None
+
+
+def _power_bridge_planner(
+    facts: PowerBridgeFacts, note: Callable[[str], None],
+) -> Generator[ReachSurvey, object, PowerBridgePlan]:
+    """Pure power-hookup geometry; yields each bounded survey it needs.
+
+    Raises `StuckError` for an unroutable or over-long bridge and defers a
+    packed hookup exactly as the live `extend_power` always has.
+    """
+    near_position = facts.near_position
+    avoid_resources = facts.avoid_resources
+    own_network = yield ReachSurvey("pole_network_id", position=near_position)
+    target = yield ReachSurvey(
+        "nearest_powered_pole", position=near_position,
+        flags=(
+            ("exclude_network_id", own_network),
+            ("avoid_resources", avoid_resources),
+        ),
     )
     if target is None:
         # No other powered network exists to bridge to. If the position's own
@@ -1274,23 +1280,19 @@ def extend_power(
         # any attempt, first one included. A submitted bridge that merged here
         # before the retry surveys reaches the same semantic outcome.
         generation = (
-            live_base.network_generation_kw(
-                client, surface, force, near_position,
-            )
+            (yield ReachSurvey("network_generation_kw", position=near_position))
             if own_network is not None else None
         )
         if generation is not None and generation > 0:
-            emit(f"  {near_position} already sits on generating network {own_network}; "
+            note(f"  {near_position} already sits on generating network {own_network}; "
                  "nothing to bridge")
-            return _power_extension_result(
-                True, waited_for_pending or _retried, detailed=detailed,
-            )
-        return _power_extension_result(False, False, detailed=detailed)
+            return PowerBridgePlan("generating", own_network=own_network)
+        return PowerBridgePlan("unpowered", own_network=own_network)
     target_position, target_name = target
     target_supply = POLE_SPECS.get(
         target_name, POLE_SPECS["medium-electric-pole"],
     )["supply"]
-    consumer = live_base.entity_at(client, surface, near_position)
+    consumer = yield ReachSurvey("entity_at", position=near_position)
     bridge_pole = (
         "small-electric-pole"
         if consumer is not None and consumer.get("name") == "small-electric-pole"
@@ -1308,14 +1310,16 @@ def extend_power(
         # that will never charge.
         ) < target_supply + consumer_size / 2
     ):
-        emit(f"  {near_position} is already inside the supply area of the powered "
+        note(f"  {near_position} is already inside the supply area of the powered "
              f"{target_name} at {target_position}; waiting for it to charge")
-        return _power_extension_result(True, False, detailed=detailed)
+        return PowerBridgePlan(
+            "in_supply", anchor=target_position, anchor_name=target_name,
+        )
     if own_network is None:
-        emit(f"  power gap found: {near_position} is not wired to any pole -- running a "
+        note(f"  power gap found: {near_position} is not wired to any pole -- running a "
              f"chain from {target_name} at {target_position} and terminating it in supply range")
     else:
-        emit(f"  power gap found: network {own_network} at {near_position} carries no "
+        note(f"  power gap found: network {own_network} at {near_position} carries no "
              f"generation -- bridging to {target_name} at {target_position}")
     # A stranded low-tier pole must stay low-tier while it is being bridged:
     # the first steel starter cannot require the medium poles that need its
@@ -1335,15 +1339,16 @@ def extend_power(
         endpoint_wire,
     )
     margin = 132.0
-    blocked = live_base.occupied_tiles(
-        client, surface,
-        (min(target_position[0], near_position[0]) - margin,
-         min(target_position[1], near_position[1]) - margin),
-        (max(target_position[0], near_position[0]) + margin,
-         max(target_position[1], near_position[1]) + margin),
-        include_resources=avoid_resources,
-    )
-    if avoid_resources and hasattr(client, "command"):
+    # Copy: the answer may be a caller's recorded survey, never mutate it.
+    blocked = set((yield ReachSurvey(
+        "occupied_tiles",
+        min_point=(min(target_position[0], near_position[0]) - margin,
+                   min(target_position[1], near_position[1]) - margin),
+        max_point=(max(target_position[0], near_position[0]) + margin,
+                   max(target_position[1], near_position[1]) + margin),
+        flags=(("include_resources", avoid_resources),),
+    )))
+    if avoid_resources and facts.live_client:
         corridor_min = (
             min(target_position[0], near_position[0]) - margin,
             min(target_position[1], near_position[1]) - margin,
@@ -1355,30 +1360,30 @@ def extend_power(
         # Preserve mineable deposits, but let emergency power bridges cross
         # depleted patches. A route containing any healthy >=1M patch remains
         # protected and follows the old strict behavior.
-        if not resource_patches.box_has_reserved_patch(
-            client, surface, corridor_min, corridor_max,
-            minimum_amount=POWER_LOW_REMAINING_ORE_THRESHOLD,
-        ):
-            blocked -= resource_patches.resource_tiles(
-                client, surface, corridor_min, corridor_max,
+        if not (yield ReachSurvey(
+            "box_has_reserved_patch",
+            min_point=corridor_min, max_point=corridor_max,
+            flags=(("minimum_amount", POWER_LOW_REMAINING_ORE_THRESHOLD),),
+        )):
+            blocked -= yield ReachSurvey(
+                "resource_tiles", min_point=corridor_min, max_point=corridor_max,
             )
-    blocked |= reserved_tiles or set()
+    blocked |= facts.reserved_tiles
     hookup_blocked = set(blocked)
     blocked -= {(math.floor(target_position[0]), math.floor(target_position[1]))}
     if own_network is None:
         # The consumer's own body is an obstacle, not an endpoint: the chain has
         # to stop on a free tile whose supply area covers it.
-        geometric_candidates = _hookup_pole_candidates(
-            client, surface, near_position, set(), target_position, bridge_pole,
+        geometric_candidates = yield from _plan_hookup_pole_candidates(
+            near_position, set(), target_position, bridge_pole,
         )
-        endpoint = _hookup_pole_position(
-            client, surface, near_position, hookup_blocked, target_position,
-            bridge_pole,
+        endpoint = yield from _plan_hookup_pole_position(
+            near_position, hookup_blocked, target_position, bridge_pole,
         )
         if endpoint is None:
             blocked_candidates = len(geometric_candidates)
             owner_sample: list[dict[str, object]] = []
-            if hasattr(client, "command") and geometric_candidates:
+            if facts.live_client and geometric_candidates:
                 try:
                     candidate_tiles = set().union(*(
                         footprint_tile_indices(
@@ -1386,11 +1391,11 @@ def extend_power(
                         )
                         for point in geometric_candidates
                     ))
-                    owners = live_base.occupied_tile_owners(
-                        client, surface,
-                        (min(x for x, _ in candidate_tiles), min(y for _, y in candidate_tiles)),
-                        (max(x for x, _ in candidate_tiles) + 1, max(y for _, y in candidate_tiles) + 1),
-                        include_resources=avoid_resources,
+                    owners = yield ReachSurvey(
+                        "occupied_tile_owners",
+                        min_point=(min(x for x, _ in candidate_tiles), min(y for _, y in candidate_tiles)),
+                        max_point=(max(x for x, _ in candidate_tiles) + 1, max(y for _, y in candidate_tiles) + 1),
+                        flags=(("include_resources", avoid_resources),),
                     )
                     seen_owners: set[tuple[str, float, float]] = set()
                     for tile, (name, x, y) in sorted(owners.items()):
@@ -1431,8 +1436,8 @@ def extend_power(
     if own_network is None:
         hops = [*hops, endpoint]
         action_names.append(endpoint_pole)
-    if bridge_pole == "medium-electric-pole" and hasattr(client, "command"):
-        stock = live_base.transferable_items(client, surface, force)
+    if bridge_pole == "medium-electric-pole" and facts.live_client:
+        stock = yield ReachSurvey("transferable_items")
         alternatives = []
         # Transmission uses big poles; substations belong to local machine
         # layouts, even when bootstrap stock makes them appear "free".
@@ -1448,9 +1453,9 @@ def extend_power(
             terminal = endpoint
             terminal_actions = []
             if own_network is None:
-                terminal = _hookup_pole_position(
-                    client, surface, near_position, hookup_blocked,
-                    target_position, terminal_name,
+                terminal = yield from _plan_hookup_pole_position(
+                    near_position, hookup_blocked, target_position,
+                    terminal_name,
                 )
                 if terminal is None:
                     continue
@@ -1475,7 +1480,7 @@ def extend_power(
                 bill_text = ", ".join(
                     f"{name}={action_names.count(name)}" for name in sorted(set(action_names))
                 )
-                emit(f"  POWER ROUTE: stocked corridor ({bill_text}) instead of a medium-pole chain")
+                note(f"  POWER ROUTE: stocked corridor ({bill_text}) instead of a medium-pole chain")
     if not hops:
         raise StuckError(f"power gap between {near_position} and {target_position} but no room "
                           "for a bridging pole -- they may already be in reach; investigate directly")
@@ -1499,6 +1504,74 @@ def extend_power(
                 f"{distance(left, right):.2f} tiles, beyond {wire_reach:.2f} "
                 "tile wire reach"
             )
+    return PowerBridgePlan(
+        "bridge", placements=tuple(zip(action_names, hops)),
+        anchor=target_position, anchor_name=target_name,
+        own_network=own_network,
+    )
+
+
+def extend_power(
+    client: RconClient, bridge: GameBridge, surface: str, force: str,
+    near_position: Point, emit: Callable[[str], None], *,
+    reserved_tiles: set[tuple[int, int]] | None = None,
+    detailed: bool = False,
+    avoid_resources: bool = True,
+    _retried: bool = False,
+) -> bool | PowerExtensionResult:
+    """Connect `near_position` to a network that actually generates power.
+
+    Handles both shapes of power fault. If a pole stands at `near_position` its
+    network is bridged to a powered one; if NO pole stands there -- a roboport
+    or machine that was never wired at all -- a chain is run out and terminated
+    on a pole whose supply area covers it. The default boolean says whether the
+    position is usable or a bridge was submitted. Callers that need to size a
+    grid can request ``detailed`` and distinguish physical coverage from an
+    actual network change.
+
+    A hop can lose its tile between the collision survey and the bots' arrival:
+    a concurrent build's own substation ghost lands exactly there (live,
+    2026-08-22 02:46). That is infrastructure-in-flight, not a wall -- replan
+    once on fresh ground instead of ending the run. `reserved_tiles` are a
+    sibling plan's future footprint: an emergency pole must route around that
+    footprint just as it would around built infrastructure.
+
+    ``avoid_resources=False`` is reserved for temporary direct-starter
+    hookup: its planned poles intentionally stand on the same disposable ore
+    patch and are leaf-pruned when the starter retires. Persistent power
+    corridors continue to preserve mineable resource tiles.
+    """
+    bridge_key = (surface, force)
+    pending_since = _PENDING_POWER_BRIDGES.pop(bridge_key, None)
+    waited_for_pending = pending_since is not None
+    if pending_since is not None:
+        remaining = _POWER_BRIDGE_SETTLE_SECONDS - (
+            time.monotonic() - pending_since
+        )
+        if remaining > 0:
+            consume_wait(f"power_bridge_settle@{near_position}")
+            time.sleep(remaining)
+    bridge_plan = drive_reach_planner(
+        _power_bridge_planner(
+            PowerBridgeFacts(
+                near_position, frozenset(reserved_tiles or ()),
+                avoid_resources, hasattr(client, "command"),
+            ),
+            emit,
+        ),
+        lambda survey: read_reach_survey(client, surface, force, survey),
+    )
+    if bridge_plan.outcome == "generating":
+        return _power_extension_result(
+            True, waited_for_pending or _retried, detailed=detailed,
+        )
+    if bridge_plan.outcome == "unpowered":
+        return _power_extension_result(False, False, detailed=detailed)
+    if bridge_plan.outcome == "in_supply":
+        return _power_extension_result(True, False, detailed=detailed)
+    target_position = bridge_plan.anchor
+    action_names = [name for name, _point in bridge_plan.placements]
+    hops = [point for _name, point in bridge_plan.placements]
     actions = [
         {"action_type": "place_ghost", "entity": entity, "position": {"x": x, "y": y}}
         for entity, (x, y) in zip(action_names, hops)
@@ -1683,6 +1756,217 @@ def _await_roboport_charge(
     )
 
 
+def _in_flight_roboport_hop(
+    nearest: Point, target_position: Point, ghosts: Sequence[Point],
+) -> Point | None:
+    """The pending roboport ghost that already advances this coverage hop.
+
+    A ghost is not service yet, but it is already the active coverage
+    transaction: credit a reachable in-flight hop rather than planning a
+    second port beside it from the older built one.
+    """
+    pending = [
+        position
+        for position in ghosts
+        if math.dist(position, nearest) <= _ROBOPORT_LINK_DISTANCE
+        and math.dist(position, target_position) < math.dist(
+            nearest, target_position,
+        )
+    ]
+    if not pending:
+        return None
+    return min(pending, key=lambda p: math.dist(p, target_position))
+
+
+def _roboport_hop_planner(
+    nearest: Point, target_position: Point, purpose: str,
+    reserved_tiles: frozenset[tuple[int, int]], note: Callable[[str], None],
+) -> Generator[ReachSurvey, object, tuple[Point, ...] | None]:
+    """Pure roboport chain from the nearest built port toward a target.
+
+    Returns None when the target is already inside `purpose` coverage, else
+    every cleared chain position (the live driver builds only the first
+    wave and replans the rest from the next observed frontier).
+    """
+    radius, square = _ROBOPORT_SERVICE_AREAS[purpose]
+    gap = service_distance(nearest, target_position, square=square)
+    if gap <= radius:
+        return None
+    note(f"  roboport {purpose} coverage gap: nearest roboport {nearest} is "
+         f"{gap:.0f} tiles from {target_position} "
+         f"({purpose} radius is {radius:.0f}) -- chaining roboports out")
+    ideals = roboport_chain(nearest, target_position, radius)
+    try:
+        placed = yield ReachSurvey(
+            "chain_positions", position=nearest,
+            flags=(
+                ("target", target_position), ("ideals", tuple(ideals)),
+                ("service_radius", radius), ("service_square", square),
+                ("link_distance", _ROBOPORT_LINK_DISTANCE),
+                ("reserved_tiles", reserved_tiles),
+            ),
+        )
+    except ValueError as error:
+        raise StuckError(
+            f"roboport chain cannot avoid existing infrastructure: {error}"
+        ) from error
+    if not placed:
+        raise StuckError(
+            f"{target_position} is outside {purpose} coverage of the roboport at "
+            f"{nearest} but no chain position could be derived; investigate directly"
+        )
+    return tuple(placed)
+
+
+def _answer_live_reach_survey(
+    client: RconClient, surface: str, force: str, survey: ReachSurvey,
+) -> object:
+    """Live answer; chain clearance goes through `clear_chain_positions`."""
+    if survey.kind != "chain_positions":
+        return read_reach_survey(client, surface, force, survey)
+    flags = dict(survey.flags)
+    return clear_chain_positions(
+        client, surface, survey.position, flags["target"], list(flags["ideals"]),
+        service_radius=flags["service_radius"],
+        service_square=flags["service_square"],
+        link_distance=flags["link_distance"],
+        reserved_tiles=flags["reserved_tiles"],
+    )
+
+
+@dataclass(frozen=True)
+class ReachFacts:
+    """Observed inputs of one coverage reach step toward ``target``."""
+
+    target: Point
+    #: Nearest built roboport (`live_base.nearest_roboport`), or None.
+    source: Point | None
+    purpose: str = "construction"
+    #: Pending roboport ghosts (`live_base.roboport_ghost_positions`).
+    roboport_ghosts: tuple[Point, ...] = ()
+    #: Sibling plans' future footprint every placement must avoid.
+    reserved_tiles: frozenset[tuple[int, int]] = frozenset()
+    live_client: bool = True
+
+
+@dataclass(frozen=True)
+class ReachStep:
+    """The next coverage hop toward a target, before anything is placed.
+
+    ``outcome`` is ``hop`` (place ``placements``: the power bridge first,
+    then the roboport, as the live driver submits them), ``covered``,
+    ``in_flight`` (a pending ghost already advances this hop) or
+    ``no_source`` (no built roboport to chain from). ``chain`` is the full
+    cleared chain toward the target; only its first wave is this step.
+    """
+
+    outcome: str
+    roboports: tuple[Point, ...] = ()
+    power: tuple[PowerBridgePlan, ...] = ()
+    chain: tuple[Point, ...] = ()
+    in_flight: Point | None = None
+    log: tuple[str, ...] = ()
+
+    @property
+    def placements(self) -> tuple[tuple[str, Point], ...]:
+        bridges = tuple(
+            placement for plan in self.power for placement in plan.placements
+        )
+        return bridges + tuple(("roboport", port) for port in self.roboports)
+
+    @property
+    def bill_of_materials(self) -> dict[str, int]:
+        bill: dict[str, int] = {}
+        for name, _point in self.placements:
+            bill[name] = bill.get(name, 0) + 1
+        return bill
+
+    @property
+    def footprint_tiles(self) -> set[tuple[int, int]]:
+        return set().union(*(
+            footprint_tile_indices(point, ENTITY_FOOTPRINTS.get(name, 1))
+            for name, point in self.placements
+        ))
+
+    @property
+    def bounds(self) -> tuple[Point, Point] | None:
+        """Tile-edge bounding box of every placement footprint."""
+        tiles = self.footprint_tiles
+        if not tiles:
+            return None
+        return (
+            (float(min(x for x, _ in tiles)), float(min(y for _, y in tiles))),
+            (float(max(x for x, _ in tiles) + 1), float(max(y for _, y in tiles) + 1)),
+        )
+
+
+def _reach_step_planner(
+    facts: ReachFacts, note: Callable[[str], None],
+) -> Generator[ReachSurvey, object, ReachStep]:
+    """Pure composition of the live hop: chain geometry, then its power."""
+    if facts.source is None:
+        return ReachStep("no_source")
+    in_flight = _in_flight_roboport_hop(
+        facts.source, facts.target, facts.roboport_ghosts,
+    )
+    if in_flight is not None:
+        return ReachStep("in_flight", in_flight=in_flight)
+    chain = yield from _roboport_hop_planner(
+        facts.source, facts.target, facts.purpose, facts.reserved_tiles, note,
+    )
+    if chain is None:
+        return ReachStep("covered")
+    wave = chain[:_ROBOPORT_WAVE]
+    power = []
+    for position in wave:
+        plan = yield from _power_bridge_planner(
+            PowerBridgeFacts(
+                position,
+                facts.reserved_tiles | footprint_tile_indices(position, 4),
+                True, facts.live_client,
+            ),
+            note,
+        )
+        if plan.outcome == "unpowered":
+            raise StuckError(
+                f"roboport at {position} cannot be connected to generated "
+                "power before its coverage ghost is submitted"
+            )
+        power.append(plan)
+    return ReachStep("hop", roboports=wave, power=tuple(power), chain=chain)
+
+
+def plan_reach_step(
+    facts: ReachFacts, surveys: Mapping[ReachSurvey, object],
+) -> ReachStep:
+    """Plan the next coverage hop from recorded facts and surveys, no I/O.
+
+    Mirrors one live `extend_roboport_coverage` pass: the roboport chain
+    toward ``facts.target`` and the power bridge staged for its first port.
+    Repairing already-built powerless ports, charge diagnostics and every
+    write stay in the live driver.
+    Raises `MissingReachSurvey` naming the first read `surveys` lacks;
+    geometry failures raise `StuckError` (or the hookup defer) as live does.
+    """
+    log: list[str] = []
+
+    def lookup(survey: ReachSurvey) -> object:
+        try:
+            return surveys[survey]
+        except KeyError:
+            raise MissingReachSurvey(survey) from None
+
+    def answer(survey: ReachSurvey) -> object:
+        if survey.kind != "chain_positions":
+            return lookup(survey)
+        return drive_reach_planner(
+            clear_chain_planner(survey.position, **dict(survey.flags)), lookup,
+        )
+
+    step = drive_reach_planner(_reach_step_planner(facts, log.append), answer)
+    return replace(step, log=tuple(log))
+
+
 def extend_roboport_coverage(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     target_position: Point, emit: Callable[[str], None], *,
@@ -1719,20 +2003,13 @@ def extend_roboport_coverage(
         # what prevents one logistic request at (39.5,31.5) and a concurrent
         # construction request at (55.5,24.5) from producing ports at
         # (34,27) and (40,26), only six tiles apart.
-        pending = [
-            position
-            for position in live_base.roboport_ghost_positions(
-                client, surface, force,
-            )
-            if math.dist(position, nearest) <= _ROBOPORT_LINK_DISTANCE
-            and math.dist(position, target_position) < math.dist(
-                nearest, target_position,
-            )
-        ]
-        if pending:
-            wave = [min(pending, key=lambda p: math.dist(p, target_position))]
+        in_flight = _in_flight_roboport_hop(
+            nearest, target_position,
+            live_base.roboport_ghost_positions(client, surface, force),
+        )
+        if in_flight is not None:
             _defer_roboport_coverage_wave(
-                target_position, purpose, wave, state="constructing",
+                target_position, purpose, [in_flight], state="constructing",
             )
     if (
         client is not None
@@ -1741,29 +2018,16 @@ def extend_roboport_coverage(
         _await_roboport_charge(
             client, surface, force, nearest, [nearest], emit,
         )
-    gap = service_distance(nearest, target_position, square=square)
-    if gap <= radius:
+    chain = drive_reach_planner(
+        _roboport_hop_planner(
+            nearest, target_position, purpose,
+            frozenset(reserved_tiles or ()), emit,
+        ),
+        lambda survey: _answer_live_reach_survey(client, surface, force, survey),
+    )
+    if chain is None:
         return False
-    emit(f"  roboport {purpose} coverage gap: nearest roboport {nearest} is "
-         f"{gap:.0f} tiles from {target_position} "
-         f"({purpose} radius is {radius:.0f}) -- chaining roboports out")
-    ideals = roboport_chain(nearest, target_position, radius)
-    try:
-        placed = clear_chain_positions(
-            client, surface, nearest, target_position, ideals,
-            service_radius=radius, service_square=square,
-            link_distance=_ROBOPORT_LINK_DISTANCE,
-            reserved_tiles=reserved_tiles,
-        )
-    except ValueError as error:
-        raise StuckError(
-            f"roboport chain cannot avoid existing infrastructure: {error}"
-        ) from error
-    if not placed:
-        raise StuckError(
-            f"{target_position} is outside {purpose} coverage of the roboport at "
-            f"{nearest} but no chain position could be derived; investigate directly"
-        )
+    placed = list(chain)
     wave_starts = (
         range(0, len(placed), _ROBOPORT_WAVE)
         if client is None else range(0, _ROBOPORT_WAVE, _ROBOPORT_WAVE)
