@@ -10430,6 +10430,14 @@ def _emit_iteration_limit_verdict(
     )
 
 
+#: Items that get a direct last-mile insert into the requester when the
+#: requester's own logistic network already holds them. None means every
+#: ingredient; a set narrows the treatment to those items. C80b telemetry:
+#: plastic was starved at the AC requester with reachable plastic > 0 in 59/59
+#: lines, so bots were not completing the last few tiles.
+_DIRECT_DELIVERY_ITEMS: frozenset[str] | None = None
+
+
 def _deliver_cell_ingredients(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     item: str, near: Point, emit: Callable[[str], None],
@@ -10460,6 +10468,22 @@ def _deliver_cell_ingredients(
             )
             if local is not None and local >= amount * 2:
                 continue
+            if (
+                local is not None and local > 0
+                and (_DIRECT_DELIVERY_ITEMS is None
+                     or ingredient in _DIRECT_DELIVERY_ITEMS)
+            ):
+                direct = live_base.transfer_stock(
+                    client, surface, ingredient, max(amount * 4, 20), chest,
+                )
+                moved_total += direct
+                emit(
+                    f"  CELL DIRECT DELIVERY: moved {direct} {ingredient} into "
+                    f"the {item} cell's requester at {chest} "
+                    f"(network held {local})"
+                )
+                if direct > 0:
+                    continue
             provider = live_base.nearest_container(
                 client, surface, force, chest,
                 names=("passive-provider-chest",),
