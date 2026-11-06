@@ -15,8 +15,8 @@ def test_productivity_module_has_a_line_recipe():
     assert spec["amounts"] == [5, 5] and spec["craft_time"] == 15.0
 
 
-def test_the_service_is_off_by_default_and_a_producing_operation():
-    assert Settings().production_service is False
+def test_the_service_is_enabled_on_this_branch_and_a_producing_operation():
+    assert Settings().production_service is True
     assert "production_service" in PRODUCING_OPERATIONS
 
 
@@ -24,7 +24,9 @@ def test_c6_and_s1_offer_the_sized_consumer_service_once():
     for phase in ({"phase_id": "C6"}, {"phase_id": "S1"}):
         menu = add_c6_consumer_options({"needs": [], "options": []}, phase, FACTS)
         option = next(o for o in menu["options"] if o["option_id"] == "op.production_service.productivity-module")
-        assert option["params"] == {"item": "productivity-module", "stock_target": 10, "minimum_machines": 2}
+        assert option["params"] == {"item": "productivity-module", "stock_target": 1,
+                                     "minimum_machines": 1, "upgrade_bootstrap": False,
+                                     "allow_promotion": False}
         assert add_c6_consumer_options(menu, phase, FACTS)["options"].count(option) == 1
 
 

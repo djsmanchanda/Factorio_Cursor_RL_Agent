@@ -609,11 +609,13 @@ def add_c6_consumer_options(menu: dict, phase: Mapping, facts: Mapping) -> dict:
     if not isinstance(recipe, Mapping) or recipe.get("enabled") is not True:
         return menu
     option_id = "op.production_service.productivity-module"
-    if any(option["option_id"] == option_id for option in menu["options"]):
-        return menu
+    # The generic service helper may have added this item first; replace it with the compact C6 cell
+    # (one machine, no promotion, outside the bootstrap cap), or the params never reach the operation.
+    menu["options"] = [option for option in menu["options"] if option["option_id"] != option_id]
     menu["options"].append({"option_id": option_id, "family": "production_service",
         "product": "productivity-module", "need_id": "service:productivity-module",
-        "params": {"item": "productivity-module", "stock_target": 10, "minimum_machines": 2},
+        "params": {"item": "productivity-module", "stock_target": 1, "minimum_machines": 1,
+                   "upgrade_bootstrap": False, "allow_promotion": False},
         "summary": "build a permanent productivity-module consumer line",
         "features": {"goal_need": True, "bill_known": False, "sustained_service_verified": False}})
     menu["needs"].append({"need_id": "service:productivity-module", "condition": "available",
