@@ -8,8 +8,8 @@ STARVED = {"needs": [{"item": "advanced-circuit", "condition": "input_starved"}]
 FACTS = {"recipes": {"copper-cable": {"ingredients": []}}}
 
 
-def test_the_cable_option_is_off_by_default():
-    assert Settings().cable_capacity is False
+def test_the_cable_option_is_enabled_on_this_branch():
+    assert Settings().cable_capacity is True
 
 
 def test_cable_capacity_is_offered_only_when_ac_is_input_starved():

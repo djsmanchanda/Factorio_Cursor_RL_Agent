@@ -600,7 +600,37 @@ def saturated_feedstock(machines: list[Mapping], recipes: Mapping, stock: Mappin
     return found
 
 
-def add_cable_capacity_option(menu: dict, board: Mapping, phase: Mapping, facts: Mapping) -> dict:
+def service_construction_blocks(results: list[dict], stock: Mapping[str, int]) -> dict[str, dict]:
+    """Production services whose last attempt was short of its construction bill and has not progressed.
+
+    Re-picking a blocked service only re-enters the same bill. Hold it while the bill is unstocked
+    *and* nothing improved since the failure; release as soon as any missing item gains stock. The
+    missing items themselves are already offered by ``shortages``.
+    """
+    latest = {}
+    for result in results:
+        if result.get("operation") == "production_service":
+            latest[(result.get("params") or {}).get("item")] = result
+    blocked = {}
+    for item, result in latest.items():
+        if not item or result.get("ok") or result.get("code") != "material_shortage":
+            continue
+        details = result.get("details") or {}
+        available = details.get("available") or {}
+        missing = {name: int(count) - int(available.get(name, 0))
+                   for name, count in (details.get("required") or {}).items()}
+        missing = {name: count for name, count in missing.items() if count > 0}
+        if not missing:
+            continue
+        if any(int(stock.get(name, 0)) > int(available.get(name, 0)) for name in missing):
+            continue  # the bill is being funded: retry
+        blocked[item] = missing
+    return blocked
+
+
+def add_cable_capacity_option(menu: dict, board: Mapping, phase: Mapping, facts: Mapping,
+                              results: list[dict] | None = None,
+                              stock: Mapping[str, int] | None = None) -> dict:
     """Offer one permanent copper-cable capacity cell when the AC cell is input-starved on cable."""
     if phase.get("phase_id") not in {"C6", "S1"}:
         return menu
@@ -611,6 +641,8 @@ def add_cable_capacity_option(menu: dict, board: Mapping, phase: Mapping, facts:
         return menu
     option_id = "op.production_service.copper-cable"
     if any(option["option_id"] == option_id for option in menu["options"]):
+        return menu
+    if "copper-cable" in service_construction_blocks(results or [], stock or {}):
         return menu
     menu["options"].append({"option_id": option_id, "family": "production_service",
         "product": "copper-cable", "need_id": "service:copper-cable",
@@ -1102,7 +1134,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         if settings.production_service:
             menu = add_c6_consumer_options(menu, phase, facts)
         if settings.cable_capacity:
-            menu = add_cable_capacity_option(menu, board, phase, facts)
+            menu = add_cable_capacity_option(menu, board, phase, facts, results, stock)
         if objective:
             menu = add_research_options(menu, board, research, facts, objective)
         from training.laya_decision_pacing import apply_waits, multiplier
