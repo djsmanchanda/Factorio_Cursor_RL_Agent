@@ -48,6 +48,13 @@ _OIL_STOCK_TARGETS = {
     "offshore-pump": 2,
 }
 
+#: One permanent cell's kit spends 5-12 passive providers and the opening kit
+#: gives 16, so the first cells consume the whole stock and every later cell
+#: bill dies on provider chests (52/54 cable selections in C76, 19/20 in C77).
+#: Keep a one-cell floor funded instead of letting the starter kit be the only
+#: source. Requester chests are deliberately absent: they need logistic science.
+PROVIDER_CHEST_FLOOR = 16
+
 
 def mission_mall_targets(
     goals: tuple[str, ...], recipes: Mapping[str, Mapping],
@@ -82,6 +89,10 @@ def mission_mall_targets(
         visit(goal)
     if goals:
         targets["lab"] = 4
+        if "passive-provider-chest" in recipes:
+            targets["passive-provider-chest"] = max(
+                targets.get("passive-provider-chest", 0), PROVIDER_CHEST_FLOOR,
+            )
     return {item: count for item, count in targets.items() if item in recipes}
 
 
