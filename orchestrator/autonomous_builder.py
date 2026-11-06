@@ -6281,6 +6281,7 @@ def _emit_loan_cell_telemetry(
         # that ambiguity into one number: network>0 means a bot-delivery
         # fault, network==0 means a coverage/segmentation fault.
         far = "?"
+        near_network = "?"
         if probe != "-":
             try:
                 network_count = live_base.network_item_count(
@@ -6288,8 +6289,17 @@ def _emit_loan_cell_telemetry(
                 )
             except Exception:  # noqa: BLE001 -- diagnostic only
                 network_count = None
-            if network_count is not None:
-                far = f"{probe}={network_count}"
+            # A None reading means no network covers the requester, which is the
+            # strongest coverage fault, not a missing observation. Hide it and
+            # the split biases toward delivery.
+            far = f"{probe}=none" if network_count is None else f"{probe}={network_count}"
+            try:
+                network_id = live_base.pole_network_id(
+                    client, surface, loan.requester_position,
+                )
+            except Exception:  # noqa: BLE001 -- diagnostic only
+                network_id = None
+            near_network = "none" if network_id is None else str(network_id)
         emit(
             f"  LOAN CELL TELEMETRY: {step.recipe} at {loan.machine_position} "
             f"bill {int(actual.get(loan.target_item, 0))}/{loan.target_count}"
@@ -6300,6 +6310,7 @@ def _emit_loan_cell_telemetry(
             f"| pool {pool} free | loans {table}"
             + (f" | starved {starved}" if missing == "-" and starved != "-" else "")
             + (f" | reachable {far}" if far != "?" else "")
+            + (f" | network {near_network}" if near_network != "?" else "")
         )
     except Exception as error:
         emit(f"  LOAN CELL TELEMETRY skipped: {error}")
