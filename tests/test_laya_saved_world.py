@@ -794,6 +794,19 @@ def test_saved_world_schema_accepts_recipe_survey_and_completeness_metadata():
     incomplete["recipe_observations"]["automation-science-pack"]["categories"] = []
     incomplete["recipe_observations"]["automation-science-pack"].pop("category")
     FACTS_VALIDATOR.validate(incomplete)
+    oil = copy.deepcopy(payload)
+    oil["fluid_recipes"] = {"basic-oil-processing": {
+        "ingredients": [{"name": "crude-oil", "type": "fluid", "amount": 100}],
+        "products": [{"name": "petroleum-gas", "type": "fluid", "amount": 45}],
+        "energy_ticks": 300, "category": "oil-processing", "machine_speeds": {"oil-refinery": 1}, "productivity_bonus": 0}}
+    oil["oil_field"] = {"anchor": {"x": 0, "y": 0}, "anchor_source": "spawn", "search_radius": 512, "found": True,
+                        "wells": 3, "total_amount": 1050000, "yield_percent": 350, "max_crude_per_s": 35,
+                        "center": {"x": 62, "y": 0.3}, "distance": 62, "nearest_well_distance": 60,
+                        "water": {"found": True, "position": {"x": 30.5, "y": 40.5}, "distance": 50.7}}
+    FACTS_VALIDATOR.validate(oil)
+    oil["oil_field"] = {"anchor": {"x": 0, "y": 0}, "anchor_source": "roboport", "search_radius": 512,
+                        "found": False, "wells": 0, "water": {"found": False, "unknown": True}}
+    FACTS_VALIDATOR.validate(oil)
 
 
 _FLUID_SNAPSHOT_SETUP = """
@@ -1004,3 +1017,69 @@ def test_query_without_report_surfaces_server_reply(tmp_path):
     adapter.bridge = Bridge()
     with pytest.raises(SavedWorldError, match="unfinished long string"):
         adapter.query(inspect={})
+
+
+@pytest.mark.lua
+def test_fluid_recipes_are_exported_typed_and_separate_from_the_solid_menu():
+    _run_survey_lua(setup="""
+prototypes.entity['chemical-plant']={type='assembling-machine',ingredient_count=4,
+  crafting_categories={chemistry=true},get_crafting_speed=function() return 1 end}
+prototypes.entity['oil-refinery']={type='assembling-machine',ingredient_count=2,
+  crafting_categories={['oil-processing']=true},get_crafting_speed=function() return 1 end}
+recipes['plastic-bar'].categories={'chemistry'}
+recipes['basic-oil-processing']=recipe('basic-oil-processing',{fluid('crude-oil',100)},{fluid('petroleum-gas',45)},
+  {energy=5,categories={'oil-processing'}})
+recipes['advanced-oil-processing']=recipe('advanced-oil-processing',{fluid('crude-oil',100),fluid('water',50)},
+  {fluid('heavy-oil',25),fluid('light-oil',45),fluid('petroleum-gas',55)},{energy=5,categories={'oil-processing'}})
+recipes['sulfuric-acid']=recipe('sulfuric-acid',{item('iron-plate',1),fluid('water',100)},{fluid('sulfuric-acid',50)},
+  {enabled=false,categories={'chemistry'}})
+""", assertions="""
+local fluid=facts.fluid_recipes
+local plastic=fluid['plastic-bar']
+assert(plastic.category=='chemistry' and plastic.energy_ticks==30 and plastic.machine_speeds['chemical-plant']==1)
+assert(plastic.ingredients[1].name=='petroleum-gas' and plastic.ingredients[1].type=='fluid' and plastic.ingredients[1].amount==20)
+assert(plastic.products[1].name=='plastic-bar' and plastic.products[1].type=='item' and plastic.products[1].amount==2)
+local basic=fluid['basic-oil-processing']
+assert(basic.energy_ticks==300 and basic.machine_speeds['oil-refinery']==1 and basic.products[1].amount==45)
+assert(#fluid['advanced-oil-processing'].products==3)
+assert(fluid['sulfuric-acid']==nil and fluid['iron-plate']==nil)
+local menu={}
+for name in pairs(facts.recipes) do menu[#menu+1]=name end
+table.sort(menu)
+assert(table.concat(menu, ',') == 'electric-furnace,electronic-circuit,iron-plate,pumpjack')
+assert(facts.oil_field==nil)
+""")
+
+
+@pytest.mark.lua
+def test_oil_field_survey_reports_nearest_patch_yield_and_water_without_creating_anything():
+    _run_survey_lua(setup="""
+request.oil_search_radius=100
+game.forces.player.get_spawn_position=function() return {x=0,y=0} end
+prototypes.entity['crude-oil']={normal_resource_amount=300000,
+  mineable_properties={mining_time=1,products={{name='crude-oil',amount=10}}}}
+prototypes.entity['pumpjack']={mining_speed=1}
+prototypes.tile={water={fluid={name='water'}},deepwater={fluid={name='water'}},grass={}}
+local function well(x,y,amount) return {name='crude-oil',position={x=x,y=y},amount=amount} end
+local wells={well(60,0,300000),well(64,4,150000),well(62,-3,600000),well(95,0,900000),well(300,0,900000)}
+local created=false
+surface.create_entity=function() created=true end
+surface.find_entities_filtered=function(f)
+  if f.name=='crude-oil' then return wells end
+  return {}
+end
+local water_distance=math.sqrt(30.5^2+40.5^2)
+surface.count_tiles_filtered=function(f)
+  assert(#f.name==2)
+  return f.radius>=water_distance and 1 or 0
+end
+surface.find_tiles_filtered=function(f) return {{position={x=30,y=40}}} end
+""", assertions="""
+local field=facts.oil_field
+assert(field.anchor_source=='spawn' and field.search_radius==100 and field.found)
+assert(field.wells==3 and field.total_amount==1050000 and field.nearest_well_distance==60)
+assert(math.abs(field.center.x-62)<1e-9 and math.abs(field.center.y-1/3)<1e-9)
+assert(math.abs(field.yield_percent-350)<1e-9 and math.abs(field.max_crude_per_s-35)<1e-9)
+assert(field.water.found and field.water.position.x==30.5 and math.abs(field.water.distance-water_distance)<1e-9)
+assert(not created)
+""")

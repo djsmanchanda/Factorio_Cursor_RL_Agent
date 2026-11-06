@@ -30,13 +30,15 @@ ROOT = Path(__file__).resolve().parents[1]
 TEST_ROOT = ROOT / "data" / "laya-saved-world"
 BOUNDS = {"x_min": -128, "y_min": -128, "x_max_exclusive": 128, "y_max_exclusive": 128}
 SCOPE = {"surface": "nauvis", "force": "player", "bounds": BOUNDS}
+# Oil and water lie beyond the build bounds; this read-only fact searches generated terrain this far from the base.
+OIL_SEARCH_RADIUS = 512
 FACTS_VALIDATOR = Draft7Validator(json.loads((ROOT / "schemas/laya_saved_world.schema.json").read_text()))
 
 
 def _query_request(candidates=None, inspect=None, extra_recipes=()):
     """One read-only request envelope. Demanded recipes only widen observation."""
     return {"bounds": dict(BOUNDS), "candidates": candidates, "inspect": inspect,
-            "extra_recipes": list(extra_recipes)}
+            "extra_recipes": list(extra_recipes), "oil_search_radius": OIL_SEARCH_RADIUS}
 
 
 class SavedWorldError(RuntimeError):
@@ -297,6 +299,22 @@ def state_option(candidate):
                          else "ghost_submit" if placements else "read_only"}
 
 
+def oil_field_digest(field):
+    """Compact oil/water facts for the decision state; None when the survey did not run."""
+    if not field:
+        return None
+    digest = {"found": field["found"], "wells": field["wells"], "search_radius": field["search_radius"],
+              "anchor": field["anchor"]}
+    for key in ("distance", "yield_percent", "max_crude_per_s"):
+        if field.get(key) is not None:
+            digest[key] = round(field[key], 1)
+    if field.get("center"):
+        digest["center"] = {axis: round(field["center"][axis], 1) for axis in ("x", "y")}
+    water = field.get("water") or {}
+    digest["water_distance"] = round(water["distance"], 1) if water.get("distance") is not None else None
+    return digest
+
+
 def decision_state(facts, candidates, run_id, model_ref, objective, history=(), measurement=None):
     options = [state_option(c) for c in candidates]
     available = sum(sum(max(0, count - n["reserved"].get(item, 0)) for item, count in n["items"].items())
@@ -339,6 +357,8 @@ def decision_state(facts, candidates, run_id, model_ref, objective, history=(), 
             "production_counts": {n: v for n, v in facts["production"].items() if v},
             "consumption_counts": {n: v for n, v in facts["consumption"].items() if v}}},
     }
+    if facts.get("oil_field"):
+        state["observation_digest"]["oil_field"] = oil_field_digest(facts["oil_field"])
     if measurement is not None:
         state["observation_digest"]["saved_world"]["measured_flow"] = {
             "window_ticks": measurement["window_ticks"],

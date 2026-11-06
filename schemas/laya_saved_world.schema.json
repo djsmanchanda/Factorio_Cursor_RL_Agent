@@ -44,6 +44,45 @@
         "category_metadata_unsupported": {"type": "integer", "minimum": 0}
       }
     },
+    "fluid_recipes": {
+      "type": "object",
+      "description": "Enabled recipes with a fluid ingredient or product, keyed by recipe name. Facts only: kept out of 'recipes', which is the solid build menu. Product amounts are expected amounts (probability applied).",
+      "additionalProperties": {
+        "type": "object", "additionalProperties": false,
+        "required": ["ingredients", "products", "energy_ticks", "machine_speeds"],
+        "properties": {
+          "ingredients": {"$ref": "#/definitions/recipe_parts"},
+          "products": {"$ref": "#/definitions/recipe_parts"},
+          "energy_ticks": {"type": "number", "exclusiveMinimum": 0},
+          "category": {"type": "string"},
+          "machine_speeds": {"oneOf": [{"type": "object", "additionalProperties": {"type": "number", "exclusiveMinimum": 0}}, {"type": "array", "maxItems": 0}]},
+          "productivity_bonus": {"type": "number", "minimum": 0}
+        }
+      }
+    },
+    "oil_field": {
+      "type": "object", "additionalProperties": false,
+      "description": "Read-only survey of the nearest crude-oil patch (wells within 32 tiles of the nearest well) and water tile to the base anchor, within search_radius of generated terrain.",
+      "required": ["anchor", "anchor_source", "search_radius", "found", "wells", "water"],
+      "properties": {
+        "anchor": {"$ref": "#/definitions/position"},
+        "anchor_source": {"enum": ["roboport", "spawn"]},
+        "search_radius": {"type": "number", "exclusiveMinimum": 0},
+        "found": {"type": "boolean"},
+        "wells": {"type": "integer", "minimum": 0},
+        "total_amount": {"$ref": "#/definitions/count"},
+        "yield_percent": {"$ref": "#/definitions/count"},
+        "max_crude_per_s": {"$ref": "#/definitions/count"},
+        "center": {"$ref": "#/definitions/position"},
+        "distance": {"$ref": "#/definitions/count"},
+        "nearest_well_distance": {"$ref": "#/definitions/count"},
+        "water": {
+          "type": "object", "additionalProperties": false, "required": ["found"],
+          "properties": {"found": {"type": "boolean"}, "unknown": {"const": true},
+                         "position": {"$ref": "#/definitions/position"}, "distance": {"$ref": "#/definitions/count"}}
+        }
+      }
+    },
     "recipes": {"type": "object", "additionalProperties": {"type": "object", "required": ["ingredients", "product_amount", "energy_ticks"], "properties": {"ingredients": {"type": "array", "items": {"type": "object", "required": ["name", "amount"], "properties": {"name": {"type": "string"}, "amount": {"type": "number", "exclusiveMinimum": 0}}}}, "product_amount": {"type": "number", "exclusiveMinimum": 0}, "energy_ticks": {"type": "integer", "minimum": 1}}}}
   },
   "definitions": {

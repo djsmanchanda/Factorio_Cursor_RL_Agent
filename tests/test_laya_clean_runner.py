@@ -564,3 +564,25 @@ def test_runner_journals_unlinked_candidate_without_promoting_it(tmp_path):
     assert state_evidence == [{"option_id": candidate["option_id"], "status": "unavailable",
                                "reason": "test", "dispatch_authorized": False}]
     assert candidate["option_id"] not in adapter.executed
+
+
+def test_fluid_facts_leave_solid_menus_alone_and_plastic_chain_blocked_without_an_operation():
+    from tests.test_laya_factory_status import FLUID_RECIPES
+    plain, fluid = facts(), {**facts(), "fluid_recipes": FLUID_RECIPES}
+    targets = phase("C1")["targets"]
+    assert (compile_menu(fluid, compile_status(fluid, targets), validator(), seed=4)
+            == compile_menu(plain, compile_status(plain, targets), validator(), seed=4))
+    board = compile_status(fluid, {"plastic-bar": 0.5})
+    menu = compile_menu(fluid, board, validator(), seed=4)
+    for item in ("plastic-bar", "petroleum-gas", "crude-oil"):
+        assert menu["blocked"][f"item:{item}"] == {"no_candidate": 1}
+        assert not any(o.get("need_id") == f"item:{item}" for o in menu["options"])
+    state = build_state({**fluid, "oil_field": {"anchor": {"x": 0, "y": 0}, "anchor_source": "roboport",
+                                               "search_radius": 512, "found": True, "wells": 3,
+                                               "center": {"x": 62.04, "y": 0.33}, "distance": 62.04,
+                                               "yield_percent": 350.0, "max_crude_per_s": 35.0,
+                                               "water": {"found": False}}},
+                        menu, board, phase("C4"), "test", ExplorationPolicy.model_ref, [], None)
+    assert state["observation_digest"]["oil_field"] == {
+        "found": True, "wells": 3, "search_radius": 512, "anchor": {"x": 0, "y": 0}, "distance": 62.0,
+        "yield_percent": 350.0, "max_crude_per_s": 35.0, "center": {"x": 62.0, "y": 0.3}, "water_distance": None}

@@ -4,7 +4,7 @@ import pytest
 
 from orchestrator.laya_state import validate_state
 from training.laya_factory_status import (
-    FactoryStatusError, apply_to_state, bottleneck_chain, compile_status, goal_demand, goal_met,
+    FactoryStatusError, apply_to_state, bottleneck_chain, compile_status, goal_demand, goal_met, production_recipes,
 )
 from training.laya_saved_world import decision_state
 
@@ -158,3 +158,65 @@ def test_a_cell_held_off_by_its_own_gate_reads_as_stocked_not_idle():
     board = compile_status(world(gated, items={"iron-gear-wheel": 400}), {"iron-gear-wheel": 0.25},
                            flows(iron_gear_wheel=0.0))
     assert board["needs"][0]["condition"] == "satisfied"
+
+
+def fluid_recipe(ingredients, products, ticks, machine):
+    """facts["fluid_recipes"] entry as the saved-world survey exports it (vanilla 2.0 amounts)."""
+    def parts(entries):
+        return [{"name": n, "type": t, "amount": a} for n, t, a in entries]
+    return {"ingredients": parts(ingredients), "products": parts(products), "energy_ticks": ticks,
+            "machine_speeds": {machine: 1.0}}
+
+
+FLUID_RECIPES = {
+    "plastic-bar": fluid_recipe([("petroleum-gas", "fluid", 20), ("coal", "item", 1)], [("plastic-bar", "item", 2)],
+                                60, "chemical-plant"),
+    "basic-oil-processing": fluid_recipe([("crude-oil", "fluid", 100)], [("petroleum-gas", "fluid", 45)],
+                                         300, "oil-refinery"),
+    "advanced-oil-processing": fluid_recipe(
+        [("crude-oil", "fluid", 100), ("water", "fluid", 50)],
+        [("heavy-oil", "fluid", 25), ("light-oil", "fluid", 45), ("petroleum-gas", "fluid", 55)], 300, "oil-refinery"),
+    "light-oil-cracking": fluid_recipe([("light-oil", "fluid", 30), ("water", "fluid", 30)],
+                                       [("petroleum-gas", "fluid", 20)], 120, "chemical-plant"),
+    # Catalyst recipe whose steam no recipe makes: must neither be chosen nor raise a cycle.
+    "coal-liquefaction": fluid_recipe(
+        [("coal", "item", 10), ("heavy-oil", "fluid", 25), ("steam", "fluid", 50)],
+        [("heavy-oil", "fluid", 90), ("light-oil", "fluid", 20), ("petroleum-gas", "fluid", 10)], 300, "oil-refinery"),
+}
+
+
+def test_fluid_recipes_choose_the_shortest_chain_to_raw_and_keep_solid_recipes():
+    facts = {**world([]), "fluid_recipes": FLUID_RECIPES}
+    chosen = production_recipes(facts)
+    assert {k: chosen[k] for k in RECIPES} == RECIPES  # Solid recipes pass through untouched.
+    assert chosen["petroleum-gas"]["recipe"] == "basic-oil-processing"
+    assert chosen["heavy-oil"]["recipe"] == chosen["light-oil"]["recipe"] == "advanced-oil-processing"
+    assert "crude-oil" not in chosen and "steam" not in chosen
+    only_advanced = {k: v for k, v in FLUID_RECIPES.items() if k != "basic-oil-processing"}
+    assert production_recipes({**facts, "fluid_recipes": only_advanced})["petroleum-gas"]["recipe"] == "advanced-oil-processing"
+    running = {**facts, "machines": [machine("oil-refinery", "advanced-oil-processing", "working")]}
+    assert production_recipes(running)["petroleum-gas"]["recipe"] == "advanced-oil-processing"
+
+
+def test_plastic_goal_expands_to_petroleum_gas_crude_and_coal_with_machine_counts():
+    oil = {"found": True, "wells": 4, "max_crude_per_s": 40.0}
+    facts = {**world([]), "fluid_recipes": FLUID_RECIPES, "oil_field": oil}
+    board = compile_status(facts, {"plastic-bar": 0.5}, flows(coal=1.0))
+    needs = {n["item"]: n for n in board["needs"]}
+    assert set(needs) == {"plastic-bar", "petroleum-gas", "coal", "crude-oil"}
+    plastic, gas, crude = needs["plastic-bar"], needs["petroleum-gas"], needs["crude-oil"]
+    assert plastic["condition"] == "unbuilt" and plastic["machines_needed"] == {"chemical-plant": 1}
+    assert gas["required_per_s"] == pytest.approx(5.0) and gas["machines_needed"] == {"oil-refinery": 1}
+    assert crude["required_per_s"] == pytest.approx(100 / 45 * 5) and crude["machines_needed"] == {"pumpjack": 2}
+    assert needs["coal"]["required_per_s"] == pytest.approx(0.25) and needs["coal"]["condition"] == "satisfied"
+    assert bottleneck_chain(board) == ["plastic-bar:unbuilt <- petroleum-gas:unbuilt <- crude-oil:unmeasured"]
+    # Machines count under the recipe they run, not the product name.
+    built = {**facts, "machines": [machine("oil-refinery", "basic-oil-processing", "working")]}
+    gas = next(n for n in compile_status(built, {"plastic-bar": 0.5})["needs"] if n["item"] == "petroleum-gas")
+    assert gas["machines"] == {"oil-refinery": 1} and gas["capacity_per_s"] == pytest.approx(9.0)
+
+
+def test_without_fluid_facts_plastic_stays_unavailable_and_solid_boards_are_unchanged():
+    assert next(n for n in compile_status(world([]), {"plastic-bar": 0.5})["needs"])["condition"] == "recipe_unavailable"
+    solid = compile_status(world([]), {"electronic-circuit": 1.0})
+    assert compile_status({**world([]), "fluid_recipes": FLUID_RECIPES}, {"electronic-circuit": 1.0}) == solid

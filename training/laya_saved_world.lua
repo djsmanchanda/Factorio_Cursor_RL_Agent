@@ -16,7 +16,7 @@ end
 local facts = {version="saved-world-v1", tick=game.tick, surface="nauvis", force="player",
   mods=script.active_mods, networks={}, ports={}, poles={}, machines={}, resources={},
   player_stock={}, production={}, consumption={}, researched={}, pending_ghosts=0,
-  infrastructure_counts={}, recipes={}, recipe_observations={}, enabled_recipes={}}
+  infrastructure_counts={}, recipes={}, recipe_observations={}, enabled_recipes={}, fluid_recipes={}}
 local generation = {}
 for _, e in pairs(surface.find_entities_filtered{force=force}) do
   facts.infrastructure_counts[e.name]=(facts.infrastructure_counts[e.name] or 0)+1
@@ -156,6 +156,23 @@ for name,r in pairs(force.recipes) do
   if category_list[1] then observation.category=category_list[1] end
   facts.recipe_observations[name]=observation
   if r.enabled then facts.enabled_recipes[name]=true end
+  -- Enabled recipes touching a fluid get their own typed key; facts.recipes
+  -- (Laya's solid build menu) never sees them. Products carry their expected
+  -- amount so multi-product and probabilistic outputs read as plain rates.
+  local fluid=false
+  for _,part in ipairs(ingredients) do if part.type=="fluid" then fluid=true end end
+  for _,part in ipairs(products) do if part.type=="fluid" then fluid=true end end
+  if r.enabled and fluid then
+    local typed_products={}
+    for _,part in ipairs(products) do
+      local amount=part.amount or ((part.amount_min or 0)+(part.amount_max or 0))/2
+      table.insert(typed_products,{name=part.name,type=part.type,amount=amount*(part.probability or 1)})
+    end
+    local entry={ingredients=ingredients,products=typed_products,energy_ticks=math.max(1/60,energy),
+      machine_speeds=speeds,productivity_bonus=r.productivity_bonus}
+    if category_list[1] then entry.category=category_list[1] end
+    facts.fluid_recipes[name]=entry
+  end
   observation_count=observation_count+1
 end
 -- The count covers exactly force.recipes at this tick, enabled or not. Other
@@ -683,5 +700,71 @@ if request.candidates then
     results[c.option_id]=result
   end
   return {tick=game.tick, validations=results}
+end
+-- Read-only oil facts for the base: the nearest crude-oil patch and water tile
+-- to the base anchor (lowest roboport, else the force spawn). Searches only
+-- generated chunks; creates nothing and generates no chunks.
+if request.oil_search_radius then
+  local anchor,source=nil,"spawn"
+  for _,port in ipairs(facts.ports) do
+    if not anchor or port.position.x<anchor.x or (port.position.x==anchor.x and port.position.y<anchor.y) then
+      anchor=port.position; source="roboport"
+    end
+  end
+  anchor=anchor or force.get_spawn_position(surface)
+  local ax,ay,radius=anchor.x,anchor.y,request.oil_search_radius
+  local field={anchor={x=ax,y=ay},anchor_source=source,search_radius=radius,found=false,wells=0}
+  local wells={}
+  if prototypes.entity["crude-oil"] then
+    wells=surface.find_entities_filtered{type="resource",name="crude-oil",area={{ax-radius,ay-radius},{ax+radius,ay+radius}}}
+  end
+  local nearest,best=nil,math.huge
+  for _,e in pairs(wells) do
+    local d=math.sqrt((e.position.x-ax)^2+(e.position.y-ay)^2)
+    if d<=radius and d<best then nearest,best=e,d end
+  end
+  if nearest then
+    -- One patch: wells within 32 tiles of the nearest well.
+    local count,amount,sx,sy=0,0,0,0
+    for _,e in pairs(wells) do
+      if math.abs(e.position.x-nearest.position.x)<=32 and math.abs(e.position.y-nearest.position.y)<=32 then
+        count=count+1; amount=amount+e.amount; sx=sx+e.position.x; sy=sy+e.position.y
+      end
+    end
+    local cx,cy=sx/count,sy/count
+    field.found=true; field.wells=count; field.total_amount=amount
+    field.center={x=cx,y=cy}; field.distance=math.sqrt((cx-ax)^2+(cy-ay)^2); field.nearest_well_distance=best
+    -- Yield: amount over the prototype's normal amount (100% each); crude/s if every well had a pumpjack.
+    local ok,per_amount=pcall(function()
+      local p=prototypes.entity["crude-oil"]; local pump=prototypes.entity["pumpjack"]
+      local mined=p.mineable_properties
+      return pump.mining_speed*mined.products[1].amount/mined.mining_time/p.normal_resource_amount
+    end)
+    local ok_normal,normal=pcall(function() return prototypes.entity["crude-oil"].normal_resource_amount end)
+    if ok_normal and type(normal)=="number" and normal>0 then field.yield_percent=100*amount/normal end
+    if ok and type(per_amount)=="number" and per_amount>0 then field.max_crude_per_s=amount*per_amount end
+  end
+  -- Nearest water: tiles whose prototype yields water, by bisecting the search radius.
+  local names={}
+  for name,tile in pairs(prototypes.tile or {}) do
+    local ok,fluid=pcall(function() return tile.fluid end)
+    if ok and fluid and fluid.name=="water" then names[#names+1]=name end
+  end
+  local function water_within(r)
+    return surface.count_tiles_filtered{position={ax,ay},radius=r,name=names,limit=1}>0
+  end
+  local ok_water,water=pcall(function()
+    if #names==0 or not water_within(radius) then return {found=false} end
+    local lo,hi=0,radius
+    while hi-lo>1 do
+      local mid=math.floor((lo+hi)/2)
+      if water_within(mid) then hi=mid else lo=mid end
+    end
+    local tile=surface.find_tiles_filtered{position={ax,ay},radius=hi,name=names,limit=1}[1]
+    local x,y=tile.position.x+.5,tile.position.y+.5
+    return {found=true,position={x=x,y=y},distance=math.sqrt((x-ax)^2+(y-ay)^2)}
+  end)
+  field.water=ok_water and water or {found=false,unknown=true}
+  facts.oil_field=field
 end
 return facts

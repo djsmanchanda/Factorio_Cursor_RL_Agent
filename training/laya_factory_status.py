@@ -25,6 +25,9 @@ from planners.recipe_data import MACHINE_SPEEDS
 
 VERSION = "laya-factory-status-v1"
 RAW_ITEMS = frozenset({"iron-ore", "copper-ore", "stone", "coal"})
+# Fluids drawn from the world (pumpjack, offshore pump), raw like ores.
+RAW_FLUIDS = frozenset({"crude-oil", "water"})
+RAW = RAW_ITEMS | RAW_FLUIDS
 SMELTED_ITEMS = frozenset({"iron-plate", "copper-plate", "stone-brick", "steel-plate"})
 FURNACE_SPEEDS = {"stone-furnace": 1.0, "steel-furnace": 2.0, "electric-furnace": 2.0}
 ASSEMBLER_TIERS = ("assembling-machine-1", "assembling-machine-2", "assembling-machine-3")
@@ -52,11 +55,67 @@ def _bucket(status: str) -> str:
     return next((name for name, members in STATUS_BUCKETS.items() if status in members), "other")
 
 
-def goal_demand(targets: Mapping[str, float], recipes: Mapping[str, Mapping]) -> dict[str, dict]:
-    """Expand target rates through enabled solid recipes into per-item demand.
+def production_recipes(facts: Mapping) -> dict[str, Mapping]:
+    """``facts["recipes"]`` plus one fluid recipe for each item or fluid only fluid recipes make.
 
-    Returns ``{item: {"required_per_s", "depth", "consumers"}}``.  Items with no
-    enabled recipe are leaves; the board marks non-raw leaves as unavailable.
+    ``facts["fluid_recipes"]`` (typed, keyed by recipe) is reshaped per product into the
+    solid recipe shape, with ``recipe`` and ``machine_speeds`` added.  Per product, the
+    recipe with the shortest chain to raw resources is used (so the chosen chain is
+    acyclic); ties prefer a recipe machines already run, then fewer ingredients, fewer
+    products and the name (basic-oil-processing over advanced unless only advanced is
+    enabled).  Solid recipes always win; facts["recipes"] itself is never changed.
+    """
+    solid = facts.get("recipes") or {}
+    fluid = facts.get("fluid_recipes") or {}
+    if not fluid:
+        return dict(solid)
+
+    def parts(spec: Mapping, key: str) -> list[Mapping]:
+        return [p for p in (spec.get(key) or ()) if float(p.get("amount") or 0) > 0]
+
+    producers: dict[str, list[str]] = defaultdict(list)
+    for name, spec in sorted(fluid.items()):
+        for part in parts(spec, "products"):
+            if part["name"] not in solid and part["name"] not in RAW and name not in producers[part["name"]]:
+                producers[part["name"]].append(name)
+    cost: dict[str, float] = {item: 0 for item in RAW}
+
+    def recipe_cost(ingredients: Sequence[Mapping]) -> float:
+        return 1 + max((cost.get(p["name"], math.inf) for p in ingredients), default=0)
+
+    changed = True
+    while changed:  # Costs only fall and are bounded below, so this settles.
+        changed = False
+        for item, ingredients in [*((i, r["ingredients"]) for i, r in solid.items() if i not in RAW),
+                                  *((i, parts(fluid[n], "ingredients")) for i, names in producers.items() for n in names)]:
+            value = recipe_cost(ingredients)
+            if value < cost.get(item, math.inf):
+                cost[item], changed = value, True
+    in_use = {m.get("recipe") for m in facts.get("machines") or ()}
+    merged = dict(solid)
+    for item, names in sorted(producers.items()):
+        name = min(names, key=lambda n: (recipe_cost(parts(fluid[n], "ingredients")), n not in in_use,
+                                         len(parts(fluid[n], "ingredients")), len(parts(fluid[n], "products")), n))
+        spec = fluid[name]
+        if math.isinf(recipe_cost(parts(spec, "ingredients"))):
+            continue  # Unreachable from raw resources: stays a leaf (recipe_unavailable).
+        merged[item] = {
+            "recipe": name, "fluid": True, "energy_ticks": float(spec["energy_ticks"]),
+            "ingredients": [{"name": p["name"], "type": p.get("type", "item"), "amount": float(p["amount"])}
+                            for p in parts(spec, "ingredients")],
+            "product_amount": sum(float(p["amount"]) for p in parts(spec, "products") if p["name"] == item),
+            "productivity_bonus": float(spec.get("productivity_bonus") or 0),
+            "machine_speeds": dict(spec.get("machine_speeds") or {}),
+        }
+    return merged
+
+
+def goal_demand(targets: Mapping[str, float], recipes: Mapping[str, Mapping]) -> dict[str, dict]:
+    """Expand target rates through enabled recipes into per-item demand.
+
+    ``recipes`` is ``facts["recipes"]`` or ``production_recipes(facts)`` (which adds
+    fluid chains).  Returns ``{item: {"required_per_s", "depth", "consumers"}}``.
+    Items with no enabled recipe are leaves; the board marks non-raw leaves as unavailable.
     """
     demand: dict[str, float] = defaultdict(float)
     depth: dict[str, int] = {}
@@ -68,7 +127,7 @@ def goal_demand(targets: Mapping[str, float], recipes: Mapping[str, Mapping]) ->
         demand[item] += rate
         depth[item] = min(depth.get(item, level), level)
         recipe = recipes.get(item)
-        if recipe is None or item in RAW_ITEMS:
+        if recipe is None or item in RAW:
             return
         crafts = rate / (float(recipe["product_amount"]) * (1 + float(recipe.get('productivity_bonus',0))))
         for part in recipe["ingredients"]:
@@ -84,8 +143,11 @@ def goal_demand(targets: Mapping[str, float], recipes: Mapping[str, Mapping]) ->
 
 
 def makeable(item: str, recipes: Mapping[str, Mapping], _path: tuple[str, ...] = ()) -> bool:
-    """Whether ``item`` can be made from raw resources through enabled recipes (``facts["recipes"]``)."""
-    if item in RAW_ITEMS:
+    """Whether ``item`` can be made from raw resources through ``recipes``.
+
+    Pass ``facts["recipes"]`` for the solid build menu, ``production_recipes(facts)`` to include fluid chains.
+    """
+    if item in RAW:
         return True
     recipe = recipes.get(item)
     if recipe is None or item in _path:
@@ -97,8 +159,11 @@ def machine_rate(machine: str, item: str, recipe: Mapping | None) -> float | Non
     """Theoretical items/s of one machine on ``item``; ``None`` when unknown."""
     if recipe is None:
         return None
-    speed = FURNACE_SPEEDS.get(machine) if item in SMELTED_ITEMS else None
-    speed = speed if speed is not None else MACHINE_SPEEDS.get(machine)
+    if recipe.get("machine_speeds"):  # Observed category-compatible machines (fluid recipes).
+        speed = recipe["machine_speeds"].get(machine)
+    else:
+        speed = FURNACE_SPEEDS.get(machine) if item in SMELTED_ITEMS else None
+        speed = speed if speed is not None else MACHINE_SPEEDS.get(machine)
     if not speed:
         return None
     return speed * float(recipe["product_amount"]) * (1 + float(recipe.get('productivity_bonus',0))) * 60.0 / float(recipe["energy_ticks"])
@@ -158,7 +223,7 @@ def _diagnose(item: str, recipe: Mapping | None, buckets: Mapping[str, int], mac
         return "satisfied"
     if buckets.get("blocked", 0) * 2 > machine_count and stock >= required * STOCKED_SECONDS:
         return "satisfied"  # A full mall measures 0/s while its stock meets demand.
-    if item in RAW_ITEMS:
+    if item in RAW:
         return "short" if measured is not None else "unmeasured"
     if recipe is None:
         return "recipe_unavailable"
@@ -186,10 +251,14 @@ def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Ma
     # Construction items reported short join the demand tree at a small rate, so their
     # inputs (e.g. steel for poles) become visible needs; goals stay the phase targets.
     stock_targets = {item: rate for item, rate in (stock or {}).items() if item not in targets}
-    recipes = facts.get("recipes") or {}
+    recipes = production_recipes(facts)
     demand = goal_demand({**targets, **stock_targets}, recipes)
     goal_only = goal_demand(targets, recipes)  # Phase goals are judged on these rates alone.
     stock = accessible_stock(facts)
+    oil = facts.get("oil_field") or {}
+    # Crude per pumpjack on the nearest observed field (one pumpjack per well, no mining productivity).
+    per_pumpjack = (oil["max_crude_per_s"] / oil["wells"]
+                    if oil.get("found") and oil.get("wells") and oil.get("max_crude_per_s") else None)
     by_recipe: dict[str, list[Mapping]] = defaultdict(list)
     for machine in facts.get("machines") or []:
         if machine.get("recipe"):
@@ -197,8 +266,8 @@ def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Ma
 
     needs = []
     for item, info in demand.items():
-        recipe = None if item in RAW_ITEMS else recipes.get(item)
-        machines = by_recipe.get(item, [])
+        recipe = None if item in RAW else recipes.get(item)
+        machines = by_recipe.get(recipe.get("recipe", item) if recipe else item, [])
         statuses: dict[str, int] = defaultdict(int)
         buckets: dict[str, int] = defaultdict(int)
         tiers: dict[str, int] = defaultdict(int)
@@ -212,11 +281,16 @@ def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Ma
         required = info["required_per_s"]
         measured = _measured(measurement, "production", item)
         machines_needed = {}
-        candidates = list(FURNACE_SPEEDS) if item in SMELTED_ITEMS else list(ASSEMBLER_TIERS)
+        if recipe is not None and recipe.get("machine_speeds"):
+            candidates = sorted(recipe["machine_speeds"])
+        else:
+            candidates = list(FURNACE_SPEEDS) if item in SMELTED_ITEMS else list(ASSEMBLER_TIERS)
         for tier in candidates if recipe is not None else ():
             per_machine = machine_rate(tier, item, recipe)
             if per_machine:
                 machines_needed[tier] = math.ceil(required / per_machine - 1e-9)
+        if item == "crude-oil" and per_pumpjack:
+            machines_needed["pumpjack"] = math.ceil(required / per_pumpjack - 1e-9)
         condition = _diagnose(item, recipe, buckets, len(machines), required, capacity, measured,
                               int(stock.get(item, 0)), goal=item in targets)
         if condition == "unbuilt" and built.get(item, 0) > 0:
@@ -234,7 +308,7 @@ def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Ma
         })
     conditions = {n["item"]: n["condition"] for n in needs}
     for need in needs:
-        recipe = recipes.get(need["item"]) if need["item"] not in RAW_ITEMS else None
+        recipe = recipes.get(need["item"]) if need["item"] not in RAW else None
         need["short_inputs"] = sorted(part["name"] for part in (recipe or {}).get("ingredients", ())
                                       if conditions.get(part["name"]) not in (None, "satisfied"))
     needs.sort(key=lambda n: (n["depth"], n["item"]))
