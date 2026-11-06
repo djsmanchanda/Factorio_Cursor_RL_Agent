@@ -10430,6 +10430,14 @@ def _emit_iteration_limit_verdict(
     )
 
 
+#: Items that get a direct last-mile insert into the requester when the
+#: requester itself is short but its own logistic network already holds the
+#: ingredient. None means every ingredient; a set narrows the treatment.
+#: C80b telemetry: plastic was starved at the AC requester with reachable
+#: plastic > 0 in 59/59 lines, so bots were not completing the last tiles.
+_DIRECT_DELIVERY_ITEMS: frozenset[str] | None = None
+
+
 def _deliver_cell_ingredients(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     item: str, near: Point, emit: Callable[[str], None],
@@ -10458,6 +10466,32 @@ def _deliver_cell_ingredients(
             local = live_base.network_item_count(
                 client, surface, force, chest, ingredient,
             )
+            # The requester being short while its OWN network holds stock is
+            # the last-mile fault this treatment targets; the abundance skip
+            # below exists because bots normally finish that trip. Test the
+            # chest, not the network, and replenish it directly.
+            try:
+                held = int((live_base.chest_contents(
+                    client, surface, chest,
+                ) or {}).get(ingredient, 0))
+            except Exception:  # noqa: BLE001 -- diagnostic read only
+                held = 0
+            if (
+                held < amount and local is not None and local > 0
+                and (_DIRECT_DELIVERY_ITEMS is None
+                     or ingredient in _DIRECT_DELIVERY_ITEMS)
+            ):
+                direct = live_base.transfer_stock(
+                    client, surface, ingredient, max(amount * 4, 20), chest,
+                )
+                moved_total += direct
+                emit(
+                    f"  CELL DIRECT DELIVERY: moved {direct} {ingredient} into "
+                    f"the {item} cell's requester at {chest} "
+                    f"(requester held {held}, network held {local})"
+                )
+                if direct > 0:
+                    continue
             if local is not None and local >= amount * 2:
                 continue
             provider = live_base.nearest_container(
