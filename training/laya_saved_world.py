@@ -32,6 +32,15 @@ BOUNDS = {"x_min": -128, "y_min": -128, "x_max_exclusive": 128, "y_max_exclusive
 SCOPE = {"surface": "nauvis", "force": "player", "bounds": BOUNDS}
 # Oil and water lie beyond the build bounds; this read-only fact searches generated terrain this far from the base.
 OIL_SEARCH_RADIUS = 512
+# A per-option declared scope (``scope_bounds``) replaces BOUNDS for that option only. Lua refuses
+# actions within SCOPE_EDGE of a scope edge; a declared scope may exceed that by SCOPE_SLACK tiles.
+SCOPE_EDGE = 2
+SCOPE_SLACK = 4
+# The oil survey groups wells within 32 tiles of the nearest well; this is the outpost area.
+OIL_FIELD_HALF_SPAN = 32
+# Reach hops toward the outpost may stray this far from the straight base -> oil-field line (detours).
+ROUTE_HALF_WIDTH = 64
+SCOPE_KEYS = ("x_min", "y_min", "x_max_exclusive", "y_max_exclusive")
 FACTS_VALIDATOR = Draft7Validator(json.loads((ROOT / "schemas/laya_saved_world.schema.json").read_text()))
 
 
@@ -294,9 +303,66 @@ def state_option(candidate):
                 "new_items": sum(candidate.get("bill", {}).values()) if "bill" in candidate else None,
                 "wait_ticks": candidate.get("wait_ticks", 0)},
             "scope": ({"surface": "nauvis", "force": "player", "bounds": None}
-                      if candidate.get("family") == "launch" else SCOPE),
+                      if candidate.get("family") == "launch" else
+                      {**SCOPE, "bounds": dict(candidate["scope_bounds"])} if candidate.get("scope_bounds") else SCOPE),
             "risk_tier": "destructive_mutation" if candidate.get("family") == "launch"
                          else "ghost_submit" if placements else "read_only"}
+
+
+def _overlaps(a, b):
+    return (a["x_min"] < b["x_max_exclusive"] and b["x_min"] < a["x_max_exclusive"]
+            and a["y_min"] < b["y_max_exclusive"] and b["y_min"] < a["y_max_exclusive"])
+
+
+def declared_scope_reason(candidate, facts):
+    """Typed refusal for a candidate's declared ``scope_bounds``; None when absent or acceptable.
+
+    A declared scope exists only to reach the surveyed oil outpost: it must tightly contain the
+    candidate's own actions, stay within OIL_SEARCH_RADIUS of the survey anchor, and touch the
+    oil-field area or the global BOUNDS (so reach hops toward the outpost are allowed).
+    """
+    scope = candidate.get("scope_bounds")
+    if scope is None:
+        return None
+    if (not isinstance(scope, dict) or set(scope) != set(SCOPE_KEYS)
+            or any(type(scope[k]) is not int for k in SCOPE_KEYS)
+            or scope["x_min"] >= scope["x_max_exclusive"] or scope["y_min"] >= scope["y_max_exclusive"]):
+        return "scope_malformed"
+    field = (facts or {}).get("oil_field") or {}
+    if not field.get("found") or not field.get("center") or not field.get("anchor"):
+        return "scope_unsurveyed"
+    try:
+        points = [(a["position"]["x"], a["position"]["y"]) for a in actions(candidate.get("plan") or {})]
+    except (KeyError, TypeError):
+        return "scope_malformed"
+    if not points:
+        return "scope_malformed"
+    lo_x, hi_x = min(p[0] for p in points), max(p[0] for p in points)
+    lo_y, hi_y = min(p[1] for p in points), max(p[1] for p in points)
+    # Same containment the Lua validator applies, so a refusal here is never a surprise there.
+    if not (scope["x_min"] + SCOPE_EDGE <= lo_x and hi_x < scope["x_max_exclusive"] - SCOPE_EDGE
+            and scope["y_min"] + SCOPE_EDGE <= lo_y and hi_y < scope["y_max_exclusive"] - SCOPE_EDGE):
+        return "scope_excludes_actions"
+    margin = SCOPE_EDGE + SCOPE_SLACK
+    if (scope["x_min"] < math.floor(lo_x) - margin or scope["x_max_exclusive"] > math.floor(hi_x) + 1 + margin
+            or scope["y_min"] < math.floor(lo_y) - margin or scope["y_max_exclusive"] > math.floor(hi_y) + 1 + margin):
+        return "scope_too_wide"
+    ax, ay = field["anchor"]["x"], field["anchor"]["y"]
+    far_x = max(abs(scope["x_min"] - ax), abs(scope["x_max_exclusive"] - ax))
+    far_y = max(abs(scope["y_min"] - ay), abs(scope["y_max_exclusive"] - ay))
+    if math.hypot(far_x, far_y) > OIL_SEARCH_RADIUS:
+        return "scope_out_of_reach"
+    cx, cy = field["center"]["x"], field["center"]["y"]
+    outpost = {"x_min": cx - OIL_FIELD_HALF_SPAN, "y_min": cy - OIL_FIELD_HALF_SPAN,
+               "x_max_exclusive": cx + OIL_FIELD_HALF_SPAN, "y_max_exclusive": cy + OIL_FIELD_HALF_SPAN}
+    # Reach hops between base and outpost: the scope's centre lies near the anchor -> oil-field segment.
+    mx, my = (scope["x_min"] + scope["x_max_exclusive"]) / 2, (scope["y_min"] + scope["y_max_exclusive"]) / 2
+    dx, dy = cx - ax, cy - ay
+    t = max(0.0, min(1.0, ((mx - ax) * dx + (my - ay) * dy) / ((dx * dx + dy * dy) or 1)))
+    on_corridor = math.hypot(mx - (ax + t * dx), my - (ay + t * dy)) <= ROUTE_HALF_WIDTH
+    if not (on_corridor or _overlaps(scope, outpost) or _overlaps(scope, BOUNDS)):
+        return "scope_off_route"
+    return None
 
 
 def oil_field_digest(field):
@@ -580,6 +646,15 @@ class SavedWorldAdapter:
 
     def query(self, candidates=None, inspect=None):
         self._check_instance()
+        refused = {}
+        if candidates is not None and any(c.get("scope_bounds") is not None for c in candidates):
+            # Declared scopes are judged against a fresh oil survey and never reach Lua when refused.
+            facts = self.query()
+            refused = {c["option_id"]: {"reason": reason} for c in candidates
+                       if (reason := declared_scope_reason(c, facts))}
+            candidates = [c for c in candidates if c["option_id"] not in refused]
+            if not candidates:
+                return {"tick": facts["tick"], "validations": refused}
         centers = self.quad_centers()
         name = f"laya_saved_world/{uuid.uuid4().hex}.json"
         request = json.dumps(_query_request(candidates, inspect, getattr(self, "extra_recipes", ())),
@@ -611,6 +686,7 @@ class SavedWorldAdapter:
                 reason = quad_reservation_reason(candidate["plan"], protected)
                 if reason:
                     value["validations"][candidate["option_id"]] = {"reason": reason}
+            value["validations"].update(refused)
         if candidates is None and inspect is None:
             value["quad_centers"] = centers
             for key in ("ports", "poles", "machines", "resources"):

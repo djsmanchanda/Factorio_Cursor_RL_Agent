@@ -620,11 +620,13 @@ local function validate(candidate)
   local net=network and facts.networks[network]
   if not net or net.construction_robots==0 then return "no_construction_network" end
   local bill={}
+  -- A declared per-option scope (checked by the adapter against the oil survey) replaces the request bounds.
+  local scope=candidate.scope_bounds or bounds
   for _, phase in ipairs(candidate.plan.phases) do
     for _, a in ipairs(phase.actions) do
       if a.action_type~="place_ghost" then return "ghosts_only" end
       local p=a.position
-      if p.x<bounds.x_min+2 or p.y<bounds.y_min+2 or p.x>=bounds.x_max_exclusive-2 or p.y>=bounds.y_max_exclusive-2 then return "scope" end
+      if p.x<scope.x_min+2 or p.y<scope.y_min+2 or p.x>=scope.x_max_exclusive-2 or p.y>=scope.y_max_exclusive-2 then return "scope" end
       if not in_network(p,network) then return "construction_coverage" end
       local prototype=prototypes.entity[a.entity]
       if not prototype then return "prototype" end
