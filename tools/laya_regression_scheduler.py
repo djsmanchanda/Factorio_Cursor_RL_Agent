@@ -31,6 +31,7 @@ from training.laya_restart_checkpoint import load as load_checkpoint
 MIN_MIXED_JOBS = 120
 MAX_MIXED_JOBS = 150
 MAX_MIXED_WORKERS = 30
+MAX_MEASUREMENT_ARMS = 6
 TERMINAL = {"completed", "failed", "timeout", "cancelled", "infrastructure_failure", "incompatible"}
 # Live game speed is frozen per cohort. New cohorts run at 2x (120 UPS), as the
 # batch cohorts through C48 did; roots frozen before the field existed ran at
@@ -162,8 +163,13 @@ def enqueue(repo, registry, spec):
     if not name or Path(name).name != name or name.startswith(('.', '_')):
         raise ValueError('Invalid suite name')
     setup = spec.get('purpose') == 'disposable_source_setup'
-    if len(spec['arms']) != (1 if setup else 2) or any(not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]*', arm) for arm in spec['arms']):
-        raise ValueError('Safe arm labels and one setup arm or two measurement arms required')
+    mixed = spec.get('design') == 'mixed-start-v1'
+    # Full-origin/checkpoint cohorts may run a control plus several one-factor
+    # variants on the same seeds, as the batch cohorts did (owner 2026-11-06);
+    # the mixed-start A/A design stays two arms.
+    arm_counts = {1} if setup else {2} if mixed else set(range(2, MAX_MEASUREMENT_ARMS+1))
+    if len(spec['arms']) not in arm_counts or any(not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]*', arm) for arm in spec['arms']):
+        raise ValueError(f'Safe arm labels and one setup arm, two mixed-start arms or 2-{MAX_MEASUREMENT_ARMS} measurement arms required')
     if (not spec['seeds'] or any(type(s) is not int or s < 0 for s in spec['seeds'])
             or len(set(spec['seeds'])) != len(spec['seeds'])):
         raise ValueError('Distinct nonnegative seeds required')
@@ -189,7 +195,6 @@ def enqueue(repo, registry, spec):
     for predecessor in spec['after']:
         if Path(predecessor).name != predecessor or predecessor.startswith('.'):
             raise ValueError('Invalid predecessor')
-    mixed = spec.get('design') == 'mixed-start-v1'
     if mixed:
         from tools.laya_mixed_design import build_jobs
         from tools.laya_checkpoint_bank import validated_receipts
@@ -290,7 +295,7 @@ def enqueue(repo, registry, spec):
                 interface = install(repo, code)
             required = ['training/laya_restart_checkpoint.py', 'training/laya_restart_state.py']
             if not all((code/p).is_file() for p in required):
-                raise ValueError('Both frozen arms require the restart benchmark interface')
+                raise ValueError('Every frozen arm requires the restart benchmark interface')
             current = sha(code/'orchestrator/checkpoint_milestones.py')
             if predicate is not None and predicate != current:
                 raise ValueError('Strict predicate source differs between arms')

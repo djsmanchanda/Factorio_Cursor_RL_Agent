@@ -580,7 +580,7 @@ def test_loan_cell_telemetry_hides_the_reachability_probe_when_not_missing(
         raise AssertionError("must not probe a satisfied line")
 
     monkeypatch.setattr(
-        builder.live_base, "chest_contents", lambda *_a: {},
+        builder.live_base, "chest_contents", lambda *_a: {"iron-plate": 2},
     )
     monkeypatch.setattr(builder.live_base, "network_item_count", _never)
     monkeypatch.setattr(builder, "mall_slot_count", lambda *_a: 6)
@@ -598,8 +598,37 @@ def test_loan_cell_telemetry_hides_the_reachability_probe_when_not_missing(
     )
 
     assert len(emitted) == 1
-    assert "reachable" not in emitted[0]
+    assert "reachable" not in emitted[0] and "starved" not in emitted[0]
     assert called == []
+
+
+def test_loan_cell_telemetry_names_an_empty_requester_despite_base_stock(
+    monkeypatch,
+) -> None:
+    """C76/C77 (2026-11-06): the AC requester held plastic 0 while the base
+    held 494-570, and the line said `missing -` with no probe, so delivery and
+    coverage faults looked like a satisfied cell."""
+    from orchestrator import autonomous_builder as builder
+
+    loan = _telemetry_loan()
+    monkeypatch.setattr(builder.live_base, "chest_contents", lambda *_a: {})
+    monkeypatch.setattr(
+        builder.live_base, "network_item_count",
+        lambda _cl, _surface, _force, _position, item: {"iron-plate": 0}.get(item),
+    )
+    monkeypatch.setattr(builder, "mall_slot_count", lambda *_a: 6)
+    monkeypatch.setattr(builder, "active_bootstrap_loans", lambda *_a: (loan,))
+    emitted: list[str] = []
+    builder._emit_loan_cell_telemetry(
+        object(), "nauvis", "player", loan,
+        MallBootstrapStep("iron-gear-wheel", 92, 52),
+        {"iron-plate": 50}, 44, emitted.append,
+    )
+
+    assert "missing -" in emitted[0]
+    assert "starved iron-plate" in emitted[0]
+    # Base stock outside the requester's network: a coverage/segmentation fault.
+    assert "reachable iron-plate=0" in emitted[0]
 
 
 def test_loan_cell_telemetry_never_raises(monkeypatch) -> None:

@@ -88,7 +88,7 @@ def test_host_admission_counts_stale_and_reserved_worlds_and_stale_gate_blocks(t
     assert not scheduler.may_admit(registry, 100, available_gb=2)
 
 
-def frozen_suite(tmp_path):
+def frozen_suite(tmp_path, arms=('candidate', 'reference')):
     repo = tmp_path/'repo'
     repo.mkdir()
     for name in ('training/laya_restart_checkpoint.py','training/laya_restart_state.py',
@@ -106,7 +106,7 @@ def frozen_suite(tmp_path):
     mods = tmp_path/'mods'
     mods.mkdir()
     (mods/'mod-list.json').write_text('{"mods":[]}')
-    spec = {'name':'regression-test','arms':{'candidate':{'revision':'HEAD'},'reference':{'revision':'HEAD'}},
+    spec = {'name':'regression-test','arms':{arm:{'revision':'HEAD'} for arm in arms},
         'seeds':[1,2], 'max_game_ticks':1000,'trial_wall_seconds':60,'until':'2099-01-01T00:00:00+00:00',
         'source_save':str(source),'mods_source':str(mods),'python':sys.executable,
         'factorio_binary':sys.executable, 'after':['predecessor'], 'game_port_base':49100,'rcon_port_base':49200}
@@ -123,6 +123,18 @@ def test_freeze_plans_every_job_and_refuses_launch_before_predecessor_or_gate(tm
     assert scheduler.run_one(root) == 'waiting_for_host_budget'
     assert report(root)['planned'] == 4
     assert sum(g['unknown'] for g in report(root)['groups']) == 4
+
+
+def test_full_origin_cohort_runs_a_control_and_several_variants_on_shared_seeds(tmp_path):
+    root, _ = frozen_suite(tmp_path, arms=('reference', 'hold', 'chests', 'plastic'))
+    jobs = scheduler.read(root/'job-status.json')['jobs']
+    # Each seed's arms are admitted together, so every variant pairs with the control.
+    assert [j['arm'] for j in jobs[:4]] == ['reference', 'hold', 'chests', 'plastic']
+    assert {j['seed'] for j in jobs[:4]} == {1} and len(jobs) == 8
+    assert len(scheduler.read(root/'freeze.json')['arms']) == 4
+    (tmp_path/'too-many').mkdir()
+    with pytest.raises(ValueError, match='measurement arms'):
+        frozen_suite(tmp_path/'too-many', arms=tuple(f'arm{i}' for i in range(7)))
 
 
 def test_capture_selection_rejects_invalid_or_nonsetup_lanes(tmp_path):
