@@ -3,6 +3,11 @@
 const $ = id => document.getElementById(id), $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const esc = value => String(value ?? 'unknown').replace(/[&<>"']/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
 const isNum = value => typeof value === 'number' && Number.isFinite(value);
+// The host gate samples UPS as 1x-equivalent (measured ÷ game speed). When every
+// running world shares one speed, show measured UPS and scale the floors to it, so
+// 2x worlds at 115 UPS no longer read as "57" (owner 2026-11-08); mixed speeds stay 1x-eq.
+const liveSpeed = m => Array.isArray(m?.game_speeds) && m.game_speeds.length === 1 && m.game_speeds[0] > 0 ? m.game_speeds[0] : 1;
+const sx = (v, s) => isNum(v) ? v * s : v;
 const fmt = (value, digits = 1) => isNum(value) ? value.toFixed(digits) : 'unknown';
 const pct = (part, whole) => isNum(part) && isNum(whole) && whole > 0 ? Math.round(part / whole * 100) : null;
 const when = ts => isNum(ts) ? new Date(ts * 1000).toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'}) : 'unknown';
@@ -143,9 +148,10 @@ function analyze() {
  const unstable = Array.isArray(t.unstable) ? t.unstable : [], limits = [];
  if (isNum(upper) && isNum(t.target_slots) && t.target_slots >= upper && (t.queued ?? 1) > 0)
   limits.push({id: 'ceiling', tone: 'limit', label: manual !== null && manual <= (cap ?? Infinity) ? 'Manual ceiling' : `Automatic cap (${mode} mode)`, detail: `target ${t.target_slots} has reached the upper limit ${upper}`});
- if (isNum(m.ups_p95) && isNum(c.min_ups_p95) && m.ups_p95 < c.min_ups_p95) limits.push({id: 'ups', tone: 'breach', label: 'UPS below floor', detail: `p95 coverage ${fmt(m.ups_p95)} < floor ${fmt(c.min_ups_p95)}`});
- else if (isNum(m.ups_p98) && isNum(c.min_ups_p98) && m.ups_p98 < c.min_ups_p98) limits.push({id: 'ups', tone: 'breach', label: 'UPS below floor', detail: `p98 coverage ${fmt(m.ups_p98)} < floor ${fmt(c.min_ups_p98)}`});
- else if (isNum(m.ups_p95) && isNum(growth) && m.ups_p95 < growth) limits.push({id: 'ups', tone: 'limit', label: 'UPS headroom', detail: `p95 coverage ${fmt(m.ups_p95)} is under the growth threshold ${fmt(growth)}`});
+ const s = liveSpeed(m);
+ if (isNum(m.ups_p95) && isNum(c.min_ups_p95) && m.ups_p95 < c.min_ups_p95) limits.push({id: 'ups', tone: 'breach', label: 'UPS below floor', detail: `p95 coverage ${fmt(m.ups_p95 * s)} < floor ${fmt(c.min_ups_p95 * s)}`});
+ else if (isNum(m.ups_p98) && isNum(c.min_ups_p98) && m.ups_p98 < c.min_ups_p98) limits.push({id: 'ups', tone: 'breach', label: 'UPS below floor', detail: `p98 coverage ${fmt(m.ups_p98 * s)} < floor ${fmt(c.min_ups_p98 * s)}`});
+ else if (isNum(m.ups_p95) && isNum(growth) && m.ups_p95 < growth) limits.push({id: 'ups', tone: 'limit', label: 'UPS headroom', detail: `p95 coverage ${fmt(m.ups_p95 * s)} is under the growth threshold ${fmt(growth * s)}`});
  if (isNum(m.temp_c) && isNum(tempLimit) && m.temp_c >= tempLimit) limits.push({id: 'temp', tone: 'breach', label: 'Over temperature target', detail: `${fmt(m.temp_c)} °C ≥ target ${fmt(tempLimit)} °C`});
  else if (isNum(m.temp_c) && isNum(tempGrow) && m.temp_c >= tempGrow) limits.push({id: 'temp', tone: 'limit', label: 'Temperature headroom', detail: `${fmt(m.temp_c)} °C is within ${fmt(tempLimit - tempGrow)} °C of the ${fmt(tempLimit)} °C target`});
  if (isNum(m.available_gb) && isNum(c.memory_min_gb) && m.available_gb <= c.memory_min_gb) limits.push({id: 'memory', tone: 'breach', label: 'Low memory', detail: `${fmt(m.available_gb)} GB ≤ minimum ${fmt(c.memory_min_gb)} GB`});
@@ -171,8 +177,10 @@ function renderCapacity() {
  const by = id => a.limits.find(l => l.id === id)?.tone;
  const scaleRuns = Math.max(a.max || 0, a.upper || 0, target || 0, active || 0, 1);
  const runs = `<div class="gauge" data-state="${by('ceiling') || 'ok'}"><div class="gauge-head"><h3>Concurrent runs</h3>${stateChip(by('ceiling') || (isNum(active) ? 'ok' : 'none'))}</div><div class="gauge-value">${esc(fmt(active, 0))} <small>of ${esc(fmt(a.upper, 0))} allowed</small></div>${meter(active, scaleRuns, [[target, '', 'Admission target'], [a.upper, 'dash', 'Upper limit']])}<dl><dt>Admission target</dt><dd>${esc(fmt(target, 0))}</dd><dt>Manual ceiling</dt><dd>${a.manual === null ? 'none (automatic)' : esc(a.manual) + (a.manualUntil ? ` until ${esc(when(a.manualUntil))}` : ' · permanent')}</dd><dt>Automatic cap</dt><dd>${esc(fmt(a.cap, 0))} (${esc(a.mode)})</dd><dt>Hard maximum</dt><dd>${esc(fmt(a.max, 0))}</dd></dl><div class="gauge-actions"><button type="button" class="link" data-focus="bump-h">Raise admission target</button><button type="button" class="link" data-focus="mode-h">Change power mode</button></div></div>`;
- const upsState = by('ups') || (isNum(m.ups_p95) ? 'ok' : 'none'), scaleUps = Math.max(m.ups_p95 || 0, a.growth || 0, c.min_ups_p95 || 0, 1) * 1.15;
- const ups = `<div class="gauge" data-state="${upsState}"><div class="gauge-head"><h3>Slow-tail UPS (1x-equivalent) · p95 coverage</h3>${stateChip(upsState)}</div><div class="gauge-value">${esc(fmt(m.ups_p95))} <small>UPS · p98 ${esc(fmt(m.ups_p98))}</small></div>${meter(m.ups_p95, scaleUps, [[c.min_ups_p95, 'red', 'p95 floor'], [a.growth, 'dash', 'Growth threshold']])}<dl><dt>p95 floor / growth</dt><dd>${esc(fmt(c.min_ups_p95))} / ${esc(fmt(a.growth))}</dd><dt>p98 floor</dt><dd>${esc(fmt(c.min_ups_p98))}</dd><dt>Runs sampled</dt><dd>${esc(fmt(m.ups_samples, 0))} of ${esc(fmt(active, 0))}</dd><dt>Aggregate UPS (1x-eq)</dt><dd>${esc(fmt(m.total_ups, 0))}</dd><dt>Measured UPS · speed</dt><dd>${esc(fmt(m.measured_ups_mean, 0))} · ${esc((m.game_speeds || []).map(v => `${v}x`).join('/') || '—')}</dd></dl></div>`;
+ const s = liveSpeed(m), speeds = (m.game_speeds || []).map(v => `${v}x`).join('/') || '—', basis = (m.game_speeds || []).length > 1 ? ' (1x-equivalent, mixed speeds)' : '';
+ const p95 = sx(m.ups_p95, s), floor95 = sx(c.min_ups_p95, s), growthUps = sx(a.growth, s);
+ const upsState = by('ups') || (isNum(m.ups_p95) ? 'ok' : 'none'), scaleUps = Math.max(p95 || 0, growthUps || 0, floor95 || 0, 1) * 1.15;
+ const ups = `<div class="gauge" data-state="${upsState}"><div class="gauge-head"><h3>Slow-tail UPS${esc(basis)} · p95 coverage</h3>${stateChip(upsState)}</div><div class="gauge-value">${esc(fmt(p95))} <small>UPS · p98 ${esc(fmt(sx(m.ups_p98, s)))} · ${esc(speeds)}</small></div>${meter(p95, scaleUps, [[floor95, 'red', 'p95 floor'], [growthUps, 'dash', 'Growth threshold']])}<dl><dt>p95 floor / growth</dt><dd>${esc(fmt(floor95))} / ${esc(fmt(growthUps))}${s !== 1 ? ` <small>(${esc(fmt(c.min_ups_p95))} / ${esc(fmt(a.growth))} at 1x)</small>` : ''}</dd><dt>p98 floor</dt><dd>${esc(fmt(sx(c.min_ups_p98, s)))}</dd><dt>Runs sampled</dt><dd>${esc(fmt(m.ups_samples, 0))} of ${esc(fmt(active, 0))}</dd><dt>Aggregate UPS${esc(basis)}</dt><dd>${esc(fmt(sx(m.total_ups, s), 0))}</dd><dt>Mean measured UPS · speed</dt><dd>${esc(fmt(m.measured_ups_mean, 0))} · ${esc(speeds)}</dd></dl></div>`;
  const tempState = by('temp') || (isNum(m.temp_c) ? 'ok' : 'none');
  const temp = `<div class="gauge" data-state="${tempState}"><div class="gauge-head"><h3>Temperature</h3>${stateChip(tempState)}</div><div class="gauge-value">${esc(fmt(m.temp_c))} <small>°C of ${esc(fmt(a.tempLimit))} target</small></div>${meter(m.temp_c, Math.max(c.temp_hard_c || 100, m.temp_c || 0), [[a.tempGrow, 'dash', 'Growth boundary'], [a.tempLimit, 'dash', 'Target'], [c.temp_hard_c, 'red', 'Hard limit']], 20)}<dl><dt>Growth boundary</dt><dd>${esc(fmt(a.tempGrow))} °C</dd><dt>Hard limit</dt><dd>${esc(fmt(c.temp_hard_c))} °C</dd><dt>Power profile</dt><dd>${esc(m.power_profile)}</dd></dl><button type="button" class="link" data-focus="floors">Edit temperature target</button></div>`;
  const memState = by('memory') || by('unstable') || (isNum(m.available_gb) ? 'ok' : 'none');
@@ -398,16 +406,18 @@ async function loadNotes(key, more = false) {
 
 // ---------------------------------------------------------------- performance charts
 const PANEL_ORDER = ['runs', 'ups', 'temp', 'total', 'mem'];
-function panelDefs(c) {
+function panelDefs(c, now = 1) {
+ // History rows before 2026-11-05 lack game_speeds and already hold measured UPS.
+ const up = (r, key) => sx(r.metrics?.[key], liveSpeed(r.metrics));
  return {
   runs: {title: 'Concurrent runs & caps', digits: 0, zero: true, step: true, series: [
    {id: 'active', name: 'Running', cls: 's-active', get: r => r.active_slots}, {id: 'target', name: 'Admission target', cls: 's-target', get: r => r.target_slots},
    {id: 'cap', name: 'Automatic cap', cls: 's-cap', dash: true, get: r => r.effective_max}, {id: 'manual', name: 'Manual ceiling', cls: 's-manual', dash: true, get: r => r.manual_target}], guards: []},
-  ups: {title: 'Slow-tail UPS per run', digits: 1, series: [{id: 'p95', name: 'p95 coverage', cls: 's-p95', get: r => r.metrics?.ups_p95}, {id: 'p98', name: 'p98 coverage', cls: 's-p98', get: r => r.metrics?.ups_p98}],
-   guards: [{series: 'p95', cls: 's-p95', name: 'p95 floor (current setting)', v: c.min_ups_p95}, {series: 'p98', cls: 's-p98', name: 'p98 floor (current setting)', v: c.min_ups_p98}]},
+  ups: {title: 'Slow-tail UPS per run (measured)', digits: 1, series: [{id: 'p95', name: 'p95 coverage', cls: 's-p95', get: r => up(r, 'ups_p95')}, {id: 'p98', name: 'p98 coverage', cls: 's-p98', get: r => up(r, 'ups_p98')}],
+   guards: [{series: 'p95', cls: 's-p95', name: `p95 floor (current setting, at ${now}x)`, v: sx(c.min_ups_p95, now)}, {series: 'p98', cls: 's-p98', name: `p98 floor (current setting, at ${now}x)`, v: sx(c.min_ups_p98, now)}]},
   temp: {title: 'Temperature °C', digits: 1, series: [{id: 'temp', name: 'Temperature', cls: 's-temp', get: r => r.metrics?.temp_c}],
    guards: [{series: 'temp', cls: 's-temp', name: 'target (current setting)', v: c.temp_limit_c}, {series: 'temp', cls: 's-temp', name: 'hard limit (current setting)', v: c.temp_hard_c}]},
-  total: {title: 'Aggregate UPS (all running worlds)', digits: 0, series: [{id: 'total', name: 'Total UPS', cls: 's-total', get: r => r.metrics?.total_ups}], guards: []},
+  total: {title: 'Aggregate UPS (all running worlds)', digits: 0, series: [{id: 'total', name: 'Total UPS', cls: 's-total', get: r => up(r, 'total_ups')}], guards: []},
   mem: {title: 'Available memory GB', digits: 1, series: [{id: 'mem', name: 'Free memory', cls: 's-mem', get: r => r.metrics?.available_gb}], guards: [{series: 'mem', cls: 's-mem', name: 'minimum (current setting)', v: c.memory_min_gb}]},
  };
 }
@@ -437,7 +447,7 @@ function auditText(row) {
 let chartModel = null;
 function drawPerformance() {
  $$('#range button').forEach(b => b.setAttribute('aria-pressed', Number(b.dataset.hours) === ui.hours));
- const defs = snapshot ? panelDefs(snapshot.config) : {}, toggles = $('panel-toggles');
+ const defs = snapshot ? panelDefs(snapshot.config, liveSpeed(snapshot.target?.metrics)) : {}, toggles = $('panel-toggles');
  setHTML(toggles, `<span class="muted small">Panels</span><div class="segmented">${PANEL_ORDER.map(id => `<button type="button" data-panel="${id}" aria-pressed="${ui.panels.includes(id)}">${PANEL_NAMES[id]}</button>`).join('')}</div>`);
  const host = $('chart'); host.setAttribute('aria-busy', hist.loading);
  if (ui.tab !== 'performance' || !snapshot) return;
