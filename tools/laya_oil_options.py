@@ -1,11 +1,11 @@
 # Path: tools/laya_oil_options.py
-# Purpose: Clean-runner `reach` and `oil` option families: drive the deterministic pure planners and offer their placements as ghost candidates.
+# Purpose: Clean-runner `reach`, `coal-feed` and `oil` option families: drive the deterministic pure planners and offer their placements as ghost candidates.
 
-"""Reach and oil options for the clean runner (docs/rl/Laya_Clean_Runner.md, "Oil options").
+"""Reach, coal-feed and oil options for the clean runner (docs/rl/Laya_Clean_Runner.md, "Oil options").
 
 Adapter only.  Geometry comes from the deterministic pure planners
 (`orchestrator.stage_services.plan_reach_step`, `plan_power_bridge`,
-`orchestrator.stage_chemical.plan_oil_cell_intent`); every survey they name is
+`orchestrator.stage_chemical.plan_oil_cell_intent`, `plan_coal_mine_intent`); every survey they name is
 answered with the deterministic read-only functions against the disposable
 world.  It lives in tools/ (training/ may not import `orchestrator.stage_*`;
 training/isolation.py) and the CLI injects it into the clean runner, like the
@@ -35,6 +35,8 @@ OIL_NEED_ORDER = ("plastic-bar", "petroleum-gas", "crude-oil")
 # SCOPE_EDGE (2) and at most SCOPE_EDGE + SCOPE_SLACK (6); see laya_saved_world.declared_scope_reason.
 SCOPE_MARGIN = 4
 MAX_SURVEYS = 96  # Bounded reads per planner resolution; exceeding it is a typed block, not a hang.
+# The coal mine probes up to 300 origins (two reads each); past this many reads the site is too cluttered to offer.
+COAL_MAX_SURVEYS = 128
 # The cell intent is a frozen geometry; re-plan after this many game ticks so a stale one cannot linger.
 PLAN_TTL_TICKS = 36000
 # Nominal electric draw (kW) of the cell's consumers; an estimate, compared with no measured grid.
@@ -123,15 +125,29 @@ class World:
         return _find_oil_cell_site(self.client, self.surface, oil)
 
     def coal_source(self, near):
-        """Belt source of the nearest planner-managed coal mine: (point, None) or (None, reason)."""
+        """Belt source of the nearest planner-managed coal mine: (point, None) or (None, reason).
+
+        Recognized by layout (`extraction_state`): drills beside a belt row, ghosts included, so a
+        `coal-feed` build reads as incomplete until built and then as the source. Lone drills
+        (drill-to-chest `mine` builds) are not belt sources and do not count.
+        """
         from orchestrator import extraction_state
         from orchestrator.stage_chemical import _coal_belt_source
-        mine = extraction_state.find_resource_mine(self.client, self.surface, self.force, "coal", near)
+        mine = extraction_state.find_resource_mine(self.client, self.surface, self.force, "coal", near,
+                                                   include_unclassified=False)
         if mine is None:
             return None, "needs:coal_source"
         if mine.pending:
             return None, "coal_source_incomplete"
         return _coal_belt_source(self.client, self.surface, mine), None
+
+    def coal_patch(self, near):
+        from orchestrator import resource_patches
+        return resource_patches.nearest_viable_patch(self.client, self.surface, "coal", near)
+
+    def read_coal_survey(self, survey):
+        from orchestrator.stage_chemical import _read_coal_survey
+        return _read_coal_survey(self.client, self.surface, survey)
 
     def plastic_site(self, refinery_centre, coal):
         from orchestrator.stage_chemical import _find_plastic_site
@@ -199,27 +215,41 @@ class OilOptions:
         def covered(point) -> bool:  # Euclidean: conservative for the square construction area.
             return any(math.dist(_xy(p["position"]), point) <= p["construction_radius"] for p in ports)
 
-        intent, reason = self._intent(world, facts, center)
+        intent, reason, cell_centre = self._intent(world, facts, center)
         if reason:
             block(oil_need, reason)
+        # Without a belt coal source the cell cannot be planned; the next build is the coal mine it needs.
+        coal = None
+        if reason == "needs:coal_source":
+            coal, coal_reason = self._coal(world, facts, cell_centre)
+            if coal_reason:
+                block(oil_need, coal_reason)
+            result["facts"]["coal_planned"] = coal is not None
+            if coal:
+                result["facts"].update(coal_bill=coal["bill"], coal_belt_source=coal["source"])
+        build = intent or coal
         points = plan_points({"phases": intent["phases"]}) if intent else []
         uncovered = [p for p in points if not covered(p)]
         result["facts"].update(cell_planned=intent is not None, cell_actions=len(points),
                                cell_uncovered_actions=len(uncovered))
+        if coal:
+            uncovered = [p for p in plan_points({"phases": coal["phases"]}) if not covered(p)]
         if intent:
             result["facts"].update(cell_bill=intent["bill"], cell_draw_kw=intent["draw_kw"],
                                    grid_capacity_kw=None, power_capacity_verified=False,
                                    plan_tick=intent["tick"])
-        # Reach toward the oil field until it is covered, then toward the cell's remaining actions.
+        # Reach toward the oil field until it is covered, then toward the cell's (or coal mine's) remaining actions.
         targets = [center] if not covered(center) else []
         if not targets and uncovered:
             targets = [min(uncovered, key=lambda p: min(math.dist(_xy(q["position"]), p) for q in ports))]
         if targets:
-            option = self._reach(world, ports, targets[0], center, intent, reach_need, block)
-            if intent:
+            option = self._reach(world, ports, targets[0], center, build, reach_need, block)
+            if build:
                 block(oil_need, "needs:construction_coverage")
+        elif intent:
+            option = self._oil(world, ports, intent, center, oil_need, block)
         else:
-            option = self._oil(world, ports, intent, center, oil_need, block) if intent else None
+            option = self._coal_feed(world, ports, coal, center, oil_need, block) if coal else None
         if option:
             try:
                 validate_build_plan(option["plan"])
@@ -230,20 +260,25 @@ class OilOptions:
         result["blocked"] = {need: dict(counts) for need, counts in result["blocked"].items()}
         return result
 
-    def _intent(self, world: World, facts: Mapping, center) -> tuple[dict | None, str | None]:
-        """The frozen opening cell (ghost phases, bill, draw) or the typed reason it cannot be planned."""
-        from orchestrator.stage_chemical import MissingOilSurvey, OilCellFacts, plan_oil_cell_intent
-        from orchestrator.stage_services import StuckError
+    def _intent(self, world: World, facts: Mapping, center) -> tuple[dict | None, str | None, Any]:
+        """The frozen opening cell (ghost phases, bill, draw) or the typed reason it cannot be planned,
+        plus the cell centre once a cell site is known (the coal mine's reference point)."""
         oil = world.oil_well(center)
         if oil is None:
-            return None, "oil_well_unreadable"
+            return None, "oil_well_unreadable", None
         cell = world.cell_site(oil)
         if cell is None:
-            return None, "no_cell_site"
+            return None, "no_cell_site", None
         cell_centre = (round(cell[0]) + 32.0, round(cell[1]) + 22.0)
         coal, reason = world.coal_source(cell_centre)
         if reason:
-            return None, reason
+            return None, reason, cell_centre
+        intent, reason = self._cell(world, facts, oil, cell, cell_centre, coal)
+        return intent, reason, cell_centre
+
+    def _cell(self, world, facts, oil, cell, cell_centre, coal) -> tuple[dict | None, str | None]:
+        from orchestrator.stage_chemical import MissingOilSurvey, OilCellFacts, plan_oil_cell_intent
+        from orchestrator.stage_services import StuckError
         key = (tuple(oil), tuple(cell), tuple(coal))
         cached = self._cache.get(key)
         if cached and facts["tick"] - cached["tick"] < self.plan_ttl_ticks:
@@ -274,6 +309,81 @@ class OilOptions:
         self._cache[key] = intent
         return intent, None
 
+    def _coal(self, world: World, facts: Mapping, cell_centre) -> tuple[dict | None, str | None]:
+        """The belt coal mine `ensure_coal_mine` would build for this cell (ghost phases, bill, belt
+        source), or the typed reason it cannot be planned. Cached like the cell intent."""
+        from orchestrator.stage_chemical import CoalMineFacts, MissingCoalSurvey, plan_coal_mine_intent
+        from orchestrator.stage_services import StuckError
+        patch = world.coal_patch(cell_centre)
+        if patch is None:
+            return None, "no_coal_patch"
+        key = ("coal", tuple(cell_centre), tuple(patch.minimum), tuple(patch.maximum))
+        cached = self._cache.get(key)
+        if cached and facts["tick"] - cached["tick"] < self.plan_ttl_ticks:
+            return (None, cached["reason"]) if "reason" in cached else (cached, None)
+        self._cache.clear()
+        mine_facts = CoalMineFacts(tuple(cell_centre), tuple(patch.minimum), tuple(patch.maximum), patch.amount)
+        try:
+            mine, _surveys = resolve(plan_coal_mine_intent, mine_facts, world.read_coal_survey, MissingCoalSurvey,
+                                     limit=COAL_MAX_SURVEYS)
+        except (StuckError, SurveyBudgetExceeded) as error:
+            self._cache[key] = {"tick": facts["tick"], "reason": "coal_plan_failed", "error": str(error)[:200]}
+            return None, "coal_plan_failed"
+        phases, reason = ghost_phases([("coal_mine", mine.plan)])
+        if reason:
+            self._cache[key] = {"tick": facts["tick"], "reason": f"coal_{reason}"}
+            return None, f"coal_{reason}"
+        bill = Counter(a["entity"] for phase in phases for a in phase["actions"])
+        coal = {"tick": facts["tick"], "phases": phases, "bill": dict(bill), "footprint": frozenset(mine.footprint_tiles),
+                "substations": sorted({(a["position"]["x"], a["position"]["y"]) for phase in phases
+                                       for a in phase["actions"] if a["entity"] == "substation"}),
+                "source": list(mine.output), "output_side": mine.output_side,
+                "patch": {"min": list(patch.minimum), "max": list(patch.maximum), "amount": patch.amount},
+                "draw_kw": round(sum(NOMINAL_DRAW_KW.get(name, 0) * n for name, n in bill.items()), 1)}
+        self._cache[key] = coal
+        return coal, None
+
+    def _bridge(self, world, build, phases, after, family, need, block) -> dict | None:
+        """Hook the build's first substation to the grid (`plan_power_bridge`), inserting the poles after
+        phase index ``after``; the facts, or None when blocked."""
+        from orchestrator.reach_survey import MissingReachSurvey
+        from orchestrator.stage_services import PowerBridgeFacts, StuckError, plan_power_bridge
+        if not build["substations"]:
+            return {"power_bridge": "none"}
+        # One hookup from the first substation (the build wires the rest); the
+        # deterministic runtime bridges each after the previous is built.
+        try:
+            bridge, _surveys = resolve(plan_power_bridge, PowerBridgeFacts(build["substations"][0],
+                                       build["footprint"]), world.read_reach_survey, MissingReachSurvey)
+        except (StuckError, SurveyBudgetExceeded):
+            block(need, f"{family}_power_plan_failed")
+            return None
+        if bridge.outcome == "unpowered":
+            block(need, f"{family}_unpowered")
+            return None
+        if bridge.placements:
+            phases.insert(after, {"name": f"{family}_power_bridge",
+                                  "actions": [ghost(name, x, y) for name, (x, y) in bridge.placements]})
+        return {"power_bridge": bridge.outcome, "power_bridge_poles": len(bridge.placements),
+                "power_bridged_substations": 1, "substations": len(build["substations"])}
+
+    def _coal_feed(self, world, ports, coal, center, need, block) -> dict | None:
+        phases = copy.deepcopy(coal["phases"])
+        first = coal["substations"][0] if coal["substations"] else None
+        after = next((i + 1 for i, p in enumerate(phases) for a in p["actions"]
+                      if (a["position"]["x"], a["position"]["y"]) == first), 0)
+        bridge_facts = self._bridge(world, coal, phases, after, "coal", need, block)
+        if bridge_facts is None:
+            return None
+        source = tuple(coal["source"])
+        port = min(ports, key=lambda p: math.dist(_xy(p["position"]), source))
+        oil_facts = {"kind": "coal-feed", "bill": coal["bill"], "belt_source": coal["source"],
+                     "output_side": coal["output_side"], "patch": coal["patch"], "draw_kw": coal["draw_kw"],
+                     "power_capacity_verified": False, **bridge_facts}
+        return self._candidate("coal-feed", need, f"Build the oil cell's belt coal mine ({coal['bill'].get('electric-mining-drill', 0)} "
+                               f"drills, belt source at {source}, {coal['output_side']} flow)",
+                               phases, port, ports, oil_facts, product="coal")
+
     def _reach(self, world, ports, target, center, intent, need, block) -> dict | None:
         from orchestrator.reach_survey import MissingReachSurvey
         from orchestrator.stage_services import ReachFacts, StuckError, plan_reach_step
@@ -299,28 +409,11 @@ class OilOptions:
                                [{"name": "reach_power_and_roboport", "actions": actions}], source, ports, oil_facts)
 
     def _oil(self, world, ports, intent, center, need, block) -> dict | None:
-        from orchestrator.reach_survey import MissingReachSurvey
-        from orchestrator.stage_services import PowerBridgeFacts, StuckError, plan_power_bridge
         phases = copy.deepcopy(intent["phases"])
-        bridge_facts = {"power_bridge": "none"}
-        if intent["substations"]:
-            # One hookup from the first backbone substation (the backbone wires the rest); the
-            # deterministic runtime bridges each after the previous is built.
-            try:
-                bridge, _surveys = resolve(plan_power_bridge, PowerBridgeFacts(intent["substations"][0],
-                                           intent["footprint"]), world.read_reach_survey, MissingReachSurvey)
-            except (StuckError, SurveyBudgetExceeded):
-                block(need, "oil_power_plan_failed")
-                return None
-            if bridge.outcome == "unpowered":
-                block(need, "oil_unpowered")
-                return None
-            bridge_facts = {"power_bridge": bridge.outcome, "power_bridge_poles": len(bridge.placements),
-                            "power_bridged_substations": 1, "substations": len(intent["substations"])}
-            if bridge.placements:
-                at = next(i for i, p in enumerate(phases) if p["name"].startswith("chemical_power_backbone")) + 1
-                phases.insert(at, {"name": "oil_power_bridge",
-                                   "actions": [ghost(name, x, y) for name, (x, y) in bridge.placements]})
+        after = next((i + 1 for i, p in enumerate(phases) if p["name"].startswith("chemical_power_backbone")), 0)
+        bridge_facts = self._bridge(world, intent, phases, after, "oil", need, block)
+        if bridge_facts is None:
+            return None
         port = min(ports, key=lambda p: math.dist(_xy(p["position"]), center))
         oil_facts = {"kind": "oil", "packets": intent["packets"], "bill": intent["bill"],
                      "cell_draw_kw": intent["draw_kw"], "power_capacity_verified": False, **bridge_facts}
@@ -329,12 +422,12 @@ class OilOptions:
                                phases, port, ports, oil_facts)
 
     @staticmethod
-    def _candidate(family, need, summary, phases, port, ports, oil_facts) -> dict:
+    def _candidate(family, need, summary, phases, port, ports, oil_facts, product=None) -> dict:
         plan = {"surface": "nauvis", "force": "player", "atomic": True, "phases": phases}
         network = port["network"]
         anchor = min((p["position"] for p in ports if p["network"] == network), key=lambda p: (p["x"], p["y"]))
         scope = scope_bounds(plan_points(plan))
         digest = sha256_hash({"plan": plan, "network_anchor": anchor})
         return {"option_id": f"{family}.{digest[7:19]}", "family": family, "summary": summary, "plan": plan,
-                "network": network, "network_anchor": anchor, "product": need.split(":", 1)[1], "need_id": need,
+                "network": network, "network_anchor": anchor, "product": product or need.split(":", 1)[1], "need_id": need,
                 "scope_bounds": scope, "own_power": True, "oil_facts": {**oil_facts, "scope": scope}}

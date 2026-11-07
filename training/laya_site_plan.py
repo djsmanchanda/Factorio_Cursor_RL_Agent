@@ -405,6 +405,8 @@ def _reservation(plan: Mapping, candidate: Mapping, detail: list | None) -> str 
         # Patch boxes are survey approximations and can overlap; a mine standing in its own
         # resource's zone is mining that resource even where another patch's box reaches.
         own_ore = family == "mine" and any(z["purpose"] == f"ore:{product}" for z, _ in overlapping)
+        # The oil cell's belt coal mine (laya_oil_options `coal-feed`) stands on coal land like a coal mine.
+        feed_ore = family == "coal-feed" and any(z["purpose"] == "ore:coal" for z, _ in overlapping)
         for zone, rect in overlapping:
             kind, _, subject = zone["purpose"].partition(":")
             if action["entity"] in RELAY_POLES and kind in ("ore", "smelt", "oil"):
@@ -419,7 +421,7 @@ def _reservation(plan: Mapping, candidate: Mapping, detail: list | None) -> str 
             if kind == "oil" and family not in ("oil", "expand", "reach"):
                 return reject(f"reserved:{zone['purpose']}", action)
             if kind == "ore" and not ((family == "mine" and (product == subject or own_ore)) or starter_ore
-                                      or family in ("expand", "reach")):
+                                      or feed_ore or family in ("expand", "reach")):
                 return reject(f"reserved:{zone['purpose']}", action)
             # Roboports may stand in a smelting strip: its lines' provider taps need logistic coverage.
             if kind == "smelt" and not ((family in ("smelt", "starter", "line") and product == subject) or family in ("expand", "reach")

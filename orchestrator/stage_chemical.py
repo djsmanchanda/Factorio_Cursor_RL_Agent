@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import math
 from collections.abc import Callable, Generator, Mapping
 from dataclasses import dataclass
@@ -21,7 +22,7 @@ from orchestrator.stage_extraction import (
 )
 from orchestrator.stage_services import (
     StuckError, _ROBOPORT_SERVICE_AREAS, _diagnose_machines,
-    _ghost_materials, _logistic_chest_positions, _submit,
+    _ghost_materials, _ghostify_direct_infrastructure, _logistic_chest_positions, _submit,
     _wait_for_ghosts, construction_supply_chain_is_scheduled,
     ensure_logistic_coverage, extend_power,
     extend_roboport_coverage, service_distance,
@@ -551,33 +552,11 @@ def ensure_coal_mine(
         found = resource_patches.nearest_viable_patch(client, surface, "coal", reference)
     if found is None:
         raise StuckError("No coal patch found within the local 400-tile search")
-    _nearest, patch_min, patch_max = found.nearest, found.minimum, found.maximum
-    ore_compatible = _coal_compatible_mining_origins(
-        client, surface, patch_min, patch_max, reference,
+    mine = _coal_mine_planner(
+        CoalMineFacts(reference, found.minimum, found.maximum, found.amount),
+        lambda survey: _read_coal_survey(client, surface, survey),
     )
-    chosen = choose_mining_origin(
-        reference, patch_min, patch_max, 2,
-        lambda lo, hi: live_base.area_clear(client, surface, lo, hi),
-        lambda drills: live_base.drill_footprints_have_resource(
-            client, surface, "coal", drills,
-        ),
-        allowed_origins=set(ore_compatible),
-    )
-    if chosen is None:
-        raise StuckError(
-            "No clear two-drill coal extraction site found: "
-            f"amount={found.amount}, patch=({patch_min[0]},{patch_min[1]}).."
-            f"({patch_max[0]},{patch_max[1]}), "
-            f"ore_compatible_candidates={len(ore_compatible)}"
-        )
-    origin, count = chosen
-    output_side = "east" if reference[0] >= origin[0] else "west"
-    plan, output = direct_mine_plan(
-        origin, count, belt_type="transport-belt", inserter_type="fast-inserter",
-        output_side=output_side, continuation_tiles=0,
-    )
-    plan = strip_local_power(plan, remove_substations=False)
-    _publish_output_chest(plan)
+    plan, output, count = mine.plan, mine.output, mine.count
     plan["surface"], plan["force"] = surface, force
     _submit(
         client, bridge, surface, plan, "mining_coal", emit,
@@ -598,6 +577,136 @@ def ensure_coal_mine(
         logistic_chest_positions=[],
     )
     return None
+
+
+@dataclass(frozen=True)
+class CoalMineFacts:
+    """Already-observed inputs of one new belt coal mine; no live handles."""
+
+    #: Point the belt should serve (the oil cell centre); also orders origins.
+    reference: Point
+    #: `resource_patches.nearest_viable_patch` box of the chosen coal patch.
+    patch_min: Point
+    patch_max: Point
+    #: Patch amount, reported only in the failure message.
+    amount: int = 0
+
+
+@dataclass(frozen=True)
+class CoalSurvey:
+    """One bounded read the pure coal-mine planner needs before it can continue.
+
+    ``origins`` answers `_coal_compatible_mining_origins(min, max, preferred)`
+    (one bulk ore survey) as a list of origins; ``clear`` answers
+    `live_base.area_clear(min, max)`; ``drill_ore`` answers
+    `live_base.drill_footprints_have_resource('coal', drills)`.
+    """
+
+    kind: str
+    min_point: Point | None = None
+    max_point: Point | None = None
+    points: tuple[Point, ...] = ()
+
+
+class MissingCoalSurvey(LookupError):
+    """The pure planner needs a survey the caller did not supply."""
+
+    def __init__(self, survey: CoalSurvey) -> None:
+        super().__init__(f"coal-mine plan needs survey {survey.kind} {survey.min_point}..{survey.max_point}")
+        self.survey = survey
+
+
+@dataclass(frozen=True)
+class CoalMinePlan:
+    """A new two-drill belt coal mine exactly as `ensure_coal_mine` submits it."""
+
+    #: Stripped direct-mine plan (substations kept, no surface/force yet).
+    plan: dict
+    origin: Point
+    count: int
+    #: `direct_mine_plan` belt anchor: the downstream belt end, which
+    #: `_coal_belt_source` reports once the mine is built (east haul head or
+    #: west output) and the oil-cell planner consumes as `coal`.
+    output: Point
+    output_side: str
+
+    @property
+    def bill_of_materials(self) -> dict[str, int]:
+        """Items bots consume once `_submit` has made direct placements funded ghosts."""
+        plan = copy.deepcopy(self.plan)
+        _ghostify_direct_infrastructure(plan)
+        return _ghost_materials(plan)
+
+    @property
+    def footprint_tiles(self) -> set[tuple[int, int]]:
+        return planned_footprint_tiles(self.plan)
+
+    @property
+    def bounds(self) -> tuple[Point, Point]:
+        """Bounding box of every positioned action, without margin."""
+        return _area(self.plan, margin=0)
+
+
+def plan_coal_mine_intent(
+    facts: CoalMineFacts, surveys: Mapping[CoalSurvey, object],
+) -> CoalMinePlan:
+    """Plan the new belt coal mine from recorded facts and surveys, without I/O.
+
+    Raises `MissingCoalSurvey` naming the first read `surveys` lacks; an
+    unsited mine raises `StuckError` exactly as `ensure_coal_mine` does.
+    """
+    def answer(survey: CoalSurvey) -> object:
+        try:
+            return surveys[survey]
+        except KeyError:
+            raise MissingCoalSurvey(survey) from None
+
+    return _coal_mine_planner(facts, answer)
+
+
+def _read_coal_survey(client: RconClient, surface: str, survey: CoalSurvey) -> object:
+    """Answer one coal-mine planner survey from the live world."""
+    if survey.kind == "origins":
+        return _coal_compatible_mining_origins(
+            client, surface, survey.min_point, survey.max_point, survey.points[0],
+        )
+    if survey.kind == "clear":
+        return live_base.area_clear(client, surface, survey.min_point, survey.max_point)
+    if survey.kind == "drill_ore":
+        return live_base.drill_footprints_have_resource(
+            client, surface, "coal", list(survey.points),
+        )
+    raise ValueError(f"unknown coal survey kind {survey.kind!r}")
+
+
+def _coal_mine_planner(
+    facts: CoalMineFacts, answer: Callable[[CoalSurvey], object],
+) -> CoalMinePlan:
+    """Pure belt coal-mine geometry; every live read goes through ``answer``."""
+    reference, patch_min, patch_max = facts.reference, facts.patch_min, facts.patch_max
+    ore_compatible = answer(CoalSurvey("origins", patch_min, patch_max, (reference,)))
+    chosen = choose_mining_origin(
+        reference, patch_min, patch_max, 2,
+        lambda lo, hi: answer(CoalSurvey("clear", lo, hi)),
+        lambda drills: answer(CoalSurvey("drill_ore", points=tuple(map(tuple, drills)))),
+        allowed_origins=set(ore_compatible),
+    )
+    if chosen is None:
+        raise StuckError(
+            "No clear two-drill coal extraction site found: "
+            f"amount={facts.amount}, patch=({patch_min[0]},{patch_min[1]}).."
+            f"({patch_max[0]},{patch_max[1]}), "
+            f"ore_compatible_candidates={len(ore_compatible)}"
+        )
+    origin, count = chosen
+    output_side = "east" if reference[0] >= origin[0] else "west"
+    plan, output = direct_mine_plan(
+        origin, count, belt_type="transport-belt", inserter_type="fast-inserter",
+        output_side=output_side, continuation_tiles=0,
+    )
+    plan = strip_local_power(plan, remove_substations=False)
+    _publish_output_chest(plan)
+    return CoalMinePlan(plan, origin, count, output, output_side)
 
 
 def _existing_outputs(

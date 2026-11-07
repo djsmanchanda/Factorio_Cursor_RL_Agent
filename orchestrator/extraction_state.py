@@ -114,9 +114,13 @@ def _parse_entities(raw: str) -> list[ExtractionEntity]:
 
 
 def _classify_direct_mines(
-    entities: list[ExtractionEntity], near: Point,
+    entities: list[ExtractionEntity], near: Point, include_unclassified: bool = True,
 ) -> list[ResourceMine]:
-    """Classify legacy terminal chests and continuous-belt side taps."""
+    """Classify legacy terminal chests and continuous-belt side taps.
+
+    With no recognizable layout, a lone drill reads as one pending mine unless
+    ``include_unclassified`` is false (drill-to-chest mines are not belt sources).
+    """
     by_kind: dict[str, dict[Point, bool]] = {}
     for entity in entities:
         states = by_kind.setdefault(entity.kind, {})
@@ -222,7 +226,7 @@ def _classify_direct_mines(
     if direct_candidates:
         return [mine for _distance, mine in sorted(direct_candidates, key=lambda item: item[0])]
     pending_drills = list(drills)
-    if pending_drills:
+    if pending_drills and include_unclassified:
         drill = min(
             pending_drills,
             key=lambda p: (p[0] - near[0]) ** 2 + (p[1] - near[1]) ** 2,
@@ -302,7 +306,7 @@ def _resource_mine_entities(
 
 def find_resource_mines(
     client: RconClient, surface: str, force: str, resource: str, near: Point,
-    excluded_drill_positions: tuple[Point, ...] = (),
+    excluded_drill_positions: tuple[Point, ...] = (), *, include_unclassified: bool = True,
 ) -> list[ResourceMine]:
     """Find every planner-managed mine for one resource, nearest-first."""
     excluded = set(excluded_drill_positions)
@@ -314,17 +318,18 @@ def find_resource_mines(
         if entity.kind != "drill" or entity.position not in excluded
     ]
     return _classify_direct_mines(
-        entities, near,
+        entities, near, include_unclassified,
     )
 
 
 def find_resource_mine(
     client: RconClient, surface: str, force: str, resource: str, near: Point,
-    excluded_drill_positions: tuple[Point, ...] = (),
+    excluded_drill_positions: tuple[Point, ...] = (), *, include_unclassified: bool = True,
 ) -> ResourceMine | None:
     """Compatibility wrapper returning only the nearest managed mine."""
     mines = find_resource_mines(
         client, surface, force, resource, near, excluded_drill_positions,
+        include_unclassified=include_unclassified,
     )
     return mines[0] if mines else None
 

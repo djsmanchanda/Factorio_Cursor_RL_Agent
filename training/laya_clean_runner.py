@@ -82,7 +82,7 @@ class Settings:
     mall_gate_scale: float = 1.0
     mall_buildable_multiplier: int = 5
     context_view: str = 'full'
-    oil_options: bool = True  # `reach` and `oil` families (tools/laya_oil_options.py, injected); inert until oil is a need.
+    oil_options: bool = True  # `reach`, `coal-feed` and `oil` families (tools/laya_oil_options.py, injected); inert until oil is a need.
     reservation_mode: str = 'strict'
 WAIT_TICKS = (300, 1800)
 MAX_MENU = 20  # laya_state schema: options maxItems
@@ -91,7 +91,8 @@ MAX_CONSECUTIVE_FAILURES = 3
 # The entity each family exists to add; live checks credit entities already placed.
 PRIMARY_ENTITY = {"expand": "roboport", "mine": "electric-mining-drill", "smelt": "electric-furnace",
                   "starter": "electric-mining-drill", "line": "electric-furnace",
-                  "assemble": "assembling-machine-1", "reach": "roboport", "oil": "chemical-plant"}
+                  "assemble": "assembling-machine-1", "reach": "roboport", "oil": "chemical-plant",
+                  "coal-feed": "electric-mining-drill"}
 # Recipes the clean runner needs exported in addition to the shared helper's list.
 RECIPE_LIST_END = '"chemical-plant","oil-refinery","pumpjack"}'
 # fast-inserter: line output taps; pipe-to-ground, offshore-pump, substation: the oil cell's bill (laya_oil_options).
@@ -449,7 +450,7 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     ``external_shortfalls`` (item -> units lacking) is a build the provider could not offer because
     the network cannot fund it; it counts as one more blocked candidate, so its items get stock needs.
 
-    ``oil_offer`` (tools/laya_oil_options.py) adds `reach`/`oil` candidates, which carry their own
+    ``oil_offer`` (tools/laya_oil_options.py) adds `reach`/`coal-feed`/`oil` candidates, which carry their own
     power and declared scope, and typed blocked reasons for their needs. ``None`` leaves the menu unchanged.
     """
     rng = random.Random(seed)

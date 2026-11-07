@@ -1,17 +1,20 @@
-# Path: tests/test_laya_oil_options.py | Purpose: Protect the clean runner's `reach` and `oil` families: planner outputs become scoped ghost candidates or typed blocks.
+# Path: tests/test_laya_oil_options.py | Purpose: Protect the clean runner's `reach`, `coal-feed` and `oil` families: planner outputs become scoped ghost candidates or typed blocks.
 
 from __future__ import annotations
 
 import pytest
 
-from orchestrator import stage_chemical, stage_services
+from orchestrator import extraction_state, resource_patches, stage_chemical, stage_services
 from orchestrator.reach_survey import MissingReachSurvey, ReachSurvey
-from orchestrator.stage_chemical import MissingOilSurvey, OilCellPlan, OilSurvey
+from orchestrator.stage_chemical import (
+    CoalMinePlan, CoalSurvey, MissingCoalSurvey, MissingOilSurvey, OilCellPlan, OilSurvey,
+)
 from orchestrator.stage_services import PowerBridgePlan, ReachStep
 from tests.test_laya_clean_runner import facts as runner_facts, validator
 from training.laya_clean_runner import _offer_oil, compile_menu
 from training.laya_factory_status import compile_status
-from tools.laya_oil_options import OilOptions
+from planners.plan_validation import validate_build_plan
+from tools.laya_oil_options import OilOptions, World, ghost_phases
 from training.laya_saved_world import declared_scope_reason, ghost
 
 CENTER = (297.0, 10.0)
@@ -21,6 +24,8 @@ BOARD = {"needs": [{"item": "plastic-bar", "condition": "shortfall"},
                    {"item": "crude-oil", "condition": "shortfall"}]}
 HOP_SURVEY = ReachSurvey("area_clear", min_point=(40.0, -2.0), max_point=(44.0, 2.0))
 CELL_SURVEY = OilSurvey("occupied", (280.0, 0.0), (320.0, 30.0))
+COAL_SURVEY = CoalSurvey("origins", (240.0, 50.0), (270.0, 70.0), (312.0, 22.0))
+COAL_PATCH = resource_patches.ResourcePatch((250.5, 50.5), (240.0, 50.0), (270.0, 70.0), 400_000)
 
 
 def port(x, y, network="1"):
@@ -35,8 +40,8 @@ def world_facts(ports, oil_field=OIL_FIELD):
 class FakeWorld:
     """Recorded read-only answers; ``reads`` lists every read in order."""
 
-    def __init__(self, coal=(250.0, 40.0), coal_reason=None):
-        self.coal, self.coal_reason, self.reads = coal, coal_reason, []
+    def __init__(self, coal=(250.0, 40.0), coal_reason=None, coal_patch=COAL_PATCH):
+        self.coal, self.coal_reason, self.patch, self.reads = coal, coal_reason, coal_patch, []
 
     def oil_well(self, center):
         self.reads.append("oil_well")
@@ -49,6 +54,14 @@ class FakeWorld:
     def coal_source(self, near):
         self.reads.append("coal_source")
         return (None, self.coal_reason) if self.coal_reason else (self.coal, None)
+
+    def coal_patch(self, near):
+        self.reads.append(("coal_patch", near))
+        return self.patch
+
+    def read_coal_survey(self, survey):
+        self.reads.append(("coal_survey", survey.kind))
+        return [(250.0, 52.0)]
 
     def plastic_site(self, centre, coal):
         self.reads.append("plastic_site")
@@ -89,10 +102,26 @@ def cell_plan(extra=()):
     ]})
 
 
+def coal_plan():
+    """A recorded belt coal mine: direct substation, one drill pair and an east-flow collector."""
+    return CoalMinePlan(plan={"phases": [
+        {"name": "direct_mine_power", "actions": [
+            {"action_type": "place_entity", "entity": "substation", "position": {"x": 256.0, "y": 55.0}}]},
+        {"name": "direct_mine_output", "actions": [
+            {"action_type": "place_entity", "entity": "electric-mining-drill", "position": {"x": 251.5, "y": 50.5},
+             "direction": "south"},
+            ghost("transport-belt", 250.5, 52.5, "east"), ghost("transport-belt", 251.5, 52.5, "east"),
+            ghost("transport-belt", 252.5, 52.5, "east"), ghost("transport-belt", 253.5, 52.5, "east")]},
+        {"name": "direct_mine_expansion", "actions": [
+            {"action_type": "place_entity", "entity": "electric-mining-drill", "position": {"x": 251.5, "y": 54.5},
+             "direction": "north"}]},
+    ]}, origin=(250.0, 52.0), count=1, output=(253.5, 52.5), output_side="east")
+
+
 @pytest.fixture
 def planners(monkeypatch):
     """Patch the pure planners with recorded outputs; each needs one survey first, like the real ones."""
-    calls = {"reach": [], "oil": [], "bridge": []}
+    calls = {"reach": [], "oil": [], "bridge": [], "coal": []}
 
     def reach(facts, surveys):
         calls["reach"].append(facts)
@@ -111,9 +140,19 @@ def planners(monkeypatch):
 
     def bridge(facts, surveys):
         calls["bridge"].append(facts)
-        return PowerBridgePlan("bridge", placements=(("medium-electric-pole", (292.5, 5.5)),))
+        return calls.get("bridge_plan") or PowerBridgePlan(
+            "bridge", placements=(("medium-electric-pole", (292.5, 5.5)),))
+
+    def coal(facts, surveys):
+        calls["coal"].append(facts)
+        if COAL_SURVEY not in surveys:
+            raise MissingCoalSurvey(COAL_SURVEY)
+        if calls.get("coal_error"):
+            raise stage_services.StuckError(calls["coal_error"])
+        return coal_plan()
 
     monkeypatch.setattr(stage_services, "plan_reach_step", reach)
+    monkeypatch.setattr(stage_chemical, "plan_coal_mine_intent", coal)
     monkeypatch.setattr(stage_chemical, "plan_oil_cell_intent", oil)
     monkeypatch.setattr(stage_services, "plan_power_bridge", bridge)
     return calls
@@ -166,10 +205,74 @@ def test_landfill_plans_are_blocked_not_offered(planners):
 def test_missing_coal_source_blocks_oil_and_reach_still_targets_the_field(planners):
     world = FakeWorld(coal_reason="needs:coal_source")
     offer = OilOptions().offer(world, world_facts([port(0, 0)]), BOARD)
-    assert offer["blocked"] == {"item:plastic-bar": {"needs:coal_source": 1}}
+    assert offer["blocked"] == {"item:plastic-bar": {"needs:coal_source": 1, "needs:construction_coverage": 1}}
     assert [c["family"] for c in offer["candidates"]] == ["reach"]
     assert not planners["oil"] and "plastic_site" not in world.reads
-    assert planners["reach"][0].reserved_tiles == frozenset()
+    # The coal mine is planned near the cell centre and its land is kept free of the hop.
+    assert planners["coal"][0].reference == (312.0, 22.0) and offer["facts"]["coal_planned"]
+    assert planners["reach"][0].reserved_tiles
+
+
+def test_missing_coal_source_offers_the_belt_coal_mine_once_covered(planners):
+    world, facts = FakeWorld(coal_reason="needs:coal_source"), world_facts([port(0, 0), port(290, 10), port(250, 60)])
+    offer = OilOptions().offer(world, facts, BOARD)
+    [feed] = offer["candidates"]
+    assert feed["family"] == "coal-feed" and feed["need_id"] == "item:plastic-bar" and feed["product"] == "coal"
+    assert offer["blocked"] == {"item:plastic-bar": {"needs:coal_source": 1}}
+    assert [p["name"] for p in feed["plan"]["phases"]] == [
+        "coal_mine:direct_mine_power", "coal_power_bridge", "coal_mine:direct_mine_output",
+        "coal_mine:direct_mine_expansion"]
+    assert all(a["action_type"] == "place_ghost" for p in feed["plan"]["phases"] for a in p["actions"])
+    assert planners["bridge"][0].near_position == (256.0, 55.0)
+    assert feed["oil_facts"]["belt_source"] == [253.5, 52.5] and feed["oil_facts"]["bill"]["electric-mining-drill"] == 2
+    assert feed["network_anchor"] == {"x": 0, "y": 0} and feed["own_power"]
+    assert ("coal_survey", "origins") in world.reads and declared_scope_reason(feed, facts) is None
+
+
+@pytest.mark.parametrize("setup,reason", [
+    (lambda calls, world: setattr(world, "patch", None), "no_coal_patch"),
+    (lambda calls, world: calls.update(coal_error="No clear two-drill coal extraction site"), "coal_plan_failed"),
+    (lambda calls, world: calls.update(bridge_plan=PowerBridgePlan("unpowered")), "coal_unpowered"),
+])
+def test_an_unplannable_coal_mine_is_a_typed_block(planners, setup, reason):
+    world = FakeWorld(coal_reason="needs:coal_source")
+    setup(planners, world)
+    offer = OilOptions().offer(world, world_facts([port(0, 0), port(290, 10), port(250, 60)]), BOARD)
+    assert offer["candidates"] == []
+    assert offer["blocked"] == {"item:plastic-bar": {"needs:coal_source": 1, reason: 1}}
+
+
+def test_an_incomplete_coal_mine_is_not_offered_again(planners):
+    world = FakeWorld(coal_reason="coal_source_incomplete")
+    offer = OilOptions().offer(world, world_facts([port(0, 0), port(290, 10), port(250, 60)]), BOARD)
+    assert offer["candidates"] == [] and not planners["coal"]
+    assert offer["blocked"] == {"item:plastic-bar": {"coal_source_incomplete": 1}}
+
+
+def test_a_built_coal_feed_is_recognized_as_the_oil_cells_belt_source(monkeypatch):
+    """Real planner geometry through the real mine classifier: ghosts read as incomplete, built as the source."""
+    from tests.test_coal_mine_intent import _EAST_REFERENCE, _facts, _record_surveys
+    mine = stage_chemical.plan_coal_mine_intent(_facts(_EAST_REFERENCE), _record_surveys(monkeypatch, _EAST_REFERENCE))
+    entities = [(("drill" if a["entity"] == "electric-mining-drill" else "belt"), (a["position"]["x"], a["position"]["y"]))
+                for p in mine.plan["phases"] for a in p["actions"]
+                if a["entity"] in ("electric-mining-drill", "transport-belt")]
+    phases, reason = ghost_phases([("coal_mine", mine.plan)])
+    assert reason is None  # The deterministic geometry is a valid all-ghost Laya plan as it stands.
+    validate_build_plan({"surface": "nauvis", "force": "player", "atomic": True, "phases": phases})
+    lone_chest_drill = extraction_state.ExtractionEntity("drill", (-20.5, 40.5), True)  # A `mine` build.
+
+    def entities_at(built):
+        return lambda *_a: [lone_chest_drill, *(extraction_state.ExtractionEntity(k, p, built) for k, p in entities)]
+
+    monkeypatch.setattr(stage_chemical.live_base, "transport_belt_direction_at", lambda *_a: "east")
+    world = World(type("Client", (), {"command": lambda self, _t: ""})())
+    monkeypatch.setattr(extraction_state, "_resource_mine_entities", entities_at(False))
+    assert world.coal_source(_EAST_REFERENCE) == (None, "coal_source_incomplete")
+    monkeypatch.setattr(extraction_state, "_resource_mine_entities", entities_at(True))
+    assert world.coal_source(_EAST_REFERENCE) == (mine.output, None)
+    # Drill-to-chest coal mines alone are not a belt source.
+    monkeypatch.setattr(extraction_state, "_resource_mine_entities", lambda *_a: [lone_chest_drill])
+    assert world.coal_source(_EAST_REFERENCE) == (None, "needs:coal_source")
 
 
 def test_cell_intent_is_cached_until_its_inputs_or_ttl_change(planners):
@@ -253,6 +356,19 @@ def test_reach_hops_cross_ore_and_oil_land_like_coverage_but_not_the_mall():
     assert reservation_reason(plan, hop(42, 0)) is None
     assert reservation_reason(plan, hop(115, 0)) is None
     assert reservation_reason(plan, hop(-20, -20)) == "reserved:mall"
+
+
+def test_the_coal_feed_may_stand_on_coal_land_only():
+    from training.laya_site_plan import reservation_reason
+    plan = {"zones": [{"purpose": "ore:coal", "rect": [240, 40, 270, 70]},
+                      {"purpose": "ore:iron-ore", "rect": [30, -10, 60, 10]}]}
+
+    def feed(x, y):
+        return {"family": "coal-feed", "product": "coal", "plan": {"phases": [
+            {"name": "all", "actions": [ghost("electric-mining-drill", x, y)]}]}}
+
+    assert reservation_reason(plan, feed(251.5, 50.5)) is None
+    assert reservation_reason(plan, feed(42.5, 0.5)) == "reserved:ore:iron-ore"
 
 
 def test_an_option_over_already_submitted_ghosts_is_blocked_not_resubmitted():
