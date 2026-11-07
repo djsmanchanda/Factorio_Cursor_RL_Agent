@@ -530,7 +530,14 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
         rejected.update({reason.split(":", 1)[0]: count for reason, count in counts.items()})
     for candidate in (oil_offer or {}).get("candidates") or ():
         oil_needs.add(candidate["need_id"])
-        if placed and not clear_of(list(actions(candidate["plan"])), list(placed)):
+        planned = list(actions(candidate["plan"]))
+        # An action identical to one Laya already submitted (same entity and position) is reconciled by the
+        # executor as already present - deterministic plans include the belt or pole they attach to (live
+        # 2026-11-07: the oil cell repeats the coal-feed's belt end). Refused footprints always count.
+        same = {(a["entity"], a["position"]["x"], a["position"]["y"]) for a in planned}
+        submitted = {(o["entity"], o["position"]["x"], o["position"]["y"]) for o in placed if o.get("submitted")}
+        others = [o for o in placed if not o.get("submitted") or (o["entity"], o["position"]["x"], o["position"]["y"]) not in same]
+        if same <= submitted or (others and not clear_of(planned, others)):  # a pure resubmission, or a real overlap
             # Ghosts Laya already submitted are not yet in the facts; never resubmit over them.
             reasons[candidate["need_id"]]["already_submitted"] += 1
             rejected["already_submitted"] += 1
@@ -1069,7 +1076,7 @@ def _submitted_entities(adapter: Any) -> list[dict]:
         except (OSError, ValueError):
             continue
         if (receipt.get("submission") or {}).get("ok"):
-            placed += [{"entity": a["entity"], "position": a["position"]}
+            placed += [{"entity": a["entity"], "position": a["position"], "submitted": True}
                        for phase in receipt["candidate"]["plan"]["phases"] for a in phase["actions"]]
     return placed
 

@@ -385,9 +385,30 @@ def test_an_option_over_already_submitted_ghosts_is_blocked_not_resubmitted():
            "plan": {"surface": "nauvis", "force": "player", "atomic": True, "phases": [
                {"name": "reach", "actions": [ghost("roboport", 42, 0)]}]}}
     menu = compile_menu(fluid, board, validator(), seed=4, oil_offer={"candidates": [hop], "blocked": {}},
-                        placed=[{"entity": "roboport", "position": {"x": 42, "y": 0}}])
-    assert menu["blocked"]["item:crude-oil"] == {"already_submitted": 1}
+                        placed=[{"entity": "roboport", "position": {"x": 42, "y": 0}, "submitted": True}])
+    assert menu["blocked"]["item:crude-oil"] == {"already_submitted": 1}  # a pure resubmission
     assert not any(o["option_id"] == "reach.abc" for o in menu["options"])
+
+
+def test_an_option_sharing_an_attachment_entity_with_an_earlier_build_is_still_offered():
+    """Live 2026-11-07 smoke: the oil cell repeats the coal-feed's belt end (reconciled as already present)."""
+    from tests.test_laya_factory_status import FLUID_RECIPES
+    fluid = {**runner_facts(), "fluid_recipes": FLUID_RECIPES}
+    board = compile_status(fluid, {"plastic-bar": 0.5})
+    cell = {"option_id": "reach.abc", "family": "reach", "summary": "cell", "need_id": "item:crude-oil",
+            "product": "crude-oil", "network": "1", "own_power": True,
+            "plan": {"surface": "nauvis", "force": "player", "atomic": True, "phases": [
+                {"name": "coal", "actions": [ghost("transport-belt", 60.5, 0.5, "east"), ghost("transport-belt", 61.5, 0.5, "east")]}]}}
+    def validate(candidates):
+        return {c["option_id"]: {"reason": None, "bill": {"transport-belt": 2}} if c["family"] == "reach"
+                else validator()([c])[c["option_id"]] for c in candidates}
+
+    shared = [{"entity": "transport-belt", "position": {"x": 60.5, "y": 0.5}, "submitted": True}]
+    menu = compile_menu(fluid, board, validate, seed=4, oil_offer={"candidates": [cell], "blocked": {}}, placed=shared)
+    assert "already_submitted" not in menu["blocked"].get("item:crude-oil", {})
+    refused = [{"entity": "transport-belt", "position": {"x": 60.5, "y": 0.5}}]  # a footprint the game refused
+    menu = compile_menu(fluid, board, validate, seed=4, oil_offer={"candidates": [cell], "blocked": {}}, placed=refused)
+    assert menu["blocked"]["item:crude-oil"] == {"already_submitted": 1}
 
 
 def test_the_provider_reads_the_adapters_own_world(planners):
