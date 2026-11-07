@@ -706,7 +706,11 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
         return legal
 
     legal = check(by_need)
-    for item, lacking in (external_shortfalls or {}).items():  # An unfunded external build, e.g. an optimizer block.
+    # Unfunded external builds (an optimizer block) and stock an oil-family plan lacks (laya_oil_options).
+    external_shortfalls = {**(external_shortfalls or {})}
+    for item, lacking in ((oil_offer or {}).get("shortfalls") or {}).items():
+        external_shortfalls[item] = max(int(external_shortfalls.get(item, 0)), int(lacking))
+    for item, lacking in external_shortfalls.items():
         unit_shortfalls[item] = max(unit_shortfalls.get(item, 0), int(lacking))
         if not makeable(item, facts.get("recipes") or {}):
             continue  # Visible as a shortfall, but no stock need: nothing enabled can make it yet.

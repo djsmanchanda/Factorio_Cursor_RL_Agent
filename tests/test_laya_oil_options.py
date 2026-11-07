@@ -411,6 +411,26 @@ def test_an_option_sharing_an_attachment_entity_with_an_earlier_build_is_still_o
     assert menu["blocked"]["item:crude-oil"] == {"already_submitted": 1}
 
 
+def test_missing_stock_for_the_cell_is_a_shortfall_that_drives_the_mall(planners, monkeypatch):
+    """Live 2026-11-07 smoke s1: the coal belt route needed 91 belts; it read as oil_options_error."""
+    from orchestrator.parts_mall import MaterialShortage
+
+    def short(facts, surveys):
+        raise MaterialShortage("belt bridge for coal", {"transport-belt": 91}, {"transport-belt": 0})
+    monkeypatch.setattr(stage_chemical, "plan_oil_cell_intent", short)
+    offer = OilOptions().offer(FakeWorld(), world_facts([port(0, 0), port(290, 10)]), BOARD)
+    assert offer["blocked"]["item:plastic-bar"] == {"item_shortfall:transport-belt": 1}
+    assert offer["shortfalls"] == {"transport-belt": 91}
+    from tests.test_laya_factory_status import FLUID_RECIPES
+    base = runner_facts()
+    belt = {"ingredients": [{"name": "iron-gear-wheel", "amount": 1}, {"name": "iron-plate", "amount": 1}],
+            "product_amount": 2, "energy_ticks": 30}
+    fluid = {**base, "recipes": {**base["recipes"], "transport-belt": belt}, "fluid_recipes": FLUID_RECIPES}
+    menu = compile_menu(fluid, compile_status(fluid, {"plastic-bar": 0.5}), validator(), seed=4,
+                        oil_offer={"candidates": [], "blocked": offer["blocked"], "shortfalls": offer["shortfalls"]})
+    assert menu["unit_shortfalls"]["transport-belt"] >= 91 and "transport-belt" in menu["shortfalls"]
+
+
 def test_the_provider_reads_the_adapters_own_world(planners):
     seen = []
 

@@ -39,6 +39,8 @@ MAX_SURVEYS = 96  # Bounded reads per planner resolution; exceeding it is a type
 COAL_MAX_SURVEYS = 128
 # The cell intent is a frozen geometry; re-plan after this many game ticks so a stale one cannot linger.
 PLAN_TTL_TICKS = 36000
+# A plan blocked by missing stock is retried sooner: the mall may make the items within minutes.
+SHORTAGE_TTL_TICKS = 3600
 # Built cell machines and off-grid substations are looked for this far around the oil field (the outpost).
 OUTPOST_SCAN_RADIUS = 128
 # Nominal electric draw (kW) of the cell's consumers; an estimate, compared with no measured grid.
@@ -218,6 +220,7 @@ class OilOptions:
 
     plan_ttl_ticks: int = PLAN_TTL_TICKS
     _cache: dict = field(default_factory=dict)
+    shortfalls: dict = field(default_factory=dict)
 
     def __call__(self, adapter: Any, facts: Mapping, board: Mapping) -> dict | None:
         """The clean runner's hook: read the adapter's own disposable world."""
@@ -231,6 +234,7 @@ class OilOptions:
         center = _xy(field_facts["center"])
         ports = [p for p in facts["ports"] if p["energy"] > 0]
         result: dict = {"candidates": [], "blocked": {}, "facts": {"oil_center": list(center)}}
+        self.shortfalls = {}
         reach_need = f"item:{_first_unmet(REACH_NEED_ORDER, unmet)}"
         oil_need = f"item:{_first_unmet(OIL_NEED_ORDER, unmet)}"
 
@@ -302,6 +306,8 @@ class OilOptions:
             else:
                 result["candidates"].append(option)
         result["blocked"] = {need: dict(counts) for need, counts in result["blocked"].items()}
+        if self.shortfalls:  # Items a plan needs that the base lacks: they become stock needs like any shortfall.
+            result["shortfalls"] = dict(self.shortfalls)
         return result
 
     def _intent(self, world: World, facts: Mapping, center) -> tuple[dict | None, str | None, Any]:
@@ -325,7 +331,8 @@ class OilOptions:
         from orchestrator.stage_services import StuckError
         key = (tuple(oil), tuple(cell), tuple(coal))
         cached = self._cache.get(key)
-        if cached and facts["tick"] - cached["tick"] < self.plan_ttl_ticks:
+        if cached and facts["tick"] - cached["tick"] < cached.get("ttl", self.plan_ttl_ticks):
+            self.shortfalls = dict(cached.get("shortfalls") or {})
             return (None, cached["reason"]) if "reason" in cached else (cached, None)
         self._cache.clear()
         plastic = world.plastic_site(cell_centre, coal)
@@ -335,8 +342,19 @@ class OilOptions:
         cell_facts = OilCellFacts(target_output="plastic-bar", oil_position=tuple(oil), cell_origin=tuple(cell),
                                   coal=tuple(coal), plastic_site=tuple(plastic), water=water,
                                   patch_tiles=tuple(world.patch_tiles(oil)))
+        from orchestrator.parts_mall import MaterialShortage
         try:
             plan, _surveys = resolve(plan_oil_cell_intent, cell_facts, world.read_oil_survey, MissingOilSurvey)
+        except MaterialShortage as error:
+            # Missing stock is a funding fact like a validator's item_shortfall, not a failed plan (live
+            # 2026-11-07 smoke s1: the coal belt route needed 91 belts the base lacked).
+            short = {item: target - error.available.get(item, 0) for item, target in error.required.items()
+                     if target > error.available.get(item, 0)}
+            first = min(short, key=lambda item: (-short[item], item)) if short else "unknown"
+            self._cache[key] = {"tick": facts["tick"], "reason": f"item_shortfall:{first}", "shortfalls": short,
+                                "ttl": SHORTAGE_TTL_TICKS}
+            self.shortfalls = short
+            return None, f"item_shortfall:{first}"
         except (StuckError, SurveyBudgetExceeded) as error:
             self._cache[key] = {"tick": facts["tick"], "reason": "oil_plan_failed", "error": str(error)[:200]}
             return None, "oil_plan_failed"
