@@ -68,6 +68,11 @@ def scope_bounds(points: list[tuple[float, float]]) -> dict[str, int]:
             "y_max_exclusive": math.floor(max(ys)) + 1 + SCOPE_MARGIN}
 
 
+def phases_bill(phases: list[Mapping]) -> dict[str, int]:
+    """Items the submitted ghosts consume: one per ghost, including inserted power-bridge phases."""
+    return dict(Counter(a["entity"] for phase in phases for a in phase["actions"]))
+
+
 def plan_points(plan: Mapping) -> list[tuple[float, float]]:
     return [(a["position"]["x"], a["position"]["y"]) for phase in plan["phases"] for a in phase["actions"]]
 
@@ -377,7 +382,7 @@ class OilOptions:
             return None
         source = tuple(coal["source"])
         port = min(ports, key=lambda p: math.dist(_xy(p["position"]), source))
-        oil_facts = {"kind": "coal-feed", "bill": coal["bill"], "belt_source": coal["source"],
+        oil_facts = {"kind": "coal-feed", "bill": phases_bill(phases), "belt_source": coal["source"],
                      "output_side": coal["output_side"], "patch": coal["patch"], "draw_kw": coal["draw_kw"],
                      "power_capacity_verified": False, **bridge_facts}
         return self._candidate("coal-feed", need, f"Build the oil cell's belt coal mine ({coal['bill'].get('electric-mining-drill', 0)} "
@@ -415,7 +420,7 @@ class OilOptions:
         if bridge_facts is None:
             return None
         port = min(ports, key=lambda p: math.dist(_xy(p["position"]), center))
-        oil_facts = {"kind": "oil", "packets": intent["packets"], "bill": intent["bill"],
+        oil_facts = {"kind": "oil", "packets": intent["packets"], "bill": phases_bill(phases),
                      "cell_draw_kw": intent["draw_kw"], "power_capacity_verified": False, **bridge_facts}
         return self._candidate("oil", need, f"Build the opening oil -> plastic cell ({len(intent['packets'])} packets, "
                                f"{sum(len(p['actions']) for p in phases)} ghosts, ~{intent['draw_kw'] / 1000:.1f} MW)",
