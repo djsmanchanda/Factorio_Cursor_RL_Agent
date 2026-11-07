@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from math import floor, isclose
 
+from core.fluid_systems import rotate_offset
 from planners.infrastructure import POLE_SPECS
 from planners.infrastructure_geometry import footprint_tile_indices
 from planners.plan_validation import ENTITY_FOOTPRINTS, validate_build_plan
@@ -15,21 +16,19 @@ _DIRECTION_VECTORS = {
     "south": (0, 1), "west": (-1, 0),
 }
 
-# The pipe stands immediately outside the 3x3 pumpjack footprint. The
-# graphical connector is on the machine edge, but placing a pipe on that edge
-# tile collides with the pumpjack (live run 2026-08-26 04:43).
-_PUMPJACK_OUTPUT_OFFSETS = {
-    "north": (-1, -2), "east": (2, -1),
-    "south": (1, 2), "west": (-2, 1),
-}
+# The pipe stands immediately outside the 3x3 pumpjack footprint. The 2.x
+# prototype's north-facing connection is the edge tile (1, -1) facing north, so
+# the pipe tile is (1, -2); placing a pipe on the edge tile collides with the
+# pumpjack (live run 2026-08-26 04:43). The old table had x mirrored: south
+# pumpjacks were left unconnected (live 2026-11-07, oil-chain-check-20261107).
+_PUMPJACK_NORTH_OUTPUT = (1, -2)
+_PUMPJACK_OUTPUT_OFFSETS = {d: rotate_offset(_PUMPJACK_NORTH_OUTPUT, d) for d in _DIRECTION_VECTORS}
 
-_OFFSHORE_OUTPUT_OFFSETS = {
-    # Factorio's offshore-pump direction points into the water. The pipe
-    # connector is the immediately adjacent tile on the opposite, landward
-    # side. Skipping one extra tile leaves the pump disconnected.
-    "north": (0, 1), "east": (-1, 0),
-    "south": (0, -1), "west": (1, 0),
-}
+# Factorio's offshore-pump direction points into the water. The pipe connector
+# is the immediately adjacent tile on the opposite, landward side. Skipping one
+# extra tile leaves the pump disconnected.
+_OFFSHORE_NORTH_OUTPUT = (0, 1)
+_OFFSHORE_OUTPUT_OFFSETS = {d: rotate_offset(_OFFSHORE_NORTH_OUTPUT, d) for d in _DIRECTION_VECTORS}
 
 ROW_POLE = "medium-electric-pole"
 

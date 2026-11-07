@@ -84,11 +84,13 @@ def _live_world(monkeypatch) -> None:
 
 # Recorded from the pre-refactor `_plan_opening_oil_cell` on this fixture
 # (November 7, 2026); the refactor must reproduce them byte for byte.
+# Re-recorded 2026-11-07: pumpjack outputs and mirrored machines corrected for Factorio 2.x
+# (fluid geometry only; diffed against the old intent).
 _GOLDEN = {
-    "plastic-bar": "26d3d3b2cf081c44ca147bc456f47be497ad2af8e8207b4e631485acc881470c",
-    "sulfur": "9df848317bedfca4a532258efa92e3a7fcfe72ef861ac66f8a616fb87753ecc8",
+    "plastic-bar": "4b2fb87818b15894ed000497a5bd7b3ceb83450717d8434a94220f552cacb5f7",
+    "sulfur": "208bb9678a728fbf61f1336350fbebaea16447e80cfcbe0f1d47d4259d231975",
 }
-_GOLDEN_LOG = "a493ac768ff6534a0c67a5dc9848482051f6f5d529410952c36bda1f2aa8887d"
+_GOLDEN_LOG = "a89ef3f1e54b8cfec41125757fd87e2cad96197e49657b5f983615b8bf525c41"
 
 
 def _facts(target_output: str) -> stage_chemical.OilCellFacts:

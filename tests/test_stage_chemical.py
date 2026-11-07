@@ -216,27 +216,23 @@ def test_pumpjack_faces_the_local_oil_cell() -> None:
     north = pumpjack_siting.pumpjack_site_nearest((-286.5, -98.5), (-286.0, -160.0))
 
     assert east["direction"] == "east"
-    assert east["output"] == (-285, -100)
+    assert east["output"] == (-285, -98)
     assert north["direction"] == "north"
-    assert north["output"] == (-288, -101)
+    assert north["output"] == (-286, -101)
 
 
-def test_pumpjack_blueprint_rotation_and_mirror_map_to_real_connectors() -> None:
-    """User-supplied blueprints: default, 90° clockwise, then mirrored.
+def test_pumpjack_connector_matches_the_2x_prototype() -> None:
+    """Factorio 2.x pumpjack pipe_connections: edge tile (1, -1) facing north.
 
-    The exported defaults are north, east, and south respectively; connector
-    tiles must rotate with the 3x3 body, not remain at the default location.
+    The pipe tile is one step outward, rotated with the 3x3 body. Live
+    2026-11-07: a lone pipe on the south jack's (-1, 2) tile filled with crude;
+    the old x-mirrored (1, 2) tile left the jack waiting for space.
     """
     position = (-286.5, -98.5)
-    assert verified_pumpjack_output_tile({
-        "position": position, "direction": "north",
-    }) == (-288, -101)
-    assert verified_pumpjack_output_tile({
-        "position": position, "direction": "east",
-    }) == (-285, -100)
-    assert verified_pumpjack_output_tile({
-        "position": position, "direction": "south",
-    }) == (-286, -97)
+    expected = {"north": (-286, -101), "east": (-285, -98),
+                "south": (-288, -97), "west": (-289, -100)}
+    for direction, tile in expected.items():
+        assert verified_pumpjack_output_tile({"position": position, "direction": direction}) == tile
 
 
 def test_live_east_pumpjack_pipe_starts_outside_the_machine() -> None:
@@ -245,13 +241,13 @@ def test_live_east_pumpjack_pipe_starts_outside_the_machine() -> None:
     )
 
     assert site["direction"] == "east"
-    assert site["output"] == (-267, -100)
+    assert site["output"] == (-267, -98)
     plan = stage_chemical.generate_pumpjack_source([site], [site["output"]])
     pipe = next(
         action for phase in plan["phases"] for action in phase["actions"]
         if action.get("entity") == "pipe"
     )
-    assert pipe["position"] == {"x": -266.5, "y": -99.5}
+    assert pipe["position"] == {"x": -266.5, "y": -97.5}
 
 
 def test_requested_straight_shoreline_has_adjacent_land_output() -> None:

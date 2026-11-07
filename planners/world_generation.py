@@ -80,8 +80,8 @@ def _electronics_world() -> dict:
         "coal_output_y": 2.5,
         "coal_output_x": 40.5,
         "coal_capacity_per_second": 1.5,
-        "pumpjack_sites": [{"position": [20.5, -43.5], "output": [19, -46], "resource": "crude-oil", "capacity_per_second": 60.0, "direction": "north"}],
-        "crude_pipe_tiles": [[19, -46]],
+        "pumpjack_sites": [{"position": [20.5, -43.5], "output": [21, -46], "resource": "crude-oil", "capacity_per_second": 60.0, "direction": "north"}],
+        "crude_pipe_tiles": [[21, -46]],
         "offshore_pump_sites": [{"position": [20.5, 83.5], "output": [20, 82], "resource": "water", "capacity_per_second": 1200.0, "direction": "south"}],
         "water_pipe_tiles": [[20, 82]],
     }

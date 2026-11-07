@@ -357,6 +357,9 @@ local function configuration_error(entity, action, direction)
   if direction ~= nil and entity.direction ~= direction then
     return "direction_mismatch"
   end
+  if action.mirror ~= nil and entity.mirroring ~= action.mirror then
+    return "mirror_mismatch"
+  end
   if action.underground_type then
     local ok, actual = pcall(function() return entity.belt_to_ground_type end)
     if not ok then return "underground_type_read_failed" end
@@ -755,6 +758,14 @@ end
 -- placement must be followed by an explicit wiring pass rather than trusting
 -- the implicit auto-connect. Reach values come straight from the prototype
 -- (get_max_wire_distance), matching planners/infrastructure.py's POLE_SPECS.
+-- A reflected fluid layout needs its machine flipped to match its pipes; an
+-- existing unflipped machine is repaired in place rather than left dry.
+local function repair_existing_mirror(entity, action)
+  if action.mirror ~= nil and entity.mirroring ~= action.mirror then
+    pcall(function() entity.mirroring = action.mirror end)
+  end
+end
+
 local function repair_existing_inserter_direction(entity, action, direction, mismatch)
   -- Mall cells are idempotent: an older deployment may have created the
   -- inserter facing the drop side. Inserters are the only existing entities we
@@ -1128,6 +1139,7 @@ local function execute_build_plan(authorization, build_plan)
           if action.action_type == "place_ghost" and needs_reconfiguration(action, existing) then
             configure_error = configure_created_entity(existing, action)
           end
+          if action.action_type == "place_ghost" then repair_existing_mirror(existing, action) end
           local mismatch = configure_error or configuration_error(existing, action, direction)
           if action.action_type == "place_ghost" then
             mismatch = repair_existing_inserter_direction(existing, action, direction, mismatch)
@@ -1148,6 +1160,7 @@ local function execute_build_plan(authorization, build_plan)
             inner_name = action.entity,
             position = { position.x, position.y },
             direction = direction,
+            mirror = action.mirror,
             type = action.underground_type,
             force = force,
             tags = action.research_lab_ownership or action.optimizer_ownership or shared_tags
@@ -1175,6 +1188,7 @@ local function execute_build_plan(authorization, build_plan)
           if needs_reconfiguration(action, existing) then
             configure_error = configure_created_entity(existing, action)
           end
+          repair_existing_mirror(existing, action)
           local mismatch = configure_error or configuration_error(existing, action, direction)
           mismatch = repair_existing_inserter_direction(existing, action, direction, mismatch)
           if mismatch then
@@ -1194,6 +1208,7 @@ local function execute_build_plan(authorization, build_plan)
             name = action.entity,
             position = { position.x, position.y },
             direction = direction,
+            mirror = action.mirror,
             type = action.underground_type,
             force = force
           }

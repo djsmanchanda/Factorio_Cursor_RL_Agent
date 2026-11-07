@@ -454,7 +454,7 @@ def measured_outcome(before, after):
 
 
 CONFIGURATION_FIELDS = frozenset({"recipe", "logistic_requests", "logistic_sections", "clear_inventory_limit"})
-SAVED_WORLD_GHOST_FIELDS = frozenset({"action_type", "entity", "position", "direction", "underground_type", "recipe",
+SAVED_WORLD_GHOST_FIELDS = frozenset({"action_type", "entity", "position", "direction", "mirror", "underground_type", "recipe",
                                       "logistic_requests", "logistic_sections", "clear_inventory_limit",
                                       "input_priority", "output_priority"})
 

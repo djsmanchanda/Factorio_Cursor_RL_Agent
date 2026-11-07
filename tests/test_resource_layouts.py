@@ -92,8 +92,8 @@ def test_direct_mining_to_chest_rejects_invalid_geometry(
 
 def test_fluid_resources_preserve_supplied_entity_and_output_coordinates() -> None:
     crude = generate_pumpjack_source(
-        [{"position": (18.5, 20.5), "output": (16, 21), "direction": "west"}],
-        [(16, 21), (15, 21)],
+        [{"position": (18.5, 20.5), "output": (16, 19), "direction": "west"}],
+        [(16, 19), (15, 19)],
     )
     water = generate_offshore_pump_source(
         [{"position": (5.5, 30.5), "output": (6, 30), "direction": "west"}],
@@ -106,8 +106,9 @@ def test_fluid_resources_preserve_supplied_entity_and_output_coordinates() -> No
 
 
 def test_west_pumpjack_requires_its_live_verified_output_tile() -> None:
-    site = {"position": (18.5, -43.5), "output": (16, -43), "direction": "west"}
-    plan = generate_pumpjack_source([site], [(16, -43)])
+    # Live 2026-11-07: crude from a west jack filled only the (-2, -1) tile.
+    site = {"position": (18.5, -43.5), "output": (16, -45), "direction": "west"}
+    plan = generate_pumpjack_source([site], [(16, -45)])
 
     pumpjack = next(action for action in actions(plan) if action["entity"] == "pumpjack")
     pipe = next(action for action in actions(plan) if action["entity"] == "pipe")
@@ -115,7 +116,7 @@ def test_west_pumpjack_requires_its_live_verified_output_tile() -> None:
         "action_type": "place_ghost", "entity": "pumpjack",
         "position": {"x": 18.5, "y": -43.5}, "direction": "west",
     }
-    assert pipe["position"] == {"x": 16.5, "y": -42.5}
+    assert pipe["position"] == {"x": 16.5, "y": -44.5}
     validate_no_collisions([("crude", plan)])
 
     site["output"] = (20, -47)
@@ -151,8 +152,8 @@ def test_offshore_power_scaffold_has_no_row_pole_on_its_water_pipe() -> None:
 @pytest.mark.parametrize(
     ("direction", "output"),
     [
-        ("north", (17, 19)), ("east", (20, 20)),
-        ("south", (19, 23)), ("west", (16, 22)),
+        ("north", (19, 19)), ("east", (20, 22)),
+        ("south", (17, 23)), ("west", (16, 20)),
     ],
 )
 def test_pumpjack_connector_rotates_with_the_machine(

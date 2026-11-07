@@ -121,6 +121,13 @@ def _oriented_plan(
             action["direction"] = transform_direction(
                 "north", direction=direction, mirror=mirror,
             )
+        if mirror is not None and action.get("entity") in directional_machines:
+            # A mirrored row only matches its pipes if the machine itself is
+            # mirrored (Factorio 2.x `mirror`): an unmirrored refinery kept its
+            # own ports and left every crude/petroleum link dry (live 2026-11-07).
+            # Reflecting an already mirrored machine (paired blocks) cancels.
+            if action.pop("mirror", False) is not True:
+                action["mirror"] = True
     validate_build_plan(plan)
     return plan
 
