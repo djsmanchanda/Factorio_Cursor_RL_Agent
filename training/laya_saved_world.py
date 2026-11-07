@@ -36,8 +36,9 @@ OIL_SEARCH_RADIUS = 512
 # actions within SCOPE_EDGE of a scope edge; a declared scope may exceed that by SCOPE_SLACK tiles.
 SCOPE_EDGE = 2
 SCOPE_SLACK = 4
-# The oil survey groups wells within 32 tiles of the nearest well; this is the outpost area.
-OIL_FIELD_HALF_SPAN = 32
+# The outpost: everything within this many tiles of the surveyed oil-field centre. The oil-cell planner
+# sites its 64x44 cell within 80 tiles of the wells and its belt coal mine on the coal patch nearest the cell.
+OUTPOST_RADIUS = 128
 # Reach hops toward the outpost may stray this far from the straight base -> oil-field line (detours).
 ROUTE_HALF_WIDTH = 64
 SCOPE_KEYS = ("x_min", "y_min", "x_max_exclusive", "y_max_exclusive")
@@ -319,7 +320,8 @@ def declared_scope_reason(candidate, facts):
 
     A declared scope exists only to reach the surveyed oil outpost: it must tightly contain the
     candidate's own actions, stay within OIL_SEARCH_RADIUS of the survey anchor, and touch the
-    oil-field area or the global BOUNDS (so reach hops toward the outpost are allowed).
+    outpost (OUTPOST_RADIUS around the oil field: cell and coal mine), the global BOUNDS or the
+    base-to-oil corridor (so reach hops toward the outpost are allowed).
     """
     scope = candidate.get("scope_bounds")
     if scope is None:
@@ -353,14 +355,16 @@ def declared_scope_reason(candidate, facts):
     if math.hypot(far_x, far_y) > OIL_SEARCH_RADIUS:
         return "scope_out_of_reach"
     cx, cy = field["center"]["x"], field["center"]["y"]
-    outpost = {"x_min": cx - OIL_FIELD_HALF_SPAN, "y_min": cy - OIL_FIELD_HALF_SPAN,
-               "x_max_exclusive": cx + OIL_FIELD_HALF_SPAN, "y_max_exclusive": cy + OIL_FIELD_HALF_SPAN}
+    # Nearest point of the scope to the oil-field centre: the scope touches the outpost disc.
+    near_x = min(max(cx, scope["x_min"]), scope["x_max_exclusive"])
+    near_y = min(max(cy, scope["y_min"]), scope["y_max_exclusive"])
+    at_outpost = math.hypot(near_x - cx, near_y - cy) <= OUTPOST_RADIUS
     # Reach hops between base and outpost: the scope's centre lies near the anchor -> oil-field segment.
     mx, my = (scope["x_min"] + scope["x_max_exclusive"]) / 2, (scope["y_min"] + scope["y_max_exclusive"]) / 2
     dx, dy = cx - ax, cy - ay
     t = max(0.0, min(1.0, ((mx - ax) * dx + (my - ay) * dy) / ((dx * dx + dy * dy) or 1)))
     on_corridor = math.hypot(mx - (ax + t * dx), my - (ay + t * dy)) <= ROUTE_HALF_WIDTH
-    if not (on_corridor or _overlaps(scope, outpost) or _overlaps(scope, BOUNDS)):
+    if not (on_corridor or at_outpost or _overlaps(scope, BOUNDS)):
         return "scope_off_route"
     return None
 

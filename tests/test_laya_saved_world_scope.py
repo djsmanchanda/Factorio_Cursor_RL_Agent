@@ -35,7 +35,8 @@ def tight(points):
 
 @pytest.mark.parametrize("points", [[(297.5, 10.5), (301.5, 12.5)],      # at the outpost
                                     [(120.5, 4.5), (140.5, 4.5)],         # a reach hop leaving BOUNDS
-                                    [(200.5, 40.5), (210.5, 44.5)]])      # a mid-route hop, off both areas
+                                    [(200.5, 40.5), (210.5, 44.5)],       # a mid-route hop, off both areas
+                                    [(252.5, 113.5), (254.5, 117.5)]])    # the cell's coal mine, ~113 tiles past the wells
 def test_tight_scope_at_the_outpost_or_leaving_bounds_is_accepted(points):
     assert declared_scope_reason(candidate(points, tight(points)), OIL) is None
 
