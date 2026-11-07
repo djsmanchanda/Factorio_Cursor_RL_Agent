@@ -39,6 +39,8 @@ MAX_SURVEYS = 96  # Bounded reads per planner resolution; exceeding it is a type
 COAL_MAX_SURVEYS = 128
 # The cell intent is a frozen geometry; re-plan after this many game ticks so a stale one cannot linger.
 PLAN_TTL_TICKS = 36000
+# Built cell machines and off-grid substations are looked for this far around the oil field (the outpost).
+OUTPOST_SCAN_RADIUS = 128
 # Nominal electric draw (kW) of the cell's consumers; an estimate, compared with no measured grid.
 NOMINAL_DRAW_KW = {"pumpjack": 90, "oil-refinery": 420, "chemical-plant": 210, "offshore-pump": 0,
                    "electric-mining-drill": 90, "inserter": 13.2, "fast-inserter": 46.7}
@@ -177,6 +179,30 @@ class World:
         from orchestrator.stage_chemical import _read_oil_survey
         return _read_oil_survey(self.client, self.surface, self.force, survey)
 
+    def outpost_power(self, center, radius=OUTPOST_SCAN_RADIUS):
+        """Built cell machines near the oil field, and player substations off the main grid.
+
+        Main grid: the electric network of the powered roboport nearest the base anchor (lowest roboport).
+        """
+        lua = (
+            "local s=game.surfaces['" + self.surface + "'];local f='" + self.force + "';"
+            "local cx,cy=" + str(center[0]) + "," + str(center[1]) + ";local r=" + str(radius) + ";"
+            "local main=nil;local best=nil;for _,p in pairs(s.find_entities_filtered{name='roboport',force=f}) do "
+            "if p.energy>0 and (not best or p.position.x<best.x or (p.position.x==best.x and p.position.y<best.y)) then "
+            "best=p.position;main=p.electric_network_id end end;"
+            "local area={{cx-r,cy-r},{cx+r,cy+r}};local out={main=main,machines={},isolated={}};"
+            "for _,e in pairs(s.find_entities_filtered{name={'oil-refinery','chemical-plant','pumpjack'},force=f,area=area}) do "
+            "out.machines[e.name]=(out.machines[e.name] or 0)+1 end;"
+            "for _,e in pairs(s.find_entities_filtered{name='substation',force=f,area=area}) do "
+            "if e.electric_network_id~=main then out.isolated[#out.isolated+1]={e.position.x,e.position.y} end end;"
+            "rcon.print(helpers.table_to_json(out))")
+        from orchestrator.live_base import _sc
+        import json as _json
+        raw = _json.loads(_sc(self.client, lua))
+        isolated = raw.get("isolated") or []
+        return {"machines": raw.get("machines") or {}, "main_grid": raw.get("main"),
+                "isolated_substations": [tuple(p) for p in (isolated.values() if isinstance(isolated, dict) else isolated)]}
+
     def read_reach_survey(self, survey):
         from orchestrator.stage_services import _answer_live_reach_survey
         return _answer_live_reach_survey(self.client, self.surface, self.force, survey)
@@ -220,6 +246,19 @@ class OilOptions:
         def covered(point) -> bool:  # Euclidean: conservative for the square construction area.
             return any(math.dist(_xy(p["position"]), point) <= p["construction_radius"] for p in ports)
 
+        # A cell already built is not planned again; its off-grid substations get a hookup each
+        # (the deterministic runtime bridges every cell substation, one after another).
+        power = world.outpost_power(center)
+        built = power["machines"]
+        result["facts"].update(cell_built=bool(built.get("oil-refinery") and built.get("chemical-plant")),
+                               outpost_machines=built, isolated_substations=len(power["isolated_substations"]))
+        if power["isolated_substations"]:
+            hookup = self._hookup(world, ports, power["isolated_substations"], oil_need, block)
+            if hookup:
+                result["candidates"].append(hookup)
+        if result["facts"]["cell_built"]:
+            result["blocked"] = {need: dict(counts) for need, counts in result["blocked"].items()}
+            return result
         intent, reason, cell_centre = self._intent(world, facts, center)
         if reason:
             block(oil_need, reason)
@@ -371,6 +410,29 @@ class OilOptions:
                                   "actions": [ghost(name, x, y) for name, (x, y) in bridge.placements]})
         return {"power_bridge": bridge.outcome, "power_bridge_poles": len(bridge.placements),
                 "power_bridged_substations": 1, "substations": len(build["substations"])}
+
+    def _hookup(self, world, ports, isolated, need, block) -> dict | None:
+        """Bridge the off-grid substation nearest the grid to the main grid (`plan_power_bridge`)."""
+        from orchestrator.reach_survey import MissingReachSurvey
+        from orchestrator.stage_services import PowerBridgeFacts, StuckError, plan_power_bridge
+        target = min(isolated, key=lambda p: min(math.dist(_xy(q["position"]), p) for q in ports))
+        try:
+            bridge, _surveys = resolve(plan_power_bridge, PowerBridgeFacts(target, frozenset()),
+                                       world.read_reach_survey, MissingReachSurvey)
+        except (StuckError, SurveyBudgetExceeded):
+            block(need, "hookup_plan_failed")
+            return None
+        if bridge.outcome == "unpowered":
+            block(need, "hookup_unpowered")
+            return None
+        if not bridge.placements:
+            return None
+        phases = [{"name": "power_hookup", "actions": [ghost(name, x, y) for name, (x, y) in bridge.placements]}]
+        port = min(ports, key=lambda p: math.dist(_xy(p["position"]), target))
+        oil_facts = {"kind": "power-hookup", "substation": list(target), "isolated_substations": len(isolated),
+                     "bill": phases_bill(phases), "power_bridge": bridge.outcome}
+        return self._candidate("power-hookup", need, f"Connect the off-grid substation at {target} to the main grid "
+                               f"({len(bridge.placements)} poles; {len(isolated)} off-grid)", phases, port, ports, oil_facts)
 
     def _coal_feed(self, world, ports, coal, center, need, block) -> dict | None:
         phases = copy.deepcopy(coal["phases"])

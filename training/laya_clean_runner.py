@@ -92,7 +92,7 @@ MAX_CONSECUTIVE_FAILURES = 3
 PRIMARY_ENTITY = {"expand": "roboport", "mine": "electric-mining-drill", "smelt": "electric-furnace",
                   "starter": "electric-mining-drill", "line": "electric-furnace",
                   "assemble": "assembling-machine-1", "reach": "roboport", "oil": "chemical-plant",
-                  "coal-feed": "electric-mining-drill"}
+                  "coal-feed": "electric-mining-drill", "power-hookup": "big-electric-pole"}
 # Recipes the clean runner needs exported in addition to the shared helper's list.
 RECIPE_LIST_END = '"chemical-plant","oil-refinery","pumpjack"}'
 # fast-inserter: line output taps; pipe-to-ground, offshore-pump, substation: the oil cell's bill (laya_oil_options).

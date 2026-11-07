@@ -40,8 +40,13 @@ def world_facts(ports, oil_field=OIL_FIELD):
 class FakeWorld:
     """Recorded read-only answers; ``reads`` lists every read in order."""
 
-    def __init__(self, coal=(250.0, 40.0), coal_reason=None, coal_patch=COAL_PATCH):
+    def __init__(self, coal=(250.0, 40.0), coal_reason=None, coal_patch=COAL_PATCH, machines=None, isolated=()):
         self.coal, self.coal_reason, self.patch, self.reads = coal, coal_reason, coal_patch, []
+        self.machines, self.isolated = machines or {}, list(isolated)
+
+    def outpost_power(self, center):
+        self.reads.append("outpost_power")
+        return {"machines": self.machines, "main_grid": 1, "isolated_substations": self.isolated}
 
     def oil_well(self, center):
         self.reads.append("oil_well")
@@ -395,3 +400,21 @@ def test_the_provider_reads_the_adapters_own_world(planners):
     options.offer = lambda world, facts, board: seen.append((world.client, world.surface, world.force))
     options(Adapter(), {}, BOARD)
     assert seen == [("rcon-of-this-copy", "nauvis", "player")]
+
+
+def test_a_built_cell_is_not_replanned_and_its_off_grid_substation_gets_a_hookup(planners):
+    """Live 2026-11-07: the cell built, but its refinery substations stayed on their own network."""
+    world = FakeWorld(machines={"oil-refinery": 4, "chemical-plant": 2, "pumpjack": 3}, isolated=[(285.0, -20.0)])
+    offer = OilOptions().offer(world, world_facts([port(0, 0), port(290, 10)]), BOARD)
+    assert offer["facts"]["cell_built"] and offer["facts"]["isolated_substations"] == 1
+    assert "oil_well" not in world.reads and not planners["oil"]  # nothing replanned over the built cell
+    (hookup,) = offer["candidates"]
+    assert hookup["family"] == "power-hookup" and hookup["oil_facts"]["substation"] == [285.0, -20.0]
+    assert planners["bridge"][-1].near_position == (285.0, -20.0)
+    assert declared_scope_reason(hookup, world_facts([port(0, 0), port(290, 10)])) is None
+
+
+def test_a_powered_built_cell_offers_nothing_more(planners):
+    world = FakeWorld(machines={"oil-refinery": 4, "chemical-plant": 2})
+    offer = OilOptions().offer(world, world_facts([port(0, 0), port(290, 10)]), BOARD)
+    assert offer["candidates"] == [] and offer["blocked"] == {} and offer["facts"]["cell_built"]
