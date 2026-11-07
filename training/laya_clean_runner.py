@@ -797,6 +797,11 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
         if need and need.get("goal_required_per_s", need.get("required", 0)) > 0 and plate not in starters:
             for name, count in starter_bill(plate).items():
                 goal_reserve[name] = goal_reserve.get(name, 0) + count
+    # Roboports the oil route still needs while none can be made (live 2026-11-08 smoke s1: the kit's
+    # roboports went to coverage and the outpost stalled item_shortfall:roboport). A fact, not a rule.
+    outpost_ports = int(((oil_offer or {}).get("facts") or {}).get("roboports_to_outpost") or 0)
+    if outpost_ports and not makeable("roboport", facts.get("recipes") or {}):
+        goal_reserve["roboport"] = goal_reserve.get("roboport", 0) + outpost_ports
     return {"needs": needs, "options": options, "proposed": len(proposed) + len(external_results), "blocked": blocked,
             "blocked_alternatives": blocked_alternatives,
             "rejected": dict(rejected), "shortfalls": dict(shortfalls), "unit_shortfalls": unit_shortfalls,

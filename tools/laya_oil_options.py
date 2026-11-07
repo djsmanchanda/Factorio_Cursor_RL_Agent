@@ -41,6 +41,8 @@ COAL_MAX_SURVEYS = 128
 PLAN_TTL_TICKS = 36000
 # A plan blocked by missing stock is retried sooner: the mall may make the items within minutes.
 SHORTAGE_TTL_TICKS = 3600
+# Spacing of successive reach hops (live 2026-11-07/08: 40-42 tiles), for the roboports-to-outpost fact.
+REACH_HOP_TILES = 42
 # Built cell machines and off-grid substations are looked for this far around the oil field (the outpost).
 OUTPOST_SCAN_RADIUS = 128
 # Nominal electric draw (kW) of the cell's consumers; an estimate, compared with no measured grid.
@@ -246,6 +248,10 @@ class OilOptions:
             return result
         source_port = min(ports, key=lambda p: math.dist(_xy(p["position"]), center))
         result["facts"]["distance_to_oil"] = round(math.dist(_xy(source_port["position"]), center), 1)
+        # Roboports still needed to reach the field (one per hop; hops observed ~40-42 tiles apart). Before
+        # plastic they cannot be made, so this is what the kit must keep for the oil route.
+        reach_gap = max(0.0, result["facts"]["distance_to_oil"] - source_port["construction_radius"])
+        result["facts"]["roboports_to_outpost"] = math.ceil(reach_gap / REACH_HOP_TILES)
 
         def covered(point) -> bool:  # Euclidean: conservative for the square construction area.
             return any(math.dist(_xy(p["position"]), point) <= p["construction_radius"] for p in ports)

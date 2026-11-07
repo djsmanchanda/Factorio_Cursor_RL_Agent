@@ -431,6 +431,17 @@ def test_missing_stock_for_the_cell_is_a_shortfall_that_drives_the_mall(planners
     assert menu["unit_shortfalls"]["transport-belt"] >= 91 and "transport-belt" in menu["shortfalls"]
 
 
+def test_roboports_still_needed_for_the_outpost_join_the_goal_reserve(planners):
+    """Live 2026-11-08 smoke s1: coverage builds took the kit's roboports and the outpost stalled."""
+    offer = OilOptions().offer(FakeWorld(), world_facts([port(0, 0)]), BOARD)
+    assert offer["facts"]["roboports_to_outpost"] == 6  # (297.2 - 55) / 42, rounded up
+    from tests.test_laya_factory_status import FLUID_RECIPES
+    fluid = {**runner_facts(), "fluid_recipes": FLUID_RECIPES}
+    menu = compile_menu(fluid, compile_status(fluid, {"plastic-bar": 0.5}), validator(), seed=4,
+                        oil_offer={"candidates": [], "blocked": {}, "facts": offer["facts"]})
+    assert menu["goal_reserve"]["roboport"] == 6
+
+
 def test_the_provider_reads_the_adapters_own_world(planners):
     seen = []
 
