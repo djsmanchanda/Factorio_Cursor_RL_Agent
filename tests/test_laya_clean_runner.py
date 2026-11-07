@@ -586,3 +586,21 @@ def test_fluid_facts_leave_solid_menus_alone_and_plastic_chain_blocked_without_a
     assert state["observation_digest"]["oil_field"] == {
         "found": True, "wells": 3, "search_radius": 512, "anchor": {"x": 0, "y": 0}, "distance": 62.0,
         "yield_percent": 350.0, "max_crude_per_s": 35.0, "center": {"x": 62.0, "y": 0.3}, "water_distance": None}
+
+
+@pytest.mark.parametrize("chests, kept", [(1, True), (2, False)])
+def test_the_last_kit_chest_is_kept_for_the_plastic_cell(chests, kept):
+    """User contract 2026-10-17; live 2026-11-08: mall slots took every kit chest and the oil cell stalled."""
+    f = facts()
+    f["networks"]["1"]["items"]["passive-provider-chest"] = chests
+
+    def validate(candidates):
+        return {c["option_id"]: {"reason": None, "bill": {
+            {"expand": "roboport", "mine": "electric-mining-drill", "smelt": "electric-furnace",
+             "assemble": "assembling-machine-1"}[c["family"]]: 1, "passive-provider-chest": 1}} for c in candidates}
+
+    menu = compile_menu(f, compile_status(f, phase("C1")["targets"]), validate, seed=1)
+    reserved = any("reserved:plastic_cell:passive-provider-chest" in r for r in menu["blocked_alternatives"].values()) \
+        or any("reserved:plastic_cell:passive-provider-chest" in r for r in menu["blocked"].values())
+    assert reserved is kept
+    assert all(o["family"] == "wait" for o in menu["options"]) is kept

@@ -658,6 +658,11 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
                 summary[key] = copy.deepcopy(candidate[key])
         external_results.append(summary)
 
+    # Contract (user, 2026-10-17): until plastic exists, logistic chests come only from the bootstrap kit;
+    # keep what the plastic cell needs (its output passive-provider chest) for the oil family. Live
+    # 2026-11-08 smokes: mall slots took all 16 kit chests and the cell stalled item_shortfall on that chest.
+    plastic_reserve = ({PLASTIC_CELL_CHEST: PLASTIC_CELL_CHESTS}
+                       if not makeable(PLASTIC_CELL_CHEST, facts.get("recipes") or {}) else {})
     def check(groups):
         expanded = {}
         for need in sorted(groups):
@@ -689,6 +694,11 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
                 primary = PRIMARY_ENTITY.get(candidate["family"])
                 if not reason and (not result.get("bill") or (primary and primary not in result["bill"])):
                     reason = "no_op"  # Its main entity already exists; only power pieces would be new.
+                if not reason and candidate["family"] not in OIL_FAMILIES:
+                    for item, keep in plastic_reserve.items():
+                        if result["bill"].get(item) and _available(facts, candidate, item) - int(result["bill"][item]) < keep:
+                            reason = f"reserved:plastic_cell:{item}"
+                            break
                 if reason:
                     reasons[need][reason] += 1
                     rejected[reason.split(":", 1)[0]] += 1
@@ -1154,6 +1164,9 @@ def _plan_decision(facts: Mapping, board: Mapping, phase: Mapping, policy: "Poli
 
 
 OIL_CHAIN = ("crude-oil", "petroleum-gas", "plastic-bar")
+OIL_FAMILIES = frozenset({"reach", "coal-feed", "oil", "power-hookup"})
+# The opening oil cell's plastic output chest (orchestrator/stage_chemical.py), reserved from the kit.
+PLASTIC_CELL_CHEST, PLASTIC_CELL_CHESTS = "passive-provider-chest", 1
 
 
 def _offer_oil(provider: Callable[[Any, Mapping, Mapping], Mapping | None] | None, adapter: Any, facts: Mapping,
