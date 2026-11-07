@@ -42,6 +42,12 @@ from training.laya_run_log import RunLog
 from training.laya_saved_world import SavedWorldAdapter, file_hash, owned_root
 from training.laya_checkpoint import load_bundle, export_bundle, restore_context
 
+
+def _oil_options():
+    """`reach`/`oil` option families (tools/laya_oil_options.py); inert until oil is an unmet need."""
+    from tools.laya_oil_options import OilOptions
+    return OilOptions()
+
 SOURCE_SAVE = ROOT / "saves/mod_playground.zip"
 
 
@@ -184,7 +190,8 @@ def main(argv=None) -> int:
                               decisions=args.decisions or None, measure_ticks=args.measure_ticks, seed=args.seed,
                               run_id=run_id, emit=log, should_stop=stop.is_set, status_path=paths["status"],
                               settings=settings, initial_reached=resume['phases_reached'] if resume else (),
-                              candidate_provider=candidate_provider)
+                              candidate_provider=candidate_provider,
+                              oil_options=_oil_options() if settings.oil_options else None)
             if args.export_checkpoint:
                 export_bundle(adapter,args.export_checkpoint,summary)
             if stop.is_set():

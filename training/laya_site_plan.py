@@ -416,13 +416,13 @@ def _reservation(plan: Mapping, candidate: Mapping, detail: list | None) -> str 
             starter_ore = family in ("starter", "line") and SMELTED.get(subject) == product  # Its own patch.
             # Roboports may stand on ore: coverage must cross a patch to reach the ones beyond it.
             # Oil parcels are kept for pumpjacks and their pipes (the oil family); coverage may cross.
-            if kind == "oil" and family not in ("oil", "expand"):
+            if kind == "oil" and family not in ("oil", "expand", "reach"):
                 return reject(f"reserved:{zone['purpose']}", action)
             if kind == "ore" and not ((family == "mine" and (product == subject or own_ore)) or starter_ore
-                                      or family == "expand"):
+                                      or family in ("expand", "reach")):
                 return reject(f"reserved:{zone['purpose']}", action)
             # Roboports may stand in a smelting strip: its lines' provider taps need logistic coverage.
-            if kind == "smelt" and not ((family in ("smelt", "starter", "line") and product == subject) or family == "expand"
+            if kind == "smelt" and not ((family in ("smelt", "starter", "line") and product == subject) or family in ("expand", "reach")
                                         or (family == "mine" and SMELTED.get(product) == subject)):
                 return reject(f"reserved:{zone['purpose']}", action)
             if kind == "mall":

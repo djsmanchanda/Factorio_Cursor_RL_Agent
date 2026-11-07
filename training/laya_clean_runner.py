@@ -82,6 +82,7 @@ class Settings:
     mall_gate_scale: float = 1.0
     mall_buildable_multiplier: int = 5
     context_view: str = 'full'
+    oil_options: bool = True  # `reach` and `oil` families (tools/laya_oil_options.py, injected); inert until oil is a need.
     reservation_mode: str = 'strict'
 WAIT_TICKS = (300, 1800)
 MAX_MENU = 20  # laya_state schema: options maxItems
@@ -90,10 +91,11 @@ MAX_CONSECUTIVE_FAILURES = 3
 # The entity each family exists to add; live checks credit entities already placed.
 PRIMARY_ENTITY = {"expand": "roboport", "mine": "electric-mining-drill", "smelt": "electric-furnace",
                   "starter": "electric-mining-drill", "line": "electric-furnace",
-                  "assemble": "assembling-machine-1"}
+                  "assemble": "assembling-machine-1", "reach": "roboport", "oil": "chemical-plant"}
 # Recipes the clean runner needs exported in addition to the shared helper's list.
 RECIPE_LIST_END = '"chemical-plant","oil-refinery","pumpjack"}'
-EXTRA_RECIPES = ("big-electric-pole", "iron-stick", "fast-inserter")  # fast-inserter: line output taps
+# fast-inserter: line output taps; pipe-to-ground, offshore-pump, substation: the oil cell's bill (laya_oil_options).
+EXTRA_RECIPES = ("big-electric-pole", "iron-stick", "fast-inserter", "pipe-to-ground", "offshore-pump", "substation")
 # Idle furnaces return no current recipe; report the previous one so built-but-starved
 # furnaces stay attributed to their product.
 RECIPE_LINE = 'if e.type~="mining-drill" then local recipe=e.get_recipe(); m.recipe=recipe and recipe.name end'
@@ -314,6 +316,12 @@ def _sample(groups: Mapping[str, list], limit: int, rng: random.Random) -> list:
     return picked
 
 
+def _one_phase(candidate: Mapping) -> dict:
+    """The candidate with every phase's actions in one phase (the land check reads the first phase only)."""
+    plan = candidate["plan"]
+    return {**candidate, "plan": {**plan, "phases": [{"name": "all", "actions": list(actions(plan))}]}}
+
+
 def _build_only(candidate: Mapping) -> dict:
     """The candidate's plan without the generator's power relay (substations/poles)."""
     phase = candidate["plan"]["phases"][0]
@@ -425,7 +433,8 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
                  additional_candidates: Sequence[Mapping] = (), observe_unlinked: bool = False,
                  additional_observations: Mapping | None = None,
                  external_check: Callable[[Mapping, Mapping], tuple[str | None, Mapping | None]] | None = None,
-                 external_shortfalls: Mapping[str, int] | None = None) -> dict:
+                 external_shortfalls: Mapping[str, int] | None = None,
+                 oil_offer: Mapping | None = None) -> dict:
     """Group legal options by the unmet need they serve.
 
     Each sampled build is offered with its power alternatives (training/laya_power.py).
@@ -439,6 +448,9 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
 
     ``external_shortfalls`` (item -> units lacking) is a build the provider could not offer because
     the network cannot fund it; it counts as one more blocked candidate, so its items get stock needs.
+
+    ``oil_offer`` (tools/laya_oil_options.py) adds `reach`/`oil` candidates, which carry their own
+    power and declared scope, and typed blocked reasons for their needs. ``None`` leaves the menu unchanged.
     """
     rng = random.Random(seed)
     if additional_observations is not None and not isinstance(additional_observations, Mapping):
@@ -510,6 +522,19 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
         unit_shortfalls[item] = max(unit_shortfalls.get(item, 0), lacking)
 
     reasons: dict[str, Counter] = defaultdict(Counter)
+    oil_needs: set[str] = set()
+    for need, counts in ((oil_offer or {}).get("blocked") or {}).items():
+        oil_needs.add(need)
+        reasons[need].update(counts)
+        rejected.update({reason.split(":", 1)[0]: count for reason, count in counts.items()})
+    for candidate in (oil_offer or {}).get("candidates") or ():
+        oil_needs.add(candidate["need_id"])
+        if placed and not clear_of(list(actions(candidate["plan"])), list(placed)):
+            # Ghosts Laya already submitted are not yet in the facts; never resubmit over them.
+            reasons[candidate["need_id"]]["already_submitted"] += 1
+            rejected["already_submitted"] += 1
+            continue
+        by_need[candidate["need_id"]].append(candidate)
     external_results = []
     external_needs = set()
     admitted_external: list[tuple[str, dict]] = []
@@ -630,13 +655,15 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
         for need in sorted(groups):
             builds = list(groups[need])
             rng.shuffle(builds)
-            variants = [v for c in builds[:per_need_checked] for v in power_variants(c, power_facts)]
+            variants = [v for c in builds[:per_need_checked]
+                        for v in ([c] if c.get("own_power") else power_variants(c, power_facts))]
             if builds and not variants:
                 reasons[need]["no_power_layout"] += 1
             expanded[need] = []
             for variant in variants:
                 # Land reservation is a hard rule: reject builds on another purpose's land.
-                reason = reservation_reason(land_plan, variant) if site_plan else None
+                land_view = _one_phase(variant) if variant.get("own_power") else variant
+                reason = reservation_reason(land_plan, land_view) if site_plan else None
                 if reason:
                     reasons[need][reason] += 1
                     rejected[reason.split(":", 1)[0]] += 1
@@ -735,10 +762,11 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
         need: dict(sorted(reasons[need].items(), key=lambda kv: (-kv[1], kv[0]))[:4])
         for need in sorted(legal) if legal[need] and reasons.get(need)}
     # Needs with no legal option, and why: observation, not a remedy.
-    blocked = {need: dict(reasons[need]) for need in sorted(set(by_need) | set(stock_groups) | set(pre_rejected) | external_needs)
+    blocked = {need: dict(reasons[need]) for need in sorted(set(by_need) | set(stock_groups) | set(pre_rejected)
+                                                            | external_needs | oil_needs)
                if need not in legal}
     for item in sorted(unmet):
-        if f"item:{item}" not in by_need and f"item:{item}" not in legal and f"item:{item}" not in external_needs:
+        if all(f"item:{item}" not in group for group in (by_need, legal, external_needs, oil_needs)):
             blocked[f"item:{item}"] = {"no_candidate": 1}
     # Kit items the phase's still-unbuilt starters will need, so side builds can see what they would take.
     goal_reserve: dict[str, int] = {}
@@ -754,7 +782,15 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
             "land_rejections": {k: v for k, v in land_examples.items() if k in blocked},
             "line_site_diagnostics": line_diagnostics,
             "additional_candidate_results": external_results,
-            "omitted_needs": omitted_needs}
+            "omitted_needs": omitted_needs,
+            **({"oil_options": _oil_summary(oil_offer)} if oil_offer is not None else {})}
+
+
+def _oil_summary(offer: Mapping) -> dict:
+    """Journal/state view of the reach and oil families: observed facts, offered scopes and hops, blocks."""
+    return {"facts": offer.get("facts") or {}, "blocked": offer.get("blocked") or {},
+            "candidates": [{"option_id": c["option_id"], "family": c["family"], "need_id": c["need_id"],
+                            **c.get("oil_facts", {})} for c in offer.get("candidates") or ()]}
 
 
 class Policy(Protocol):
@@ -841,6 +877,8 @@ def build_state(facts: Mapping, menu: Mapping, board: Mapping, phase: Mapping, r
     if supply:  # Per-item units short and why needs with options still have blocked candidates.
         state["observation_digest"]["supply_facts"] = supply
     if menu.get('line_site_diagnostics'):state['observation_digest']['line_site_diagnostics']=menu['line_site_diagnostics']
+    if menu.get("oil_options"):
+        state["observation_digest"]["oil_options"] = menu["oil_options"]
     if settings.dependency_context:
         from training.laya_experiment_context import dependency_context
         state['observation_digest']['dependency_context'] = dependency_context(facts, menu['options'], board)
@@ -871,6 +909,7 @@ def _option_record(option: Mapping) -> dict:
             "bill": option.get("bill"), "draws": option.get("draws"), "wait_ticks": option.get("wait_ticks"),
             "plan_hash": sha256_hash(plan) if plan else None, "coverage_reach": option.get("coverage_reach"),
             "slot": option.get("slot"), "next_slot": option.get("next_slot"),
+            **({"oil_facts": option["oil_facts"]} if option.get("oil_facts") else {}),
             "entities": dict(Counter(a["entity"] for a in plan["phases"][0]["actions"])) if plan else None,
             **({"optimizer_facts": option["optimizer_facts"]} if option.get("optimizer_facts") else {})}
 
@@ -1102,11 +1141,31 @@ def _plan_decision(facts: Mapping, board: Mapping, phase: Mapping, policy: "Poli
     return chosen["site_plan"]
 
 
+OIL_CHAIN = ("crude-oil", "petroleum-gas", "plastic-bar")
+
+
+def _offer_oil(provider: Callable[[Any, Mapping, Mapping], Mapping | None] | None, adapter: Any, facts: Mapping,
+               board: Mapping | None, emit: Callable[[str], None]) -> dict | None:
+    """Reach/oil candidates for this decision; a failed read blocks the families instead of the decision."""
+    if provider is None or board is None:
+        return None
+    try:
+        return provider(adapter, facts, board)
+    except Exception as error:  # Evidence, not a crash: the menu shows the block.
+        emit(f"  OIL OPTIONS FAILED: {type(error).__name__}: {str(error)[:160]}")
+        unmet = [i for i in OIL_CHAIN if any(n["item"] == i and n["condition"] != "satisfied" for n in board["needs"])]
+        if not unmet:
+            return None
+        return {"candidates": [], "blocked": {f"item:{unmet[0]}": {"oil_options_error": 1}},
+                "facts": {"error": f"{type(error).__name__}: {str(error)[:200]}"}}
+
+
 def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, measure_ticks: int,
         seed: int, run_id: str, emit: Callable[[str], None] = lambda _: None,
         should_stop: Callable[[], bool] = lambda: False, status_path: Path | None = None,
         settings: Settings = Settings(), initial_reached: Sequence[str] = (),
-        candidate_provider: Callable[[Any, Mapping, Mapping], Sequence[Mapping]] | None = None) -> dict:
+        candidate_provider: Callable[[Any, Mapping, Mapping], Sequence[Mapping]] | None = None,
+        oil_options: Callable[[Any, Mapping, Mapping], Mapping | None] | None = None) -> dict:
     """Observe -> board -> menu -> choose -> execute -> measure, journaling each step.
 
     ``decisions=None`` runs until the mission completes, the safe-stop rule
@@ -1221,6 +1280,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
             demand_observations = describe(facts, board, external) if describe is not None else {}
             last = getattr(candidate_provider, "last", None) or {}
             unfunded = (last.get("detail") or {}).get("short") if last.get("reason") == "unfunded" else None
+            oil_offer = _offer_oil(oil_options, adapter, facts, board, emit)
             menu = compile_menu(facts, board, validate_candidates, seed + index,
                                 site_plan=site_plan, starters=_starters_submitted(adapter), retargets=retargets,
                                 placed=_submitted_entities(adapter),
@@ -1229,7 +1289,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                                 additional_candidates=external,
                                 observe_unlinked=bool(getattr(candidate_provider, "observe_unlinked", False)),
                                 additional_observations=demand_observations, external_check=external_check,
-                                external_shortfalls=unfunded)
+                                external_shortfalls=unfunded, oil_offer=oil_offer)
             # Items the checks found short become small demand targets on the next board.
             stock_demand = {item: settings.stock_rate for item in menu["shortfalls"]}
             pending_units = menu.get("pending_units") or {}
@@ -1246,6 +1306,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                           additional_candidate_results=menu["additional_candidate_results"],
                           no_legal_build=not any(o["family"] != "wait" for o in menu["options"]),
                           omitted_needs=menu.get("omitted_needs"),
+                          **({"oil_options": menu["oil_options"]} if menu.get("oil_options") else {}),
                           summary=chosen["summary"])
             _append(journal, record)  # Durable before any mutation.
             if blocks is not None:

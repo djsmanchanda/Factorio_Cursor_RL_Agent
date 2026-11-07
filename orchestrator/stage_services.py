@@ -1967,6 +1967,22 @@ def plan_reach_step(
     return replace(step, log=tuple(log))
 
 
+def plan_power_bridge(
+    facts: PowerBridgeFacts, surveys: Mapping[ReachSurvey, object],
+) -> PowerBridgePlan:
+    """Plan one power hookup (`extend_power`'s geometry) from recorded surveys, no I/O.
+
+    Raises `MissingReachSurvey` naming the first read `surveys` lacks.
+    """
+    def lookup(survey: ReachSurvey) -> object:
+        try:
+            return surveys[survey]
+        except KeyError:
+            raise MissingReachSurvey(survey) from None
+
+    return drive_reach_planner(_power_bridge_planner(facts, lambda _m: None), lookup)
+
+
 def extend_roboport_coverage(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     target_position: Point, emit: Callable[[str], None], *,
