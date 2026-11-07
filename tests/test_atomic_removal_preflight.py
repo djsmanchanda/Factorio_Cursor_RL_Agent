@@ -354,6 +354,36 @@ def test_factorio_2_east_rotates_rectangular_atomic_footprints(tmp_path: Path) -
     assert result.returncode == 0, result.stderr or result.stdout
 
 
+@pytest.mark.parametrize(("pump_x", "pump_y", "direction"), [(0, 1, "south"), (1, 0, "east"), (-1, 0, "west"), (0, 1, "north")])
+def test_asymmetric_footprints_rotate_per_side(tmp_path: Path, pump_x, pump_y, direction) -> None:
+    """Live 2026-11-07: a south-facing offshore pump was checked with its north box and blocked its own pipe.
+
+    Each pump touches the belt tile only in the north orientation (the control case).
+    """
+    scenario = f"""
+      prototype("offshore-pump")
+      prototypes.entity["offshore-pump"].collision_box = {{
+        left_top = {{ x = -0.6, y = -1.05 }}, right_bottom = {{ x = 0.6, y = 0.3 }},
+      }}
+      dofile("{EXECUTOR.as_posix()}")
+      payload = {{
+        authorization = {{ approved_actions = {{ "place_core_infrastructure" }} }},
+        build_plan = {{ surface = "planner-sandbox", force = "planner", atomic = true, phases = {{
+          {{ name = "water", actions = {{
+            {{ action_type = "place_entity", entity = "offshore-pump", position = {{ x = {pump_x}, y = {pump_y} }}, direction = "{direction}" }},
+            {{ action_type = "place_entity", entity = "transport-belt", position = {{ x = 0, y = 0 }}, direction = "north" }},
+          }} }},
+        }} }},
+      }}
+      registered["build_layout_plan"]({{ parameter = "ignored" }})
+      assert(captured_report.ok == ({str(direction != "north").lower()}), "ok=" .. tostring(captured_report.ok))
+    """
+    script = tmp_path / "asymmetric_footprint.lua"
+    script.write_text(_HARNESS + scenario, encoding="utf-8")
+    result = subprocess.run(["lua", str(script)], text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
 @pytest.mark.parametrize(
     ("remove_name", "remove_x"),
     [("stone-furnace", 0), ("transport-belt", 0.25)],
