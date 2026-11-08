@@ -208,6 +208,8 @@ def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_
         return []
     ports = [p for p in facts["ports"] if p["energy"] > 0]
     chests = sum(int((n.get("items") or {}).get("passive-provider-chest", 0)) for n in (facts.get("networks") or {}).values())
+    from training.laya_factory_status import available_items, missing_input
+    chests_scarce = missing_input("passive-provider-chest", facts.get("recipes") or {}, available_items(facts)) is not None
     candidates = []
     for plate, ore in STARTER_ORE.items():
         if plate not in plates:
@@ -273,10 +275,16 @@ def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_
                     # fewer taps reduce the bill without changing furnace geometry.
                     # Fast taps (one or two chests) first; the cheapest regular row is the fallback.
                     valid_site = False
-                    tap_options = [("fast-inserter", n) for n in sorted({1, full_taps(rows, "fast-inserter")})]
-                    regular = math.ceil(full_taps(rows) / 2)
-                    if chests >= regular + CHEST_SPARE:  # Chests are finite before plastic; keep some for later lines.
-                        tap_options.append(("inserter", regular))
+                    # One topology, not a choice for Laya (user, 2026-11-08: decisions are what to make, not how).
+                    # While chests cannot be made, one fast tap: one kit chest, 2.31/s (live kit-B-s1 piled
+                    # 11k copper plates, so line throughput was not the limit). Once they can, full rate.
+                    if chests_scarce:
+                        tap_options = [("fast-inserter", 1)]
+                    else:
+                        tap_options = [("fast-inserter", full_taps(rows, "fast-inserter"))]
+                        regular = math.ceil(full_taps(rows) / 2)
+                        if chests >= regular + CHEST_SPARE:
+                            tap_options.append(("inserter", regular))
                     for inserter, taps in tap_options:
                         actions = mine + route + furnaces + output_taps(rows, lx, ly, taps=taps, inserter=inserter)
                         if not _reachable(actions, ports, port["network"]):

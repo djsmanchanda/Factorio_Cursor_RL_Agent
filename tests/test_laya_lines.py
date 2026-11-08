@@ -73,13 +73,18 @@ def test_line_candidates_are_valid_powered_and_sit_on_planned_land():
     assert rejected['iron-plate']['outside_construction']>0
     assert lines and {c["furnaces"] for c in lines} <= {6, 18}
     short = [c for c in lines if c["furnaces"] == 6]
-    # Fast taps empty a 6-furnace line into one or two chests; with chests to spare, a 3-chest regular row too.
-    assert {(c["tap_inserter"], c["output_taps"]) for c in short} == {("fast-inserter", 1), ("fast-inserter", 2)}
+    # While chests cannot be made (user, 2026-11-08), one fast tap: one kit chest, whatever the kit holds.
+    assert {(c["tap_inserter"], c["output_taps"]) for c in short} == {("fast-inserter", 1)}
     stocked = {**facts, "networks": {"1": {"items": {"passive-provider-chest": 7}}}}
-    short = [c for c in line_candidates(stocked, plan, {"iron-plate"}) if c["furnaces"] == 6]
-    assert {(c["tap_inserter"], c["output_taps"]) for c in short} == {("fast-inserter", 1), ("fast-inserter", 2),
-                                                                     ("inserter", 3)}
-    assert {c["estimated_output_per_s"] for c in short} == {2.31, 3.75, 2.49}
+    assert {(c["tap_inserter"], c["output_taps"]) for c in line_candidates(stocked, plan, {"iron-plate"})
+            if c["furnaces"] == 6} == {("fast-inserter", 1)}
+    # Once chests are makeable (plastic on hand), full-rate taps; with chests to spare, a regular row too.
+    makeable = {**stocked, "recipes": {"passive-provider-chest": {"ingredients": [{"name": "plastic-bar", "amount": 1}],
+                                                                  "product_amount": 1, "energy_ticks": 30}},
+                "networks": {"1": {"items": {"passive-provider-chest": 7, "plastic-bar": 5}}}}
+    short = [c for c in line_candidates(makeable, plan, {"iron-plate"}) if c["furnaces"] == 6]
+    assert {(c["tap_inserter"], c["output_taps"]) for c in short} == {("fast-inserter", 2), ("inserter", 3)}
+    assert {c["estimated_output_per_s"] for c in short} == {3.75, 2.49}
     for c in short:
         chests = sum(a["entity"] == "passive-provider-chest" for a in c["plan"]["phases"][0]["actions"])
         assert chests == c["output_taps"]
