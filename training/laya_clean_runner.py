@@ -1249,6 +1249,12 @@ def parallel_picks(policy: "Policy", facts: Mapping, menu: Mapping, first: Mappi
     """
     picks = [first]
     extra = []
+    # Extras spend only what can be replaced: an item no recipe can make now (before plastic: roboports, chests)
+    # is the kit's and stays a deliberate single decision; untagged coverage serves no need (smoke-fixes-20261108:
+    # 25 coverage hops by C1, then copper sites out of reach with no roboports left).
+    recipes, have = facts.get("recipes") or {}, available_items(facts)
+    irreplaceable = {item for o in menu["options"] for item in (o.get("bill") or {})
+                     if item in recipes and missing_input(item, recipes, have)}
     while len(picks) < limit:
         taken_aspects = {ASPECTS.get(p["family"], p["family"]) for p in picks}
         taken_needs = {p.get("need_id") for p in picks}
@@ -1262,6 +1268,8 @@ def parallel_picks(policy: "Policy", facts: Mapping, menu: Mapping, first: Mappi
             if option["family"] == "wait":
                 return True
             if ASPECTS.get(option["family"], option["family"]) in taken_aspects or option.get("need_id") in taken_needs:
+                return False
+            if option.get("need_id") == "coverage" or irreplaceable & set(option.get("bill") or {}):
                 return False
             if any(_available(facts, option, item) - spent[item] < count for item, count in (option.get("bill") or {}).items()):
                 return False

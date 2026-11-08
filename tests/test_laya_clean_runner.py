@@ -689,3 +689,21 @@ def test_parallel_picks_take_other_aspects_that_fit_footprint_and_stock():
             return {"option_id": o["option_id"], "need_id": o["need_id"], "probability": 1.0}
     extra = parallel_picks(First(), facts, menu, first, 4, lambda sub: {})
     assert [o["option_id"] for _, o, _, _ in extra] == ["e"]  # b same aspect, c overlaps, d unaffordable
+
+
+def test_parallel_picks_never_spend_irreplaceable_kit_items_or_take_untagged_coverage():
+    from training.laya_clean_runner import parallel_picks
+    first = {"option_id": "a", "family": "assemble", "need_id": "item:gear", "bill": {}, "summary": "a"}
+    port_hop = {"option_id": "b", "family": "expand", "need_id": "item:copper-ore", "bill": {"roboport": 1}, "summary": "b"}
+    loose = {"option_id": "c", "family": "starter", "need_id": "coverage", "bill": {}, "summary": "c"}
+    menu = {"options": [first, port_hop, loose, {"option_id": "wait.300", "family": "wait", "need_id": "wait"}],
+            "needs": [{"need_id": n, "options": [i]} for n, i in (("item:gear", "a"), ("item:copper-ore", "b"),
+                                                                   ("coverage", "c"), ("wait", "wait.300"))]}
+    facts = {"recipes": {"roboport": {"ingredients": [{"name": "advanced-circuit", "amount": 45}]}},
+             "networks": {"1": {"items": {"roboport": 9}}}}
+
+    class Any:
+        def choose(self, state, menu):
+            o = next(o for o in menu["options"] if o["family"] != "wait")
+            return {"option_id": o["option_id"], "need_id": o["need_id"], "probability": 1.0}
+    assert parallel_picks(Any(), facts, menu, first, 4, lambda sub: {}) == []
