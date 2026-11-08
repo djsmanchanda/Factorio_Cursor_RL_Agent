@@ -16,7 +16,7 @@ status board, guided policy, journals and console, but expose different choices.
 
 | Path | Current choices | Remaining limits |
 | --- | --- | --- |
-| `--actions geometry` (default), `training/laya_clean_runner.py` | Land plan, funded starter/mine/smelting/assembly alternatives, mall retargets, coverage and waits. | Bounded site/scale menus; general fluid, research, upgrade and repair choice coverage remains incomplete. Component fixtures are separate evidence. |
+| `--actions geometry` (default), `training/laya_clean_runner.py` | Land plan, funded starter/mine/smelting/assembly alternatives, coverage and waits; mall slots are switched by the automatic slot manager. | Bounded site/scale menus; general fluid, research, upgrade and repair choice coverage remains incomplete. Component fixtures are separate evidence. |
 | `--actions deterministic`, `training/laya_ops_runner.py` | Plate starter/foundation/extension/retirement, baseline mall item, shortage batch, steel fence/seed and waits. | `training/laya_ops.py` still calls strategic builder wrappers that choose prerequisites, lender, site, scale, transport and recovery. Coverage can occur inside a request rather than as a separate offered choice. |
 
 The target split is **preview legal alternatives → Laya chooses → execute the
@@ -127,6 +127,33 @@ compatible learned policy; then missing goal actions and matched acceptance.
 Coordinate shared mall/adapter files through their latest ownership handoff.
 
 Oil facts (November 7, 2026; unit and Lua-fixture tests only): the saved-world survey exports enabled recipes with a fluid ingredient or product as typed `facts["fluid_recipes"]` (ingredients/products with type and amount, energy ticks, category, compatible machine speeds); `facts["recipes"]`, the solid build menu, is unchanged. The status board expands fluid goals through them (`production_recipes`): per product, the shortest chain to raw resources, ties to a recipe already running, then fewer ingredients. Plastic at 0.5/s reads as one chemical plant, 5 petroleum gas/s from one oil refinery (basic oil processing) and about 11 crude/s; crude oil and water are raw. A read-only `facts["oil_field"]` survey (512 tiles of generated terrain around the lowest roboport, else spawn) reports the nearest crude-oil patch (centre, distance, wells, total amount, yield, crude/s with one pumpjack per well) and the nearest water tile; its compact form is `observation_digest.oil_field`. No oil operation exists yet, so fluid needs stay in the menu's `blocked` as `no_candidate`. Fluid flow is not measured, so crude oil and petroleum gas never read as satisfied from counters. A candidate may declare its own `scope_bounds` (unit and Lua-fixture tests only); the Lua validator then checks that candidate's actions against it instead of the global ±128 bounds. The adapter refuses a declared scope before Lua (`scope_malformed`, `scope_unsurveyed`, `scope_excludes_actions`, `scope_too_wide`, `scope_out_of_reach`, `scope_off_route`) unless it tightly contains the candidate's actions, lies within the oil search radius of the survey anchor, and touches the outpost (128 tiles around the surveyed oil field, for the cell and its coal mine), the global bounds or a 64-tile corridor along the base-to-oil line (reach hops); the option's state `scope` shows it. Candidates without one are unchanged.
+
+## Automated mall slots and decision cadence (November 8, 2026; unit tests, replay and a live smoke)
+
+User intent, 2026-11-08: Laya decides *what to make and in what quantity*; slotting is automated, and the decision
+rate rises over time with decisions in parallel on different aspects.
+
+- **Slot manager** (`training/laya_mall_slots.manage`, run before each decision): it has the mall's assemblers and
+  maximizes output and working occupancy. Priority: bottleneck chains deepest link first (precursors before
+  consumers), then other unmet board items deepest first, then construction shortfalls. It frees idle, impossible
+  and off-board cells, keeps cells already set to a demanded item, gives each item ceil(gap / machine rate) cells,
+  prefers W/E cells for the most urgent items, and applies all switches in one configure. Switches leave
+  `retarget` receipts with authority `slot_manager`. Laya gets no retarget options (`mission.rotating-mall` and
+  `mission.slot-settle` are inert for this runner).
+- **Obtainable now** (`laya_factory_status.missing_input`): nothing is offered, slotted or made a stock need
+  whose inputs cannot be had now (raw, in stock or measured as produced; the item's own stock never counts).
+  Before plastic, chests are blocked facts (`unobtainable:<input>`), not options.
+- **Mall lattice** (`training/laya_mall_block.py`): module centres at anchor + i·(6,5) + j·(−3,10), the user's
+  reference layout (one requester per four machines, one passive chest per two). Generator assembler sites are
+  dropped once a mall block exists. Laya is offered one slot: W/E of the nearest modules first, then N/S beside a
+  built W/E slot.
+- **Line taps**: one topology per line. One fast tap while chests cannot be made; full rate afterwards.
+- **Cadence** (live play): each decision is submitted without waiting (`construction_pending`; reconcile finishes
+  it). A cycle takes up to `parallel_aspects` (4) decisions on distinct aspects (production, smelting, coverage,
+  oil, external) whose footprints and bills do not conflict, then advances
+  `cadence_ticks(t) = 1800 / (1 + ln(1 + (t − 36000) / 36000))` ticks after a 36,000-tick delay, floored at 300.
+  Stall patience is also kept in game time (`stall_decisions × 3600` ticks). Receipts are read once per change
+  (`training/laya_receipts.py`), and each decision record carries `wall_s` per step.
 
 ## Oil options: `reach`, `coal-feed` and `oil` families (November 7, 2026; unit tests with recorded planner outputs only)
 
