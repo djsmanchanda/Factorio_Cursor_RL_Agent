@@ -620,3 +620,72 @@ def test_a_chest_shortfall_before_plastic_is_a_blocked_fact_not_a_stock_need():
     assert menu["unit_shortfalls"].get("passive-provider-chest")  # Still visible as a fact.
     assert [r.split(":")[0] for r in menu["blocked"]["stock:passive-provider-chest"]] == ["unobtainable"]
     assert not any(o.get("product") == "passive-provider-chest" for o in menu["options"])
+
+
+def test_cadence_is_flat_then_shrinks_like_a_log_and_floors():
+    """User 2026-11-08: the decision rate rises like a delayed logarithmic function of game time."""
+    from training.laya_clean_runner import Settings, cadence_ticks
+    s = Settings()
+    early = [cadence_ticks(t, s) for t in (0, s.cadence_delay_ticks)]
+    later = [cadence_ticks(s.cadence_delay_ticks + k * s.cadence_scale_ticks, s) for k in (1, 3, 10, 100)]
+    assert early == [s.cadence_start_ticks] * 2
+    assert later == sorted(later, reverse=True) and later[0] < s.cadence_start_ticks
+    assert cadence_ticks(10**9, s) == s.cadence_min_ticks
+    rates = [1 / cadence_ticks(s.cadence_delay_ticks + k * s.cadence_scale_ticks, s) for k in (1, 2, 4, 8)]
+    gains = [b - a for a, b in zip(rates, rates[1:])]
+    assert all(g > 0 for g in gains)  # rising, by roughly constant steps per doubling (log-like)
+
+
+class DeferredAdapter(FakeAdapter):
+    deferred_execution = True
+
+    def __init__(self):
+        super().__init__()
+        self.world["networks"]["1"]["items"].update({"assembling-machine-1": 10, "roboport": 4, "electric-furnace": 6})
+        self.advanced = []
+        self.waits = []
+
+    def execute(self, selected, presented, measure_ticks, wait=True):
+        self.waits.append(wait)
+        self.executed.append(selected)
+        option = next(o for o in presented if o["option_id"] == selected)
+        return {"status": "construction_pending" if option.get("plan") else "observed"}
+
+    def advance(self, ticks):
+        self.advanced.append(ticks)
+        self.world["tick"] += ticks
+
+
+def test_live_cycles_submit_without_waiting_and_advance_by_the_cadence(tmp_path):
+    from training.laya_clean_runner import Settings, cadence_ticks
+    adapter = DeferredAdapter()
+    run(adapter, ExplorationPolicy(3), journal=tmp_path / "j.jsonl", decisions=6, measure_ticks=300, seed=0, run_id="t")
+    assert adapter.waits and not any(adapter.waits)  # Every submission returned without waiting.
+    assert adapter.advanced and all(t >= cadence_ticks(0, Settings()) for t in adapter.advanced)
+
+
+def test_parallel_picks_take_other_aspects_that_fit_footprint_and_stock():
+    from training.laya_clean_runner import parallel_picks
+
+    def option(oid, family, need, x, bill):
+        plan = {"phases": [{"actions": [{"action_type": "place_ghost", "entity": "assembling-machine-1",
+                                         "position": {"x": x, "y": 0.5}}]}]}
+        return {"option_id": oid, "family": family, "need_id": need, "plan": plan, "bill": bill, "summary": oid}
+    first = option("a", "assemble", "item:gear", 0.5, {"assembling-machine-1": 1})
+    menu = {"options": [first,
+                        option("b", "assemble", "item:cable", 10.5, {"assembling-machine-1": 1}),  # same aspect
+                        option("c", "line", "item:iron-plate", 1.5, {"assembling-machine-1": 1}),  # overlaps a
+                        option("d", "expand", "coverage", 20.5, {"assembling-machine-1": 2}),      # stock left: 1
+                        option("e", "smelt", "item:steel-plate", 30.5, {"assembling-machine-1": 1}),
+                        {"option_id": "wait.300", "family": "wait", "need_id": "wait", "summary": "wait"}],
+            "needs": [{"need_id": n, "options": [i]} for n, i in
+                      (("item:gear", "a"), ("item:cable", "b"), ("item:iron-plate", "c"), ("coverage", "d"),
+                       ("item:steel-plate", "e"), ("wait", "wait.300"))]}
+    facts = {"networks": {"1": {"items": {"assembling-machine-1": 2}}}}
+
+    class First:  # Always the first non-wait option offered.
+        def choose(self, state, menu):
+            o = next(o for o in menu["options"] if o["family"] != "wait")
+            return {"option_id": o["option_id"], "need_id": o["need_id"], "probability": 1.0}
+    extra = parallel_picks(First(), facts, menu, first, 4, lambda sub: {})
+    assert [o["option_id"] for _, o, _, _ in extra] == ["e"]  # b same aspect, c overlaps, d unaffordable

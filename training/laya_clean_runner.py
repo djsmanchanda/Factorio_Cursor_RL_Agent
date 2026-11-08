@@ -86,6 +86,32 @@ class Settings:
     context_view: str = 'full'
     oil_options: bool = True  # `reach`, `coal-feed` and `oil` families (tools/laya_oil_options.py, injected); inert until oil is a need.
     reservation_mode: str = 'strict'
+    # Decision cadence (user, 2026-11-08): the decision rate rises like a delayed logarithm of game time,
+    # and decisions run in parallel, one per aspect. Live play only (adapters with deferred execution):
+    # interval = start / (1 + ln(1 + (t - delay) / scale)) after ``delay`` ticks, floored at ``min``.
+    parallel_aspects: int = 4  # 1 = one decision per cycle (the pre-2026-11-08 loop)
+    cadence_start_ticks: int = 1800
+    cadence_delay_ticks: int = 36000
+    cadence_scale_ticks: int = 36000
+    cadence_min_ticks: int = 300
+
+
+# What a decision works on; parallel decisions in one cycle take different aspects.
+ASPECTS = {"assemble": "production", "retarget": "production", "starter": "smelting", "line": "smelting",
+           "smelt": "smelting", "mine": "smelting", "expand": "coverage", "reach": "oil", "coal-feed": "oil",
+           "oil": "oil", "power-hookup": "oil", "optimizer-block": "external", "wait": "wait"}
+# Stall patience in game time once decisions are faster: the pre-2026-11-08 loop spent 3,400-5,000 ticks per decision.
+STALL_TICKS_PER_DECISION = 3600
+
+
+def cadence_ticks(elapsed: int, settings: "Settings") -> int:
+    """Game ticks between decision cycles: constant, then shrinking logarithmically (rate grows like a log)."""
+    if elapsed <= settings.cadence_delay_ticks:
+        return settings.cadence_start_ticks
+    growth = 1 + math.log(1 + (elapsed - settings.cadence_delay_ticks) / settings.cadence_scale_ticks)
+    return max(settings.cadence_min_ticks, round(settings.cadence_start_ticks / growth))
+
+
 WAIT_TICKS = (300, 1800)
 MAX_MENU = 20  # laya_state schema: options maxItems
 EXPLORATION_MODEL = {"model_id": "laya-exploration-v1", "model_hash": "sha256:" + "0" * 64}
@@ -163,7 +189,9 @@ class LiveWorld(SavedWorldAdapter):
                 "phases": [{"name": "laya-configure", "actions": actions}]}
         return load_json(self.bridge.build_layout(build_layout_authorization([plan]), plan, timeout=30))
 
-    def execute(self, selected, presented, measure_ticks=1800, check_verifier=None):
+    deferred_execution = True  # execute(..., wait=False): submit and return; reconcile finishes the build.
+
+    def execute(self, selected, presented, measure_ticks=1800, check_verifier=None, *, wait=True):
         candidate = next((c for c in presented if c["option_id"] == selected), None)
         if candidate and candidate.get("family") == "retarget":
             return mall_slots.execute_retarget(self, candidate, measure_ticks)
@@ -180,8 +208,8 @@ class LiveWorld(SavedWorldAdapter):
                 raise
         try:
             if check_verifier is None:
-                return super().execute(selected, presented, measure_ticks)
-            return super().execute(selected, presented, measure_ticks, check_verifier=check_verifier)
+                return super().execute(selected, presented, measure_ticks, wait=wait)
+            return super().execute(selected, presented, measure_ticks, check_verifier=check_verifier, wait=wait)
         except SavedWorldError as error:
             if "ghost submission failed" in str(error):
                 self._close_failed_submissions()
@@ -1211,6 +1239,53 @@ def _offer_oil(provider: Callable[[Any, Mapping, Mapping], Mapping | None] | Non
                 "facts": {"error": f"{type(error).__name__}: {str(error)[:200]}"}}
 
 
+def parallel_picks(policy: "Policy", facts: Mapping, menu: Mapping, first: Mapping, limit: int,
+                   state_for: Callable[[Mapping], Mapping]) -> list[tuple[dict, dict, Mapping, Any]]:
+    """More decisions for this cycle, one per further aspect, chosen by the same policy from what remains.
+
+    Remaining options take another aspect and need than the picks so far, do not overlap their footprints,
+    and fit the stock left after their bills. The policy may pick a wait to end the cycle's picks.
+    Returns (choice, option, state, distribution) per extra pick.
+    """
+    picks = [first]
+    extra = []
+    while len(picks) < limit:
+        taken_aspects = {ASPECTS.get(p["family"], p["family"]) for p in picks}
+        taken_needs = {p.get("need_id") for p in picks}
+        footprint = [{"entity": a["entity"], "position": a["position"]}
+                     for p in picks for a in (actions(p["plan"]) if p.get("plan") else ())]
+        spent: Counter = Counter()
+        for p in picks:
+            spent.update(p.get("bill") or {})
+
+        def fits(option: Mapping) -> bool:
+            if option["family"] == "wait":
+                return True
+            if ASPECTS.get(option["family"], option["family"]) in taken_aspects or option.get("need_id") in taken_needs:
+                return False
+            if any(_available(facts, option, item) - spent[item] < count for item, count in (option.get("bill") or {}).items()):
+                return False
+            planned = list(actions(option["plan"])) if option.get("plan") else []
+            return not planned or not footprint or clear_of(planned, footprint)
+
+        options = [o for o in menu["options"] if fits(o)]
+        if not any(o["family"] != "wait" for o in options):
+            break
+        kept = {o["option_id"] for o in options}
+        sub = {**menu, "options": options,
+               "needs": [{**n, "options": [i for i in n["options"] if i in kept]} for n in menu["needs"]
+                         if any(i in kept for i in n["options"])]}
+        state = state_for(sub)
+        choice = policy.choose(state, sub)
+        distribution = choice.pop("distribution", None)
+        option = next(o for o in options if o["option_id"] == choice["option_id"])
+        if option["family"] == "wait":
+            break
+        picks.append(option)
+        extra.append((choice, option, state, distribution))
+    return extra
+
+
 def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, measure_ticks: int,
         seed: int, run_id: str, emit: Callable[[str], None] = lambda _: None,
         should_stop: Callable[[], bool] = lambda: False, status_path: Path | None = None,
@@ -1413,8 +1488,12 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                         "blocked": menu["blocked"], "land_rejections": menu.get("land_rejections"),
                         "additional_candidate_results": menu["additional_candidate_results"],
                         "distribution": distribution, "choice": choice}
+            # Live play submits and moves on; reconcile finishes builds while later cycles decide.
+            deferred = (settings.parallel_aspects > 1 and getattr(adapter, "deferred_execution", False)
+                        and chosen["family"] not in ("optimizer-block", "retarget"))
             try:
-                receipt = adapter.execute(choice["option_id"], menu["options"], measure_ticks)
+                receipt = (adapter.execute(choice["option_id"], menu["options"], measure_ticks, wait=False) if deferred
+                           else adapter.execute(choice["option_id"], menu["options"], measure_ticks))
                 if blocks is not None:
                     _journal_events(blocks, journal, run_id)
             except Exception as error:
@@ -1424,7 +1503,8 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                                                                "error": str(error)[:500]})
                 raise
             lap("execute")
-            window = receipt["measurement"]  # This decision's own window; the board uses rolling rates.
+            # This decision's own window (none when deferred); the board uses rolling rates either way.
+            window = receipt.get("measurement") or {"window_ticks": 0, "production": {}}
             after = receipt.get("after")
             if after:
                 samples.append((after["tick"], dict(after["production"]), dict(after["consumption"])))
@@ -1444,19 +1524,61 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                                 "status":receipt['status'],'produced':record['measured_per_s']}})
             summary["decisions"] += 1
             failures = 0
+            done = ("observed", "construction_pending") if deferred else ("observed",)
+
+            def serves(option: Mapping) -> bool:
+                # Untagged coverage serves no current need, so it does not count as progress.
+                return option["family"] not in ("wait", "retarget") and option.get("need_id") != "coverage"
+            served = serves(chosen) and receipt["status"] in done
+            if deferred:
+                cycle = index
+                elapsed = facts["tick"] - samples[0][0]
+                extra = [] if chosen["family"] == "wait" else parallel_picks(
+                    policy, facts, menu, chosen, settings.parallel_aspects,
+                    lambda sub: build_state(facts, sub, board, phase, run_id, policy.model_ref, history, measurement, settings))
+                for pick_choice, pick, pick_state, pick_distribution in extra:
+                    index += 1
+                    record = {"run_id": run_id, "index": index, "authority": policy.authority, "event": "decision",
+                              "tick": facts["tick"], "phase": phase["phase_id"], "status": "pending", "cycle": cycle,
+                              "aspect": ASPECTS.get(pick["family"], pick["family"]), "choice": pick_choice,
+                              "summary": pick["summary"]}
+                    _append(journal, record)
+                    emit(f"DECISION {index} (parallel, {record['aspect']}) need={pick_choice['need_id']} "
+                         f"p={pick_choice['probability']:.3f}: {pick['summary']}")
+                    pick_receipt = adapter.execute(pick_choice["option_id"], menu["options"], measure_ticks, wait=False)
+                    record.update(status=pick_receipt["status"])
+                    _append(journal, record)
+                    _training_record(records, run_id=run_id, index=index, tick=facts["tick"], phase=phase["phase_id"],
+                                     no_legal_build=False, authority=policy.authority, state=pick_state,
+                                     options=[_option_record(o) for o in menu["options"]], blocked=menu["blocked"],
+                                     land_rejections=menu.get("land_rejections"),
+                                     additional_candidate_results=menu["additional_candidate_results"],
+                                     distribution=pick_distribution, choice=pick_choice,
+                                     outcome={"status": pick_receipt["status"], "parallel": True})
+                    history.append({"decision_id": f"decision.{index}", "tick": facts["tick"], "summary": pick["summary"][:120],
+                                    "outcome": "pending", "experiment_outcome": {"family": pick["family"],
+                                    "product": pick.get("product"), "status": pick_receipt["status"], "produced": {}}})
+                    summary["decisions"] += 1
+                    served = served or (serves(pick) and pick_receipt["status"] in done)
+                interval = cadence_ticks(elapsed, settings)
+                if chosen["family"] == "wait":
+                    interval = max(interval, int(chosen.get("wait_ticks") or 0))
+                emit(f"  CYCLE: {1 + len(extra)} decision(s); next in {interval} ticks")
+                adapter.advance(interval)
+                lap("advance")
             # Stall: no need-serving build, no phase and no goal-gap improvement for STALL_DECISIONS decisions.
             gap = _goal_gap(compile_status(facts, phase["targets"], measurement, built))
-            # Untagged coverage serves no current need, so it does not count as progress.
-            # A retarget only re-plans an existing slot; it counts once the goal gap moves.
-            served = chosen["family"] not in ("wait", "retarget") and chosen.get("need_id") != "coverage"
             # Funding blocked builds is progress too: fewer units short than ever before in this phase.
             short = sum((menu.get("unit_shortfalls") or {}).values())
-            progressed = ((served and receipt["status"] == "observed") or gap < stall["best_gap"] * 0.95
-                          or short < stall["best_short"])
+            progressed = served or gap < stall["best_gap"] * 0.95 or short < stall["best_short"]
             stall["best_gap"] = min(stall["best_gap"], gap)
             stall["best_short"] = min(stall["best_short"], short)
             stall["since"] = 0 if progressed else stall["since"] + 1
-            if stall["since"] >= settings.stall_decisions:
+            if progressed or "since_tick" not in stall:
+                stall["since_tick"] = facts["tick"]
+            # With faster cycles, patience is also measured in game time, as the old loop spent it.
+            patient = deferred and facts["tick"] - stall["since_tick"] < settings.stall_decisions * STALL_TICKS_PER_DECISION
+            if stall["since"] >= settings.stall_decisions and not patient:
                 summary["stop"] = "stalled"
                 emit(f"STALLED: {settings.stall_decisions} decisions without a new build or goal progress; "
                      f"bottleneck {' | '.join(compact['bottleneck']) or 'none'}; blocked {blocked or 'none'}")

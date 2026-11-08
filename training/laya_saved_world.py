@@ -767,7 +767,12 @@ class SavedWorldAdapter:
             time.sleep(.05)
         raise SavedWorldError("engine clock failed to reach its bounded endpoint")
 
-    def execute(self, selected, presented, measure_ticks=1800, check_verifier=None):
+    def execute(self, selected, presented, measure_ticks=1800, check_verifier=None, *, wait=True):
+        """Validate, submit and (``wait``) measure one selected option.
+
+        ``wait=False`` returns right after submission with the receipt ``construction_pending``: reconcile
+        configures and observes it once bots finish, so several decisions can be in flight at once.
+        """
         matches = [c for c in presented if c["option_id"] == selected]
         if len(matches) != 1:
             raise SavedWorldError("selection must resolve to one presented candidate")
@@ -866,6 +871,10 @@ class SavedWorldAdapter:
             atomic_json(receipt_path, receipt)
             if not report["ok"]:
                 raise SavedWorldError(f"ghost submission failed: {report.get('error')}")
+        if not wait:
+            receipt.update(status="construction_pending" if candidate.get("plan") else "observed")
+            atomic_json(receipt_path, receipt)
+            return receipt
         self.advance(candidate.get("wait_ticks", measure_ticks))
         after = self.query()
         # Configuration is applied only to observed bot-built entities. No
