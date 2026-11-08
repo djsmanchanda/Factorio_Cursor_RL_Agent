@@ -1,5 +1,5 @@
 # Path: training/laya_mall_block.py
-# Purpose: Mall cells anywhere in Laya's one large mall block (quad cells on a grid), growing from the edge nearest a roboport.
+# Purpose: Mall cells in Laya's one large mall block, on one module lattice, W/E slots first, growing from the edge nearest a roboport.
 
 """Mall block cells.
 
@@ -19,43 +19,48 @@ from collections.abc import Mapping
 
 from orchestrator.laya_operations import sha256_hash
 from planners.laya_quad_cell import generate_quad_slot
-from planners.quad_mall_layout import DENSE_MALL_MODULE_OFFSETS, QUAD_MALL_MACHINE_OFFSETS
+from planners.quad_mall_layout import QUAD_MALL_MACHINE_OFFSETS
 from planners.plan_validation import validate_build_plan
 from training.laya_lines import clear_of
 
-# A bank is the shared dense layout: three interlocking quad modules at DENSE_MALL_MODULE_OFFSETS
-# around a site (12 machines), the footprint MALL_EXTENT (-7,-6)-(10,16). Banks tile the block.
-BANK_EXTENT = (-7.0, -6.0, 10.0, 16.0)
-BANK_PITCH = (19, 24)  # bank footprint plus a pole/gap tile row
+# One lattice per mall (user reference layout, 2026-11-08, data/laya-saved-world/cohort-kit-20261108/
+# user-reference-mall-*): module centres at anchor + i*(6,5) + j*(-3,10), the continuation of
+# DENSE_MALL_MODULE_OFFSETS. Every 3x5 cell is a hub or one machine of exactly one hub (a plus-pentomino
+# tiling): no gaps, no shared machines. The old 19x24 bank grid left modules off this lattice.
+LATTICE = ((6.0, 5.0), (-3.0, 10.0))
+MODULE_EXTENT = (-4.5, -6.5, 4.5, 6.5)  # Machines at (+-3, 0) and (0, +-5), 3x3 each.
+ANCHOR_INSET = (7.0, 6.0)  # The first module sits where the old first bank site did (existing worlds keep it).
 FURNACE_PRODUCTS = {"iron-plate", "copper-plate", "stone-brick", "steel-plate"}
 HORIZONTAL, VERTICAL = ("west", "east"), ("north", "south")  # vertical slots need long-handed inserters
 
 
-def bank_sites(zone: list[float]) -> list[tuple[float, float]]:
-    """Bank sites tiling the block, aligned like the shared generator's sites (x.5, y.5)."""
-    x0, y0, x1, y1 = zone
-    sites = []
-    y = y0 - BANK_EXTENT[1]
-    while y + BANK_EXTENT[3] <= y1:
-        x = x0 - BANK_EXTENT[0]
-        while x + BANK_EXTENT[2] <= x1:
-            sites.append((math.floor(x) + .5, math.floor(y) + .5))
-            x += BANK_PITCH[0]
-        y += BANK_PITCH[1]
-    return sites
+def lattice_anchor(zone: list[float]) -> tuple[float, float]:
+    return (math.floor(zone[0] + ANCHOR_INSET[0]) + .5, math.floor(zone[1] + ANCHOR_INSET[1]) + .5)
 
 
 def block_centres(zone: list[float]) -> list[tuple[float, float]]:
-    """Every quad module centre of every bank in the block."""
-    return [(sx + dx, sy + dy) for sx, sy in bank_sites(zone) for dx, dy in DENSE_MALL_MODULE_OFFSETS]
+    """Every lattice module centre whose four machines fit inside the mall block."""
+    x0, y0, x1, y1 = zone
+    ax, ay = lattice_anchor(zone)
+    (ux, uy), (vx, vy) = LATTICE
+    span = int(max(x1 - x0, y1 - y0)) // 3 + 2
+    centres = []
+    for i in range(-span, span + 1):
+        for j in range(-span, span + 1):
+            x, y = ax + i * ux + j * vx, ay + i * uy + j * vy
+            if x + MODULE_EXTENT[0] >= x0 and y + MODULE_EXTENT[1] >= y0 and x + MODULE_EXTENT[2] <= x1 \
+                    and y + MODULE_EXTENT[3] <= y1:
+                centres.append((x, y))
+    return sorted(centres, key=lambda c: (c[1], c[0]))
 
 
 def fill_order(zone: list[float], ports: list[Mapping]) -> list[tuple[tuple[float, float], str]]:
-    """(module centre, side) slots in build order: nearest bank first, module by module, sides in a fixed order."""
-    def near(site):
-        return min(math.dist(site, (p["position"]["x"], p["position"]["y"])) for p in ports)
-    return [((sx + dx, sy + dy), side) for sx, sy in sorted(bank_sites(zone), key=near)
-            for dx, dy in DENSE_MALL_MODULE_OFFSETS for side in (*HORIZONTAL, *VERTICAL)]
+    """(module centre, side) in build priority (user, 2026-11-08): W/E slots of modules nearest a roboport
+    first (short inserters, fast-upgradable), then N/S slots; a N/S slot is used only beside a built W/E slot."""
+    def near(centre):
+        return (min(math.dist(centre, (p["position"]["x"], p["position"]["y"])) for p in ports), centre[1], centre[0])
+    centres = sorted(block_centres(zone), key=near)
+    return [(c, side) for sides in (HORIZONTAL, VERTICAL) for c in centres for side in sides]
 
 
 def mall_cell_candidates(facts: Mapping, plan: Mapping | None, products: set[str], *, per_product: int = 6,
@@ -71,16 +76,27 @@ def mall_cell_candidates(facts: Mapping, plan: Mapping | None, products: set[str
         return []
     taken = {(m["position"]["x"], m["position"]["y"]) for m in facts.get("machines", [])}
     taken |= {(o["position"]["x"], o["position"]["y"]) for o in obstacles if o["entity"].startswith("assembling-machine")}
-    free = []  # the next free slot of each kind
-    for centre, side in (slot for zone in zones for slot in fill_order(zone, ports)):
+
+    def built(centre, side):
         dx, dy = QUAD_MALL_MACHINE_OFFSETS[side]
-        if (centre[0] + dx, centre[1] + dy) in taken:
+        return (centre[0] + dx, centre[1] + dy) in taken
+
+    def covered(centre, side):
+        """Inside a powered port's logistic area and clear of non-machine obstacles (product-independent)."""
+        dx, dy = QUAD_MALL_MACHINE_OFFSETS[side]
+        spots = [(centre[0] + dx, centre[1] + dy), centre, (centre[0], centre[1] - 1), (centre[0], centre[1] + 1)]
+        return any(all(max(abs(x - p["position"]["x"]), abs(y - p["position"]["y"])) <= p["logistic_radius"] - 1
+                       for x, y in spots) for p in ports)
+
+    # One slot, the first free one in priority order: Laya chooses what to make, not where (user, 2026-11-08).
+    free = []
+    for centre, side in (slot for zone in zones for slot in fill_order(zone, ports)):
+        if built(centre, side) or not covered(centre, side):
             continue
-        if not any(s in HORIZONTAL for _, s in free) and side in HORIZONTAL or \
-                not any(s in VERTICAL for _, s in free) and side in VERTICAL:
-            free.append((centre, side))
-        if len(free) == 2:
-            break
+        if side in VERTICAL and not any(built(centre, s) for s in HORIZONTAL):
+            continue  # Top/bottom only on a module whose left/right is started.
+        free = [(centre, side)]
+        break
     candidates = []
     for product in sorted(p for p in products if p in recipes and p not in FURNACE_PRODUCTS):
         for centre, side in free:

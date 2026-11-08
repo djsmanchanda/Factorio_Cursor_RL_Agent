@@ -464,6 +464,13 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
     known_needs = {n["item"] for n in board["needs"]}
     proposed = _compile(facts, unmet, seed, request_multiplier)
+    # With a mall block, assemblers go only on its lattice (training/laya_mall_block.py); the shared
+    # generator's fixed quad sites around each roboport left modules off the pattern (live 2026-11-08).
+    mall_zone = bool(site_plan) and any(z["purpose"] == "mall" for z in site_plan.get("zones") or ())
+
+    def off_lattice(candidate: Mapping) -> bool:
+        return mall_zone and candidate["family"] == "assemble"
+    proposed = [c for c in proposed if not off_lattice(c)]
     # Iron, copper and stone start with direct starters (drills feeding furnaces); the
     # generator's single-drill-into-chest mines and requester-fed furnaces are not offered.
     proposed = [c for c in proposed if not ((c["family"] == "smelt" and c.get("product") in STARTER_ORE)
@@ -754,7 +761,8 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
             del shortfalls[item]
             pre_rejected[f"stock:{item}"][f"unobtainable:{blocker}"] += 1
     stock_groups: dict[str, list] = defaultdict(list)
-    stock = [c for c in [*(_compile(facts, set(shortfalls), seed, request_multiplier) if shortfalls else ()),
+    stock = [c for c in [*(c for c in (_compile(facts, set(shortfalls), seed, request_multiplier) if shortfalls else ())
+                           if not off_lattice(c)),
                          *mall_cell_candidates(facts, site_plan, set(shortfalls), obstacles=obstacles)]
              if c["family"] == "assemble" and c.get("product") in shortfalls]
     for candidate in on_free_land(stock, lambda c: f"stock:{c['product']}"):

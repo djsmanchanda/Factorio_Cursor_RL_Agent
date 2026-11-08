@@ -158,19 +158,25 @@ def test_the_mall_is_one_large_block_beside_the_starter_area_with_cells_across_i
         assert cells and all(reservation_reason(option["site_plan"], c) is None for c in cells)
 
 
-def test_mall_block_fills_bank_by_bank_in_the_dense_quad_pattern():
-    from training.laya_mall_block import fill_order, mall_cell_candidates
-    from planners.quad_mall_layout import DENSE_MALL_MODULE_OFFSETS
+def test_mall_block_modules_sit_on_one_lattice_and_fill_left_right_first():
+    """User reference layout 2026-11-08: module centres at anchor + i*(6,5) + j*(-3,10); new W/E slots first,
+    then N/S only on a module whose W/E is started; Laya is offered one slot (what to make, not where)."""
+    from training.laya_mall_block import LATTICE, block_centres, fill_order, lattice_anchor, mall_cell_candidates
     zone = [-29.0, 14.0, 11.0, 54.0]
     ports = [{"position": {"x": 3, "y": -1}, "energy": 1, "network": "1", "logistic_radius": 25, "construction_radius": 55}]
+    ax, ay = lattice_anchor(zone)
+    assert ax % 1 == 0.5 and ay % 1 == 0.5
+    (ux, uy), (vx, vy) = LATTICE
+    for x, y in block_centres(zone):  # Integer lattice coordinates for every centre.
+        det = ux * vy - uy * vx
+        i = ((x - ax) * vy - (y - ay) * vx) / det
+        j = (ux * (y - ay) - uy * (x - ax)) / det
+        assert abs(i - round(i)) < 1e-9 and abs(j - round(j)) < 1e-9
     order = fill_order(zone, ports)
-    site = order[0][0]
-    assert [c for c, _ in order[:12]] == [(site[0] + dx, site[1] + dy) for dx, dy in DENSE_MALL_MODULE_OFFSETS for _ in range(4)]
-    assert site[0] % 1 == 0.5 and site[1] % 1 == 0.5  # aligned like the shared generator's sites
+    sides = [side for _, side in order]
+    assert set(sides[:sides.index("north")]) == {"west", "east"}  # every W/E slot before any N/S slot
     facts = {"ports": ports, "machines": [], "recipes": {"iron-gear-wheel": {
         "ingredients": [{"name": "iron-plate", "amount": 2}], "product_amount": 1, "energy_ticks": 30}}}
     plan = {"zones": [{"purpose": "mall", "rect": zone}]}
-    first = mall_cell_candidates(facts, plan, {"iron-gear-wheel"})
-    assert {c["summary"].split()[1] for c in first} == {"west", "north"}  # next free horizontal and vertical slot
-    built = {**facts, "machines": [{"name": "assembling-machine-1", "position": {"x": site[0] - 3, "y": site[1]}}]}
-    assert {c["summary"].split()[1] for c in mall_cell_candidates(built, plan, {"iron-gear-wheel"})} == {"east", "north"}
+    [first] = mall_cell_candidates(facts, plan, {"iron-gear-wheel"})
+    assert first["summary"].split()[1] in ("west", "east")
