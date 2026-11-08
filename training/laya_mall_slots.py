@@ -29,6 +29,7 @@ from pathlib import Path
 
 from orchestrator.laya_operations import sha256_hash
 from planners.stock_gating import stock_gate
+from training.laya_receipts import receipts
 
 ASSEMBLERS = ("assembling-machine-1", "assembling-machine-2", "assembling-machine-3")
 FURNACE_PRODUCTS = {"iron-plate", "copper-plate", "stone-brick", "steel-plate"}
@@ -88,15 +89,11 @@ def mall_cells(root: Path, facts: Mapping) -> list[dict]:
     machines = {(m["position"]["x"], m["position"]["y"]): m for m in facts.get("machines", [])
                 if m["name"] in ASSEMBLERS}
     cells, seen, retargeted = [], set(), {}
-    for path in sorted(Path(root, "evidence").glob("transaction-*.json"), key=lambda p: p.stat().st_mtime):
-        try:
-            receipt = json.loads(path.read_text())
-        except (OSError, ValueError):
-            continue
-        candidate = receipt.get("candidate") or {}
-        if receipt.get("status") in ("observed", "applied") and candidate.get("family") == "retarget":
+    for _, receipt in receipts(root):
+        candidate = receipt["candidate"]
+        if receipt["status"] in ("observed", "applied") and candidate.get("family") == "retarget":
             position = next(a["position"] for a in candidate["plan"]["phases"][0]["actions"] if a["entity"] in ASSEMBLERS)
-            retargeted[(position["x"], position["y"])] = (receipt.get("before") or {}).get("tick")
+            retargeted[(position["x"], position["y"])] = receipt["before_tick"]
             continue
         if receipt.get("status") != "observed" or candidate.get("family") != "assemble":
             continue

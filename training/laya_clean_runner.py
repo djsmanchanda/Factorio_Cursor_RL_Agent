@@ -50,6 +50,7 @@ from training.laya_saved_world import (SAVED_WORLD_GHOST_FIELDS, SavedWorldAdapt
                                        compile_candidates, decision_state, evaluate_required_checks,
                                        required_check_reason)
 from training import laya_mall_slots as mall_slots
+from training.laya_receipts import receipts
 from training.laya_mall_block import mall_cell_candidates
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -190,16 +191,16 @@ class LiveWorld(SavedWorldAdapter):
         from training.laya_layout_stream import atomic_json
         blocked_path = self.root / "evidence" / BLOCKED_FOOTPRINTS
         blocked = json.loads(blocked_path.read_text()) if blocked_path.exists() else []
-        for path in (self.root / "evidence").glob("transaction-*.json"):
-            receipt = json.loads(path.read_text())
-            submission = receipt.get("submission") or {}
-            if (receipt.get("status") not in {"pending", "submission_failed"} or submission.get("ok") is not False
+        for path, slim in receipts(self.root):
+            submission = slim["submission"]
+            if (slim["status"] not in {"pending", "submission_failed"} or submission.get("ok") is not False
                     or submission.get("error") not in {"atomic_footprint_blocked", "direct_construction_forbidden"}):
                 continue
+            receipt = json.loads(path.read_text())
             receipt.update(status="rejected", reason=f"submission_failed:{submission.get('error')}")
             atomic_json(path, receipt)
             blocked += [{"entity": f["entity"], "position": f["position"]}
-                        for f in submission.get("placement_failures") or [] if f.get("position")]
+                        for f in receipt["submission"].get("placement_failures") or [] if f.get("position")]
         blocked_path.write_text(json.dumps(blocked) + "\n")
 
     def tick(self) -> int:
@@ -1014,11 +1015,7 @@ def _built_counts(adapter: Any) -> dict[str, int]:
     if root is None:
         return {}
     # Oldest first: a retarget moves a slot only after the build that made it.
-    for path in sorted(Path(root, "evidence").glob("transaction-*.json"), key=lambda p: p.stat().st_mtime):
-        try:
-            receipt = json.loads(path.read_text())
-        except (OSError, ValueError):
-            continue
+    for _, receipt in receipts(root):
         candidate = receipt.get("candidate") or {}
         if receipt.get("status") == "observed" and candidate.get("family") in ("smelt", "assemble", "starter") \
                 and candidate.get("product"):
@@ -1089,12 +1086,8 @@ def _submitted_entities(adapter: Any) -> list[dict]:
     blocked = Path(root, "evidence", BLOCKED_FOOTPRINTS) if root else None
     if blocked and blocked.exists():
         placed += json.loads(blocked.read_text())
-    for path in Path(root, "evidence").glob("transaction-*.json") if root else ():
-        try:
-            receipt = json.loads(path.read_text())
-        except (OSError, ValueError):
-            continue
-        if (receipt.get("submission") or {}).get("ok"):
+    for _, receipt in receipts(root):
+        if receipt["submission"].get("ok"):
             placed += [{"entity": a["entity"], "position": a["position"], "submitted": True}
                        for phase in receipt["candidate"]["plan"]["phases"] for a in phase["actions"]]
     return placed
@@ -1104,13 +1097,9 @@ def _starters_submitted(adapter: Any) -> set[str]:
     """Plates whose direct starter was submitted (built or still under construction)."""
     root = getattr(adapter, "root", None)
     started: set[str] = set()
-    for path in Path(root, "evidence").glob("transaction-*.json") if root else ():
-        try:
-            receipt = json.loads(path.read_text())
-        except (OSError, ValueError):
-            continue
-        candidate = receipt.get("candidate") or {}
-        if candidate.get("family") == "starter" and (receipt.get("submission") or {}).get("ok"):
+    for _, receipt in receipts(root):
+        candidate = receipt["candidate"]
+        if candidate.get("family") == "starter" and receipt["submission"].get("ok"):
             started.add(candidate["product"])
     return started
 
@@ -1230,9 +1219,20 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
             summary["stop"] = "stopped"
             break
         record: dict[str, Any] = {"run_id": run_id, "index": index, "authority": policy.authority}
+        # Wall seconds per step: the game keeps running (live play) while the runner thinks, so this is
+        # what the decision rate costs in game time (live 2026-11-08: 10 s -> 44 s between decisions).
+        timings: dict[str, float] = {}
+        clock = [time.perf_counter()]
+
+        def lap(step: str) -> None:
+            now = time.perf_counter()
+            timings[step] = round(now - clock[0], 3)
+            clock[0] = now
         try:
             adapter.reconcile()
+            lap("reconcile")
             facts = adapter.query()
+            lap("query")
             if blocks is not None:
                 blocks.reconcile(adapter, facts)  # Receipt- and entity-based; never resends.
                 _journal_events(blocks, journal, run_id)
@@ -1283,6 +1283,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                                         gate_scale=settings.mall_gate_scale,buildable_multiplier=settings.mall_buildable_multiplier,
                                         pending_units=pending_units)
                          if settings.mall_slots and hasattr(adapter, "configure") else [])
+            lap("board_and_slots")
             last_query: dict = {}
 
             def validate_candidates(candidates):
@@ -1320,12 +1321,14 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                                 observe_unlinked=bool(getattr(candidate_provider, "observe_unlinked", False)),
                                 additional_observations=demand_observations, external_check=external_check,
                                 external_shortfalls=unfunded, oil_offer=oil_offer)
+            lap("menu")
             # Items the checks found short become small demand targets on the next board.
             stock_demand = {item: settings.stock_rate for item in menu["shortfalls"]}
             pending_units = menu.get("pending_units") or {}
             state = build_state(facts, menu, board, phase, run_id, policy.model_ref, history, measurement, settings)
             choice = policy.choose(state, menu)
             distribution = choice.pop("distribution", None)
+            lap("choose")
             chosen = next(o for o in menu["options"] if o["option_id"] == choice["option_id"])
             compact = compact_status(board)
             record.update(event="decision", tick=facts["tick"], phase=phase["phase_id"], status="pending",
@@ -1383,12 +1386,13 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                 _training_record(records, **training, outcome={"status": "failed", "error_type": type(error).__name__,
                                                                "error": str(error)[:500]})
                 raise
+            lap("execute")
             window = receipt["measurement"]  # This decision's own window; the board uses rolling rates.
             after = receipt.get("after")
             if after:
                 samples.append((after["tick"], dict(after["production"]), dict(after["consumption"])))
                 measurement = rolling_measurement(samples, settings.rate_window_ticks) or measurement
-            record.update(status=receipt["status"], measured_per_s={
+            record.update(status=receipt["status"], wall_s=timings, measured_per_s={
                 k: round(v["per_second"], 3) for k, v in window["production"].items() if v["per_second"]})
             _append(journal, record)
             _training_record(records, **training, outcome={

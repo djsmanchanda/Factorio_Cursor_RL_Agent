@@ -525,6 +525,12 @@ def configuration_actions(plan):
     return result
 
 
+# Receipt statuses reconcile acts on (or refuses); every other status is finished evidence.
+RECONCILE_STATUSES = frozenset({"pending", "submitting", "configuration_submitting", "submission_received",
+                                "submission_recovered", "submission_failed", "configuration_received",
+                                "configuration_recovered", "configuration_failed", "construction_pending"})
+
+
 class SavedWorldAdapter:
     runtime = "disposable_saved_world"
     surface = "nauvis"
@@ -617,9 +623,9 @@ class SavedWorldAdapter:
         centers = {(p["x"], p["y"]) for p in self.manifest.get("quad_centers", [])}
         # Reserve as soon as a selected horizontal slot is durably submitted,
         # including while its bots/configuration are still pending.
-        for path in (self.root / "evidence").glob("transaction-*.json"):
-            receipt = load_json(path)
-            if (receipt.get("submission") or {}).get("ok"):
+        from training.laya_receipts import receipts
+        for _, receipt in receipts(self.root):
+            if receipt["submission"].get("ok"):
                 centers.update((p["x"], p["y"]) for p in quad_centers_from_plan(receipt["candidate"]["plan"]))
         return [{"x": x, "y": y} for x, y in sorted(centers)]
 
@@ -903,7 +909,13 @@ class SavedWorldAdapter:
                 recover_layout_stream(self.root, self.bridge, resolved=store_recovered)
             except Exception as error:
                 raise SavedWorldError("pending layout submission could not be recovered; outcome is unknown") from error
+        from training.laya_receipts import receipts
+        # Only unfinished receipts need the full file; finished ones (observed, rejected, ...) are skipped
+        # from the cached slim view instead of re-parsing megabytes of facts every decision.
+        unfinished = {path for path, slim in receipts(self.root) if slim["status"] in RECONCILE_STATUSES}
         for path in sorted(evidence.glob("transaction-*.json")):
+            if path not in unfinished:
+                continue
             receipt = load_json(path)
             if receipt["status"] == "pending":
                 raise SavedWorldError(f"interrupted transaction needs review: {path.name}")
