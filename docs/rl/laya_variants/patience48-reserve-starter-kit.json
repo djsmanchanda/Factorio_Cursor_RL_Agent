@@ -1,0 +1,10 @@
+{
+  "version": "1.0.0",
+  "variant_id": "patience48-reserve-starter-kit",
+  "description": "patience48 plus reserve-starter-kit: side builds that would dip below the unbuilt goal starters' kit x0.05. eval-c4-20261108 stalls at C2 spent the logistic chests and roboports that later stone/brick lines needed.",
+  "settings": {"stall_decisions": 48},
+  "catalog_patch": {
+    "mission.protect-goal-stock": {"prefer": [{"when": {"starves_goal": true}, "weight": 0.05},
+                                               {"when": {"dips_goal_reserve": true}, "weight": 0.05}]}
+  }
+}
