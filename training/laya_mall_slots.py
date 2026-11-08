@@ -16,8 +16,10 @@ the others rotate to whatever is short.  Laya's cells are the same idea:
   works with no spare assemblers; that is what breaks the assembler deadlock
   (each new cell needs an assembler, including the cell that makes them).
 
-Which cell to retarget, and when, is the policy's choice; the facts each
-option carries (``slot``) are what the doc rules condition on.
+Since 2026-11-08 (user: "All slotting should be automated, decisions should only be on what to make and in
+what quantity") the runner uses ``manage``: a deterministic slot manager with the mall's machines at its
+disposal, maximizing output and working occupancy, priority from the bottleneck chains and their
+precursors. Laya no longer gets retarget options; ``sync``/``retarget_candidates`` remain for their tests.
 """
 
 from __future__ import annotations
@@ -29,7 +31,7 @@ from pathlib import Path
 
 from orchestrator.laya_operations import sha256_hash
 from planners.stock_gating import stock_gate
-from training.laya_factory_status import missing_input
+from training.laya_factory_status import bottleneck_chain, machine_rate, missing_input
 from training.laya_receipts import receipts
 
 ASSEMBLERS = ("assembling-machine-1", "assembling-machine-2", "assembling-machine-3")
@@ -272,3 +274,133 @@ def execute_retarget(adapter, candidate: Mapping, measure_ticks: int) -> dict:
     receipt.update(status="observed", after=after, measurement=measured_outcome(before, after))
     path.write_text(json.dumps(receipt, indent=2) + "\n")
     return receipt
+
+
+MAX_PER_ITEM = 4  # Cells the manager adds to one item per pass; the next pass sees the new measured rate.
+
+
+def _side(cell: Mapping) -> str:
+    """W/E cells sit level with their requester (short, upgradable inserters); N/S use long-handed ones."""
+    return "horizontal" if cell["position"]["y"] == cell["requester"]["y"] else "vertical"
+
+
+def demand_order(board: Mapping, stock_demand: Mapping, recipes: Mapping, have: set[str]) -> list[str]:
+    """Unmet items a mall cell can make now, highest priority first.
+
+    Bottleneck chains first, deepest link first (a precursor before what it feeds), then every other unmet
+    board item deepest first, then construction shortfalls.
+    """
+    order = [link.split(":")[0] for chain in bottleneck_chain(board) for link in reversed(chain.split(" <- "))]
+    order += [n["item"] for n in sorted((n for n in board["needs"] if n["condition"] != "satisfied"),
+                                        key=lambda n: (-n["depth"], n["item"]))]
+    order += sorted(stock_demand)
+    result: list[str] = []
+    for item in order:
+        if item not in result and craftable(recipes, item) and missing_input(item, recipes, have) is None:
+            result.append(item)
+    return result
+
+
+def assign(cells: list[dict], order: list[str], board: Mapping, recipes: Mapping, have: set[str], tick: int,
+           recent: Mapping[tuple, str] = {}) -> list[tuple[dict, str]]:
+    """(cell, item) switches that put free cells on the most urgent unmet items.
+
+    A cell is free when idle (gated, output full, no recipe), making something nothing demands, or making
+    something it cannot make now. A cell switched within RECENT_TICKS keeps its recipe unless idle or
+    impossible, so slots do not thrash (a recipe change discards loaded ingredients). Each item gets cells for
+    its unmet rate, ceil(gap / per-machine rate), less cells already making it or just switched to it.
+    """
+    needs = {n["item"]: n for n in board["needs"]}
+
+    def is_free(cell: Mapping) -> bool:
+        product = cell["product"]
+        if not product or cell["status"] in IDLE_STATUSES or missing_input(product, recipes, have) is not None:
+            return True
+        since = cell.get("retargeted_tick")
+        settled = since is None or tick - since >= RECENT_TICKS
+        # A working cell on any board item (met or not) is serving demand; only off-board work is given away.
+        return product not in needs and product not in order and settled
+
+    free = [c for c in cells if is_free(c)]
+    making = {item: sum(1 for c in cells if c["product"] == item and not is_free(c)) for item in order}
+    moves = []
+    for rank, item in enumerate(order):
+        if not free:
+            break
+        need = needs.get(item) or {}
+        recipe = recipes.get(item) or {}
+        rate = (machine_rate(free[0]["entity"], item, recipe) or 0.0) if recipe.get("energy_ticks") else 0.0
+        gap = need.get("gap_per_s") if need.get("gap_per_s") is not None else need.get("required_per_s") or 0.0
+        pending = sum(1 for product in recent.values() if product == item)  # Switched, not measured yet.
+        if gap and rate:  # Cells for the unmet rate; working cells are already in the measured rate.
+            wanted = min(MAX_PER_ITEM, math.ceil(gap / rate - 1e-9)) - pending
+        else:  # A stock or unrated item: one working cell.
+            wanted = 1 - making.get(item, 0)
+        # A free cell already set to the item keeps it (its gate lifts below): no switch, nothing discarded.
+        for cell in [c for c in free if c["product"] == item][:max(0, wanted)]:
+            free.remove(cell)
+            wanted -= 1
+        # The most urgent third prefers W/E cells (fast inserters fit), the rest leave them free.
+        fast_first = rank < max(1, len(order) // 3)
+        free.sort(key=lambda c: (_side(c) != "horizontal") if fast_first else (_side(c) == "horizontal"))
+        for _ in range(max(0, wanted)):
+            pick = next((c for c in free if c["product"] != item), None)
+            if pick is None:
+                break
+            free.remove(pick)
+            moves.append((pick, item))
+    return moves
+
+
+def manage(adapter, facts: Mapping, board: Mapping, stock_demand: Mapping[str, float], applied: dict,
+           emit=lambda _: None, *, gate_scale: float = 1.0, buildable_multiplier: int = BUILDABLE_MULTIPLIER) -> list[dict]:
+    """Gates in line with the phase, then every free cell switched to the most urgent item, in one configure.
+
+    Each switch leaves a retarget receipt (authority ``slot_manager``) so slot ages and built counts read the
+    same evidence as before. Returns the switches made.
+    """
+    import uuid
+    from training.laya_layout_stream import atomic_json
+    cells = mall_cells(adapter.root, facts)
+    recipes = facts.get("recipes") or {}
+    from training.laya_factory_status import available_items
+    have = available_items(facts, board)
+    order = demand_order(board, stock_demand, recipes, have)
+    # Demanded items run ungated; everything else stops at its stock target.
+    goal_items = {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
+    ungated = goal_items | set(stock_demand) | set(order)
+    tick = int(facts.get("tick") or 0)
+    recent = {(c["position"]["x"], c["position"]["y"]): c["product"] for c in cells
+              if c.get("retargeted_tick") is not None and tick - c["retargeted_tick"] < RECENT_TICKS}
+    moves = assign(cells, order, board, recipes, have, tick, recent)
+    switched = {(c["position"]["x"], c["position"]["y"]) for c, _ in moves}
+    actions = [a for a in gate_updates(cells, ungated, applied, gate_scale)
+               if (a["position"]["x"], a["position"]["y"]) not in switched]
+    plans = [(cell, item, retarget_plan(cell, item, recipes, gated=item not in ungated, gate_scale=gate_scale,
+                                        buildable_multiplier=buildable_multiplier)) for cell, item in moves]
+    actions += [a for _, _, plan in plans for a in plan["phases"][0]["actions"]]
+    if not actions:
+        return []
+    report = adapter.configure(actions)  # Raises on bridge errors: nothing is recorded, the next pass retries.
+    failed = report.get("failed_entities", 0) + report.get("failed_placements", 0)
+    if not report.get("ok") or failed:
+        emit(f"SLOT MANAGER: {len(actions)} configure action(s) failed ({failed}); nothing recorded")
+        return []
+    for action in actions:
+        if action["entity"] in ASSEMBLERS:
+            applied[(action["position"]["x"], action["position"]["y"])] = (
+                action["recipe"], "logistic_condition" in action, (action.get("logistic_condition") or {}).get("constant"))
+    made = []
+    for cell, item, plan in plans:
+        record = {"family": "retarget", "authority": "slot_manager", "product": item, "plan": plan,
+                  "network": cell["network"], "network_anchor": cell["network_anchor"],
+                  "slot": {"from": cell["product"], "side": _side(cell)},
+                  "summary": f"Slot manager: {cell['product'] or 'idle'} slot at ({cell['position']['x']:g},"
+                             f"{cell['position']['y']:g}) -> {item}"}
+        atomic_json(adapter.root / "evidence" / f"transaction-{uuid.uuid4().hex}.json",
+                    {"candidate": record, "status": "applied", "before": {"tick": tick}, "configuration": report})
+        made.append({"from": cell["product"], "to": item, "position": dict(cell["position"]), "side": _side(cell)})
+    if made:
+        emit("SLOT MANAGER: " + ", ".join(f"{m['from'] or 'idle'}->{m['to']}@({m['position']['x']:g},{m['position']['y']:g})"
+                                         for m in made))
+    return made

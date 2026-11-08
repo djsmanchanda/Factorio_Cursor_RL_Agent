@@ -1303,10 +1303,15 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                 _draw_zones(adapter, site_plan, emit)
                 summary["decisions"] += 1
                 continue
-            retargets = (mall_slots.sync(adapter, facts, board, stock_demand, gates, emit,
-                                        gate_scale=settings.mall_gate_scale,buildable_multiplier=settings.mall_buildable_multiplier,
-                                        pending_units=pending_units)
-                         if settings.mall_slots and hasattr(adapter, "configure") else [])
+            # Slotting is automated (user, 2026-11-08): the slot manager switches mall cells to the most urgent
+            # items before Laya decides; Laya gets no retarget options.
+            slot_moves = (mall_slots.manage(adapter, facts, board, stock_demand, gates, emit,
+                                            gate_scale=settings.mall_gate_scale,
+                                            buildable_multiplier=settings.mall_buildable_multiplier)
+                          if settings.mall_slots and hasattr(adapter, "configure") else [])
+            if slot_moves:
+                record["slot_manager"] = slot_moves
+            retargets: list = []
             lap("board_and_slots")
             last_query: dict = {}
 

@@ -202,3 +202,57 @@ def test_no_retarget_to_an_item_whose_inputs_nothing_can_make(tmp_path):
     cell_receipt(tmp_path, "a", 2.5, "iron-gear-wheel")
     facts = {**world((2.5, "iron-gear-wheel", "working")), "recipes": recipes}
     assert retarget_candidates(facts, mall_cells(tmp_path, facts), {"passive-provider-chest"}, {}, set()) == []
+
+
+def need(item, condition, depth, gap=None, required=0.5, short=()):
+    return {"item": item, "condition": condition, "depth": depth, "gap_per_s": gap, "required_per_s": required,
+            "goal_required_per_s": 0.0, "short_inputs": list(short)}
+
+
+def manager_board():
+    # Drills (goal) are starved of circuits, circuits of cable: the chain's deepest link comes first.
+    return {"targets": {"electric-mining-drill": 0.1}, "needs": [
+        need("electric-mining-drill", "unbuilt", 0, short=["electronic-circuit"]),
+        need("electronic-circuit", "unbuilt", 1, short=["copper-cable"]),
+        need("copper-cable", "unbuilt", 2),
+        need("iron-gear-wheel", "satisfied", 1)]}
+
+
+def test_demand_order_puts_precursors_first_and_drops_what_cannot_be_made_now():
+    from training.laya_mall_slots import demand_order
+    have = {"iron-plate", "copper-plate"}
+    order = demand_order(manager_board(), {"plastic-bar": 0.01}, RECIPES, have)
+    assert order == ["copper-cable", "electronic-circuit", "electric-mining-drill"]  # plastic-bar takes fluids
+
+
+def test_free_cells_go_to_urgent_items_working_board_cells_and_recent_switches_stay():
+    from training.laya_mall_slots import assign
+    def cell(x, product, status, side="horizontal", since=None):
+        return {"entity": "assembling-machine-1", "position": {"x": x, "y": 0.5},
+                "requester": {"x": x - 3, "y": 0.5 if side == "horizontal" else 5.5},
+                "product": product, "status": status, "retargeted_tick": since}
+    cells = [cell(1, "iron-gear-wheel", "working"),                      # meets a board need: kept
+             cell(2, "iron-stick", "disabled_by_control_behavior"),      # gated (stocked): free
+             cell(3, "passive-provider-chest", "item_ingredient_shortage", "vertical"),  # impossible now: free
+             cell(4, "splitter", "working", since=9_000),                # off-board but switched recently: kept
+             cell(5, None, "no_recipe", "vertical")]
+    recipes = {**RECIPES, "passive-provider-chest": {"ingredients": [{"name": "advanced-circuit", "amount": 1}],
+                                                     "product_amount": 1}}
+    order = ["copper-cable", "electronic-circuit", "electric-mining-drill"]
+    moves = assign(cells, order, manager_board(), recipes, {"iron-plate", "copper-plate"}, tick=10_000)
+    assert [(c["position"]["x"], item) for c, item in moves] == [(2, "copper-cable"), (3, "electronic-circuit"),
+                                                                 (5, "electric-mining-drill")]
+
+
+def test_manage_switches_in_one_configure_and_leaves_receipts_slot_ages_read(tmp_path):
+    from training.laya_mall_slots import manage
+    cell_receipt(tmp_path, "a", 3.5, "iron-stick")
+    calls = []
+    adapter = type("A", (), {"root": tmp_path, "configure": lambda self, acts: calls.append(acts) or {"ok": True}})()
+    facts = {"tick": 500, "recipes": RECIPES, "networks": {"1": {"items": {"iron-plate": 50, "copper-plate": 50}}},
+             "machines": [{"name": "assembling-machine-1", "position": {"x": 3.5, "y": 0.5}, "recipe": "iron-stick",
+                           "status": "disabled_by_control_behavior"}]}
+    made = manage(adapter, facts, manager_board(), {}, {})
+    assert [m["to"] for m in made] == ["copper-cable"] and len(calls) == 1
+    [cell] = mall_cells(tmp_path, {**facts, "machines": [{**facts["machines"][0], "recipe": "copper-cable", "status": "working"}]})
+    assert cell["product"] == "copper-cable" and cell["retargeted_tick"] == 500
