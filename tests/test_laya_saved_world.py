@@ -1083,3 +1083,17 @@ assert(math.abs(field.yield_percent-350)<1e-9 and math.abs(field.max_crude_per_s
 assert(field.water.found and field.water.position.x==30.5 and math.abs(field.water.distance-water_distance)<1e-9)
 assert(not created)
 """)
+
+
+def test_recorded_runtime_root_is_passed_on_every_lifecycle_call(tmp_path, monkeypatch):
+    from tools import run_laya_saved_world
+    calls = []
+    monkeypatch.setattr(run_laya_saved_world.subprocess, "run",
+                        lambda cmd, **_: calls.append(cmd) or type("R", (), {"stdout": ""})())
+    manifest = {"game_port": 1, "rcon_port": 2}
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest))
+    run_laya_saved_world.manager(tmp_path, "stop")
+    (tmp_path / "manifest.json").write_text(json.dumps({**manifest, "runtime_root": "/rt/factorio-2.1.24"}))
+    run_laya_saved_world.manager(tmp_path, "start", ["--nice", "5"])
+    assert "--runtime-root" not in calls[0]
+    assert calls[1][-4:] == ["--runtime-root", "/rt/factorio-2.1.24", "--nice", "5"]

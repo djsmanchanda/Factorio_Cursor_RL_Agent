@@ -27,7 +27,8 @@ def manager(root, action, extra=()):
         "bash", str(root / "frozen/scripts/manage_linux_deterministic_server.sh"), action,
         "--root", str(root / "server"), "--fleet-mode", "--bootstrap-profile", "supplied-v1",
         "--game-port", str(manifest["game_port"]), "--rcon-port", str(manifest["rcon_port"]),
-        "--source-save", str(root / "baseline.zip"), *extra,
+        "--source-save", str(root / "baseline.zip"),
+        *(["--runtime-root", manifest["runtime_root"]] if manifest.get("runtime_root") else []), *extra,
     ], check=True, capture_output=True, text=True).stdout.strip()
 
 
@@ -62,7 +63,17 @@ def prepare(args):
     shutil.copy2(ROOT / "scripts/manage_linux_deterministic_server.sh", frozen / "scripts")
     for name, folder in [("factorio_cursor_rl_agent", "factorio_mod"), ("factorio_training_lab", "factorio_training_lab")]:
         shutil.copytree(args.mods_source / name, frozen / folder)
-    manifest = {"version": PROFILE, "runtime": runtime, "production_authority": False,
+    # Engine: explicit, recorded, and replayed on every lifecycle call, so a GUI client can match it (same version
+    # and mods are required to join) and runs on different engines are never mistaken for matched evidence.
+    engine = {}
+    runtime_root = getattr(args, "runtime_root", None)
+    if runtime_root is not None:
+        binary = runtime_root.resolve() / "bin/x64/factorio"
+        if not binary.is_file():
+            raise SavedWorldError(f"no Factorio executable under {runtime_root}")
+        engine = {"runtime_root": str(runtime_root.resolve()), "factorio_version": subprocess.run(
+            [str(binary), "--version"], check=True, capture_output=True, text=True).stdout.splitlines()[0]}
+    manifest = {"version": PROFILE, "runtime": runtime, "production_authority": False, **engine,
                 "comparison_eligible": False, "source_save": str(source), "source_sha256": file_hash(source),
                 "game_port": args.game_port, "rcon_port": args.rcon_port, "mod_hashes": {},
                 "runtime_settings": {"factorio_update_threads": update_threads,
@@ -124,6 +135,7 @@ def parser():
     p.add_argument("--update-threads", type=int, help="Factorio update-runner threads for this world (1..64)")
     p.add_argument("--cpu-affinity", help="taskset CPU list for this world (for example 0-3,8)")
     p.add_argument("--nice", type=int, default=0, help="Lower this server's CPU priority by 0..19")
+    p.add_argument("--runtime-root", type=Path, help="Factorio runtime for this world (default: the server manager's)")
     return p
 
 
