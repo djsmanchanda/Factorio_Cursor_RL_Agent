@@ -29,6 +29,7 @@ from pathlib import Path
 
 from orchestrator.laya_operations import sha256_hash
 from planners.stock_gating import stock_gate
+from training.laya_factory_status import missing_input
 from training.laya_receipts import receipts
 
 ASSEMBLERS = ("assembling-machine-1", "assembling-machine-2", "assembling-machine-3")
@@ -168,7 +169,8 @@ def retarget_candidates(facts: Mapping, cells: list[dict], items: Iterable[str],
     """One option per (cell, needed item) the cell does not already make."""
     recipes = facts.get("recipes") or {}
     candidates = []
-    for item in sorted(i for i in set(items) if craftable(recipes, i) and obtainable(recipes, i, stock)):
+    have = {name for name, count in stock.items() if count > 0}
+    for item in sorted(i for i in set(items) if craftable(recipes, i) and missing_input(i, recipes, have) is None):
         for cell in cells:
             if cell["product"] == item:
                 continue

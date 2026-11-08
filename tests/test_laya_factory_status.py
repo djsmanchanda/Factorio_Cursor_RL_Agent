@@ -220,3 +220,19 @@ def test_without_fluid_facts_plastic_stays_unavailable_and_solid_boards_are_unch
     assert next(n for n in compile_status(world([]), {"plastic-bar": 0.5})["needs"])["condition"] == "recipe_unavailable"
     solid = compile_status(world([]), {"electronic-circuit": 1.0})
     assert compile_status({**world([]), "fluid_recipes": FLUID_RECIPES}, {"electronic-circuit": 1.0}) == solid
+
+
+CHEST_CHAIN = {"passive-provider-chest": recipe([("steel-chest", 1), ("electronic-circuit", 3), ("advanced-circuit", 1)], 30),
+               "steel-chest": recipe([("steel-plate", 8)], 30),
+               "advanced-circuit": recipe([("plastic-bar", 2), ("electronic-circuit", 2), ("copper-cable", 4)], 360),
+               "electronic-circuit": recipe([("iron-plate", 1), ("copper-cable", 3)], 30),
+               "copper-cable": recipe([("copper-plate", 1)], 30, 2)}
+
+
+def test_kit_chests_in_stock_are_no_route_to_more_chests_until_plastic_exists():
+    """User 2026-11-08: before plastic, no chests may be ordered or slotted; the item's own stock never counts."""
+    from training.laya_factory_status import missing_input
+    have = {"passive-provider-chest", "steel-plate", "iron-plate", "copper-plate"}
+    assert missing_input("passive-provider-chest", CHEST_CHAIN, have) == "plastic-bar"
+    assert missing_input("passive-provider-chest", CHEST_CHAIN, have | {"plastic-bar"}) is None
+    assert missing_input("electronic-circuit", CHEST_CHAIN, set()) == "iron-plate"  # A plate not on hand blocks too.

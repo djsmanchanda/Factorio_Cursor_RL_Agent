@@ -604,3 +604,19 @@ def test_the_last_kit_chest_is_kept_for_the_plastic_cell(chests, kept):
         or any("reserved:plastic_cell:passive-provider-chest" in r for r in menu["blocked"].values())
     assert reserved is kept
     assert all(o["family"] == "wait" for o in menu["options"]) is kept
+
+
+def test_a_chest_shortfall_before_plastic_is_a_blocked_fact_not_a_stock_need():
+    f = facts()
+    f["recipes"].update({
+        "passive-provider-chest": recipe([("steel-chest", 1), ("electronic-circuit", 3), ("advanced-circuit", 1)], 30),
+        "advanced-circuit": recipe([("plastic-bar", 2), ("electronic-circuit", 2)], 360)})
+
+    def validate(candidates):
+        return {c["option_id"]: {"reason": "item_shortfall:passive-provider-chest", "bill": {}} for c in candidates}
+
+    menu = compile_menu(f, compile_status(f, phase("C1")["targets"]), validate, seed=1)
+    assert "passive-provider-chest" not in menu["shortfalls"]
+    assert menu["unit_shortfalls"].get("passive-provider-chest")  # Still visible as a fact.
+    assert [r.split(":")[0] for r in menu["blocked"]["stock:passive-provider-chest"]] == ["unobtainable"]
+    assert not any(o.get("product") == "passive-provider-chest" for o in menu["options"])

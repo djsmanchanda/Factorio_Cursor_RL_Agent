@@ -37,7 +37,8 @@ from core.local_time import local_stamp
 from orchestrator.laya_operations import sha256_hash
 from orchestrator.laya_state import validate_state
 from planners.plan_validation import actions, validate_build_plan
-from training.laya_factory_status import apply_to_state, compact_status, compile_status, makeable
+from training.laya_factory_status import (apply_to_state, available_items, compact_status, compile_status,
+                                          missing_input)
 from training.laya_mission import MISSION_ID, current_phase, phase_reached
 from training.laya_guided_policy import load_preferences, matches, option_features
 from training.laya_power import POLES, power_variants, world_obstacles
@@ -484,6 +485,23 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     power_facts = {**facts, "layout_obstacles": [*(facts.get("layout_obstacles") or ()), *placed]}
     pre_rejected: dict[str, Counter] = defaultdict(Counter)
     land_examples: dict[str, list] = defaultdict(list)
+    # Hard legality (user, 2026-11-08): nothing is offered whose inputs cannot be had now. Before plastic,
+    # logistic chests need advanced circuits no recipe can make, so no chest slot or chest order exists.
+    have = available_items(facts, board)
+    recipes = facts.get("recipes") or {}
+
+    def unobtainable(item: str) -> str | None:
+        """The input that blocks a known recipe now; items without a known recipe keep their old handling."""
+        return missing_input(item, recipes, have) if item in recipes else None
+
+    kept = []
+    for candidate in proposed:
+        blocker = unobtainable(candidate["product"]) if candidate["family"] == "assemble" and candidate.get("product") else None
+        if blocker:
+            pre_rejected[f"item:{candidate['product']}"][f"unobtainable:{blocker}"] += 1
+        else:
+            kept.append(candidate)
+    proposed = kept
 
     def on_free_land(candidates: list[dict], key_of: Callable[[dict], str]) -> list[dict]:
         """Land check on the build itself before sampling (the generator's relays are replaced later)."""
@@ -663,7 +681,7 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     # keep what the plastic cell needs (its output passive-provider chest) for the oil family. Live
     # 2026-11-08 smokes: mall slots took all 16 kit chests and the cell stalled item_shortfall on that chest.
     plastic_reserve = ({PLASTIC_CELL_CHEST: PLASTIC_CELL_CHESTS}
-                       if not makeable(PLASTIC_CELL_CHEST, facts.get("recipes") or {}) else {})
+                       if missing_input(PLASTIC_CELL_CHEST, recipes, have) else {})
     def check(groups):
         expanded = {}
         for need in sorted(groups):
@@ -723,12 +741,18 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
         external_shortfalls[item] = max(int(external_shortfalls.get(item, 0)), int(lacking))
     for item, lacking in external_shortfalls.items():
         unit_shortfalls[item] = max(unit_shortfalls.get(item, 0), int(lacking))
-        if not makeable(item, facts.get("recipes") or {}):
+        if item not in recipes or unobtainable(item):
             continue  # Visible as a shortfall, but no stock need: nothing enabled can make it yet.
         shortfalls[item] += 1
         pending_units[item] = max(pending_units.get(item, 0), _available(facts, {}, item) + int(lacking))
     for need, option in admitted_external:  # Only with the external_check capability: verified, selectable options.
         legal.setdefault(need, []).append(option)
+    # Short items that cannot be made now stay visible (unit_shortfalls, blocked) but are no stock need.
+    for item in sorted(shortfalls):
+        blocker = unobtainable(item)
+        if blocker:
+            del shortfalls[item]
+            pre_rejected[f"stock:{item}"][f"unobtainable:{blocker}"] += 1
     stock_groups: dict[str, list] = defaultdict(list)
     stock = [c for c in [*(_compile(facts, set(shortfalls), seed, request_multiplier) if shortfalls else ()),
                          *mall_cell_candidates(facts, site_plan, set(shortfalls), obstacles=obstacles)]
@@ -801,7 +825,7 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     # Roboports the oil route still needs while none can be made (live 2026-11-08 smoke s1: the kit's
     # roboports went to coverage and the outpost stalled item_shortfall:roboport). A fact, not a rule.
     outpost_ports = int(((oil_offer or {}).get("facts") or {}).get("roboports_to_outpost") or 0)
-    if outpost_ports and not makeable("roboport", facts.get("recipes") or {}):
+    if outpost_ports and missing_input("roboport", recipes, have):
         goal_reserve["roboport"] = goal_reserve.get("roboport", 0) + outpost_ports
     return {"needs": needs, "options": options, "proposed": len(proposed) + len(external_results), "blocked": blocked,
             "blocked_alternatives": blocked_alternatives,

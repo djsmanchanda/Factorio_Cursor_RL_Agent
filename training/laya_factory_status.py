@@ -155,6 +155,35 @@ def makeable(item: str, recipes: Mapping[str, Mapping], _path: tuple[str, ...] =
     return all(makeable(part["name"], recipes, _path + (item,)) for part in recipe["ingredients"])
 
 
+def missing_input(item: str, recipes: Mapping[str, Mapping], available: set[str] | frozenset,
+                  _path: tuple[str, ...] = ()) -> str | None:
+    """The first input that keeps ``item`` from being made *now*, or ``None`` when it can be.
+
+    An input counts when it is raw, ``available`` (network stock or measured production) or itself
+    makeable now. The item's own stock never counts: making more needs its inputs. Before plastic,
+    the starter kit's logistic chests are no route to more chests (user, 2026-11-08: "it has to work
+    within the constraints at that point in time"); once plastic is produced, they become makeable.
+    """
+    recipe = recipes.get(item)
+    if recipe is None or item in _path:
+        return item
+    for part in recipe["ingredients"]:
+        name = part["name"]
+        if name in RAW or name in available:
+            continue
+        missing = missing_input(name, recipes, available, _path + (item,))
+        if missing:
+            return missing
+    return None
+
+
+def available_items(facts: Mapping, board: Mapping | None = None) -> set[str]:
+    """Items on hand now: positive network stock or a measured production rate on the board."""
+    have = {name for network in (facts.get("networks") or {}).values()
+            for name, count in (network.get("items") or {}).items() if count and count > 0}
+    return have | {row["item"] for row in ((board or {}).get("needs") or ()) if (row.get("measured") or 0) > 0}
+
+
 def machine_rate(machine: str, item: str, recipe: Mapping | None) -> float | None:
     """Theoretical items/s of one machine on ``item``; ``None`` when unknown."""
     if recipe is None:
