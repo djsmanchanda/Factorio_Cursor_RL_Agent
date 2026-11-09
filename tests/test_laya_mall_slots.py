@@ -256,3 +256,23 @@ def test_manage_switches_in_one_configure_and_leaves_receipts_slot_ages_read(tmp
     assert [m["to"] for m in made] == ["copper-cable"] and len(calls) == 1
     [cell] = mall_cells(tmp_path, {**facts, "machines": [{**facts["machines"][0], "recipe": "copper-cable", "status": "working"}]})
     assert cell["product"] == "copper-cable" and cell["retargeted_tick"] == 500
+
+
+def test_build_blocking_shortfall_takes_the_stocked_goal_cell_precursor_first():
+    """eval-fixes-20261108: every seed's only cell stayed on goal copper cable (4,262 stocked) while builds
+    were short of medium poles, so nothing could be built - not even a cell to make poles."""
+    from training.laya_mall_slots import assign, demand_order
+    recipes = {**RECIPES, "iron-stick": {"ingredients": [{"name": "iron-plate", "amount": 1}], "product_amount": 2},
+               "medium-electric-pole": {"ingredients": [{"name": "iron-stick", "amount": 4},
+                                                        {"name": "copper-plate", "amount": 2}], "product_amount": 1}}
+    board = {"targets": {"copper-cable": 0.56}, "needs": [need("copper-cable", "satisfied", 0, required=0.56)]}
+    stock = {"copper-cable": 4262, "iron-plate": 2354, "copper-plate": 900}
+    have = set(stock)
+    order = demand_order(board, {"medium-electric-pole": 0.01}, recipes, have, stock)
+    assert order[:2] == ["iron-stick", "medium-electric-pole"]
+    cable = {"entity": "assembling-machine-1", "position": {"x": -9.5, "y": -20.5}, "requester": {"x": -12.5, "y": -20.5},
+             "product": "copper-cable", "status": "item_ingredient_shortage", "retargeted_tick": None}
+    assert [(c["product"], item) for c, item in assign([cable], order, board, recipes, have, 10_000, stock=stock)] \
+        == [("copper-cable", "iron-stick")]
+    # Unstocked, the goal cell keeps its job.
+    assert assign([cable], order, board, recipes, have, 10_000, stock={**stock, "copper-cable": 10}) == []

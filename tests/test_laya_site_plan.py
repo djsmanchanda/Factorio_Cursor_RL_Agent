@@ -180,3 +180,20 @@ def test_mall_block_modules_sit_on_one_lattice_and_fill_left_right_first():
     plan = {"zones": [{"purpose": "mall", "rect": zone}]}
     [first] = mall_cell_candidates(facts, plan, {"iron-gear-wheel"})
     assert first["summary"].split()[1] in ("west", "east")
+
+
+def test_a_built_slot_shares_its_hub_with_the_next_slot_of_the_module():
+    """eval-fixes-20261108: a second slot repeats the module's requester exactly; counting that as a collision
+    froze every mall at one machine once the generator's off-lattice sites were gone."""
+    from training.laya_mall_block import mall_cell_candidates
+    zone = [-29.0, 14.0, 11.0, 54.0]
+    ports = [{"position": {"x": 3, "y": -1}, "energy": 1, "network": "1", "logistic_radius": 25, "construction_radius": 55}]
+    facts = {"ports": ports, "machines": [], "recipes": {"iron-gear-wheel": {
+        "ingredients": [{"name": "iron-plate", "amount": 2}], "product_amount": 1, "energy_ticks": 30}}}
+    plan = {"zones": [{"purpose": "mall", "rect": zone}]}
+    [first] = mall_cell_candidates(facts, plan, {"iron-gear-wheel"})
+    placed = [{"entity": a["entity"], "position": a["position"], "submitted": True}
+              for a in first["plan"]["phases"][0]["actions"]]
+    [second] = mall_cell_candidates(facts, plan, {"iron-gear-wheel"}, obstacles=placed)
+    centre = lambda c: c["summary"].split("(")[1].split(")")[0]
+    assert centre(second) == centre(first) and second["summary"].split()[1] != first["summary"].split()[1]

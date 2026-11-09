@@ -81,22 +81,35 @@ def mall_cell_candidates(facts: Mapping, plan: Mapping | None, products: set[str
         dx, dy = QUAD_MALL_MACHINE_OFFSETS[side]
         return (centre[0] + dx, centre[1] + dy) in taken
 
-    def covered(centre, side):
-        """Inside a powered port's logistic area and clear of non-machine obstacles (product-independent)."""
-        dx, dy = QUAD_MALL_MACHINE_OFFSETS[side]
-        spots = [(centre[0] + dx, centre[1] + dy), centre, (centre[0], centre[1] - 1), (centre[0], centre[1] + 1)]
-        return any(all(max(abs(x - p["position"]["x"]), abs(y - p["position"]["y"])) <= p["logistic_radius"] - 1
-                       for x, y in spots) for p in ports)
+    def reach(placements):
+        return next((p for p in ports if all(
+            max(abs(a["position"]["x"] - p["position"]["x"]), abs(a["position"]["y"] - p["position"]["y"]))
+            <= p["logistic_radius"] - 1 for a in placements)), None)
 
-    # One slot, the first free one in priority order: Laya chooses what to make, not where (user, 2026-11-08).
+    def clear(placements):
+        """Clear of everything but machines and the module's own shared hub: a slot repeats its module's
+        requester/provider exactly (each slot owns a request section), which is not a collision."""
+        own = {(a["entity"], a["position"]["x"], a["position"]["y"]) for a in placements}
+        return clear_of([a for a in placements if not a["entity"].startswith("assembling")],
+                        [o for o in obstacles if not o["entity"].startswith("assembling")
+                         and (o["entity"], o["position"]["x"], o["position"]["y"]) not in own])
+
+    def placeable(placements):
+        return reach(placements) is not None and clear(placements)
+
+    # One slot: the first in priority order whose placement is in reach and clear - Laya chooses what to make,
+    # not where (user, 2026-11-08). Slot geometry is the same for every product, so one reference product checks it
+    # (eval-fixes-20261108: the first slot was blocked and, checked by coverage only, froze mall growth).
+    makeable = sorted(p for p in products if p in recipes and p not in FURNACE_PRODUCTS)
     free = []
-    for centre, side in (slot for zone in zones for slot in fill_order(zone, ports)):
-        if built(centre, side) or not covered(centre, side):
+    for centre, side in (slot for zone in zones for slot in fill_order(zone, ports)) if makeable else ():
+        if built(centre, side):
             continue
         if side in VERTICAL and not any(built(centre, s) for s in HORIZONTAL):
             continue  # Top/bottom only on a module whose left/right is started.
-        free = [(centre, side)]
-        break
+        if placeable(generate_quad_slot(makeable[0], recipes[makeable[0]], centre, side)):
+            free = [(centre, side)]
+            break
     candidates = []
     for product in sorted(p for p in products if p in recipes and p not in FURNACE_PRODUCTS):
         for centre, side in free:
@@ -104,8 +117,7 @@ def mall_cell_candidates(facts: Mapping, plan: Mapping | None, products: set[str
             port = next((p for p in ports if all(
                 max(abs(a["position"]["x"] - p["position"]["x"]), abs(a["position"]["y"] - p["position"]["y"]))
                 <= p["logistic_radius"] - 1 for a in placements)), None)
-            if port is None or not clear_of([a for a in placements if not a["entity"].startswith("assembling")],
-                                            [o for o in obstacles if not o["entity"].startswith("assembling")]):
+            if port is None or not clear(placements):
                 continue
             plan_ = {"surface": "nauvis", "force": "player", "atomic": True,
                      "phases": [{"name": f"saved-world-assemble-{product}", "actions": placements}]}
