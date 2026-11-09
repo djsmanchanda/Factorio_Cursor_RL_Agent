@@ -656,8 +656,11 @@ def add_cable_capacity_option(menu: dict, board: Mapping, phase: Mapping, facts:
 
 
 def add_c6_consumer_options(menu: dict, phase: Mapping, facts: Mapping) -> dict:
-    """Offer the permanent consumer service while the C6 advanced-circuit goal is active."""
-    if phase.get("phase_id") not in {"C6", "S1"}:
+    """Offer the permanent consumer service while the advanced-circuit goal is active."""
+    # C82: the PM cell was first chosen around 3,500 s in C6 with AC
+    # output_blocked, too late to fund. Offer it from C5 as well so the cell
+    # can be built while the base still has construction slack.
+    if phase.get("phase_id") not in {"C5", "C6", "S1"}:
         return menu
     catalog = facts.get("recipe_observations")
     recipe = catalog.get("productivity-module") if isinstance(catalog, Mapping) else None
