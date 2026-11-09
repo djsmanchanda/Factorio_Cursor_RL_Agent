@@ -1,0 +1,8 @@
+{
+  "version": "1.0.0",
+  "variant_id": "solid-fluid-filter-v1",
+  "description": "Remove fluid shortages from the solid batch menu before its cap.",
+  "settings": {
+    "ops_solid_fluid_filter": true
+  }
+}

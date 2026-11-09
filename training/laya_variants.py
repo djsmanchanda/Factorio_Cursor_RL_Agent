@@ -50,6 +50,9 @@ def load_variant(path: Path | str | None) -> dict:
     fields = {f.name for f in dataclasses.fields(Settings)}
     if set(variant.get("settings", {})) - fields:
         raise VariantError(f"unknown settings {sorted(set(variant['settings']) - fields)}")
+    for name, value in variant.get("settings", {}).items():
+        if name.startswith("ops_") and type(value) is not bool:
+            raise VariantError(f"{name} must be a boolean")
     return variant
 
 

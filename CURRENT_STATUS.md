@@ -795,3 +795,37 @@ Host available12.369GiB, heartbeat8.76s/gate26.11s; five fixed status hashes and
   - The Kev FP32 loader fix is committed locally (`9d02bfd`, branch `work/miniship/laya-model-successor-20261027`) and is unqualified.
   - Open lead: C39's integrated-main C2 collapse (13/60 against 53/60).
   - Lifecycle: no new units. The window-end timer stays armed. No push.
+## [2026-10-21 02:38 IST] Smaller fast scaffolding test with retained full composition coverage
+- What: Fast payload check uses a real four-roboport backbone; all original assertions still run against the complete electronics bundle in the slow composition family. Production code unchanged.
+- Evidence: 24 infrastructure/taxonomy tests pass, including complete bundle checks. Fast gate 38.69 s; exit 1; failures: test_current_repository_obeys_import_firewall. Starship measured the isolated check at 7.84 s -> 0.30 s and retained exactly the same 959 fast test IDs.
+- Lifecycle: Future test invocations only; active frozen campaigns unchanged.
+
+2026-10-28 15:21 IST — Added maintained docs/rl/Laya_Cohort_Results_Index.md: C1–C43 and retry/no-start records, earlier October campaigns, model trials and separately dated C44–C46 pending status; linked from the RL README. DS41F OC Go draft parent-reviewed against ledgers, selected source reports and three Terra reviews. Documentation coverage/table/source checks pass (49 resolved references); isolated baseline fast gate: 1,122 passed, one skipped, one existing import-firewall failure (laya_ops -> autonomous_builder/stage_services), with no Python changes. Lifecycle: none; active campaigns, saves, mods and policies unchanged; no push.
+
+
+2026-10-28 16:02 IST — Added independent opt-in consumer menu, solid fluid filtering, committed-owner bill facts and shared permanent-production operations; receipts distinguish prerequisites/provider availability from sustained output. Added policy/executor timing and event/run fault summaries. Evidence: 83 focused tests in original checkout; isolated fast gate 1130 passed, 3 skipped, known baseline import-firewall failure. No cohort benefit/adoption claimed. Lifecycle: freeze new code and queue disposable validation behind active campaigns; no active runner/mod/server change.
+
+
+2026-10-28 16:42 IST — Deployed the isolated cohort dashboard with guarded concurrency ceilings, UPS/thermal controls, durable cooling recovery, Starship viewing and reversible client-mod sync. Added 6h/1d/7d telemetry, newest-first cohorts, persistent run reviews and curated 7–28 October history (57 rows/150 arms; pending/invalid outcomes explicit). Evidence: 24 focused checks passed; fast gate 1155 passed, 3 skipped, known baseline import-firewall failure. Live scheduler handshake/history and Starship HTTP tunnel verified; cooling and mod replacement remain fixture-only. Lifecycle: dashboard/scheduler/recovery timer deployed; campaigns, server saves/mods unchanged. Sonnet UI refinement next; no push.
+
+
+2026-10-28 17:10 IST — Integrated Sonnet 5.5 dashboard refinement: Overview/Performance/Jobs/History, shared chart tooltips and legends, responsive light/dark layout, clearer admission controls and review workflows. Parent fixed in-flight review draft preservation, invalid numeric ranking and old queued records appearing active. Evidence: 25 focused checks, 89 isolated browser checks, read-only live four-tab/day/week checks; fast 1155 passed/3 skipped plus known baseline import-firewall failure. Lifecycle: frontend served immediately; browser refresh only, no service/campaign restart or live control/mod-sync action; no push.
+
+
+2026-10-28 17:31 IST — Added descriptive curated-cohort chronology with separate base/experimental panels, reached/final/retention metrics, window filters and keyboard/tooltips. Parent removed unsupported significance verdicts, qualified connectors by known predicate/window metadata, kept unknown-only gaps and individual replicate-arm counts, and required ten compatible metadata points for descriptive medians. Evidence: 116 browser fixtures/25 focused passed, live read-only UI/Starship checks; fast 1155 passed/3 skipped plus known baseline import-firewall failure. Lifecycle: assets served immediately; browser refresh only, no service/campaign/control/mod changes; no adoption or improvement claim, no push.
+
+
+### 2026-10-28 21:06 IST — dashboard admission target and standing power modes
+
+Integrated the missing delegate checkout into the served cohort dashboard: +1/+2/+4 admission-target nudges and persistent Auto/Cool/Balanced/Performance controls. Temporary cooling preserves the prior profile; stale recovery cannot override an explicit mode. Evidence: 30 focused tests, 140 isolated browser fixture checks, JS syntax, live API dispatch and Starship tunnel asset checks; fast gate has only the known training/laya_ops.py import-firewall failure. Restarted only laya-cohort-dashboard.service at 21:05 IST; recovery service already resolves this updated script. Host config SHA256 stayed 9c18bc795ed28dba0fe21d376079c4c0e14ef4877bbc2cd4ba89333e5218895d; no live mode/target was applied, no campaign/server/mod/save changes. Refresh the browser to load the controls.
+
+
+### 2026-10-28 21:12 IST — dashboard temperature control fixed
+
+Corrected the dashboard scheduler flag from unsupported --cool-temp-limit to --cool-temp. Two real-CLI regressions prove settings apply above/below the cool threshold on temporary hosts and preserve mode/ceiling. All 32 focused checks pass; fast gate retains only the known training/laya_ops.py firewall failure. Restarted only the dashboard. Live invalid-input dispatch reached temperature validation; host configuration remained byte-identical. User must resubmit the desired temperature; no campaign or live temperature was changed by this fix.
+
+
+## [2026-10-29 01:27 IST] Factorio 2.1.24 cohort upgrade verified; C45/C46 successors launched
+- Private build 87808 and full matching data verified against Starship provenance; original runtimes, pre-upgrade selectors and copied saves retained. Copied-save migration/reload, schema/RCON and disposable water/steam temperature fixtures passed; C46 consumer products_finished/unit_number fields verified. 63 focused tests passed; fast gate: 1155 passed, one skipped, known pre-existing import-firewall failure only. No throughput or policy benefit measured.
+- C44 finished 200/200 with physical cleanup. Old held C45/C46 accounted 120 cancelled-before-start each, zero starts, durable drain retained, supervisors exited. New engine-labelled 2124 successors preserve original source/mods/seeds/120-job designs/windows. C45 actual engine/data/mod load verified; C46 remains queued behind new C45. Original Oct31/Nov1 06:00 IST deadlines retained, shared host admission unchanged.
+- Lifecycle: future manager/dashboard defaults select 2.1.24; running successors use private frozen-manager XDG mappings. Existing idle worlds were not migrated/resumed. Receipts, rollback and exact units: data/factorio-upgrades/2.1.24/state.json. Mixed-start/C47 work remains gated on actual C46 completion/cleanup; no production save, installed mod or policy adoption changed.

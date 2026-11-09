@@ -93,6 +93,11 @@ class Settings:
     decision_wait_sqrt_minutes: float = 20.0
     decision_wait_max_multiplier: float = 4.0
     decision_wait_min_ticks: int = 60
+    # Independent experiment factors; none changes the adopted decision policy.
+    ops_consumer_choices: bool = False
+    ops_solid_fluid_filter: bool = False
+    ops_chain_economics: bool = False
+    ops_production_services: bool = False
 
     def __post_init__(self):
         from training.laya_decision_pacing import validate

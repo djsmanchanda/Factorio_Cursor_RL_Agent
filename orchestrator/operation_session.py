@@ -59,6 +59,12 @@ def receipt(operation: str, params: dict, result: object) -> dict:
     """A normal return as a typed receipt: ``ok`` only when the operation's own postcondition holds."""
     if operation in {"raise_stock_gate", "reserve_steel_seed", "research_select", "research_labs", "reconcile_mall_loan"}:
         return {"operation": operation, "params": params, **result}
+    if operation == "production_service":
+        # This advances the shared permanent-line builder. A returned provider
+        # position is not a measured delivery/consumption or milestone receipt.
+        return {"operation": operation, "params": params, "ok": result is not None,
+                "code": "producer_available" if result is not None else "prerequisite_advanced",
+                "result": _receipt_result(result), "sustained_service_verified": False}
     if operation in PRODUCING_OPERATIONS:
         code = "producing" if result is not None else "prerequisite_advanced"
     elif operation in SUBMITTING_OPERATIONS:
@@ -282,16 +288,19 @@ class DeterministicSession:
 
 
     growable = ab.GROWABLE_PRODUCERS  # producers the "grow" operation may add a cell to
+    consumer_choices_enabled = False
+    filter_fluid_shortages_enabled = False
+    chain_economics_enabled = False
 
     def __init__(self, root: Path, *, goal_item: str = "automation-science-pack",
                  reference_point: tuple[float, float] = (0.0, 0.0), emit: Callable[[str], None] = print,
-                 logical_episode_id: str | None = None) -> None:
+                 logical_episode_id: str | None = None, origin_episode_id: str | None = None) -> None:
         import json
         manifest = json.loads((root / "manifest.json").read_text())
         server = root / "server"
         password = (server / "rcon-password").read_text().strip()
         self.script_output = server / "script-output"
-        self.episode_id = logical_episode_id or f"laya-{root.name}"
+        self.episode_id = origin_episode_id or logical_episode_id or f"laya-{root.name}"
         self.reference_point = reference_point
         self.emit = emit
         self.stock_networks = lambda: None
@@ -305,8 +314,9 @@ class DeterministicSession:
         self.bridge = GameBridge(script_output=self.script_output, host="127.0.0.1", port=manifest["rcon_port"],
                                  password=password, command_timeout=30.0, episode_id=self.episode_id, runtime="laya")
         self._loan_batch_seen = {}
-        # Arm before operations produce anything; resume only reads retained evidence.
-        if logical_episode_id is None:
+        # Arm before operations produce anything; ops recovery and checkpoint restarts are not
+        # episode starts and only read retained evidence.
+        if logical_episode_id is None and origin_episode_id is None:
             from orchestrator.checkpoint_observer import LiveCheckpointObservationAdapter
             LiveCheckpointObservationAdapter(self.client, self.bridge, surface=SURFACE,
                 force=FORCE)._plastic_startup(self.client, arm=True)
@@ -345,6 +355,10 @@ class DeterministicSession:
             # stock_target is the network level wanted; the cell is capped there, so it stops when the need is met.
             "produce": lambda item, stock_target=1, finite=True: ab.produce_to_demand(
                 c, b, SURFACE, FORCE, item, ref, emit, stock_target=stock_target, finite=finite),
+            # The same permanent belt-fed/chemical operation used by the
+            # deterministic runtime; never a solid batch pretending to supply fluid.
+            "production_service": lambda item: ab.ensure_produced(
+                c, b, SURFACE, FORCE, item, ref, emit, upgrade_bootstrap=True),
             # One more gear/cable cell when every existing one runs flat out and other cells starve for it.
             "grow": lambda item, machines: ab.grow_producer(c, b, SURFACE, FORCE, item, ref, emit, machines=machines),
             # A standing slot in the bootstrap mall pool (the deterministic runner's "production prep").
@@ -543,8 +557,18 @@ class DeterministicSession:
         districts = {state.recipe: {"lifecycle_state": state.lifecycle_state,
                                    "replacement_submitted": state.replacement_submitted}
                      for state in districts_ledger.states()} if districts_ledger is not None else {}
+        requester_draws = None
+        if self.chain_economics_enabled and projects is not None:
+            items = {item for project in projects.values() for item in project["required"]}
+            if len(items) <= 128:
+                try:
+                    requester_draws = {item: ab.live_base.logistic_request_total(
+                        self.client, SURFACE, FORCE, item) for item in sorted(items)}
+                except Exception:
+                    pass
         return {"version": 1, "projects": projects, "loans": loans, "slots": slots, "cells": cells,
                 "guarded_configuration": guarded_configuration, "transactions": transactions,
+                "requester_draws": requester_draws,
                 "bootstrap_districts": districts, "reservation_owners": reservation_owners(projects),
                 "demand": self._demand_facts(), "free_slots": slots["free"], "loan_error": loan_error,
                 "mall_capacity": {"committed_slots": slots["occupied"], "slot_limit": slots["capacity"],
@@ -645,7 +669,8 @@ class DeterministicSession:
         self.foundation_facts = {plate: _foundation_ready(snapshot, name)
                                  for plate, name in (("iron-plate", "iron"), ("copper-plate", "copper"),
                                                      ("stone-brick", "stone"))}
-        self._history = (self._history + [snapshot])[-20:]
+        if not self._history or snapshot != self._history[-1]:
+            self._history = (self._history + [snapshot])[-20:]
         # Fresh: the stateless predicates on this sample. The evaluator's latch answers "passed" forever once
         # reached, so a latched final could not show a regression (review 2026-10-20).
         fresh = {m.checkpoint_id: evaluate_milestone(m.checkpoint_id, snapshot, baseline=self._baseline,

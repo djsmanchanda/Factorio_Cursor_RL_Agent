@@ -1,0 +1,14 @@
+# Path: systemd/laya-cohort-dashboard.service.example | Purpose: Optional user service template for the isolated cohort dashboard.
+[Unit]
+Description=Laya cohort operations dashboard
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=/ABSOLUTE/PATH/TO/CODE
+ExecStart=/ABSOLUTE/PATH/TO/PYTHON /ABSOLUTE/PATH/TO/CODE/tools/laya_cohort_dashboard.py --repo-root /ABSOLUTE/PATH/TO/EVIDENCE
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

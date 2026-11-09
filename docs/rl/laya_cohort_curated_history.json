@@ -1,0 +1,5955 @@
+{
+  "version": 1,
+  "updated_at": "2026-10-28T16:34:18+05:30",
+  "coverage": {
+    "from": "2026-10-07",
+    "to": "2026-10-28"
+  },
+  "cohorts": [
+    {
+      "id": "C1",
+      "date": "2026-10-18",
+      "status": "completed",
+      "finding": "Strict C2/C3 fell across gate, starship and startup; 71/51/64 selected stock-gate raises all failed while summary failures=0. No adoption; proxy C3 progress did not unlock oil.",
+      "sources": [
+        "docs/rl/laya_helper_runs/c1-c9-audit-20261020/cohorts1-3.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "base",
+          "commit": null,
+          "planned": 32,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 2,
+            "C2": 17,
+            "C3": 5,
+            "C4": 0,
+            "C5": 0,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 360000,
+          "caveats": [
+            "27/32 completed; 17 planned slots not started across the cohort.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "gate",
+          "commit": null,
+          "planned": 32,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 0,
+            "C2": 16,
+            "C3": 4,
+            "C4": 0,
+            "C5": 0,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 360000,
+          "caveats": [
+            "Gate action rejected every selected raise (71/71).",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "starship",
+          "commit": null,
+          "planned": 32,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 1,
+            "C2": 14,
+            "C3": 1,
+            "C4": 0,
+            "C5": 0,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 360000,
+          "caveats": [
+            "Local frozen arm name only; no remote Starship access.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "startup",
+          "commit": null,
+          "planned": 32,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 1,
+            "C2": 14,
+            "C3": 2,
+            "C4": 0,
+            "C5": 0,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 360000,
+          "caveats": [
+            "360000-tick / 4500 s window; oldfinal is latched, so final is unknown.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C2",
+      "date": "2026-10-18",
+      "status": "completed",
+      "finding": "Embodied ladder credit lifted strict C2 6->11, C3 2->4 and C4/C5 0->1 on 24 matched seeds, but paired successes were slower. No adoption.",
+      "sources": [
+        "docs/rl/laya_helper_runs/c1-c9-audit-20261020/cohorts1-3.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "rung",
+          "commit": "f1469e1",
+          "planned": 36,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 1,
+            "C2": 8,
+            "C3": 2,
+            "C4": 2,
+            "C5": 2,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 360000,
+          "caveats": [
+            "24/36 completed; rung has no final field, so final is unknown.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "merged",
+          "commit": "88093ab",
+          "planned": 36,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 0,
+            "C2": 6,
+            "C3": 2,
+            "C4": 0,
+            "C5": 0,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 360000,
+          "caveats": [
+            "Multi-change merge/reset-line integration, not a single factor.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "ladder",
+          "commit": "09c093a",
+          "planned": 36,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 0,
+            "C2": 11,
+            "C3": 4,
+            "C4": 1,
+            "C5": 1,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 360000,
+          "caveats": [
+            "Isolated ladder factor; 24/36 completed; final unknown.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C3",
+      "date": "2026-10-18",
+      "status": "completed",
+      "finding": "Review bundle cut strict C3 7->3 on 39 matched pairs (C2 18->17). No adoption; the separately counted 96-slot superseded attempt is preserved.",
+      "sources": [
+        "docs/rl/laya_helper_runs/c1-c9-audit-20261020/cohorts1-3.md",
+        "data/laya-experiments/laya-c3-20261018/job-status.json",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_Cohort_Ledger_2026-10-21.md"
+      ],
+      "arms": [
+        {
+          "id": "ladder",
+          "commit": "09c093a",
+          "planned": 48,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 0,
+            "C2": 18,
+            "C3": 7,
+            "C4": 0,
+            "C5": 0,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 360000,
+          "caveats": [
+            "39/48 completed; 8 interrupted + 9 not started; final unknown.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "review",
+          "commit": "421e3de",
+          "planned": 48,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 2,
+            "C2": 18,
+            "C3": 3,
+            "C4": 0,
+            "C5": 0,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 360000,
+          "caveats": [
+            "40/48 completed; bundles two correctness fixes; final unknown.",
+            "Superseded attempt: 96 planned = 8 interrupted + 88 not started; not pooled.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C4",
+      "date": "2026-10-18",
+      "status": "completed_unverified",
+      "finding": "Starship review-vs-cell arms: C2 14 vs 21, C3 3 vs 7, C5 0 vs 1. Ledger says 96/96, but local terminal statuses are unrecoverable, so this row is low confidence; no adoption.",
+      "sources": [
+        "docs/rl/laya_helper_runs/c1-c9-audit-20261020/cohorts4-6.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "review",
+          "commit": "421e3de",
+          "planned": 48,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 14,
+            "C3": 3,
+            "C4": null,
+            "C5": 0,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": null,
+          "caveats": [
+            "Starship host; per-job terminal accounting is unknown locally, not zero.",
+            "Remote C4 tick budget is not independently established by recovered local evidence."
+          ]
+        },
+        {
+          "id": "cell",
+          "commit": "5271f7f",
+          "planned": 48,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 21,
+            "C3": 7,
+            "C4": null,
+            "C5": 1,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": null,
+          "caveats": [
+            "18 release_owner_missing failures in one recorded run; final unknown.",
+            "Remote C4 tick budget is not independently established by recovered local evidence."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C5",
+      "date": "2026-10-18",
+      "status": "completed_with_abandoned_slots",
+      "finding": "Pipe credit plus observed-tag release changed no strict endpoint (C2 41/41, C3 12/12, C5 1/0). 104 inventory-enum errors and 56 stale-tag failures retained; no adoption.",
+      "sources": [
+        "docs/rl/laya_helper_runs/c1-c9-audit-20261020/cohorts4-6.md",
+        "data/laya-experiments/laya-c5-20261018/a/job-status.json",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_Cohort_Ledger_2026-10-21.md"
+      ],
+      "arms": [
+        {
+          "id": "review",
+          "commit": "421e3de",
+          "planned": 95,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 3,
+            "C2": 41,
+            "C3": 12,
+            "C4": 1,
+            "C5": 1,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": 360000,
+          "caveats": [
+            "Planned value is the 95/arm matched-pair analysis N; campaign planned 360 attempt slots across parts A-E (193 completed, 8 interrupted, 2 runner error, 157 never started).",
+            "Final acceptance is latched/unknown.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "next",
+          "commit": "37dc304",
+          "planned": 95,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 3,
+            "C2": 41,
+            "C3": 12,
+            "C4": 0,
+            "C5": 0,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": 360000,
+          "caveats": [
+            "95 matched same-part pairs; B never started; C had 74 stale queued slots.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C6",
+      "date": "2026-10-19",
+      "status": "completed",
+      "finding": "Inventory-API fix reduced query errors 48->0 and pipe reopenings 41->24 with no later-milestone gain (C2 17->21, C3 4->2). No adoption; final acceptance is latched.",
+      "sources": [
+        "docs/rl/laya_helper_runs/c1-c9-audit-20261020/cohorts4-6.md",
+        "data/laya-experiments/laya-c6-20261019/a/job-status.json",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_Cohort_Ledger_2026-10-21.md"
+      ],
+      "arms": [
+        {
+          "id": "prev",
+          "commit": "37dc304",
+          "planned": 48,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 1,
+            "C2": 17,
+            "C3": 4,
+            "C4": 0,
+            "C5": 0,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": 360000,
+          "caveats": [
+            "48 matched pairs; oldfinal equals ever; fresh final unknown.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "facts",
+          "commit": "5d1d866",
+          "planned": 48,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 0,
+            "C2": 21,
+            "C3": 2,
+            "C4": 0,
+            "C5": 0,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": 360000,
+          "caveats": [
+            "Decision-neutral facts/measurement change; final unknown.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C7",
+      "date": "2026-10-19",
+      "status": "completed",
+      "finding": "Netstall raised strict C3 20->37 but not C2 (80->78); one KeyError is retained. No adoption; final acceptance was latched.",
+      "sources": [
+        "docs/rl/laya_helper_runs/c1-c9-audit-20261020/cohorts7-9.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C7_Result_2026-10-20.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_Cohort_Ledger_2026-10-21.md"
+      ],
+      "arms": [
+        {
+          "id": "base",
+          "commit": "e18d8d0",
+          "planned": 198,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 1,
+            "C2": 80,
+            "C3": 20,
+            "C4": null,
+            "C5": 1,
+            "C6": 0
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "198/198 completed; 395 stalls + 1 window timeout across the cohort.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "netstall",
+          "commit": "d633957",
+          "planned": 198,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 3,
+            "C2": 78,
+            "C3": 37,
+            "C4": null,
+            "C5": 4,
+            "C6": 0
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "One caught KeyError: construction-robot retained in the denominator.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C8",
+      "date": "2026-10-20",
+      "status": "no_start",
+      "finding": "1,000 planned slots, zero launched; the independent design was superseded before any start. This is not a 0% policy result.",
+      "sources": [
+        "docs/rl/laya_helper_runs/c1-c9-audit-20261020/cohorts7-9.md",
+        "data/laya-experiments/laya-c8-20261020/freeze.json",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": []
+    },
+    {
+      "id": "C9",
+      "date": "2026-10-20",
+      "status": "completed",
+      "finding": "Five cumulative arms reached C5 ever 8/12/14/10/15 with legacy C6 zero everywhere; no endpoint contrast was significant. No adoption; copper expansion was the next wall.",
+      "sources": [
+        "docs/rl/laya_helper_runs/c1-c9-audit-20261020/cohorts7-9.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C9_Result_2026-10-20.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_Cohort_Ledger_2026-10-21.md"
+      ],
+      "arms": [
+        {
+          "id": "ref",
+          "commit": "f17b28c",
+          "planned": 48,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 0,
+            "C2": 22,
+            "C3": 10,
+            "C4": 8,
+            "C5": 8,
+            "C6": 0
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 7,
+            "C4": null,
+            "C5": 7,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "C2/C4 final not reported separately; C6 measurement was defective.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "plastic",
+          "commit": "7c514a4",
+          "planned": 48,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 0,
+            "C2": 19,
+            "C3": 5,
+            "C4": 12,
+            "C5": 12,
+            "C6": 0
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 4,
+            "C4": null,
+            "C5": 12,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "rung",
+          "commit": "8278357",
+          "planned": 48,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 1,
+            "C2": 16,
+            "C3": 11,
+            "C4": 14,
+            "C5": 14,
+            "C6": 0
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 11,
+            "C4": null,
+            "C5": 13,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Arm SHA is the rung commit named in the C1-C9 audit; the result table names the factor only.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "extend",
+          "commit": "2ee4644",
+          "planned": 48,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 0,
+            "C2": 20,
+            "C3": 9,
+            "C4": 10,
+            "C5": 10,
+            "C6": 0
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 8,
+            "C4": null,
+            "C5": 10,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "batch",
+          "commit": "cf03dbb",
+          "planned": 48,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 0,
+            "C2": 20,
+            "C3": 16,
+            "C4": 15,
+            "C5": 15,
+            "C6": 0
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 16,
+            "C4": null,
+            "C5": 11,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C10",
+      "date": "2026-10-20",
+      "status": "completed_with_invalid_arms",
+      "finding": "Only the full arm is valid (C5 14/11). Copper and norung were invalidated by 91/61 link-identity errors and 14/11 safety stops; their zeros are not policy failures.",
+      "sources": [
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C10_Result_2026-10-20.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_Cohort_Ledger_2026-10-21.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "full",
+          "commit": null,
+          "planned": 48,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": 14,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": 11,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Only arm with usable strict counts; no valid second arm to compare."
+          ]
+        },
+        {
+          "id": "copper",
+          "commit": null,
+          "planned": 48,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Invalid measurement: 91 link-identity tool errors and 14 safety stops."
+          ]
+        },
+        {
+          "id": "norung",
+          "commit": null,
+          "planned": 48,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Invalid measurement: 61 link-identity tool errors and 11 safety stops."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C11",
+      "date": "2026-10-20",
+      "status": "completed",
+      "finding": "Copper/ready/reconcile differences sat inside adjacent discordance noise (C5 ever 16/17/16); no measurable effect and no adoption.",
+      "sources": [
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C11_Result_2026-10-21.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_Cohort_Ledger_2026-10-21.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "copper",
+          "commit": null,
+          "planned": 48,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 17,
+            "C3": 14,
+            "C4": null,
+            "C5": 16,
+            "C6": 0
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 14,
+            "C4": null,
+            "C5": 14,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "ready",
+          "commit": "a12e7e5",
+          "planned": 48,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 18,
+            "C3": 12,
+            "C4": null,
+            "C5": 17,
+            "C6": 1
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 12,
+            "C4": null,
+            "C5": 15,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Legacy C6 ever 1; final not reported.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "reconcile",
+          "commit": "374e68e",
+          "planned": 48,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 18,
+            "C3": 12,
+            "C4": null,
+            "C5": 16,
+            "C6": 0
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 11,
+            "C4": null,
+            "C5": 15,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C12",
+      "date": "2026-10-21",
+      "status": "completed_with_deadline_loss",
+      "finding": "Four cumulative arms: C2 fell 15->7 and seed's C5 final regressed 1:8 (nominal p~0.04). No adoption; 32 deadline slots remain in the denominator.",
+      "sources": [
+        "data/laya-experiments/laya-c12-2123-miniship-20261021/report.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C12_Result_2026-10-21.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "ref",
+          "commit": "f82f4dd",
+          "planned": 48,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 15,
+            "C3": 10,
+            "C4": null,
+            "C5": 14,
+            "C6": 1
+          },
+          "final": {
+            "C1": null,
+            "C2": 15,
+            "C3": 9,
+            "C4": null,
+            "C5": 5,
+            "C6": 1
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "raw",
+          "commit": "d4d3af8",
+          "planned": 48,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 16,
+            "C3": 11,
+            "C4": null,
+            "C5": 11,
+            "C6": 1
+          },
+          "final": {
+            "C1": null,
+            "C2": 16,
+            "C3": 11,
+            "C4": null,
+            "C5": 9,
+            "C6": 1
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "furnace",
+          "commit": "1f7980b",
+          "planned": 48,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 11,
+            "C3": 7,
+            "C4": null,
+            "C5": 10,
+            "C6": 0
+          },
+          "final": {
+            "C1": null,
+            "C2": 11,
+            "C3": 7,
+            "C4": null,
+            "C5": 8,
+            "C6": 0
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "seed",
+          "commit": "1f7980b",
+          "planned": 48,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 7,
+            "C3": 9,
+            "C4": null,
+            "C5": 6,
+            "C6": 0
+          },
+          "final": {
+            "C1": null,
+            "C2": 7,
+            "C3": 9,
+            "C4": null,
+            "C5": 1,
+            "C6": 0
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "40/48 completed; 8 seed slots per arm never started before deadline.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C13",
+      "date": "2026-10-21",
+      "status": "completed",
+      "finding": "Shortage menu raised C5/C6 but cut C2; loan recovered C2 and lost C3. No adoption; the earlier Starship attempt is excluded.",
+      "sources": [
+        "data/laya-experiments/laya-c13-2123-miniship-20261021/report.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C13_Result_2026-10-21.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "ref",
+          "commit": "830c022",
+          "planned": 48,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 18,
+            "C3": 8,
+            "C4": null,
+            "C5": 12,
+            "C6": 1
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 8,
+            "C4": null,
+            "C5": 3,
+            "C6": 1
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "menu",
+          "commit": "42da7aa",
+          "planned": 48,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 14,
+            "C3": 11,
+            "C4": null,
+            "C5": 19,
+            "C6": 4
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 9,
+            "C4": null,
+            "C5": 2,
+            "C6": 3
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "loan",
+          "commit": "54df1d2",
+          "planned": 48,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 18,
+            "C3": 6,
+            "C4": null,
+            "C5": 19,
+            "C6": 5
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 6,
+            "C4": null,
+            "C5": 2,
+            "C6": 2
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Earlier Starship attempt: 144 planned = 2 runner errors + 4 interrupted + 138 not started; excluded.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C14",
+      "date": "2026-10-21",
+      "status": "completed_with_reruns",
+      "finding": "Steelbill suppressed retries and lost C2 26->18, C5 ever 25->20 and C6 5->4. No adoption; attempt 1 and the C14b/C14c split remain explicit.",
+      "sources": [
+        "data/laya-experiments/laya-c14b-2123-miniship-20261021/report.md",
+        "data/laya-experiments/laya-c14c-2123-miniship-20261021/report.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C14_Result_2026-10-22.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "ref",
+          "commit": "c1b8680",
+          "planned": 75,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 26,
+            "C3": 9,
+            "C4": null,
+            "C5": 25,
+            "C6": 5
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 8,
+            "C4": null,
+            "C5": 11,
+            "C6": 4
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "steelbill",
+          "commit": "934f9cb",
+          "planned": 75,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 18,
+            "C3": 10,
+            "C4": null,
+            "C5": 20,
+            "C6": 4
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 10,
+            "C4": null,
+            "C5": 5,
+            "C6": 3
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "C14b 71 completed + 79 never started, carried by C14c 80/80; 4 power-cut reruns.",
+            "Attempt 1: 150 planned = 1 completed + 4 interrupted + 1 shutdown runner error + 144 not started; excluded.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C15",
+      "date": "2026-10-21",
+      "status": "completed",
+      "finding": "Vacancy/foundation raised C2 and C5 versus steelbill (C6 5/9/7), but no C15 arm was adopted. Attempts 1, b and c never formed a denominator.",
+      "sources": [
+        "data/laya-experiments/laya-c15d-2123-miniship-20261021/report.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C15_Result_2026-10-22.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "steelbill",
+          "commit": "934f9cb",
+          "planned": 50,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 21,
+            "C3": 13,
+            "C4": null,
+            "C5": 21,
+            "C6": 5
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 13,
+            "C4": null,
+            "C5": 2,
+            "C6": 3
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "vacancy",
+          "commit": "ef382472b",
+          "planned": 50,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 25,
+            "C3": 19,
+            "C4": null,
+            "C5": 24,
+            "C6": 9
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 16,
+            "C4": null,
+            "C5": 3,
+            "C6": 6
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "foundation",
+          "commit": "d8e3f7c45",
+          "planned": 50,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 27,
+            "C3": 17,
+            "C4": null,
+            "C5": 21,
+            "C6": 7
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 13,
+            "C4": null,
+            "C5": 3,
+            "C6": 4
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "8 power-cut reruns under resume; C15d is the denominator.",
+            "Attempts 1/b/c: 150 planned each; 1 interrupted + 149 not started, then 0/150 started twice; excluded.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C16",
+      "date": "2026-10-22",
+      "status": "completed",
+      "finding": "Vacancy and foundation raised C3 (18:2) and C5 (14:3) versus ref and became the adopted cohort base (C6 11/21/22). No production promotion.",
+      "sources": [
+        "data/laya-experiments/laya-c16-2123-miniship-20261022/report.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C16_Result_2026-10-22.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "ref",
+          "commit": "c1b8680",
+          "planned": 50,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 15,
+            "C3": 6,
+            "C4": null,
+            "C5": 13,
+            "C6": 6
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 5,
+            "C4": null,
+            "C5": 3,
+            "C6": 3
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "vacancy",
+          "commit": "0bf1bdc",
+          "planned": 50,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 1,
+            "C2": 25,
+            "C3": 22,
+            "C4": null,
+            "C5": 24,
+            "C6": 8
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 21,
+            "C4": null,
+            "C5": 4,
+            "C6": 6
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "ADOPTED into the cohort base together with foundation.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "foundation",
+          "commit": "7fd2320",
+          "planned": 50,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 35,
+            "C3": 22,
+            "C4": null,
+            "C5": 25,
+            "C6": 9
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 19,
+            "C4": null,
+            "C5": 4,
+            "C6": 7
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "ADOPTED into the cohort base.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C17",
+      "date": "2026-10-22",
+      "status": "completed",
+      "finding": "Release fix cut loan-release refusals 169->1 and untyped stuck 50->24, but endpoints were flat (C6 12 vs 16). Kept as a correctness fix, not adopted by endpoints.",
+      "sources": [
+        "data/laya-experiments/laya-c17-2123-miniship-20261022/report.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C17_Result_2026-10-22.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "foundation",
+          "commit": "7fd2320",
+          "planned": 75,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 1,
+            "C2": 60,
+            "C3": 39,
+            "C4": null,
+            "C5": 47,
+            "C6": 12
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 36,
+            "C4": null,
+            "C5": 12,
+            "C6": 8
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "release",
+          "commit": "d39b6c7",
+          "planned": 75,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 59,
+            "C3": 39,
+            "C4": null,
+            "C5": 45,
+            "C6": 16
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 37,
+            "C4": null,
+            "C5": 7,
+            "C6": 10
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Refusals typed as mall_cell_lifecycle_conflict.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C18",
+      "date": "2026-10-22",
+      "status": "completed",
+      "finding": "Credit raised C2 42->51 and C5 ever 29->44 (20:5, p~0.004) and was adopted into the cohort base; reported tool-error/safety-stop counters were zero.",
+      "sources": [
+        "data/laya-experiments/laya-c18-2123-miniship-20261022/report.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C18_Result_2026-10-23.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "release",
+          "commit": "d39b6c7",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 2,
+            "C2": 42,
+            "C3": 27,
+            "C4": null,
+            "C5": 29,
+            "C6": 7
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 24,
+            "C4": null,
+            "C5": 8,
+            "C6": 4
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "credit",
+          "commit": "e37464d",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 2,
+            "C2": 51,
+            "C3": 35,
+            "C4": null,
+            "C5": 44,
+            "C6": 10
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 32,
+            "C4": null,
+            "C5": 12,
+            "C6": 9
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "ADOPTED into the cohort base.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C19",
+      "date": "2026-10-22",
+      "status": "stopped",
+      "finding": "Stopped by the user after 70 completions + 32 not started (102 registry jobs; index accounts 150 design slots). Paired C2 3:9 and Laya C6 5:10; b372672 reverted. No completed-rate claim.",
+      "sources": [
+        "data/laya-experiments/laya-c19-2123-miniship-20261022/report.md",
+        "data/laya-experiments/laya-c19-2123-miniship-20261022/job-status.json",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C19_Result_2026-10-23.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "credit",
+          "commit": "e37464d",
+          "planned": 75,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "35/51 registry jobs completed; 48 of the 150 design slots were cut before admission.",
+            "Index accounts 150 planned = 70 completed + 48 cut + 32 stopped; local batch.json holds 51 seeds x 2 arms = 102 jobs."
+          ]
+        },
+        {
+          "id": "started",
+          "commit": "b372672",
+          "planned": 75,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "35/51 registry jobs completed; user stop; no aggregate strict totals."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C20",
+      "date": "2026-10-22",
+      "status": "stopped_superseded",
+      "finding": "Stopped and superseded by C22 after 33 completed + 117 stopped of 150 planned. No endpoint totals are claimed.",
+      "sources": [
+        "data/laya-experiments/laya-c20-2123-miniship-20261022/report.md",
+        "docs/rl/laya_helper_runs/cohort-review-20261023/completed-cohorts.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "started",
+          "commit": "b372672",
+          "planned": 75,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "33 completed; 117 stopped; 16 full pairs + 1 unpaired."
+          ]
+        },
+        {
+          "id": "integrated",
+          "commit": "8507710",
+          "planned": 75,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "33 completed; superseded before a usable aggregate."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C21",
+      "date": "2026-10-22",
+      "status": "stopped_superseded",
+      "finding": "Stopped and superseded by C22 after 70 completed + 80 stopped of 150 planned; no endpoint totals are claimed.",
+      "sources": [
+        "data/laya-experiments/laya-c21-2123-miniship-20261022/report.md",
+        "docs/rl/laya_helper_runs/cohort-review-20261023/completed-cohorts.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "integrated",
+          "commit": "8507710",
+          "planned": 75,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "70 completed; 80 stopped; 35 pairs."
+          ]
+        },
+        {
+          "id": "retain",
+          "commit": "657572e",
+          "planned": 75,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "70 completed; superseded before a usable aggregate."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C22",
+      "date": "2026-10-23",
+      "status": "completed",
+      "finding": "Integration baseline d8a4825 was retained; loan retention was not adopted (C5 final 5/7/1). Whole-base integration, not a single-factor win.",
+      "sources": [
+        "data/laya-experiments/laya-c22-2123-miniship-20261023/report.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C22_Result_2026-10-23.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "credit",
+          "commit": "e37464d",
+          "planned": 40,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 28,
+            "C3": 19,
+            "C4": null,
+            "C5": 25,
+            "C6": 11
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 17,
+            "C4": null,
+            "C5": 5,
+            "C6": 6
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "integrated",
+          "commit": "d8a4825",
+          "planned": 40,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 30,
+            "C3": 24,
+            "C4": null,
+            "C5": 23,
+            "C6": 6
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 22,
+            "C4": null,
+            "C5": 7,
+            "C6": 6
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Retained as the cohort base.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "retain",
+          "commit": "3d221aa",
+          "planned": 40,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 31,
+            "C3": 22,
+            "C4": null,
+            "C5": 27,
+            "C6": 11
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 18,
+            "C4": null,
+            "C5": 1,
+            "C6": 3
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Not adopted; power-route refusals rose about sixfold.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C23",
+      "date": "2026-10-23",
+      "status": "completed",
+      "finding": "Receipt raised targeted Laya C6 15:7 and legacy C6 ever 9->14, but C5 final leaned opposite 4:7. Not adopted; d8a4825 stays.",
+      "sources": [
+        "data/laya-experiments/laya-c23-2123-miniship-20261023/report.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C23_Result_2026-10-23.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "integrated",
+          "commit": "d8a4825",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 43,
+            "C3": 32,
+            "C4": null,
+            "C5": 35,
+            "C6": 9
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 30,
+            "C4": null,
+            "C5": 9,
+            "C6": 6
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "receipt",
+          "commit": "3b7d702",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 46,
+            "C3": 33,
+            "C4": null,
+            "C5": 37,
+            "C6": 14
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 33,
+            "C4": null,
+            "C5": 6,
+            "C6": 11
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Power-route refusals doubled (18 in 11 runs vs 9 in 8).",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C24",
+      "date": "2026-10-23",
+      "status": "completed",
+      "finding": "Steel was not adopted: C2 42/41 and strict C6 5/8, and steel was slower to strict C2 (21:33).",
+      "sources": [
+        "data/laya-experiments/laya-c24-2123-miniship-20261023/report.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C24_Result_2026-10-23.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "control",
+          "commit": "d8a4825",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 42,
+            "C3": 25,
+            "C4": null,
+            "C5": 30,
+            "C6": 5
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 24,
+            "C4": null,
+            "C5": 9,
+            "C6": 3
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "steel",
+          "commit": "5fb6371",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 41,
+            "C3": 31,
+            "C4": null,
+            "C5": 33,
+            "C6": 8
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 29,
+            "C4": null,
+            "C5": 9,
+            "C6": 5
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C25",
+      "date": "2026-10-23",
+      "status": "completed",
+      "finding": "Backing was not adopted: C3 33/28, C5 final 8/8, strict C6 13/10; backing was slower to strict C3 (14:28).",
+      "sources": [
+        "data/laya-experiments/laya-c25-2123-miniship-20261023/report.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C25_Result_2026-10-24.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "control",
+          "commit": "d8a4825",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 46,
+            "C3": 33,
+            "C4": null,
+            "C5": 35,
+            "C6": 13
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 32,
+            "C4": null,
+            "C5": 8,
+            "C6": 9
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "backing",
+          "commit": "d8a4825",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 44,
+            "C3": 28,
+            "C4": null,
+            "C5": 33,
+            "C6": 10
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 27,
+            "C4": null,
+            "C5": 8,
+            "C6": 5
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Same commit as control; config-only difference.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C26",
+      "date": "2026-10-24",
+      "status": "no_start",
+      "finding": "60 planned jobs were cancelled before any start; C26b is the replacement denominator at 30 per arm. Not a 0% result.",
+      "sources": [
+        "data/laya-experiments/laya-c26-2123-miniship-20261023/report.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "control",
+          "commit": "2d9b4b5",
+          "planned": 30,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Parent design mirrored C26b; zero jobs started."
+          ]
+        },
+        {
+          "id": "ready",
+          "commit": "2d9b4b5",
+          "planned": 30,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "mall_loan_reconciliation design; zero jobs started."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C27",
+      "date": "2026-10-24",
+      "status": "no_start",
+      "finding": "60 planned jobs were cancelled before any start; C27b is the replacement denominator at 30 per arm. Not a 0% result.",
+      "sources": [
+        "data/laya-experiments/laya-c27-2123-miniship-20261023/report.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "control",
+          "commit": "2d9b4b5",
+          "planned": 30,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Parent design mirrored C27b; zero jobs started."
+          ]
+        },
+        {
+          "id": "linear3",
+          "commit": "2d9b4b5",
+          "planned": 30,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Linear wait-schedule design; zero jobs started."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C26b",
+      "date": "2026-10-24",
+      "status": "completed",
+      "finding": "Ready mall-loan reconciliation was not adopted: C2 22/19, C3 18/11 and C6 6/3. First cohort with the 7,200 s window.",
+      "sources": [
+        "data/laya-experiments/laya-c26b-2123-miniship-20261024/report.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C26b_Result_2026-10-24.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "control",
+          "commit": "2d9b4b5",
+          "planned": 30,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 22,
+            "C3": 18,
+            "C4": null,
+            "C5": 19,
+            "C6": 6
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 15,
+            "C4": null,
+            "C5": 2,
+            "C6": 2
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "ready",
+          "commit": "2d9b4b5",
+          "planned": 30,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 19,
+            "C3": 11,
+            "C4": null,
+            "C5": 14,
+            "C6": 3
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 11,
+            "C4": null,
+            "C5": 3,
+            "C6": 3
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Same commit; mall_loan_reconciliation=true only.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C27b",
+      "date": "2026-10-24",
+      "status": "completed",
+      "finding": "Linear3 pacing was not adopted: C2 24/20, C5 20/12, C6 7/6; the arm stalls sooner.",
+      "sources": [
+        "data/laya-experiments/laya-c27b-2123-miniship-20261024/report.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C27b_Result_2026-10-24.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "control",
+          "commit": "2d9b4b5",
+          "planned": 30,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 24,
+            "C3": 18,
+            "C4": null,
+            "C5": 20,
+            "C6": 7
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 16,
+            "C4": null,
+            "C5": 5,
+            "C6": 5
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "linear3",
+          "commit": "2d9b4b5",
+          "planned": 30,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 20,
+            "C3": 12,
+            "C4": null,
+            "C5": 12,
+            "C6": 6
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 11,
+            "C4": null,
+            "C5": 2,
+            "C6": 5
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Same commit; wait-schedule config only.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C28",
+      "date": "2026-10-24",
+      "status": "completed",
+      "finding": "Policy-weight screen with A/A controls: steel30's C3 9 vs 6/4 sits inside A/A noise and feedstock16 is thin. No adoption.",
+      "sources": [
+        "data/laya-experiments/laya-c28-2123-miniship-20261024/report.md",
+        "docs/rl/Laya_Cohort_Results_Index.md",
+        "docs/rl/laya_helper_runs/cohort-review-20261023/completed-cohorts.md"
+      ],
+      "arms": [
+        {
+          "id": "control_a",
+          "commit": "2d9b4b5",
+          "planned": 15,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 1,
+            "C2": 9,
+            "C3": 6,
+            "C4": null,
+            "C5": 4,
+            "C6": 1
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 5,
+            "C4": null,
+            "C5": 1,
+            "C6": 0
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "A/A control; report final C6 is 0 while ever C6 is 1 (the index wrote 1/1).",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "control_b",
+          "commit": "2d9b4b5",
+          "planned": 15,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 11,
+            "C3": 4,
+            "C4": null,
+            "C5": 7,
+            "C6": 1
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 4,
+            "C4": null,
+            "C5": 1,
+            "C6": 1
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "A/A control; differences are run-to-run noise.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "steel30",
+          "commit": "2d9b4b5",
+          "planned": 15,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 12,
+            "C3": 9,
+            "C4": null,
+            "C5": 8,
+            "C6": 1
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 7,
+            "C4": null,
+            "C5": 2,
+            "C6": 1
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "mission.ops-steel weight 5->30 only.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "feedstock16",
+          "commit": "2d9b4b5",
+          "planned": 15,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 12,
+            "C3": 5,
+            "C4": null,
+            "C5": 7,
+            "C6": 1
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 5,
+            "C4": null,
+            "C5": 0,
+            "C6": 1
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "mission.ops-grow-feedstock weight 4->16 only.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C29",
+      "date": "2026-10-24",
+      "status": "completed",
+      "finding": "Release 5a5ed28 was adopted as the cohort base: C3 38 vs 25 (19:6, p~0.015), C2 faster by 13 min RMST and C1 0->3. No production promotion.",
+      "sources": [
+        "data/laya-experiments/laya-c29-2123-miniship-20261024/report.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C29_Result_2026-10-24.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "control",
+          "commit": "daefefc",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 0,
+            "C2": 44,
+            "C3": 25,
+            "C4": null,
+            "C5": 30,
+            "C6": 13
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 23,
+            "C4": null,
+            "C5": 4,
+            "C6": 8
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "release",
+          "commit": "5a5ed28",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 3,
+            "C2": 50,
+            "C3": 38,
+            "C4": null,
+            "C5": 38,
+            "C6": 15
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 36,
+            "C4": null,
+            "C5": 5,
+            "C6": 13
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "ADOPTED as the cohort base.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C30",
+      "date": "2026-10-24",
+      "status": "completed",
+      "finding": "Site was not adopted: C2 50/47, C5 ever 32/37 but final 12/16, C6 10/8, and site is slower. C30a and S30r are separate strata.",
+      "sources": [
+        "data/laya-experiments/laya-c30-2123-miniship-20261024/report.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C30_Result_2026-10-25.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "release",
+          "commit": "5a5ed28",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 50,
+            "C3": 40,
+            "C4": null,
+            "C5": 32,
+            "C6": 10
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 39,
+            "C4": null,
+            "C5": 12,
+            "C6": 6
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "site",
+          "commit": "f765d30",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 47,
+            "C3": 36,
+            "C4": null,
+            "C5": 37,
+            "C6": 8
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 35,
+            "C4": null,
+            "C5": 16,
+            "C6": 6
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "C30a (40 planned) and Starship S30r (48 planned) are reported separately, not pooled; per-arm endpoints for those strata are not in the index.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C31",
+      "date": "2026-10-25",
+      "status": "invalid",
+      "finding": "Invalid measurement: every completed run reached strict C0 only (85 completed + 35 cancelled). This is not a 0% policy result; C34 reran the comparison after repair.",
+      "sources": [
+        "data/laya-experiments/laya-c31-2123-miniship-20261024/report.md",
+        "docs/rl/Laya_Cohort_Results_Index.md",
+        "docs/rl/laya_helper_runs/terra-review-20261028/cohorts.json"
+      ],
+      "arms": [
+        {
+          "id": "census",
+          "commit": "de40332",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "43 completed of 60; acceptance defect; Laya C6 observed 21/43 but is not a strict count."
+          ]
+        },
+        {
+          "id": "outblock",
+          "commit": "7c63333",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "42 completed of 60; same strict-C0-only defect; Laya C6 observed 15/42."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C32",
+      "date": "2026-10-25",
+      "status": "no_start",
+      "finding": "120/120 cancelled before any start; the clearance candidate was superseded by C33. No jobs and no result.",
+      "sources": [
+        "data/laya-experiments/laya-c32-2123-miniship-20261025/report.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": []
+    },
+    {
+      "id": "C33",
+      "date": "2026-10-25",
+      "status": "completed",
+      "finding": "Clearance was not adopted: strict C3 regressed 44->37 and strict C6 was level at 10/11. C5 here is c5-v1.",
+      "sources": [
+        "data/laya-experiments/laya-c33-2123-miniship-20261025/report.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C33_Result_2026-10-25.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "control",
+          "commit": "5a5ed28",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": "c5-v1",
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 50,
+            "C3": 44,
+            "C4": null,
+            "C5": 35,
+            "C6": 10
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 38,
+            "C4": null,
+            "C5": 6,
+            "C6": 8
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "clearance",
+          "commit": "ba31bec",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": "c5-v1",
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 52,
+            "C3": 37,
+            "C4": null,
+            "C5": 38,
+            "C6": 11
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 36,
+            "C4": null,
+            "C5": 12,
+            "C6": 7
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C34",
+      "date": "2026-10-25",
+      "status": "completed",
+      "finding": "Outblock was not adopted; primary C3 47/45 and C6 10/11. The census held with 4,323 checks and zero evidence errors.",
+      "sources": [
+        "data/laya-experiments/laya-c34-2123-miniship-20261025/report.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C34_Result_2026-10-25.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "census",
+          "commit": "9d9b279",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": "c5-v1",
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 51,
+            "C3": 47,
+            "C4": null,
+            "C5": 35,
+            "C6": 10
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 47,
+            "C4": null,
+            "C5": 14,
+            "C6": 9
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "outblock",
+          "commit": "9d8216d",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": "c5-v1",
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 48,
+            "C3": 45,
+            "C4": null,
+            "C5": 37,
+            "C6": 11
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 45,
+            "C4": null,
+            "C5": 9,
+            "C6": 10
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C35",
+      "date": "2026-10-25",
+      "status": "completed",
+      "finding": "Finite LHI was not adopted: primary strict C6 8->6 despite C3 42->51; Laya C6 fell 27->21.",
+      "sources": [
+        "data/laya-experiments/laya-c35-2123-miniship-20261025/report.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C35_Result_2026-10-26.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "census",
+          "commit": "9d9b279",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": "c1-v1",
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": "c5-v1",
+            "C6": "c6-v1"
+          },
+          "ever": {
+            "C1": null,
+            "C2": 48,
+            "C3": 42,
+            "C4": 31,
+            "C5": 31,
+            "C6": 8
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 42,
+            "C4": 31,
+            "C5": 5,
+            "C6": 4
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "lhi",
+          "commit": "2c5dfbc",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": "c1-v1",
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": "c5-v1",
+            "C6": "c6-v1"
+          },
+          "ever": {
+            "C1": null,
+            "C2": 54,
+            "C3": 51,
+            "C4": 35,
+            "C5": 35,
+            "C6": 6
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 51,
+            "C4": 35,
+            "C5": 15,
+            "C6": 6
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C36",
+      "date": "2026-10-26",
+      "status": "completed",
+      "finding": "Clearance was held, not adopted: strict C6 rose 5->15 (12:2, p~0.013) but untyped faults rose 12->36 and C5 final fell 17->7.",
+      "sources": [
+        "data/laya-experiments/laya-c36-2123-miniship-20261025/report.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C36_Result_2026-10-26.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "control",
+          "commit": "d9402da",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": "c1-v1",
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": "c5-v1",
+            "C6": "c6-v1"
+          },
+          "ever": {
+            "C1": null,
+            "C2": 47,
+            "C3": 31,
+            "C4": 31,
+            "C5": 31,
+            "C6": 5
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 28,
+            "C4": 31,
+            "C5": 17,
+            "C6": 2
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "clearance",
+          "commit": "cdb16a2",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": "c1-v1",
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": "c5-v1",
+            "C6": "c6-v1"
+          },
+          "ever": {
+            "C1": 1,
+            "C2": 48,
+            "C3": 34,
+            "C4": 38,
+            "C5": 38,
+            "C6": 15
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 34,
+            "C4": 38,
+            "C5": 7,
+            "C6": 13
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C37",
+      "date": "2026-10-26",
+      "status": "completed",
+      "finding": "Robot-only occupancy exclusion was not adopted: strict C6 11->7 and C5 final 8->12, both inside the A/A noise band.",
+      "sources": [
+        "data/laya-experiments/laya-c37-2123-miniship-20261026/report.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C37_Result_2026-10-26.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "control",
+          "commit": "d9402da",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": "c5-v1",
+            "C6": null
+          },
+          "ever": {
+            "C1": 2,
+            "C2": 53,
+            "C3": 36,
+            "C4": 36,
+            "C5": 36,
+            "C6": 11
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 36,
+            "C4": 36,
+            "C5": 8,
+            "C6": 8
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "robots",
+          "commit": "32c1ef5",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": "c5-v1",
+            "C6": null
+          },
+          "ever": {
+            "C1": 1,
+            "C2": 50,
+            "C3": 37,
+            "C4": 36,
+            "C5": 36,
+            "C6": 7
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": 36,
+            "C4": 36,
+            "C5": 12,
+            "C6": 6
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C38",
+      "date": "2026-10-26",
+      "status": "completed_with_prepare_failure",
+      "finding": "Both arms failed C2 and never started an oil cell; strict C1 was reached by 20/18 runs but only 1/0 at final (119 completed + 1 prepare_failed, 59 pairs). Not a C36 clearance replication.",
+      "sources": [
+        "data/laya-experiments/laya-c38-2123-miniship-20261026/report.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C38_Result_2026-10-26.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "robots",
+          "commit": "9764fb6",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 20,
+            "C2": 0,
+            "C3": 0,
+            "C4": 0,
+            "C5": 0,
+            "C6": 0
+          },
+          "final": {
+            "C1": 1,
+            "C2": 0,
+            "C3": 0,
+            "C4": 0,
+            "C5": 0,
+            "C6": 0
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "59/60 completed; one prepare_failed (EADDRINUSE, holder unknown) retained.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "clearance_robots",
+          "commit": null,
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 18,
+            "C2": 0,
+            "C3": 0,
+            "C4": 0,
+            "C5": 0,
+            "C6": 0
+          },
+          "final": {
+            "C1": 0,
+            "C2": 0,
+            "C3": 0,
+            "C4": 0,
+            "C5": 0,
+            "C6": 0
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Distinct frozen diff; no SHA named in the index.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C39",
+      "date": "2026-10-26",
+      "status": "completed",
+      "finding": "Reference 9d9b279 retained; integrated f098f9f rejected (C6 13->0, C2 53->13). C5 predicates were incompatible and not paired.",
+      "sources": [
+        "data/laya-experiments/laya-c39-2123-miniship-20261026/report.md",
+        "data/laya-orchestration/c40-20261027/code/docs/rl/Laya_C39_Result_2026-10-27.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "reference",
+          "commit": "9d9b279",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": "c2-v1",
+            "C3": null,
+            "C4": null,
+            "C5": "c5-v1",
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 53,
+            "C3": 50,
+            "C4": 39,
+            "C5": 39,
+            "C6": 13
+          },
+          "final": {
+            "C1": null,
+            "C2": 53,
+            "C3": 50,
+            "C4": 39,
+            "C5": 7,
+            "C6": 8
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Reference C5 frozen v1 but journal version tags absent; descriptive only.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "integrated",
+          "commit": "f098f9f",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": "c2-v1",
+            "C3": null,
+            "C4": null,
+            "C5": "c5-v2",
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 13,
+            "C3": 7,
+            "C4": 0,
+            "C5": 0,
+            "C6": 0
+          },
+          "final": {
+            "C1": null,
+            "C2": 13,
+            "C3": 7,
+            "C4": 0,
+            "C5": null,
+            "C6": 0
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Integrated active C5 ends unknown in all 60; C5 final left null.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C40",
+      "date": "2026-10-27",
+      "status": "completed",
+      "finding": "Gate-held fact raised strict C2 12->32 in a 216k-tick cap, but C3 6->5 and no C4-C6. Intermediate finding only, not adopted.",
+      "sources": [
+        "data/laya-experiments/laya-c40-2123-miniship-20261027/report.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "control",
+          "commit": "876b778",
+          "planned": 40,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": "c2-v1",
+            "C3": null,
+            "C4": null,
+            "C5": "c5-v2",
+            "C6": null
+          },
+          "ever": {
+            "C1": 27,
+            "C2": 12,
+            "C3": 6,
+            "C4": 0,
+            "C5": 0,
+            "C6": 0
+          },
+          "final": {
+            "C1": null,
+            "C2": 12,
+            "C3": 6,
+            "C4": 0,
+            "C5": 0,
+            "C6": 0
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 216000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "gateheld",
+          "commit": "7067c55",
+          "planned": 40,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": "c2-v1",
+            "C3": null,
+            "C4": null,
+            "C5": "c5-v2",
+            "C6": null
+          },
+          "ever": {
+            "C1": 38,
+            "C2": 32,
+            "C3": 5,
+            "C4": 0,
+            "C5": 0,
+            "C6": 0
+          },
+          "final": {
+            "C1": null,
+            "C2": 32,
+            "C3": 5,
+            "C4": 0,
+            "C5": 0,
+            "C6": 0
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 216000,
+          "caveats": [
+            "Short window; C2 contrast 24:4.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C41",
+      "date": "2026-10-27",
+      "status": "completed",
+      "finding": "Reference held. Gateheld reached C2 34 but C3 5; mineres traded C2 34->22 for C3 5->15 with 343 untyped events. No adoption; reference C5 version unknown.",
+      "sources": [
+        "data/laya-experiments/laya-c41-2123-miniship-20261027/report.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "reference",
+          "commit": "9d9b279",
+          "planned": 40,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": "c2-v1",
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 1,
+            "C2": 32,
+            "C3": 30,
+            "C4": 23,
+            "C5": 23,
+            "C6": 8
+          },
+          "final": {
+            "C1": null,
+            "C2": 32,
+            "C3": 30,
+            "C4": 23,
+            "C5": 6,
+            "C6": 7
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "C5 version unobserved in 40/40; descriptive only.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "gateheld",
+          "commit": "7067c55",
+          "planned": 40,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": "c2-v1",
+            "C3": null,
+            "C4": null,
+            "C5": "c5-v2",
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 34,
+            "C3": 5,
+            "C4": 2,
+            "C5": 2,
+            "C6": 0
+          },
+          "final": {
+            "C1": null,
+            "C2": 34,
+            "C3": 5,
+            "C4": 2,
+            "C5": 2,
+            "C6": 0
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "mineres",
+          "commit": "5fd2a5e",
+          "planned": 40,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": "c2-v1",
+            "C3": null,
+            "C4": null,
+            "C5": "c5-v2",
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 22,
+            "C3": 15,
+            "C4": 3,
+            "C5": 3,
+            "C6": 0
+          },
+          "final": {
+            "C1": null,
+            "C2": 22,
+            "C3": 15,
+            "C4": 3,
+            "C5": 3,
+            "C6": 0
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "343 untyped events, 319 petroleum-gas.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C42",
+      "date": "2026-10-27",
+      "status": "completed",
+      "finding": "Siting raised C3 9->15 and C2 33->37 versus gateheld, but resiting lost C2 1:12. Reservation hypotheses only; no adoption.",
+      "sources": [
+        "data/laya-experiments/laya-c42-2123-miniship-20261027/report.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "gateheld",
+          "commit": "7067c55",
+          "planned": 40,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": "c2-v1",
+            "C3": null,
+            "C4": null,
+            "C5": "c5-v2",
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 33,
+            "C3": 9,
+            "C4": 6,
+            "C5": 6,
+            "C6": 0
+          },
+          "final": {
+            "C1": null,
+            "C2": 33,
+            "C3": 9,
+            "C4": 6,
+            "C5": 6,
+            "C6": 0
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "siting",
+          "commit": "bf6d748",
+          "planned": 40,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": "c2-v1",
+            "C3": null,
+            "C4": null,
+            "C5": "c5-v2",
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 37,
+            "C3": 15,
+            "C4": 9,
+            "C5": 9,
+            "C6": 1
+          },
+          "final": {
+            "C1": null,
+            "C2": 37,
+            "C3": 15,
+            "C4": 9,
+            "C5": 9,
+            "C6": 1
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "resiting",
+          "commit": "3139909",
+          "planned": 40,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": "c2-v1",
+            "C3": null,
+            "C4": null,
+            "C5": "c5-v2",
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 26,
+            "C3": 21,
+            "C4": 15,
+            "C5": 15,
+            "C6": 0
+          },
+          "final": {
+            "C1": null,
+            "C2": 26,
+            "C3": 21,
+            "C4": 15,
+            "C5": 15,
+            "C6": 0
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "C2 vs siting 1:12 (p~0.003).",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C43",
+      "date": "2026-10-28",
+      "status": "completed",
+      "finding": "Accell rejected: no C6 gain (12 vs 11 ever, 10 vs 7 final) and an early C2/C3 deficit (4:9, 4:12). C5 version labels are absent in all 60 pairs.",
+      "sources": [
+        "data/laya-experiments/laya-c43-2123-miniship-20261028/report.md",
+        "docs/rl/Laya_Cohort_Results_Index.md",
+        "data/laya-orchestration/c40-20261027/findings/c43-review-codex.md"
+      ],
+      "arms": [
+        {
+          "id": "reference",
+          "commit": "9d9b279",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": "c2-v1",
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 2,
+            "C2": 56,
+            "C3": 55,
+            "C4": 44,
+            "C5": 44,
+            "C6": 12
+          },
+          "final": {
+            "C1": null,
+            "C2": 56,
+            "C3": 55,
+            "C4": 44,
+            "C5": 12,
+            "C6": 10
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "C5 predicate version unobserved in 60/60; 44-ever is descriptive, not version-qualified.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        },
+        {
+          "id": "accell",
+          "commit": "1f63435",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": "c2-v1",
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 51,
+            "C3": 47,
+            "C4": 38,
+            "C5": 38,
+            "C6": 11
+          },
+          "final": {
+            "C1": null,
+            "C2": 51,
+            "C3": 47,
+            "C4": 38,
+            "C5": 12,
+            "C6": 7
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": 540000,
+          "caveats": [
+            "C5 version unobserved; 31 untyped events vs reference 21.",
+            "Matched-arm design does not establish the runtime comparison_eligible flag; retained as unknown."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "C44",
+      "date": "2026-10-28",
+      "status": "pending",
+      "finding": "Pending partial snapshot (36 completed / 15 running / 149 queued of 200 at 14:58, later 42/16/142). Not ranked; no endpoint claim.",
+      "sources": [
+        "docs/rl/Laya_Cohort_Results_Index.md",
+        "data/laya-orchestration/laya-loop/log.md",
+        "docs/rl/laya_helper_runs/terra-review-20261028/cohorts.json"
+      ],
+      "arms": [
+        {
+          "id": "control",
+          "commit": "bf6d748",
+          "planned": 40,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "steel",
+          "commit": "7e70e00",
+          "planned": 40,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": null,
+          "caveats": [
+            "Primary candidate; snapshot only."
+          ]
+        },
+        {
+          "id": "ownservice",
+          "commit": "9ccdd1c",
+          "planned": 40,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "nofluid",
+          "commit": "c054f95",
+          "planned": 40,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "reference",
+          "commit": "9d9b279",
+          "planned": 40,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": null,
+          "caveats": []
+        }
+      ]
+    },
+    {
+      "id": "C45",
+      "date": "2026-10-28",
+      "status": "pending",
+      "finding": "Queued 120/120; no endpoint evidence and not ranked.",
+      "sources": [
+        "docs/rl/Laya_Cohort_Results_Index.md",
+        "data/laya-orchestration/laya-loop/queue.json",
+        "docs/rl/laya_helper_runs/terra-review-20261028/cohorts.json"
+      ],
+      "arms": [
+        {
+          "id": "reference",
+          "commit": "9d9b279",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "steel",
+          "commit": "33a7c73",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": null,
+          "caveats": []
+        }
+      ]
+    },
+    {
+      "id": "C46",
+      "date": "2026-10-28",
+      "status": "pending",
+      "finding": "Queued 120/120; the v3 consumer receipt must be read from journals because the harness reports v2. Not ranked.",
+      "sources": [
+        "docs/rl/Laya_Cohort_Results_Index.md",
+        "data/laya-orchestration/laya-loop/queue.json",
+        "docs/rl/laya_helper_runs/terra-review-20261028/cohorts.json"
+      ],
+      "arms": [
+        {
+          "id": "reference",
+          "commit": "9d9b279",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "consumer",
+          "commit": "9462d4c",
+          "planned": 60,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": null,
+          "caveats": []
+        }
+      ]
+    },
+    {
+      "id": "ops-history-20261007",
+      "date": "2026-10-07",
+      "status": "completed",
+      "finding": "Mall-first-30 beat the old baseline on proxy C1 19:1, but proxy C2 stayed 0 in every arm; more history alone was 10:6 (p~0.45). No adoption.",
+      "sources": [
+        "docs/rl/Laya_System_Audit_2026-10-08.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "old-baseline",
+          "commit": null,
+          "planned": 52,
+          "predicate_family": "proxy",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 2,
+            "C2": 0,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "mall-first-30",
+          "commit": null,
+          "planned": 52,
+          "predicate_family": "proxy",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 20,
+            "C2": 0,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "follow-through",
+          "commit": null,
+          "planned": 52,
+          "predicate_family": "proxy",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 19,
+            "C2": 0,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "no-repeat",
+          "commit": null,
+          "planned": 52,
+          "predicate_family": "proxy",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 20,
+            "C2": 0,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "unstick",
+          "commit": null,
+          "planned": 52,
+          "predicate_family": "proxy",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 22,
+            "C2": 0,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "all-history",
+          "commit": null,
+          "planned": 52,
+          "predicate_family": "proxy",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 24,
+            "C2": 0,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": null,
+          "caveats": []
+        }
+      ]
+    },
+    {
+      "id": "next-20261008",
+      "date": "2026-10-08",
+      "status": "completed",
+      "finding": "Baseline weights retained: strict C1 25/16 and C2 12/9, while the candidate's proxy C2 looked better (48/58). No improvement.",
+      "sources": [
+        "docs/rl/Laya_Session_Handoff_2026-10-09.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "baseline",
+          "commit": null,
+          "planned": 160,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": "c2-v1",
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 25,
+            "C2": 12,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": null,
+          "caveats": [
+            "Proxy C2 48/160 is a separate family and is not in this strict row."
+          ]
+        },
+        {
+          "id": "other-slots-x1",
+          "commit": null,
+          "planned": 160,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": "c2-v1",
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": 16,
+            "C2": 9,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": null,
+          "caveats": [
+            "Proxy C2 58/160 is a separate family."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "epsilon-pilot-20261015",
+      "date": "2026-10-15",
+      "status": "completed",
+      "finding": "Tiny 4-seed pilot: strict C2 by epsilon 0/5/10/15/20/25% was 2/0/1/1/2/2. No default change.",
+      "sources": [
+        "docs/rl/Laya_Weekly_Reset_Audit_2026-10-17.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "eps-0",
+          "commit": "163ae4e",
+          "planned": 4,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": "c1-v2",
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 2,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "eps-5",
+          "commit": "163ae4e",
+          "planned": 4,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": "c1-v2",
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 0,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "eps-10",
+          "commit": "163ae4e",
+          "planned": 4,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": "c1-v2",
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 1,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "eps-15",
+          "commit": "163ae4e",
+          "planned": 4,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": "c1-v2",
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 1,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "eps-20",
+          "commit": "163ae4e",
+          "planned": 4,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": "c1-v2",
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 2,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "eps-25",
+          "commit": "163ae4e",
+          "planned": 4,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": "c1-v2",
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 2,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": null,
+          "caveats": []
+        }
+      ]
+    },
+    {
+      "id": "batch-20261016-morning",
+      "date": "2026-10-16",
+      "status": "completed",
+      "finding": "Strict C2 9/12/13/14 and proxy C2 12/15/17/15, with all C4 zero; no oil breakthrough and no replicated winner.",
+      "sources": [
+        "docs/rl/Laya_Weekly_Reset_Audit_2026-10-17.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "control",
+          "commit": null,
+          "planned": 24,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 9,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "goal-producer",
+          "commit": null,
+          "planned": 24,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 12,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "reservation-release",
+          "commit": null,
+          "planned": 24,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 13,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "shortage-weight-8",
+          "commit": null,
+          "planned": 24,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 14,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": null,
+          "caveats": []
+        }
+      ]
+    },
+    {
+      "id": "batch-20261016-night",
+      "date": "2026-10-16",
+      "status": "completed",
+      "finding": "Reservation-release's morning lead did not replicate (strict C2 12/17/12/15; C3 3/4/1/5; C4 zero). No adoption.",
+      "sources": [
+        "docs/rl/laya_helper_runs/combined-batch-20261016-night.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "control",
+          "commit": "a832bef",
+          "planned": 20,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 12,
+            "C3": 3,
+            "C4": 0,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "oil-parts",
+          "commit": null,
+          "planned": 20,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 17,
+            "C3": 4,
+            "C4": 0,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "reservation-release",
+          "commit": null,
+          "planned": 20,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 12,
+            "C3": 1,
+            "C4": 0,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "shortage-weight-8",
+          "commit": null,
+          "planned": 20,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 15,
+            "C3": 5,
+            "C4": 0,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": null,
+          "caveats": []
+        }
+      ]
+    },
+    {
+      "id": "batch-20261017-early",
+      "date": "2026-10-17",
+      "status": "completed",
+      "finding": "No challenger beat control (strict C2 18/17/16/15; C3 5/3/5/4) and the coal treatment fired 0/24. No adoption.",
+      "sources": [
+        "docs/rl/Laya_Weekly_Reset_Audit_2026-10-17.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "control",
+          "commit": null,
+          "planned": 24,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 18,
+            "C3": 5,
+            "C4": 0,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "candidate-2",
+          "commit": null,
+          "planned": 24,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 17,
+            "C3": 3,
+            "C4": 0,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "candidate-3",
+          "commit": null,
+          "planned": 24,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 16,
+            "C3": 5,
+            "C4": 0,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "candidate-4",
+          "commit": null,
+          "planned": 24,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 15,
+            "C3": 4,
+            "C4": 0,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": null,
+          "caveats": []
+        }
+      ]
+    },
+    {
+      "id": "batch-20261017-day",
+      "date": "2026-10-17",
+      "status": "completed",
+      "finding": "Weight-8 had the best strict C2 (12) but no plastic, and the chest loop remained; all C4 were zero. No adoption.",
+      "sources": [
+        "docs/rl/laya_helper_runs/combined-batch-20261017-day.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "control",
+          "commit": "7bbb1d5",
+          "planned": 16,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 8,
+            "C3": 1,
+            "C4": 0,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "no-latch",
+          "commit": null,
+          "planned": 16,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 7,
+            "C3": 4,
+            "C4": 0,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "pipe-300",
+          "commit": null,
+          "planned": 16,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 9,
+            "C3": 2,
+            "C4": 0,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "shortage-weight-8",
+          "commit": null,
+          "planned": 16,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": 12,
+            "C3": 4,
+            "C4": 0,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": null,
+          "window_max_game_ticks": null,
+          "caveats": []
+        }
+      ]
+    },
+    {
+      "id": "model-base-20261027",
+      "date": "2026-10-27",
+      "status": "trial_completed",
+      "finding": "Guided retained: strict C6 ever/final 7/5 versus 0/0 for three learned arms; not a clean causal model estimate because every original job is comparison_eligible:false.",
+      "sources": [
+        "docs/rl/Laya_Model_Result_2026-10-27.md",
+        "docs/rl/Laya_Model_Cohort_2026-10-27.md",
+        "docs/rl/Laya_Cohort_Results_Index.md"
+      ],
+      "arms": [
+        {
+          "id": "guided",
+          "commit": "2511e4",
+          "planned": 30,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": 7
+          },
+          "final": {
+            "C1": null,
+            "C2": 26,
+            "C3": 22,
+            "C4": null,
+            "C5": null,
+            "C6": 5
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": null,
+          "caveats": [
+            "Source-bound c2-v1..c6-v1 without per-record version labels; latency/exposure differ."
+          ]
+        },
+        {
+          "id": "kev-released",
+          "commit": null,
+          "planned": 30,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": 0
+          },
+          "final": {
+            "C1": null,
+            "C2": 1,
+            "C3": 0,
+            "C4": null,
+            "C5": null,
+            "C6": 0
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "vela",
+          "commit": null,
+          "planned": 30,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": 0
+          },
+          "final": {
+            "C1": null,
+            "C2": 5,
+            "C3": 2,
+            "C4": null,
+            "C5": null,
+            "C6": 0
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "jiwo",
+          "commit": null,
+          "planned": 30,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": 0
+          },
+          "final": {
+            "C1": null,
+            "C2": 0,
+            "C3": 0,
+            "C4": null,
+            "C5": null,
+            "C6": 0
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": null,
+          "caveats": []
+        }
+      ]
+    },
+    {
+      "id": "gpukev-20261028",
+      "date": "2026-10-28",
+      "status": "stopped",
+      "finding": "Ended early: 8 completed of 90, plus 4 endpoint-connection faults, 2 operator-stop casualties and 76 not started. Eight completions cannot rank weights.",
+      "sources": [
+        "docs/rl/Laya_Cohort_Results_Index.md",
+        "docs/rl/laya_helper_runs/terra-review-20261028/cohorts.md"
+      ],
+      "arms": [
+        {
+          "id": "guided",
+          "commit": null,
+          "planned": 30,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "kev-released",
+          "commit": null,
+          "planned": 30,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": null,
+          "caveats": []
+        },
+        {
+          "id": "kev-weak-v3",
+          "commit": null,
+          "planned": 30,
+          "predicate_family": "strict",
+          "predicate_versions": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "ever": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "final": {
+            "C1": null,
+            "C2": null,
+            "C3": null,
+            "C4": null,
+            "C5": null,
+            "C6": null
+          },
+          "comparison_eligible": false,
+          "window_max_game_ticks": null,
+          "caveats": []
+        }
+      ]
+    }
+  ]
+}
