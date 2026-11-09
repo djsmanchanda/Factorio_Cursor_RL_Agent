@@ -32,7 +32,10 @@ STARTER_MALL_TARGETS = (
 # Generation stock is demand-driven only after advanced-circuit output proves
 # the mission-critical oil and electronics ladder is already operating.
 _MACHINE_STOCK_TARGETS = {
-    "assembling-machine-2": 6,
+    # A C6 consumer cell needs 2-6 assembling-machine-2 and 3-10 passive
+    # providers at once; C82's PM cell was attempted in 11/50 worlds and never
+    # built (AM2 short 2, providers short 4). Reserve one consumer bill.
+    "assembling-machine-2": 12,
     "chemical-plant": 4,
 }
 
@@ -82,6 +85,10 @@ def mission_mall_targets(
         visit(goal)
     if goals:
         targets["lab"] = 4
+        if "passive-provider-chest" in recipes:
+            targets["passive-provider-chest"] = max(
+                targets.get("passive-provider-chest", 0), 12,
+            )
     return {item: count for item, count in targets.items() if item in recipes}
 
 
