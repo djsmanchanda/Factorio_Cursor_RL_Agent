@@ -442,16 +442,23 @@ def test_roboports_still_needed_for_the_outpost_join_the_goal_reserve(planners):
     assert menu["goal_reserve"]["roboport"] == 6
 
 
-def test_the_provider_reads_the_adapters_own_world(planners):
+def test_the_provider_reads_the_adapters_own_world_and_routes_reach_around_reserved_land(planners, tmp_path):
+    """eval-fixes-20261109b: with the mall between base and oil, the direct hop was rejected reserved:mall forever."""
+    import json
     seen = []
+    (tmp_path / "evidence").mkdir()
+    (tmp_path / "evidence" / "site-plan.json").write_text(json.dumps({"zones": [
+        {"zone_id": "mall", "purpose": "mall", "rect": [0, 0, 2, 2]},
+        {"zone_id": "ore", "purpose": "ore:iron-ore", "rect": [10, 10, 20, 20]}]}))
 
     class Adapter:
-        bridge, surface, force = "rcon-of-this-copy", "nauvis", "player"
+        bridge, surface, force, root = "rcon-of-this-copy", "nauvis", "player", tmp_path
 
     options = OilOptions()
-    options.offer = lambda world, facts, board: seen.append((world.client, world.surface, world.force))
+    options.offer = lambda world, facts, board, reach_avoid: seen.append(
+        (world.client, world.surface, world.force, reach_avoid))
     options(Adapter(), {}, BOARD)
-    assert seen == [("rcon-of-this-copy", "nauvis", "player")]
+    assert seen == [("rcon-of-this-copy", "nauvis", "player", frozenset({(0, 0), (0, 1), (1, 0), (1, 1)}))]
 
 
 def test_a_built_cell_is_not_replanned_and_its_off_grid_substation_gets_a_hookup(planners):

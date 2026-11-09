@@ -411,3 +411,32 @@ def test_reach_step_short_circuits_need_no_surveys(monkeypatch) -> None:
         target=(-297.0, -40.0), source=_BASE_PORT, roboport_ghosts=((-40.0, -5.0),),
     ), {})
     assert (flight.outcome, flight.in_flight) == ("in_flight", (-40.0, -5.0))
+
+
+def test_a_reach_hop_routes_around_a_reserved_block_on_the_direct_line(monkeypatch) -> None:
+    """eval-fixes-20261109b: a mall block between base and oil; the hop must go around it, not into it."""
+    scenario = _SCENARIOS["construction_reach"]
+    _install(monkeypatch, _World(scenario["stock"], **scenario.get("world", {})))
+
+    def read(survey):
+        return reach_survey.read_reach_survey(object(), "nauvis", "player", survey)
+
+    def answer(survey):
+        if survey.kind != "chain_positions":
+            return read(survey)
+        return reach_survey.drive_reach_planner(
+            roboport_placement.clear_chain_planner(survey.position, **dict(survey.flags)), read)
+
+    def plan(reserved):
+        facts = stage_services.ReachFacts(target=scenario["target"], source=_BASE_PORT, purpose="construction",
+                                          reserved_tiles=reserved)
+        return reach_survey.drive_reach_planner(stage_services._reach_step_planner(facts, lambda _m: None), answer)
+    port = plan(_RESERVED).roboports[-1]
+    block = frozenset((x, y) for x in range(int(port[0]) - 20, int(port[0]) + 20)
+                      for y in range(int(port[1]) - 20, int(port[1]) + 20))
+    step = plan(_RESERVED | block)
+    assert step.outcome == "hop"
+    size = {"roboport": 4, "big-electric-pole": 2, "substation": 2}
+    clashing = [(name, xy) for name, xy in step.placements
+                if stage_services.footprint_tile_indices(xy, size.get(name, 1)) & block]
+    assert not clashing and step.roboports[-1] != port

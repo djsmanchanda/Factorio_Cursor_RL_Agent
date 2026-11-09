@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import copy
 import math
+from pathlib import Path
 from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -116,6 +117,16 @@ def _first_unmet(order: tuple[str, ...], unmet: set[str]) -> str:
 
 def _xy(position: Mapping) -> tuple[float, float]:
     return (float(position["x"]), float(position["y"]))
+
+
+def reach_reserved_tiles(plan: Mapping | None) -> frozenset[tuple[int, int]]:
+    """Tiles of zones a `reach` roboport may not stand on (training/laya_site_plan reservation rules)."""
+    tiles: set[tuple[int, int]] = set()
+    for zone in (plan or {}).get("zones") or ():
+        if zone["purpose"] in ("mall", "corridor"):
+            x0, y0, x1, y1 = zone["rect"]
+            tiles.update((x, y) for x in range(math.floor(x0), math.ceil(x1)) for y in range(math.floor(y0), math.ceil(y1)))
+    return frozenset(tiles)
 
 
 @dataclass
@@ -225,10 +236,15 @@ class OilOptions:
     shortfalls: dict = field(default_factory=dict)
 
     def __call__(self, adapter: Any, facts: Mapping, board: Mapping) -> dict | None:
-        """The clean runner's hook: read the adapter's own disposable world."""
-        return self.offer(World(adapter.bridge, adapter.surface, adapter.force), facts, board)
+        """The clean runner's hook: read the adapter's own disposable world and its land plan."""
+        from training.laya_site_plan import load_plan
+        plan = load_plan(Path(adapter.root, "evidence", "site-plan.json")) if getattr(adapter, "root", None) else None
+        return self.offer(World(adapter.bridge, adapter.surface, adapter.force), facts, board,
+                          reach_avoid=reach_reserved_tiles(plan))
 
-    def offer(self, world: World, facts: Mapping, board: Mapping) -> dict | None:
+    def offer(self, world: World, facts: Mapping, board: Mapping,
+              reach_avoid: frozenset[tuple[int, int]] = frozenset()) -> dict | None:
+        self.reach_avoid = reach_avoid
         field_facts = facts.get("oil_field") or {}
         unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"} & FLUID_CHAIN
         if not field_facts.get("found") or not field_facts.get("center") or not unmet:
@@ -479,9 +495,12 @@ class OilOptions:
         from orchestrator.reach_survey import MissingReachSurvey
         from orchestrator.stage_services import ReachFacts, StuckError, plan_reach_step
         source = min(ports, key=lambda p: math.dist(_xy(p["position"]), target))
+        # Land the plan keeps from coverage (mall, corridors) is routed around, not hopped into: with the mall
+        # between base and oil, the direct hop was rejected reserved:mall every decision (eval-fixes-20261109b,
+        # 4/4 C3 seeds stalled before C4).
         reach_facts = ReachFacts(target=target, source=_xy(source["position"]),
                                  roboport_ghosts=world.roboport_ghosts(),
-                                 reserved_tiles=intent["footprint"] if intent else frozenset())
+                                 reserved_tiles=frozenset(intent["footprint"] if intent else ()) | getattr(self, "reach_avoid", frozenset()))
         try:
             step, _surveys = resolve(plan_reach_step, reach_facts, world.read_reach_survey, MissingReachSurvey)
         except (StuckError, SurveyBudgetExceeded):
