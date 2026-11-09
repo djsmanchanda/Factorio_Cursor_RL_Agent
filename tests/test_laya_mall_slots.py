@@ -304,3 +304,26 @@ def test_a_stocked_bottleneck_item_releases_its_cell_to_a_build_shortfall():
             "product": "iron-gear-wheel", "status": "item_ingredient_shortage", "retargeted_tick": None}
     moves = assign([gear], order, board, recipes, set(stock), 10_000, stock=stock, shortfalls={"long-handed-inserter"})
     assert [item for _, item in moves] == ["long-handed-inserter"]
+
+
+def test_an_unserved_precursor_preempts_the_lowest_ranked_demanded_cell():
+    """eval-fixes-20261109e s0: circuit and inserter cells waited for cable; cable had no cell and none was free."""
+    from training.laya_mall_slots import assign
+    def cell(x, product):
+        return {"entity": "assembling-machine-1", "position": {"x": x, "y": 0.5}, "requester": {"x": x - 3, "y": 0.5},
+                "product": product, "status": "item_ingredient_shortage", "retargeted_tick": None}
+    board = {"targets": {}, "needs": [need("inserter", "input_starved", 0, short=["electronic-circuit"]),
+                                      need("electronic-circuit", "input_starved", 1, short=["copper-cable"]),
+                                      need("copper-cable", "unbuilt", 2)]}
+    order = ["copper-cable", "electronic-circuit", "inserter"]
+    recipes = {**RECIPES, "inserter": {"ingredients": [{"name": "electronic-circuit", "amount": 1},
+                                                       {"name": "iron-plate", "amount": 1}], "product_amount": 1}}
+    have = {"copper-plate", "iron-plate"}
+    moves = assign([cell(1, "electronic-circuit"), cell(2, "inserter")], order, board, recipes, have, 10_000)
+    assert [(c["product"], item) for c, item in moves] == [("inserter", "copper-cable")]
+    # A recently switched cell is not taken; the next lowest-ranked settled one is, and none when all are recent.
+    fresh = [cell(1, "electronic-circuit"), {**cell(2, "inserter"), "retargeted_tick": 9_000}]
+    assert [(c["product"], item) for c, item in assign(fresh, order, board, recipes, have, 10_000)] \
+        == [("electronic-circuit", "copper-cable")]
+    both = [{**c, "retargeted_tick": 9_000} for c in fresh]
+    assert assign(both, order, board, recipes, have, 10_000) == []

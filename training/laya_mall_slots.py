@@ -374,6 +374,23 @@ def assign(cells: list[dict], order: list[str], board: Mapping, recipes: Mapping
                 break
             free.remove(pick)
             moves.append((pick, item))
+    # Priority pre-emption: a demanded item with no cell takes a settled cell from the lowest-ranked demanded item
+    # (eval-fixes-20261109e s0: cells on circuits and inserters waited for cable, and cable - ranked first - had
+    # no cell and no free cell to get). Cells on met board items are never taken; a build shortfall's cell yields
+    # only to something ranked above it - its own missing precursor (s3: big poles starved of unmade iron sticks).
+    rank_of = {item: i for i, item in enumerate(order)}
+    moved = {id(c) for c, _ in moves}
+    served = {item for _, item in moves} | {c["product"] for c in cells if c["product"] and id(c) not in moved}
+    for rank, item in enumerate(order):
+        if item in served:
+            continue
+        victims = [c for c in cells if id(c) not in moved and c["product"] in rank_of and rank_of[c["product"]] > rank
+                   and (c.get("retargeted_tick") is None or tick - c["retargeted_tick"] >= RECENT_TICKS)]
+        if victims:
+            victim = max(victims, key=lambda c: rank_of[c["product"]])
+            moved.add(id(victim))
+            served.add(item)
+            moves.append((victim, item))
     return moves
 
 
