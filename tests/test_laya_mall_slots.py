@@ -276,3 +276,14 @@ def test_build_blocking_shortfall_takes_the_stocked_goal_cell_precursor_first():
         == [("copper-cable", "iron-stick")]
     # Unstocked, the goal cell keeps its job.
     assert assign([cable], order, board, recipes, have, 10_000, stock={**stock, "copper-cable": 10}) == []
+
+
+def test_an_input_starved_item_gets_no_extra_cells():
+    """eval-fixes-20261109 s1: all three cells went to iron-starved gears (722 stocked), leaving cable unbuilt."""
+    from training.laya_mall_slots import assign
+    recipes = {name: {**r, "energy_ticks": 30} for name, r in RECIPES.items()}
+    board = {"targets": {}, "needs": [need("iron-gear-wheel", "input_starved", 0, gap=0.25, short=["iron-plate"])]}
+    cells = [{"entity": "assembling-machine-1", "position": {"x": x, "y": 0.5}, "requester": {"x": x - 3, "y": 0.5},
+              "product": None, "status": "no_recipe", "retargeted_tick": None} for x in (1, 2, 3)]
+    moves = assign(cells, ["iron-gear-wheel"], board, recipes, {"iron-plate"}, 10_000)
+    assert [item for _, item in moves] == ["iron-gear-wheel"]

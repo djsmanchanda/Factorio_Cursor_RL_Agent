@@ -707,3 +707,16 @@ def test_parallel_picks_never_spend_irreplaceable_kit_items_or_take_untagged_cov
             o = next(o for o in menu["options"] if o["family"] != "wait")
             return {"option_id": o["option_id"], "need_id": o["need_id"], "probability": 1.0}
     assert parallel_picks(Any(), facts, menu, first, 4, lambda sub: {}) == []
+
+
+def test_untagged_coverage_may_not_spend_a_roboport_nothing_can_make():
+    f = facts()
+    f["recipes"]["roboport"] = recipe([("advanced-circuit", 45)], 300)
+
+    def validate(candidates):
+        return {c["option_id"]: {"reason": None, "bill": {"roboport": 1} if c["family"] == "expand" else
+                {"assembling-machine-1": 1}} for c in candidates}
+    menu = compile_menu(f, compile_status(f, phase("C1")["targets"]), validate, seed=1)
+    assert not any(o["family"] == "expand" and o["need_id"] == "coverage" for o in menu["options"])
+    reasons = {**menu["blocked"].get("coverage", {}), **menu["blocked_alternatives"].get("coverage", {})}
+    assert "irreplaceable:roboport" in reasons

@@ -748,6 +748,13 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
                 primary = PRIMARY_ENTITY.get(candidate["family"])
                 if not reason and (not result.get("bill") or (primary and primary not in result["bill"])):
                     reason = "no_op"  # Its main entity already exists; only power pieces would be new.
+                if not reason and need == "coverage":
+                    # Untagged coverage serves no need; it may not spend what cannot be made now (before plastic,
+                    # kit roboports). eval-fixes-20261109: faster decisions spent 16-19 such hops in 85-180k ticks
+                    # (old loop: 234-454k), leaving none for the iron and copper line sites.
+                    spent = next((item for item in result.get("bill") or {} if unobtainable(item)), None)
+                    if spent:
+                        reason = f"irreplaceable:{spent}"
                 if not reason and candidate["family"] not in OIL_FAMILIES:
                     for item, keep in plastic_reserve.items():
                         if result["bill"].get(item) and _available(facts, candidate, item) - int(result["bill"][item]) < keep:

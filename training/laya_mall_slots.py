@@ -352,8 +352,11 @@ def assign(cells: list[dict], order: list[str], board: Mapping, recipes: Mapping
         rate = (machine_rate(free[0]["entity"], item, recipe) or 0.0) if recipe.get("energy_ticks") else 0.0
         gap = need.get("gap_per_s") if need.get("gap_per_s") is not None else need.get("required_per_s") or 0.0
         pending = sum(1 for product in recent.values() if product == item)  # Switched, not measured yet.
-        if gap and rate:  # Cells for the unmet rate; working cells are already in the measured rate.
+        starved = need.get("condition") == "input_starved" or bool(need.get("short_inputs"))
+        if gap and rate and not starved:  # Cells for the unmet rate; working cells are already in the measured rate.
             wanted = min(MAX_PER_ITEM, math.ceil(gap / rate - 1e-9)) - pending
+        elif starved:  # More machines cannot raise a rate its inputs hold down; its precursors rank first.
+            wanted = 1 - making.get(item, 0) - pending
         else:  # A stock or unrated item: one working cell.
             wanted = 1 - making.get(item, 0)
         # A free cell already set to the item keeps it (its gate lifts below): no switch, nothing discarded.
