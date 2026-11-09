@@ -720,3 +720,15 @@ def test_untagged_coverage_may_not_spend_a_roboport_nothing_can_make():
     assert not any(o["family"] == "expand" and o["need_id"] == "coverage" for o in menu["options"])
     reasons = {**menu["blocked"].get("coverage", {}), **menu["blocked_alternatives"].get("coverage", {})}
     assert "irreplaceable:roboport" in reasons
+
+
+def test_goal_reserve_counts_furnaces_later_smelted_goals_still_need_while_none_can_be_made():
+    """eval-fixes-20261109f s0/s1: 25 of the kit's 30 electric furnaces went to iron, copper and steel; the C3 stone line
+    needed 6."""
+    f = facts()
+    f["recipes"].update({"stone-brick": recipe([("stone", 2)], 192),
+                         "electric-furnace": recipe([("advanced-circuit", 5), ("steel-plate", 10)], 300)})
+    f["machines"] = [{"name": "electric-furnace", "position": {"x": 0, "y": 0}, "recipe": "stone-brick"}]
+    menu = compile_menu(f, compile_status(f, phase("C2")["targets"]), validator(), seed=1)
+    # C2: iron 3.0 and copper 3.0 -> 5 furnaces each at 0.625/s; C3: stone 1.5 -> 3, one already placed.
+    assert menu["goal_reserve"]["electric-furnace"] == 5 + 5 + 2

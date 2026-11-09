@@ -865,6 +865,28 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
         if need and need.get("goal_required_per_s", need.get("required", 0)) > 0 and plate not in starters:
             for name, count in starter_bill(plate).items():
                 goal_reserve[name] = goal_reserve.get(name, 0) + count
+    # Electric furnaces the smelted goals of this and later phases (to C4) still need while none can be made: the
+    # kit holds 30, and eval-fixes-20261109f s0/s1 spent 25 on iron, copper and steel, leaving 5 for a 6-furnace
+    # stone line at C3. A fact for the rules (dips_goal_reserve), not a block.
+    if missing_input("electric-furnace", recipes, have):
+        from training.laya_mission import PHASES
+        from training.laya_factory_status import FURNACE_SPEEDS, SMELTED_ITEMS, machine_rate
+        start = next((i for i, p in enumerate(PHASES) if p["targets"] == board.get("targets")), None)
+        upcoming: dict[str, float] = {}
+        for later in PHASES[start:] if start is not None else ():
+            if later["phase_id"] > "C4":
+                break
+            for item, rate in later["targets"].items():
+                if item in SMELTED_ITEMS:
+                    upcoming[item] = max(upcoming.get(item, 0.0), rate)
+        placed = Counter(m.get("recipe") for m in facts.get("machines") or () if m["name"] == "electric-furnace")
+        needed = 0
+        for item, rate in upcoming.items():
+            per = machine_rate("electric-furnace", item, recipes.get(item)) if recipes.get(item) else None
+            if per:
+                needed += max(0, math.ceil(rate / per - 1e-9) - placed.get(item, 0))
+        if needed:  # Unbuilt goal starters' furnaces are part of the same count, so take the larger.
+            goal_reserve["electric-furnace"] = max(goal_reserve.get("electric-furnace", 0), needed)
     # Roboports the oil route still needs while none can be made (live 2026-11-08 smoke s1: the kit's
     # roboports went to coverage and the outpost stalled item_shortfall:roboport). A fact, not a rule.
     outpost_ports = int(((oil_offer or {}).get("facts") or {}).get("roboports_to_outpost") or 0)
