@@ -287,3 +287,20 @@ def test_an_input_starved_item_gets_no_extra_cells():
               "product": None, "status": "no_recipe", "retargeted_tick": None} for x in (1, 2, 3)]
     moves = assign(cells, ["iron-gear-wheel"], board, recipes, {"iron-plate"}, 10_000)
     assert [item for _, item in moves] == ["iron-gear-wheel"]
+
+
+def test_a_stocked_bottleneck_item_releases_its_cell_to_a_build_shortfall():
+    """eval-fixes-20261109b s4: the only cell stayed on iron-starved gears (468 stocked) while every build lacked
+    long-handed inserters."""
+    from training.laya_mall_slots import assign, demand_order
+    recipes = {**RECIPES, "long-handed-inserter": {"ingredients": [{"name": "iron-gear-wheel", "amount": 1},
+                                                                   {"name": "iron-plate", "amount": 1}], "product_amount": 1}}
+    board = {"targets": {"iron-gear-wheel": 0.27},
+             "needs": [need("iron-gear-wheel", "input_starved", 0, gap=0.12, required=0.27, short=["iron-plate"]),
+                       need("iron-plate", "under_capacity", 1, gap=0.2, required=0.6)]}
+    stock = {"iron-gear-wheel": 468, "iron-plate": 3}
+    order = demand_order(board, {"long-handed-inserter": 0.01}, recipes, set(stock), stock)
+    gear = {"entity": "assembling-machine-1", "position": {"x": -16.5, "y": -2.5}, "requester": {"x": -19.5, "y": -2.5},
+            "product": "iron-gear-wheel", "status": "item_ingredient_shortage", "retargeted_tick": None}
+    moves = assign([gear], order, board, recipes, set(stock), 10_000, stock=stock, shortfalls={"long-handed-inserter"})
+    assert [item for _, item in moves] == ["long-handed-inserter"]

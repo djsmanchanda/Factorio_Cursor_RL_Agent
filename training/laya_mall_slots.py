@@ -317,7 +317,8 @@ def demand_order(board: Mapping, stock_demand: Mapping, recipes: Mapping, have: 
 
 
 def assign(cells: list[dict], order: list[str], board: Mapping, recipes: Mapping, have: set[str], tick: int,
-           recent: Mapping[tuple, str] = {}, stock: Mapping[str, int] | None = None) -> list[tuple[dict, str]]:
+           recent: Mapping[tuple, str] = {}, stock: Mapping[str, int] | None = None,
+           shortfalls: set[str] | frozenset = frozenset()) -> list[tuple[dict, str]]:
     """(cell, item) switches that put free cells on the most urgent unmet items.
 
     A cell is free when idle (gated, output full, no recipe), making something nothing demands, or making
@@ -335,10 +336,11 @@ def assign(cells: list[dict], order: list[str], board: Mapping, recipes: Mapping
         settled = since is None or tick - since >= RECENT_TICKS
         if not settled:
             return False
-        # A met item with its stock target on hand releases its cell (the eval's only cell stayed on goal
-        # copper cable with 4,262 in stock while poles were unbuilt); unmet or unstocked work keeps it.
-        if (needs.get(product) or {}).get("condition") == "satisfied" and product not in order:
-            return (stock or {}).get(product, 0) >= gate_target(product)
+        # An item with its stock target on hand releases its cell unless builds are short of it: the only cell
+        # stayed on goal copper cable with 4,262 stocked (eval-fixes-20261109), and on iron-starved gears with 468
+        # stocked while every build lacked long-handed inserters (eval-fixes-20261109b s4).
+        if product not in shortfalls and (stock or {}).get(product, 0) >= gate_target(product):
+            return True
         return product not in needs and product not in order
 
     free = [c for c in cells if is_free(c)]
@@ -400,7 +402,7 @@ def manage(adapter, facts: Mapping, board: Mapping, stock_demand: Mapping[str, f
     tick = int(facts.get("tick") or 0)
     recent = {(c["position"]["x"], c["position"]["y"]): c["product"] for c in cells
               if c.get("retargeted_tick") is not None and tick - c["retargeted_tick"] < RECENT_TICKS}
-    moves = assign(cells, order, board, recipes, have, tick, recent, stock)
+    moves = assign(cells, order, board, recipes, have, tick, recent, stock, frozenset(stock_demand))
     switched = {(c["position"]["x"], c["position"]["y"]) for c, _ in moves}
     actions = [a for a in gate_updates(cells, ungated, applied, gate_scale)
                if (a["position"]["x"], a["position"]["y"]) not in switched]
