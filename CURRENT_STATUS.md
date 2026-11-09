@@ -523,3 +523,9 @@ Per user (latest, supersedes the same-day 3-day scale request): queued successor
 - README "Measured progress" now lists every cohort that ran; `tools/laya_cohort_performance.py` regenerates `docs/rl/Laya_Cohort_Performance.md` from the local ledgers.
 - Evidence: c6-v2 has 0 valid passes in 1,085 completed runs (C58-C87); control arms reach C4 in 177/283 runs (C80b-C85); C84 left direct replenishment inconclusive (pooled 33W/20L, p=.098). Full suite 4838 passed / 39 skipped.
 - Lifecycle: nothing redeployed or restarted; C85, C86c and C87 keep running from their frozen copies. Main's runtime defaults are unchanged; adopting the reference line (`ccbecab`) or c6-v2 into main is a separate decision.
+
+## [2026-11-10 IST] Branches reorganised: main is the single long-lived branch
+- What: `main` now carries the converged experiment history plus the uncommitted reports, the 58 missing status entries (older ones archived), the dashboard mixed-start panel and the power-bridge test. 60 merged local branches were deleted after tagging each tip `archive/20261110/branch/<name>`; 30 stale worktrees (orchestration copies and finished T3 delegate worktrees) were removed after snapshotting uncommitted state to `archive/20261110/worktree/*`. Remote `laya/*` and `codex/deterministic-checkpoint-fleet` were removed after the same tagging; every commit they held is in `main`. Branch policy added to `AGENTS.md`.
+- Kept: `codex/deterministic-checkpoint-fleet` locally (the root worktree runs the live coordinators), `c86/*` and `c87/*` until their cohorts close, and `c88/*` for a future merge. Starship refs untouched. Helper-run logs stay local and untracked.
+- Evidence: fast gate 1656/1656 on the branch; all deleted branch tips are ancestors of `main`.
+- Lifecycle: nothing restarted; the deployed scheduler and dashboard still run from the root worktree.

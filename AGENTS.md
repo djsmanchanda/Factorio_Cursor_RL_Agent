@@ -92,5 +92,6 @@ Inherit T3's model/provider defaults; omit explicit model and reasoning-effort o
 - Write one dated handoff per session in `docs/handoffs/` (gitignored, local only); record durable facts in tracked docs. Update `Laya_Current_Handoff.md` when a campaign starts, ends or is adopted. Use absolute dates with IST times. Helper and observer model output goes in `*_helper_runs/`; it is evidence, not authority.
 - Commit each verified user-requested fix or feature once, unless told not to. Do not commit plans, diagnosis-only work or unverified changes.
 - RL and Laya subjects use `feat(RL ...): ...` or `fix(RL ...): ...`.
+- Branches: `main` is the only long-lived branch. Experiment arms live on short branches (`cNN/<arm>`) until their cohort closes; then merge them into `main` with `-s ours` (history only, unless adopted), tag each arm `archive/<YYYYMMDD>/cohort/<cohort>/<arm>`, and delete the branch. Never delete an unmerged, untagged branch; snapshot uncommitted worktrees to an `archive/<YYYYMMDD>/worktree/...` tag before removing them.
 - Only the main agent manages commits, remotes or pushes. Delegated tasks return changed files plus validation.
 - If verification is blocked, state the blocker precisely and do not claim completion.
