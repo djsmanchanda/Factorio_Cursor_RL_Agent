@@ -236,3 +236,13 @@ def test_kit_chests_in_stock_are_no_route_to_more_chests_until_plastic_exists():
     assert missing_input("passive-provider-chest", CHEST_CHAIN, have) == "plastic-bar"
     assert missing_input("passive-provider-chest", CHEST_CHAIN, have | {"plastic-bar"}) is None
     assert missing_input("electronic-circuit", CHEST_CHAIN, set()) == "iron-plate"  # A plate not on hand blocks too.
+
+
+def test_a_rate_met_but_drained_plate_is_under_capacity():
+    """eval-fixes-20261109c s4: iron met its 0.5/s goal-tree rate at 1.24/s, but steel and the mall consumed it all
+    (3 plates in the network), so gears starved and no iron line was offered."""
+    from training.laya_factory_status import _diagnose
+    args = ("iron-plate", {"ingredients": [], "product_amount": 1, "energy_ticks": 192}, {"working": 2}, 2, 0.5, 1.25, 1.244)
+    assert _diagnose(*args, stock=3, consumed=1.24) == "under_capacity"
+    assert _diagnose(*args, stock=3, consumed=0.6) == "satisfied"      # surplus building up
+    assert _diagnose(*args, stock=900, consumed=1.24) == "satisfied"   # a buffer on hand

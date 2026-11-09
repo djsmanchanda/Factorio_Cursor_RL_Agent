@@ -36,6 +36,7 @@ SATISFIED_SHARE = 0.95
 # Output-blocked machines whose accessible stock covers this many seconds of demand
 # are idle because nothing draws from them, not because supply is missing.
 STOCKED_SECONDS = 600
+DRAINED_STOCK = 50  # Network units below which an item made only as fast as it is consumed counts as drained.
 
 # Factorio entity_status names grouped into the conditions Laya must separate.
 STATUS_BUCKETS = {
@@ -246,10 +247,17 @@ def _upgrade_fact(machines: Sequence[Mapping], item: str, recipe: Mapping | None
 
 def _diagnose(item: str, recipe: Mapping | None, buckets: Mapping[str, int], machine_count: int,
               required: float, capacity: float | None, measured: float | None, stock: int = 0,
-              goal: bool = False) -> str:
+              goal: bool = False, consumed: float | None = None) -> str:
     """Describe the measured condition of one need; never prescribe a remedy."""
-    if measured is not None and measured >= required * SATISFIED_SHARE:
+    # Meeting the goal-tree rate while everything made is consumed and the network holds next to nothing is
+    # not enough supply: other consumers (steel, the mall) drain it (eval-fixes-20261109c s4: iron 1.24/s
+    # "satisfied" against 0.5/s required, 3 plates in the network, gears input-starved, no iron line offered).
+    drained = (measured is not None and consumed is not None and measured > 0 and consumed >= measured * SATISFIED_SHARE
+               and stock < max(DRAINED_STOCK, required * 60))
+    if measured is not None and measured >= required * SATISFIED_SHARE and not drained:
         return "satisfied"
+    if drained and item not in RAW:
+        return "under_capacity"
     if buckets.get("blocked", 0) * 2 > machine_count and stock >= required * STOCKED_SECONDS:
         return "satisfied"  # A full mall measures 0/s while its stock meets demand.
     if item in RAW:
@@ -321,7 +329,8 @@ def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Ma
         if item == "crude-oil" and per_pumpjack:
             machines_needed["pumpjack"] = math.ceil(required / per_pumpjack - 1e-9)
         condition = _diagnose(item, recipe, buckets, len(machines), required, capacity, measured,
-                              int(stock.get(item, 0)), goal=item in targets)
+                              int(stock.get(item, 0)), goal=item in targets,
+                              consumed=_measured(measurement, "consumption", item))
         if condition == "unbuilt" and built.get(item, 0) > 0:
             condition = "built_idle"  # Built by the runner but never ran (usually starved of input).
         needs.append({
