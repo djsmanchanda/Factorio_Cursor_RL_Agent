@@ -1,0 +1,7 @@
+# Path: systemd/laya-cohort-cool-recovery.service.example | Purpose: Recover expired or interrupted dashboard cooling requests.
+[Unit]
+Description=Recover Laya dashboard cooling state
+
+[Service]
+Type=oneshot
+ExecStart=/ABSOLUTE/PATH/TO/PYTHON /ABSOLUTE/PATH/TO/CODE/tools/laya_cohort_dashboard.py --repo-root /ABSOLUTE/PATH/TO/EVIDENCE --host-root /ABSOLUTE/PATH/TO/EVIDENCE/data/laya-host --data-root /ABSOLUTE/PATH/TO/EVIDENCE/data/laya-cohort-dashboard --recover-cooling
