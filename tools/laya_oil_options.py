@@ -547,9 +547,11 @@ class OilOptions:
                 try:
                     step, _surveys = resolve(plan_reach_step, replace(reach_facts, target=waypoint),
                                              world.read_reach_survey, MissingReachSurvey)
-                    break
                 except (StuckError, SurveyBudgetExceeded):
                     continue
+                if step.outcome == "hop":
+                    break
+                step = None  # A corner already covered is no detour (eval-fixes-20261109d s1, s4: silent no_candidate).
             if step is None:
                 block(need, "reach_plan_failed")
                 return None

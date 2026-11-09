@@ -258,6 +258,29 @@ def mall_blocks(facts: Mapping, blocked: Sequence[Rect]) -> list[tuple[str, Rect
     return found
 
 
+# The line itself must not pass through the mall: a north mall ~1 tile off the line still reached C4 (reach hops
+# shift around it), while a margin as wide as a hop excluded every site next to the base.
+ROUTE_MARGIN = 0.0
+
+
+def oil_route(facts: Mapping) -> tuple[tuple[float, float], tuple[float, float]] | None:
+    """(start, end) of the straight line from the survey anchor to the surveyed oil field, if one was found."""
+    field = facts.get("oil_field") or {}
+    if not field.get("found") or not field.get("center") or not field.get("anchor"):
+        return None
+    return ((float(field["anchor"]["x"]), float(field["anchor"]["y"])),
+            (float(field["center"]["x"]), float(field["center"]["y"])))
+
+
+def crosses_route(rect: Rect, route: tuple[tuple[float, float], tuple[float, float]]) -> bool:
+    """Whether the line comes within ROUTE_MARGIN of the rectangle (sampled every tile)."""
+    (x0, y0), (x1, y1) = route
+    steps = max(1, int(math.dist((x0, y0), (x1, y1))))
+    grown = Rect(rect.min_x - ROUTE_MARGIN, rect.min_y - ROUTE_MARGIN, rect.max_x + ROUTE_MARGIN, rect.max_y + ROUTE_MARGIN)
+    return any(grown.min_x <= x0 + (x1 - x0) * k / steps <= grown.max_x
+               and grown.min_y <= y0 + (y1 - y0) * k / steps <= grown.max_y for k in range(steps + 1))
+
+
 def plan_options(facts: Mapping) -> list[dict]:
     """Mall-block alternatives beside the starter area; each plan's item blocks avoid its mall."""
     first = base_zones(facts)
@@ -265,7 +288,13 @@ def plan_options(facts: Mapping) -> list[dict]:
     options = []
     from training.laya_mall_block import block_centres
     ports = [p for p in facts["ports"] if p["energy"] > 0]
-    for side, mall in mall_blocks(facts, blocked):
+    blocks = mall_blocks(facts, blocked)
+    # Keep the route to the surveyed oil field free (eval-fixes-20261109d: seeds whose mall sat west, across the
+    # base-to-oil line, never got a reach hop and stalled before C4; seeds with the mall off the line reached C4).
+    route = oil_route(facts)
+    if route and any(not crosses_route(mall, route) for _side, mall in blocks):
+        blocks = [(side, mall) for side, mall in blocks if not crosses_route(mall, route)]
+    for side, mall in blocks:
         # The mall must be able to start now: some module centre inside a powered port's logistic area.
         centres = block_centres([mall.min_x, mall.min_y, mall.max_x, mall.max_y])
         if not any(max(abs(x - p["position"]["x"]), abs(y - p["position"]["y"])) <= p.get("logistic_radius", 25) - 1

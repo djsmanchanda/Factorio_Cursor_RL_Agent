@@ -197,3 +197,14 @@ def test_a_built_slot_shares_its_hub_with_the_next_slot_of_the_module():
     [second] = mall_cell_candidates(facts, plan, {"iron-gear-wheel"}, obstacles=placed)
     centre = lambda c: c["summary"].split("(")[1].split(")")[0]
     assert centre(second) == centre(first) and second["summary"].split()[1] != first["summary"].split()[1]
+
+
+def test_a_mall_block_across_the_line_to_the_surveyed_oil_field_is_not_offered():
+    """eval-fixes-20261109d: seeds with the mall west of the base, across the line to oil, never got a reach hop."""
+    from training.laya_site_plan import Rect, crosses_route, oil_route
+    facts = {"oil_field": {"found": True, "anchor": {"x": 3, "y": -1}, "center": {"x": -280.2, "y": -91.4}}}
+    route = oil_route(facts)
+    assert crosses_route(Rect(-54, -19, -14, 21), route)       # west: on the line
+    assert not crosses_route(Rect(-29, -52, 11, -12), route)   # north: ~1 tile off it (reached C4)
+    assert not crosses_route(Rect(-29, 14, 11, 54), route)     # south
+    assert oil_route({"oil_field": {"found": False}}) is None
