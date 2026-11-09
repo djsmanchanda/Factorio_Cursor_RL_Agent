@@ -122,6 +122,10 @@ tracks all five components, next2026-10-27 02:28:19.804IST; terminal accounting
 and disable-by2026-10-31 00:20IST remain mandatory. No root, production, mod,
 host-target, model-weight or policy changes. No automatic adoption or push.
 
+## Conditional request for18 worlds — 2026-10-27 02:14 IST
+
+The user asked to add three worlds if capacity allowed. Capacity stays15: current host available memory is6.91GiB. Reserving the difference between the prior measured simultaneous full-menu model peak (14.36GiB) and current non-world charge (9.84GiB) leaves2.38GiB; another three worlds at current mean world-pool charge would leave about0.72GiB. This conservative estimate is below the existing4.5GiB admission floor. CPU has headroom, but current short-input memory does not establish room for longer inference inputs. No18-world trial, transfer, target change or active-runtime edit was made. Live status is9completed/15running/96queued, with0observed model backend or memory-limit/OOM events. Receipt: `data/laya-orchestration/model-launch-20261026/capacity18-review-20261027/20261026T204428Z/assessment.json`. Lifecycle:none; retain existing30min supervision.
+
 
 2026-10-27 04:31 IST — Quiet-period delta review accepted: 25 new raw/status terminal joins plus55 carried =80 certified;362 new learned joins,1643 across inspected prefixes;10 prior pending records resolved,1request/2execution outcomes still captured pending. Parent checked218 critical line hashes and both5-file snapshots. New faults:2power_route_unavailable+2untyped_stuck;inspected totals14typed/4untyped,0backend/timeout/tool/safety/runner errors. Separate live04:30 snapshot81completed/4running/35queued,12.249GiBavailable,freshheartbeats,0OOMkills;worldmax35343unchanged,aggregate localmax0. Quiet ceiling4until05:18;both boundedtimerswaiting/GPU9172healthy;10mincontroller continues within03:48–15:48window. Not final120/versioned endpoint certification oradoption. Receipt data/laya-orchestration/model-launch-20261026/autonomy12h-20261027/supervision/20261026T230130Z/parent-review.json. Lifecycle:none;activefreezes/attempts/packages/powerprofile unchanged,no push.
 
