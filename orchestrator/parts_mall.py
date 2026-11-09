@@ -82,6 +82,13 @@ def mission_mall_targets(
         visit(goal)
     if goals:
         targets["lab"] = 4
+        # Quad-mall bills demand 20-22 long-handed inserters and the base holds
+        # zero: every one of 588 C84 shortage lines had need == short, and the
+        # PM/AC quad-mall cells never started. Keep one bill's worth on hand.
+        if "long-handed-inserter" in recipes:
+            targets["long-handed-inserter"] = max(
+                targets.get("long-handed-inserter", 0), 24,
+            )
     return {item: count for item, count in targets.items() if item in recipes}
 
 
