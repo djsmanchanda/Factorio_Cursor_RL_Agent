@@ -30,5 +30,6 @@ def test_c6_and_s1_offer_the_sized_consumer_service_once():
         assert add_c6_consumer_options(menu, phase, FACTS)["options"].count(option) == 1
 
 
-def test_no_service_before_c6():
-    assert add_c6_consumer_options({"needs": [], "options": []}, {"phase_id": "C5"}, FACTS)["options"] == []
+def test_the_service_starts_at_c5_and_not_before():
+    assert add_c6_consumer_options({"needs": [], "options": []}, {"phase_id": "C5"}, FACTS)["options"]
+    assert add_c6_consumer_options({"needs": [], "options": []}, {"phase_id": "C4"}, FACTS)["options"] == []
