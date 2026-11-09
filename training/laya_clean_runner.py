@@ -76,6 +76,11 @@ class Settings:
     mall_buildable_multiplier: int = 5
     context_view: str = 'full'
     reservation_mode: str = 'strict'
+    # Independent experiment factors; none changes the adopted decision policy.
+    ops_consumer_choices: bool = False
+    ops_solid_fluid_filter: bool = False
+    ops_chain_economics: bool = False
+    ops_production_services: bool = False
 WAIT_TICKS = (300, 1800)
 MAX_MENU = 20  # laya_state schema: options maxItems
 EXPLORATION_MODEL = {"model_id": "laya-exploration-v1", "model_hash": "sha256:" + "0" * 64}
