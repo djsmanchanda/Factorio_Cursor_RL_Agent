@@ -267,3 +267,7 @@ C45/C46 review remains with thread94dcfaf2. Mixed-start implementation and C47
 are reserved to the upgrade/integration thread **after actual C46 cleanup**;
 no implementation or C47 readiness/completion handoff has occurred. C47 and
 subsequent calibration ownership follows the existing user-directed contract.
+
+## 2026-11-09 22:40 IST — running cohorts and converged history
+
+Running from frozen copies: C85 A/A calibration (`ccbecab` ×2), C86c requester-free PM cell (`ccbecab` / `5e3e3c1` / `caf4b7b`) and C87 long-handed inserter stock (`ccbecab` / `b42adaf` / `48cc79f`); C83 stays paused by its manipulation gate. The experiment control is the reference line `ccbecab`; main's runtime is not the experiment baseline. All experiment branches through C87 are in the history of `convergence/laya-experiments-20261109`, and per-arm results are in [cohort performance](Laya_Cohort_Performance.md).
