@@ -35,6 +35,9 @@ else:
 ASSETS = Path(__file__).with_name("laya_cohort_dashboard")
 MAX_JSON = 12 * 1024 * 1024
 MAX_TAIL = 2 * 1024 * 1024
+# A persistent mode choice also sets the system power profile it is named after ("auto" follows the system).
+MODE_PROFILES = {"cool": "power-saver", "balanced": "balanced", "performance": "performance"}
+PROFILES = frozenset(MODE_PROFILES.values())
 
 
 def read_json(path, fallback=None):
@@ -362,7 +365,16 @@ class Dashboard:
         action = body.get("action")
         if action in {"cool", "cool_cancel"}:
             return self.cool(action == "cool")
-        if action == "ceiling":
+        if action == "mode":
+            return self.set_mode(body.get("mode"), body.get("system_profile", True))
+        if action == "bump":
+            # A relative, one-off nudge: the automatic search restarts from the raised target and every safeguard still applies.
+            value = body.get("delta")
+            if type(value) is not int or not 1 <= value <= 100:
+                raise ValueError("Raise must be a whole number of runs between 1 and 100")
+            args = ["bump", f"+{value}"]
+            had_ceiling = scheduler._load_config(self.host).get("manual_target") is not None
+        elif action == "ceiling":
             value = body.get("slots")
             if type(value) is not int or not 0 <= value <= 1000:
                 raise ValueError("Ceiling must be an integer between 0 and 1000")
@@ -388,6 +400,50 @@ class Dashboard:
             self.audit(action, {"request": body, "ok": result.returncode == 0, "error": result.stderr[-500:]})
         if result.returncode:
             raise ValueError(result.stderr[-500:] or "Control failed")
+        if action == "bump":
+            try:
+                moved = json.loads(result.stdout)
+                previous, target = int(moved["previous"]), int(moved["target"])
+            except (ValueError, KeyError, TypeError):
+                return {"message": "Admission target raised."}
+            cleared = " The manual ceiling was cleared." if had_ceiling else ""
+            if target <= previous:
+                return {"message": f"Admission target is already at the scheduler maximum ({previous}).{cleared}"}
+            capped = " (the scheduler maximum)" if target < previous + value else ""
+            return {"message": f"Admission target raised from {previous} to {target}{capped}; the next scheduler cycle applies it.{cleared}"}
+
+    def _system_profile(self):
+        try:
+            result = subprocess.run(["powerprofilesctl", "get"], capture_output=True, text=True, timeout=20)
+        except (OSError, subprocess.SubprocessError):
+            return "balanced"
+        profile = result.stdout.strip()
+        return profile if result.returncode == 0 and profile in PROFILES else "balanced"
+
+    def set_mode(self, mode, system_profile=True):
+        """Persistently choose the scheduler mode; unlike cool() there is no expiry or restore."""
+        if mode not in ("auto", *MODE_PROFILES) or type(system_profile) is not bool:
+            raise ValueError("Mode must be auto, cool, balanced or performance")
+        profile = MODE_PROFILES.get(mode) if system_profile else None
+        with scheduler.control_lock(self.host):
+            state = read_json(self.data / "cooling.json", {}) or {}
+            previous = scheduler._load_config(self.host).get("mode", "auto")
+            if profile:
+                try:
+                    result = subprocess.run(["powerprofilesctl", "set", profile], capture_output=True, text=True, timeout=20)
+                    if result.returncode:
+                        raise ValueError(result.stderr[-200:].strip() or "command failed")
+                except (OSError, subprocess.SubprocessError, ValueError) as error:
+                    self.audit("mode_failed", {"mode": mode, "error": str(error)[:500]})
+                    raise ValueError(f"Could not set the {profile} power profile ({str(error)[:200]}); the mode was not changed") from error
+            scheduler._set_config(self.host, mode=mode, dashboard_cool_token=None)
+            # An active one-hour cooling request would otherwise restore a stale profile and mode when it expires.
+            ended = bool(state.get("token"))
+            if ended:
+                scheduler._atomic(self.data / "cooling.json", {})
+            self.audit("mode", {"mode": mode, "previous_mode": previous, "profile": profile, "ended_cooling": ended})
+        note = "follows the system power profile" if mode == "auto" else f"system power profile set to {profile}" if profile else "system power profile left unchanged"
+        return {"message": f"Mode set to {mode}: {note}." + (" The 1-hour cooling request was ended." if ended else "")}
 
     def cool(self, enable):
         with scheduler.control_lock(self.host):
@@ -395,10 +451,13 @@ class Dashboard:
             if not enable:
                 return self._restore_locked(state.get("token"), force=True)
             config = scheduler._load_config(self.host)
-            previous = state.get("previous_mode") if state.get("token") and config.get("dashboard_cool_token") == state.get("token") else config.get("mode", "auto")
+            renewing = bool(state.get("token") and config.get("dashboard_cool_token") == state.get("token"))
+            previous = state.get("previous_mode") if renewing else config.get("mode", "auto")
+            # Remember the profile too: a persistent performance or power-saver choice must survive an hour of cooling.
+            previous_profile = state.get("previous_profile") if renewing else self._system_profile()
             token = secrets.token_hex(12)
             self._check_recovery_timer()
-            scheduler._atomic(self.data / "cooling.json", {"token": token, "until": time.time() + 3600, "previous_mode": previous, "phase": "applying"})
+            scheduler._atomic(self.data / "cooling.json", {"token": token, "until": time.time() + 3600, "previous_mode": previous, "previous_profile": previous_profile, "phase": "applying"})
             scheduler._set_config(self.host, mode="cool", dashboard_cool_token=token)
             try:
                 result = subprocess.run(["powerprofilesctl", "set", "power-saver"], capture_output=True, text=True, timeout=20)
@@ -411,7 +470,7 @@ class Dashboard:
                 except (OSError, subprocess.SubprocessError, ValueError) as restore_error:
                     self.audit("cool_rollback_pending", {"error": str(restore_error)[:500]})
                 raise ValueError("Could not set power-saver; recovery attempted or pending") from error
-            scheduler._atomic(self.data / "cooling.json", {"token": token, "until": time.time() + 3600, "previous_mode": previous, "phase": "active"})
+            scheduler._atomic(self.data / "cooling.json", {"token": token, "until": time.time() + 3600, "previous_mode": previous, "previous_profile": previous_profile, "phase": "active"})
             self.audit("cool", {"until": time.time() + 3600, "previous_mode": previous})
 
     def _check_recovery_timer(self):
@@ -430,13 +489,15 @@ class Dashboard:
             return
         if not force and time.time() < state.get("until", 0):
             raise ValueError("Cooling timer fired before its deadline")
+        # State files written before previous_profile existed restore balanced, as they always did.
+        profile = state.get("previous_profile") if state.get("previous_profile") in PROFILES else "balanced"
         try:
-            result = subprocess.run(["powerprofilesctl", "set", "balanced"], capture_output=True, text=True, timeout=20)
+            result = subprocess.run(["powerprofilesctl", "set", profile], capture_output=True, text=True, timeout=20)
             if result.returncode:
                 raise ValueError(result.stderr[-500:] or "power profile command failed")
         except (OSError, subprocess.SubprocessError, ValueError) as error:
             self.audit("cool_restore_failed", {"error": str(error)[:500]})
-            raise ValueError("Could not restore balanced profile; retry remains pending") from error
+            raise ValueError(f"Could not restore the {profile} profile; retry remains pending") from error
         config = scheduler._load_config(self.host)
         restored_mode = None
         if config.get("dashboard_cool_token") == token:
@@ -536,7 +597,7 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path == "/api/view":
                 self.server.dashboard.view(body)
             elif self.path == "/api/control":
-                self.server.dashboard.control(body)
+                result = self.server.dashboard.control(body) or {}
             else:
                 return self.send(404, b"Not found", "text/plain")
             self.send(200, json.dumps({"ok": True, **result}).encode(), "application/json")

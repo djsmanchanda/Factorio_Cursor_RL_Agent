@@ -229,6 +229,106 @@ def test_cooling_failure_retains_pending_recovery(tmp_path, monkeypatch):
     assert "cool_apply_failed" in actions and "cool_rollback_pending" in actions
 
 
+def controlled_app(tmp_path, monkeypatch, profile="balanced", fail_set=False):
+    """A dashboard on a temp host whose power-profile commands are recorded, never executed."""
+    calls = []
+    real_run = subprocess.run
+    def run(command, **kwargs):
+        if command[0] != "powerprofilesctl":
+            return real_run(command, **kwargs)
+        calls.append(command)
+        if command[1] == "get":
+            return subprocess.CompletedProcess(command, 0, profile + "\n", "")
+        return subprocess.CompletedProcess(command, int(fail_set), "", "refused" if fail_set else "")
+    monkeypatch.setattr(dashboard.subprocess, "run", run)
+    app = dashboard.Dashboard(tmp_path, tmp_path / "registry", tmp_path / "host", tmp_path / "data", True)
+    monkeypatch.setattr(app, "_check_recovery_timer", lambda: None)
+    monkeypatch.setattr(app, "scheduler_compatibility", lambda: (True, "ok"))
+    return app, calls
+
+
+def test_bump_raises_the_target_and_reports_a_cleared_ceiling(tmp_path, monkeypatch):
+    app, _ = controlled_app(tmp_path, monkeypatch)
+    scheduler._atomic(app.host / "state.json", {"target": 10})
+    scheduler.main(["--root", str(app.host), "target", "8"])
+    result = app.control({"action": "bump", "delta": 2})
+    assert "from 10 to 12" in result["message"] and "ceiling was cleared" in result["message"]
+    assert scheduler._load_state(app.host)["target"] == 12 and scheduler._load_config(app.host)["manual_target"] is None
+    scheduler._atomic(app.host / "state.json", {"target": 29})
+    assert "to 30 (the scheduler maximum)" in app.control({"action": "bump", "delta": 4})["message"]
+    assert "already at the scheduler maximum" in app.control({"action": "bump", "delta": 1})["message"]
+    assert scheduler._load_state(app.host)["target"] == 30
+    for bad in (0, -1, 101, 1.5, "2", True, None):
+        with pytest.raises(ValueError, match="whole number"):
+            app.control({"action": "bump", "delta": bad})
+    assert [row["action"] for row in dashboard.tail_jsonl(app.data / "audit.jsonl")].count("bump") == 3
+
+
+def test_persistent_mode_sets_profile_and_supersedes_cooling(tmp_path, monkeypatch):
+    app, calls = controlled_app(tmp_path, monkeypatch, profile="performance")
+    scheduler._set_config(app.host, mode="performance")
+    app.cool(True)
+    old = dashboard.read_json(app.data / "cooling.json")
+    assert old["previous_profile"] == "performance" and scheduler._load_config(app.host)["mode"] == "cool"
+    message = app.control({"action": "mode", "mode": "balanced"})["message"]
+    assert "power profile set to balanced" in message and "cooling request was ended" in message
+    assert calls[-1] == ["powerprofilesctl", "set", "balanced"]
+    config = scheduler._load_config(app.host)
+    assert config["mode"] == "balanced" and config["dashboard_cool_token"] is None
+    assert dashboard.read_json(app.data / "cooling.json") == {}
+    before = len(calls)
+    app.restore(old["token"])  # the superseded timer must not reset profile or mode
+    assert len(calls) == before and scheduler._load_config(app.host)["mode"] == "balanced"
+    app.control({"action": "mode", "mode": "auto"})
+    app.control({"action": "mode", "mode": "cool", "system_profile": False})
+    assert len(calls) == before and scheduler._load_config(app.host)["mode"] == "cool"
+    for bad in ({"mode": "turbo"}, {"mode": "cool", "system_profile": "yes"}, {"mode": None}):
+        with pytest.raises(ValueError, match="Mode must be"):
+            app.control({"action": "mode", **bad})
+
+
+def test_mode_switch_failure_leaves_mode_and_cooling_untouched(tmp_path, monkeypatch):
+    app, calls = controlled_app(tmp_path, monkeypatch, fail_set=True)
+    scheduler._set_config(app.host, mode="balanced")
+    with pytest.raises(ValueError, match="mode was not changed"):
+        app.control({"action": "mode", "mode": "performance"})
+    assert scheduler._load_config(app.host)["mode"] == "balanced" and calls[-1] == ["powerprofilesctl", "set", "performance"]
+    assert any(row["action"] == "mode_failed" for row in dashboard.tail_jsonl(app.data / "audit.jsonl"))
+
+
+def test_cooling_restores_the_profile_it_replaced(tmp_path, monkeypatch):
+    app, calls = controlled_app(tmp_path, monkeypatch, profile="power-saver")
+    scheduler._set_config(app.host, mode="cool")
+    app.control({"action": "cool"})
+    app.control({"action": "cool"})  # a renewal must keep the original profile, not record power-saver itself
+    assert dashboard.read_json(app.data / "cooling.json")["previous_profile"] == "power-saver"
+    app.control({"action": "cool_cancel"})
+    assert calls[-1] == ["powerprofilesctl", "set", "power-saver"] and scheduler._load_config(app.host)["mode"] == "cool"
+
+
+def test_control_message_reaches_the_http_client(tmp_path, monkeypatch):
+    app, _ = controlled_app(tmp_path, monkeypatch)
+    server = dashboard.ThreadingHTTPServer(("127.0.0.1", 0), dashboard.Handler)
+    server.dashboard = app
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_port
+        headers = {"Host": f"127.0.0.1:{port}", "Origin": f"http://127.0.0.1:{port}", "X-Laya-Token": app.token, "Content-Type": "application/json"}
+        conn = http.client.HTTPConnection("127.0.0.1", port)
+        conn.request("POST", "/api/control", json.dumps({"action": "mode", "mode": "auto"}), headers)
+        response = conn.getresponse()
+        body = json.loads(response.read())
+        assert response.status == 200 and body["ok"] and "follows the system power profile" in body["message"]
+        conn.request("POST", "/api/control", json.dumps({"action": "bump", "delta": 0}), headers)
+        response = conn.getresponse()
+        assert response.status == 400 and "whole number" in json.loads(response.read())["error"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
 def test_listener_requires_world_process_and_owned_socket(tmp_path):
     world = tmp_path / "world"
     (world / "server").mkdir(parents=True)
@@ -393,3 +493,18 @@ def test_curated_sources_allow_reports_without_exposing_unlisted_data(tmp_path):
         server.shutdown()
         server.server_close()
         thread.join()
+
+
+def test_dashboard_assets_stay_csp_clean_and_mutations_stay_explicit():
+    import re
+    import shutil
+    html = (dashboard.ASSETS / "index.html").read_text()
+    script = (dashboard.ASSETS / "app.js").read_text()
+    assert not re.search(r"<script(?![^>]*\bsrc=)", html) and not re.search(r"\son[a-z]+=", html)
+    assert 'src="/app.js"' in html and 'href="/style.css"' in html
+    # The only mutating endpoints, each posted from a named action, never from render/refresh code.
+    assert set(re.findall(r"post\('(/api/[a-z-]+)'", script)) == {"/api/control", "/api/note", "/api/sync-mods", "/api/view"}
+    assert script.count("post('/api/sync-mods'") == 1 and "function startSync" in script and "sync-form" in script
+    assert not re.search(r"(localStorage|sessionStorage|save\([^)]*)[^\n]*\btoken\b", script.replace("token = next.token", ""))
+    if shutil.which("node"):
+        assert subprocess.run(["node", "--check", str(dashboard.ASSETS / "app.js")], capture_output=True).returncode == 0
