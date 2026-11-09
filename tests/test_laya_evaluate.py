@@ -41,3 +41,4 @@ def test_evaluate_reports_choice_metrics(monkeypatch, tmp_path) -> None:
     assert report["questions"] == 1
     assert report["exact_accuracy"] == 1.0
     assert report["promotion"]["eligible_for_disposable_shadow"] is True
+

@@ -5,11 +5,13 @@ import json
 from pathlib import Path
 import time
 import uuid
+import shutil
 from jsonschema import Draft7Validator
 
 from orchestrator.game_bridge import GameBridge, load_json
 from orchestrator.laya_operations import sha256_hash
 from planners.laya_quad_cell import quad_reservation_reason
+from planners.plan_validation import validate_build_plan
 from training.laya_input_profile import MALL_PROFILE
 from training.laya_mall import compile_candidates, bounded_menu, outcome
 from training.laya_mall_supply import new_supply, accrue_supply, record_delivery, commit_upgrade
@@ -20,6 +22,9 @@ FACTS_VALIDATOR=Draft7Validator(json.loads((Path(__file__).resolve().parents[1]/
 
 class MallWorld(SavedWorldAdapter):
     runtime = 'disposable_mall'
+
+    def validate_plan(self,plan):
+        validate_build_plan(plan,allow_training_fuel=True)
 
     def __init__(self, root):
         self.root = owned_root(Path(root))
@@ -39,6 +44,8 @@ class MallWorld(SavedWorldAdapter):
                  Path(__file__).with_name('laya_input_profile.py'),repo/'schemas/laya_mall_world.schema.json',
                  Path(__file__).with_name('laya_mall_view.py'),
                  Path(__file__).with_name('laya_mall_stream.lua'),
+                 Path(__file__).with_name('laya_mall_growth.py'),Path(__file__).with_name('laya_mall_population.py'),
+                 repo/'planners/plan_validation.py',repo/'tools/run_laya_mall_fleet.py',
                  repo/'tools/run_laya_mall.py',repo/'tools/run_laya_saved_world.py',repo/'planners/laya_quad_cell.py',
                  repo/'planners/quad_mall_layout.py',repo/'planners/mall_layout.py']
         self.code_hashes = {str(p): file_hash(p) for p in paths}
@@ -61,6 +68,22 @@ class MallWorld(SavedWorldAdapter):
         self.manifest=verify_instance(self.root,runtime=self.runtime)
         self.manifest['viewing_only']=True
         (self.root/'manifest.json').write_text(json.dumps(self.manifest,indent=2)+'\n')
+
+    def reset_episode(self, configuration, episode_id):
+        if self.manifest.get('viewing_only'):raise SavedWorldError('cannot recycle spectator copy')
+        self.require_clear_mutations();self.reconcile();before=self.query()
+        if configuration['surface']!=self.surface or configuration['force']!=self.force:
+            raise SavedWorldError('episode recycling retains the owned force/surface identity')
+        archive=self.root/'episodes'/episode_id
+        if archive.exists():raise SavedWorldError('episode archive already exists')
+        self.rpc('recycle',nonce=uuid.uuid4().hex,revision=before['revision'],tick=before['tick'])
+        archive.mkdir(parents=True)
+        (archive/'final-facts.json').write_text(json.dumps(before,indent=2)+'\n')
+        for name in ('evidence','rpc'):
+            if (self.root/name).exists():shutil.move(str(self.root/name),str(archive/name))
+        self.scenario=configuration;self.manifest['mall']=configuration
+        (self.root/'manifest.json').write_text(json.dumps(self.manifest,indent=2)+'\n')
+        self.initialize()
 
     def _rpc(self, op, lua_source, **fields):
         verify_instance(self.root, runtime=self.runtime)
@@ -100,7 +123,8 @@ class MallWorld(SavedWorldAdapter):
             return result
         if inspect is not None:return self.rpc('inspect',plan=inspect)
         facts=self.rpc('observe')
-        if facts.get('machines')=={}:facts['machines']=[]
+        for key in ('machines','inserters','resource_drills'):
+            if facts.get(key)=={}:facts[key]=[]
         if facts['ledger'].get('consumption_receipts')=={}:facts['ledger']['consumption_receipts']=[]
         if facts['version']!=MALL_PROFILE or facts['surface']!=self.surface or facts['force']!=self.force:
             raise SavedWorldError('mall facts identity mismatch')
@@ -159,7 +183,7 @@ class MallWorld(SavedWorldAdapter):
             raise SavedWorldError('stale mall selection')
         registered={k:v for k,v in c.items() if k!='bill'}
         if registered not in compile_candidates(before):raise SavedWorldError('mall action is not currently registered')
-        cost=2*measure_ticks if c['family']=='assemble' else c.get('wait_ticks',60)
+        cost=2*measure_ticks if c['family']=='assemble' else measure_ticks if c['family']=='tier' else c.get('wait_ticks',60)
         if before['elapsed_ticks']+cost>self.scenario['max_episode_ticks']:
             raise SavedWorldError('mall action exceeds remaining episode ticks')
         if c['family'] in {'assemble','wait'}:
@@ -169,11 +193,13 @@ class MallWorld(SavedWorldAdapter):
             path=self.root/'evidence'/f"mall-outcome-{uuid.uuid4().hex}.json"
             path.write_text(json.dumps(receipt,indent=2)+'\n')
             return receipt
-        if c['family'] not in {'priority','deliver','upgrade','toggle'}:raise SavedWorldError('unsupported mall decision')
+        if c['family'] not in {'priority','deliver','upgrade','toggle','tier','buffer'}:raise SavedWorldError('unsupported mall decision')
         nonce=uuid.uuid4().hex
         fields={'nonce':nonce,'revision':before['revision'],'tick':before['tick']}
         if c['family']=='upgrade':fields.update(upgrade=c['upgrade'],plan_hash=sha256_hash(c['upgrade']))
         elif c['family']=='toggle':fields.update(position=c['position'],active=c['active'])
+        elif c['family']=='tier':fields.update(position=c['position'],from_name=c['from_name'],to_name=c['to_name'])
+        elif c['family']=='buffer':fields.update(position=c['position'],multiplier=c['multiplier'])
         else:fields['goal']=c['goal']
         if c['family']=='deliver':fields['count']=c['count']
         result=self.rpc(c['family'],**fields)
@@ -181,7 +207,7 @@ class MallWorld(SavedWorldAdapter):
         if c['family']=='upgrade':
             expected=deepcopy(before['ledger']); commit_upgrade(expected,c['upgrade'],result)
             if expected!=after['ledger']:raise SavedWorldError('engine/Python consumed-upgrade ledger mismatch')
-        self.advance(60)
+        self.advance(measure_ticks if c['family']=='tier' else 60)
         after=self.query()
         receipt={'status':'observed','candidate':c,'before':before,'after':after,
                  'operation':result,'measurement':outcome(before,after),'adapter_hashes':self.code_hashes}

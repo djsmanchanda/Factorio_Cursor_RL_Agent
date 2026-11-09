@@ -282,7 +282,7 @@ def recent_consumption_kw(client, surface: str, force: str, near: Point) -> floa
 def build_bootstrap_steam_unit(site: dict) -> tuple[dict, Point]:
     """Build one boiler/engine pair beside a verified offshore-pump outlet.
 
-    This is the canonical north-facing Factorio 2.1.17 boiler geometry.  The
+    This is the canonical north-facing Factorio 2.1 boiler geometry.  The
     boiler's west/east water ports and north steam port connect to two
     north-facing engines.  A direct belt and inserter feed coal from below.
     """

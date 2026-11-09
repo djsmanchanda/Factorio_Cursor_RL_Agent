@@ -105,7 +105,7 @@ def is_verified_offshore_attachment(left: dict, right: dict) -> bool:
     }
 
 
-def validate_build_plan(plan: dict) -> None:
+def validate_build_plan(plan: dict, *, allow_training_fuel: bool = False) -> None:
     schema = json.loads(
         (_REPO_ROOT / "schemas" / "build_plan.schema.json").read_text(encoding="utf-8")
     )
@@ -116,7 +116,11 @@ def validate_build_plan(plan: dict) -> None:
             for error in errors
         )
         raise ValueError("BuildPlan validation FAILED:\n" + details)
-    _reject_fuel_entities(plan)
+    if allow_training_fuel:
+        if not str(plan.get('surface','')).startswith('laya-mall/') or not str(plan.get('force','')).startswith('laya-mall-'):
+            raise ValueError('training fuel requires explicit disposable mall scope')
+    else:
+        _reject_fuel_entities(plan)
     # A plan must not collide with ITSELF. validate_no_collisions existed but
     # was only ever called with separate plans, so a generator that put a 2x2
     # substation over its own feed chest produced a plan nothing rejected: the

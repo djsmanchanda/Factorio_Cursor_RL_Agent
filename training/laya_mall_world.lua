@@ -10,10 +10,14 @@ local function contents(inv)
 end
 local function add(to,from) for k,v in pairs(from) do to[k]=(to[k] or 0)+v end end
 local s=storage.laya_mall
+if request.op=="recycle" and storage.laya_mall_recycle_receipt and storage.laya_mall_recycle_receipt.receipt_id==request.nonce then
+  assert(storage.laya_mall_recycle_receipt.operation_hash==request.operation_hash,"recycle nonce reused")
+  return storage.laya_mall_recycle_receipt
+end
 if request.op=="initialize" then
   if s then assert(s.scenario_hash==cfg.scenario_hash and s.surface==cfg.surface and not s.partial,"existing mall mismatch")
   else
-    assert(not game.surfaces[cfg.surface] and not game.forces[cfg.force],"mall identity already exists")
+    assert(not game.surfaces[cfg.surface] and (not game.forces[cfg.force] or storage.laya_mall_recycled_force==cfg.force),"mall identity already exists")
     s={scenario_hash=cfg.scenario_hash,surface=cfg.surface,force=cfg.force,revision=0,partial=true,
        start_tick=game.tick,fixtures={},served={},completed_at={},customer_removed={},queue=cfg.initial_queue,receipts={}}
     storage.laya_mall=s
@@ -24,7 +28,12 @@ if request.op=="initialize" then
       table.insert(tiles,{name="refined-concrete",position={x,y}})
     end end
     surface.set_tiles(tiles)
-    local force=game.create_force(cfg.force); force.research_all_technologies()
+    local force=game.forces[cfg.force] or game.create_force(cfg.force)
+    if storage.laya_mall_recycled_force==cfg.force then force.reset() end
+    force.research_all_technologies();storage.laya_mall_recycled_force=nil
+    for _,r in ipairs(cfg.resources or {}) do
+      assert(surface.create_entity{name=r.item,position=r.position,amount=r.amount},"declared resource fixture")
+    end
     for _,f in ipairs(cfg.fixtures) do
       local e=assert(surface.create_entity{name=f.entity,position=f.position,force=force},"fixture placement failed")
       e.minable_flag=false; e.destructible=false; e.rotatable=false
@@ -51,6 +60,7 @@ local surface=assert(game.surfaces[s.surface],"mall surface missing"); local for
 local allowed={}
 for item,_ in pairs(cfg.kit) do allowed[item]=true end
 allowed["long-handed-inserter"]=true
+for _,name in ipairs({"assembling-machine-2","fast-inserter","stone-furnace","electric-mining-drill"}) do allowed[name]=true end
 local fixtures={}; for _,id in pairs(s.fixtures) do fixtures[id]=true end
 local function fixture_entity(id)
   for _,f in ipairs(cfg.fixtures) do if f.id==id then
@@ -70,6 +80,7 @@ local facts={version=cfg.version,tick=game.tick,elapsed_ticks=game.tick-s.start_
              ledger=s.ledger,served=s.served,completed_at=s.completed_at or {},customer_removed=s.customer_removed,queue=s.queue,
              robots={construction=network.all_construction_robots,logistic=network.all_logistic_robots}}
 if s.viewing_only then facts.viewing_only=true end
+if cfg.growth_version then facts.inserters={};facts.resource_drills={};facts.pending_upgrades=0 end
 local providers={}
 local statuses={}; for name,id in pairs(defines.entity_status) do statuses[id]=name end
 local function read_inventory(e,index)
@@ -92,21 +103,32 @@ for _,e in pairs(surface.find_entities_filtered{force=force}) do
       assert(surface.find_logistic_network_by_position(e.position,force)==network,"provider is not in mall network")
       table.insert(providers,e); add(facts.provider_stock,contents(inv))
     else add(facts.wip,contents(inv)) end
-  elseif e.type=="assembling-machine" then
+  elseif e.type=="assembling-machine" or e.type=="furnace" then
     local input=read_inventory(e,defines.inventory.crafter_input)
     local output=read_inventory(e,defines.inventory.crafter_output)
     add(facts.wip,input); add(facts.wip,output)
+    if e.type=="furnace" then add(facts.wip,contents(e.get_fuel_inventory())) end
     local ok,recipe=pcall(function() return e.get_recipe() end)
     assert(ok,"mall recipe read: "..e.name..": "..tostring(recipe))
     table.insert(facts.machines,{name=e.name,position=e.position,energy=e.energy,active=e.active,status=statuses[e.status] or "unknown",
                                recipe=recipe and recipe.name,input=input,output=output})
+    if cfg.growth_version then facts.machines[#facts.machines].upgrading=e.to_be_upgraded() end
   elseif e.type=="inserter" then
+    if facts.inserters then table.insert(facts.inserters,{name=e.name,position=e.position,upgrading=e.to_be_upgraded()}) end
     if e.held_stack.valid_for_read and e.held_stack.quality.name=="normal" then
       facts.wip[e.held_stack.name]=(facts.wip[e.held_stack.name] or 0)+e.held_stack.count
     end
+  elseif e.type=="mining-drill" and facts.resource_drills then
+    table.insert(facts.resource_drills,{name=e.name,position=e.position,status=statuses[e.status] or "unknown"})
+  end
+  if facts.pending_upgrades and allowed[name] and e.type~="entity-ghost" and e.to_be_upgraded() then
+    local target=e.get_upgrade_target()
+    if target then facts.pending_upgrades=facts.pending_upgrades+1;facts.reserved[target.name]=(facts.reserved[target.name] or 0)+1 end
   end
 end
-for _,item in ipairs(cfg.recipes) do
+local recipe_names={};for _,name in ipairs(cfg.recipes) do table.insert(recipe_names,name) end
+if cfg.growth_version then table.insert(recipe_names,"steel-plate") end
+for _,item in ipairs(recipe_names) do
   local r=assert(force.recipes[item],"declared recipe missing")
   assert(r.enabled,"declared recipe disabled")
   local parts={}; local product=0
@@ -116,6 +138,7 @@ for _,item in ipairs(cfg.recipes) do
 end
 local tracked={"iron-plate","copper-plate","requester-chest","passive-provider-chest"}
 for _,name in ipairs(cfg.recipes) do table.insert(tracked,name) end
+if cfg.growth_version then for _,name in ipairs({"stone","coal","steel-plate"}) do table.insert(tracked,name) end end
 for _,name in ipairs(tracked) do
   facts.production[name]=stats.get_input_count(name); facts.consumption[name]=stats.get_output_count(name)
 end
@@ -139,6 +162,21 @@ local function remove(item,count)
 end
 local function inside(p)
   return p.x>=cfg.bounds.x_min+2 and p.x<cfg.bounds.x_max_exclusive-2 and p.y>=cfg.bounds.y_min+2 and p.y<cfg.bounds.y_max_exclusive-2
+end
+local function slot_section(position)
+  local offsets={west={-3,0},east={3,0},north={0,-5},south={0,5}}
+  for _,center in ipairs(cfg.centers) do for side,delta in pairs(offsets) do
+    if position.x==center.x+delta[1] and position.y==center.y+delta[2] then
+      local group=string.format("laya-quad:%g:%g:%s",center.x,center.y,side)
+      for _,chest in pairs(surface.find_entities_filtered{name="requester-chest",position=center,force=force}) do
+        if chest.position.x==center.x and chest.position.y==center.y then
+          for _,section in pairs(chest.get_logistic_sections().sections) do
+            if section.valid and section.group==group then return section end
+          end
+        end
+      end
+    end
+  end end
 end
 local function validate(candidate)
   local plan=candidate.plan
@@ -208,6 +246,18 @@ if request.op=="view" then
 end
 assert(request.nonce and request.operation_hash,"mutation identity required")
 assert(not s.viewing_only,"spectator copy cannot execute training decisions")
+if request.op=="recycle" then
+  assert(not s.pending_operation and request.revision==s.revision and request.tick==game.tick,"recycle state")
+  for _,p in pairs(game.players) do if p.surface==surface then
+    p.set_controller{type=defines.controllers.spectator};p.force=game.forces.player
+    assert(p.teleport({0,0},game.surfaces.nauvis),"observer evacuation")
+  end end
+  assert(game.delete_surface(surface),"mall recycle refused")
+  storage.laya_mall_recycled_force=s.force;storage.laya_mall=nil
+  local r={receipt_id=request.nonce,operation_hash=request.operation_hash,recycled_surface=s.surface,tick=game.tick}
+  storage.laya_mall_recycle_receipt=r
+  return r
+end
 local previous=s.receipts[request.nonce]
 if previous then assert(previous.operation_hash==request.operation_hash,"nonce reused for another intent"); return previous end
 assert(not s.pending_operation,"interrupted mall mutation needs review")
@@ -242,14 +292,34 @@ elseif request.op=="toggle" then
   end
   assert(machine and type(request.active)=="boolean" and request.active~=machine.active,"stale machine control")
   local entity=nil
-  for _,e in pairs(surface.find_entities_filtered{name="assembling-machine-1",position=request.position,force=force}) do
+  for _,e in pairs(surface.find_entities_filtered{type={"assembling-machine","furnace"},position=request.position,force=force}) do
     if e.position.x==request.position.x and e.position.y==request.position.y then entity=e end
   end
   assert(entity and not fixtures[entity.unit_number],"machine control scope")
   s.pending_operation=request.nonce
   entity.disabled_by_script=not request.active
+  local section=slot_section(request.position)
+  if section then section.active=request.active end
   receipt.position=request.position; receipt.active=not entity.disabled_by_script
   assert(receipt.active==request.active,"machine control was not applied")
+elseif request.op=="buffer" then
+  assert(request.multiplier==1 or request.multiplier==4 or request.multiplier==15,"buffer multiplier scope")
+  local section=slot_section(request.position)
+  assert(section,"buffer section unavailable")
+  s.pending_operation=request.nonce
+  section.multiplier=request.multiplier;receipt.multiplier=section.multiplier
+elseif request.op=="tier" then
+  local pairs_allowed={["assembling-machine-1"]="assembling-machine-2",inserter="fast-inserter"}
+  assert(pairs_allowed[request.from_name]==request.to_name,"unsupported mall tier upgrade")
+  assert((facts.provider_stock[request.to_name] or 0)-(facts.reserved[request.to_name] or 0)>=1,"upgrade item shortfall")
+  local entity=nil
+  for _,e in pairs(surface.find_entities_filtered{name=request.from_name,position=request.position,force=force}) do
+    if e.position.x==request.position.x and e.position.y==request.position.y then entity=e end
+  end
+  assert(entity and not fixtures[entity.unit_number] and not entity.to_be_upgraded(),"upgrade target unavailable")
+  s.pending_operation=request.nonce
+  assert(entity.order_upgrade{target={name=request.to_name,quality="normal"},force=force},"bot upgrade order failed")
+  receipt.position=request.position;receipt.to_name=request.to_name
 elseif request.op=="deliver" then
   local task=nil
   for _,d in ipairs(cfg.demands) do if d.id==request.goal then task=d end end

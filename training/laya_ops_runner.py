@@ -687,7 +687,8 @@ def lifecycle_receipts(records: Path) -> list[dict]:
 def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, measure_ticks: int, seed: int,
         run_id: str, emit: Callable[[str], None] = lambda _: None, should_stop: Callable[[], bool] = lambda: False,
         status_path: Path | None = None, settings: Settings = Settings(), session: Any = None,
-        carried: list[dict] = ()) -> dict:
+        carried: list[dict] = (), initial_reached: tuple[str, ...] = (),
+        strict_target: str | None = None, checkpoint_callback=None, loaded_tick: int | None = None) -> dict:
     """Observe -> board -> operations -> choose -> run one -> record, until the mission ends or stalls.
 
     ``carried`` seeds the history with an earlier segment's lifecycle receipts when a fresh controller is
@@ -698,7 +699,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     session.chain_economics_enabled = settings.ops_chain_economics
     session.stock_networks = lambda: adapter.query().get("networks")
     records = journal.parent / "decision-states.jsonl"
-    reached: list[str] = []
+    reached: list[str] = list(initial_reached)
     results: list[dict] = list(carried)
     if carried:
         emit(f"JUMPSTART: restarting on the same world with {len(carried)} lifecycle receipt(s) from earlier "
@@ -709,6 +710,11 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     consumer_observation = ConsumerObservation("advanced-circuit")
     stall = {"since": 0, "best_gap": math.inf, "tick": None, "machines": 0, "missing": math.inf, "made": {}}
     accept = getattr(session, "acceptance", None)
+    from training.laya_segment_evidence import current_predicates, stop_classification
+    import os
+    started_monotonic = time.monotonic()
+    summary["loaded_tick"] = loaded_tick
+    summary["seed"] = seed
 
     def check_acceptance(event: str) -> None:
         """Deterministic milestone predicates beside the rate proxies (audit finding 7)."""
@@ -723,19 +729,39 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         summary["accepted"] = sorted(set(summary.get("accepted", [])) | set(passed))
         summary["accepted_ever"] = list(summary["accepted"])
         summary["accepted_final"] = None if "error" in statuses else sorted(passed)
-        _append(journal, {"run_id": run_id, "event": "acceptance", "at": event, "statuses": statuses})
+        tick = session._history[-1].tick if getattr(session, "_history", None) else None
+        _append(journal, {"run_id": run_id, "event": "acceptance", "at": event, "tick": tick, "statuses": statuses})
+        current, evidence = current_predicates(session) if "error" not in statuses else ({}, {})
+        row = {"event": "strict_current", "run_id": run_id, "at": event, "tick": tick,
+               "loaded_tick": summary["loaded_tick"], "statuses": current, "predicate_evidence": evidence,
+               "decisions": summary["decisions"], "elapsed_seconds": time.monotonic() - started_monotonic}
+        summary.setdefault("strict_current", []).append(row)
+        summary["strict_current_at_end"] = current
+        _append(journal, row)
+        if checkpoint_callback is not None and "error" not in statuses:
+            summary['_checkpoint_boundary'] = {"pid": os.getpid(), "run_id": run_id,
+                                                "operation_active": False, "decisions": summary["decisions"]}
+            try:
+                checkpoint_callback(adapter, session, statuses, summary, results)
+            finally:
+                summary.pop('_checkpoint_boundary', None)
     check_acceptance("start")
     index = -1
     while decisions is None or index + 1 < decisions:
         index += 1
+        if strict_target and summary.get("strict_current_at_end", {}).get(strict_target) is True:
+            summary["stop"] = "strict_target_reached"
+            break
         if should_stop():
             summary["stop"] = "stopped"
             break
         facts = adapter.query()
         consumer_fact = consumer_observation.observe(facts)
         samples.append((facts["tick"], dict(facts["production"]), dict(facts["consumption"])))
+        if summary["loaded_tick"] is None:
+            summary["loaded_tick"] = facts["tick"]
         measurement = rolling_measurement(samples, settings.rate_window_ticks) or measurement
-        if settings.max_game_ticks and facts["tick"] - samples[0][0] >= settings.max_game_ticks:
+        if settings.max_game_ticks and facts["tick"] - summary["loaded_tick"] >= settings.max_game_ticks:
             summary["stop"] = "window_timeout"
             break
         phase = current_phase(reached)
@@ -750,6 +776,9 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             stall.update(since=0, best_gap=math.inf)
             phase = current_phase(reached)
             board = compile_status(facts, phase["targets"], measurement) if phase else None
+        if strict_target and summary.get("strict_current_at_end", {}).get(strict_target) is True:
+            summary["stop"] = "strict_target_reached"
+            break
         if phase is None:
             summary["stop"] = "phase_ladder_complete"
             summary["research_completion_verified"] = False
@@ -846,7 +875,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                     "decisions": index + 1, "failures": summary["failures"],
                                     "authority": policy.authority})
         summary["decisions"] = index + 1
-        if summary["decisions"] % 10 == 0:
+        if checkpoint_callback is not None or summary["decisions"] % 10 == 0:
             check_acceptance(f"decision {index}")
         gap = _goal_gap(compile_status(after, phase["targets"], measurement))
         # Progress is measurable change, not a busy signal (a loan that never finishes once kept a run alive for
@@ -873,10 +902,12 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             summary["stop"] = "safe_stop_after_repeated_failures"
             break
     check_acceptance("end")
+    summary['stop_classification'] = stop_classification(summary['stop'])
     session.close()
     # Typed outcomes, not only caught exceptions: an untyped_stuck is a tool fault even when nothing raised.
     summary["codes"] = dict(Counter(r.get("code") or "error" for r in results if not r.get("ok")))
     summary["faults"] = operation_faults(results)
+    _append(journal, {"event":"summary", "run_id":run_id, **summary})
     emit(f"SUMMARY: stop={summary['stop']} decisions={summary['decisions']} failures={summary['failures']} "
          f"phases={','.join(reached) or 'none'} accepted={','.join(summary.get('accepted', [])) or 'none'} "
          f"accepted_final={'unknown' if summary.get('accepted_final') is None else ','.join(summary['accepted_final']) or 'none'}")

@@ -1,7 +1,10 @@
 <!-- Path: docs/rl/Laya_Cohort_Results_Index.md | Purpose: One maintained chronological index of terminal Laya cohort and campaign results, with comparability and accounting caveats. -->
 # Laya cohort results index — 1–28 October 2026
 
-Compiled **2026-10-28 ~15:12 IST** from the local evidence tree. This is a
+Compiled **2026-10-28 ~15:12 IST** from the local evidence tree. Later C45 and
+actual C46c outcomes are recorded in [the 2.1.24 result](Laya_C45_C46c_Results_2026-10-30.md).
+The C44–C46 pending rows below retain their historical snapshot, not current status.
+This is a
 retrieval index, not a re-analysis: each row states the terminal accounting,
 the tested change, the reported endpoint, the decision and the source. Detailed
 results and source-bound records provide supporting evidence; repository
@@ -38,7 +41,9 @@ not new approval from this index.
 - **Earlier named campaigns and collections:** terminal batches, pilots and
   owner-supervised campaigns from 7–17 October, plus 2 model/infrastructure
   trials. Persistent segments and overlapping collections are qualified below.
-- **Pending: C44, C45, C46** — kept out of results entirely.
+- **At the original 28 October snapshot:** C44, C45 and C46 were pending.
+  C44 subsequently completed, and the intended 2.1.24 C45 and C46c completed;
+  their original 2.1.23 freezes remained held and superseded before start.
 - The October 3 L1–L3 learned-lab workflow and October 5 geometry campaign are
   **separate lines**. They are not folded into this ops index and are not
   comparable to C1–C43. Early-month separate evidence includes the Oct 4
@@ -191,7 +196,7 @@ do not pool their counts with the numbered cohorts.
 | 27 Oct | `laya-model-base-2123-miniship-20261026` | **120/120 terminal** = 30 seeds × 4 arms; 7 original + 113 transferred attempt-0; 113 administrative `cancelled_queued` copies add no trials | guided `2511e4`; released Kev; Vela; Jiwo | Strict C6 ever/final: guided **7/5**; Kev 0/0; Vela 0/0; Jiwo 0/0 (each /30). C2 final 26/1/5/0; C3 final 22/0/2/0. Learned-vs-guided 0:7, p≈0.016; final 0:5, p≈0.063. | Retain guided; set aside all three learned arms. **Not a clean causal model-quality estimate**: every original job is `comparison_eligible:false` (menu/legality/weight reconstruction unverified); strict endpoints are source-bound c2-v1…c6-v1 without per-record version labels; latency and exposure differ. `M` |
 | 28 Oct | GPU Kev weights trial `laya-gpukev-...-20261028` | **90 planned → 8 completed + 4 endpoint-connection faults + 2 operator-stop casualties + 76 not started**; ended early at 06:07 IST | guided; released Kev; weak-v3 Kev | Completed 2/3/3; the four connection faults and two operator interruptions are infrastructure/operator, not policy failures. Eight completions cannot rank weights. | No weight-improvement verdict. Preserve the 6 faults and 76 unstarted in accounting; a continuation needs a new frozen registry. `Q`, `T` |
 
-## Pending — not results
+## Historical pending snapshot — 28 October, not current status
 
 Snapshots are time-stamped and go stale. Do not rank arms from unequal terminal
 samples.
@@ -275,8 +280,8 @@ infrastructure fault.
   C12 onward rows carry arm SHAs where the result reported them.
 - **C20/C21** were stopped and superseded; no aggregate endpoint totals are
   claimed. **C8/C32** never started. **C38** has one preparation failure.
-- **Pending snapshots** are not results. C44’s 14:58 numbers were already
-  different by 15:11; C45/C46 are queued.
+- **Historical pending snapshots** are not results. C44’s 14:58 numbers were
+  already different by 15:11; the old C45/C46 queue entries were superseded.
 
 ## Maintenance instructions
 

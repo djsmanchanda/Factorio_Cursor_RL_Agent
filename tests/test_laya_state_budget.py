@@ -66,3 +66,4 @@ def test_compact_profiles_are_named_and_bound_option_count() -> None:
     }
     with pytest.raises(LayaStateError, match="allows 12"):
         render_request(state, questions, budget_profile="compact-512")
+

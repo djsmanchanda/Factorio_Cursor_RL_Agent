@@ -443,3 +443,40 @@ def test_quad_module_places_the_capability_aware_machine(monkeypatch) -> None:
         if action.get("entity", "").startswith("assembling-machine")
     ]
     assert {action["entity"] for action in machine_actions} == {"assembling-machine-1"}
+
+
+def test_dense_mall_opens_from_world_state_after_a_checkpoint_restart(
+    monkeypatch,
+) -> None:
+    """A restart has no in-process starter swap; the world-state release must open the dense bay."""
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+    monkeypatch.setattr(builder, "_bootstrap_state", lambda _recipe: None)
+    monkeypatch.setitem(
+        LINE_RECIPES, "long-handed-inserter",
+        {"machine": "assembling-machine-1", "ingredients": ["iron-plate"],
+         "amounts": [1], "product_amount": 1, "craft_time": 0.5},
+    )
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_a: True,
+    )
+
+    assert builder._bootstrap_mall_slot_limit(object(), "nauvis", "player") == 12
+
+
+def test_dense_mall_stays_capped_when_the_world_state_is_not_released(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(builder, "_independent_mall_ready", lambda *_a: False)
+    monkeypatch.setattr(builder, "_production_started", lambda *_a: False)
+    monkeypatch.setattr(builder, "_bootstrap_state", lambda _recipe: None)
+    monkeypatch.setitem(
+        LINE_RECIPES, "long-handed-inserter",
+        {"machine": "assembling-machine-1", "ingredients": ["iron-plate"],
+         "amounts": [1], "product_amount": 1, "craft_time": 0.5},
+    )
+    monkeypatch.setattr(
+        builder, "_metal_starter_transition_complete", lambda *_a: False,
+    )
+
+    assert builder._bootstrap_mall_slot_limit(object(), "nauvis", "player") == 8

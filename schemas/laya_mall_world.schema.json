@@ -74,12 +74,20 @@
           "pattern": "^laya-mall-"
         },
         "kit": {
-          "const": {
-            "requester-chest": 10,
-            "passive-provider-chest": 20,
-            "assembling-machine-1": 6,
-            "inserter": 12
-          }
+          "enum": [
+            {
+              "requester-chest": 10,
+              "passive-provider-chest": 20,
+              "assembling-machine-1": 6,
+              "inserter": 12
+            },
+            {
+              "requester-chest": 6,
+              "passive-provider-chest": 12,
+              "assembling-machine-1": 4,
+              "inserter": 8
+            }
+          ]
         },
         "centers": {
           "type": "array",
@@ -234,7 +242,7 @@
     },
     "machines": {
       "type": "array",
-      "maxItems": 12,
+      "maxItems": 14,
       "items": {
         "type": "object",
         "required": [
@@ -248,7 +256,11 @@
         ],
         "properties": {
           "name": {
-            "const": "assembling-machine-1"
+            "enum": [
+              "assembling-machine-1",
+              "assembling-machine-2",
+              "stone-furnace"
+            ]
           },
           "position": {
             "type": "object",
@@ -291,6 +303,9 @@
             }
           },
           "active": {
+            "type": "boolean"
+          },
+          "upgrading": {
             "type": "boolean"
           }
         }
@@ -374,6 +389,22 @@
     },
     "viewing_only": {
       "type": "boolean"
+    },
+    "inserters": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "resource_drills": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "pending_upgrades": {
+      "type": "integer",
+      "minimum": 0
     }
   }
 }

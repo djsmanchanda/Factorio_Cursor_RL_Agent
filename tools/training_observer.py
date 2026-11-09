@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
 import sys
@@ -18,6 +19,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from training.observation import build_training_snapshot
+from training.laya_control import LayaTrainingControlError, LayaTrainingSupervisor
 from training.observatory_control import TrainingControlError, TrainingStartRequest, TrainingSupervisor
 from training.observer_control import ObserverControlError, TrainingSurfaceViewer
 from training.store import TrainingStore
@@ -25,6 +27,10 @@ from training.store import TrainingStore
 _ASSETS = Path(__file__).resolve().parent
 _ASSET_MAP = {
     "/": ("training_observer.html", "text/html; charset=utf-8"),
+    "/laya": ("laya_observer.html", "text/html; charset=utf-8"),
+    "/laya/": ("laya_observer.html", "text/html; charset=utf-8"),
+    "/laya.js": ("laya_observer.js", "text/javascript; charset=utf-8"),
+    "/laya.css": ("laya_observer.css", "text/css; charset=utf-8"),
     "/observer.js": ("training_observer.js", "text/javascript; charset=utf-8"),
     "/observer.css": ("training_observer.css", "text/css; charset=utf-8"),
 }
@@ -117,6 +123,7 @@ def _handler(
     database: Path | None, live_directory: Path | None, viewer: TrainingSurfaceViewer | None = None,
     view_reason: str | None = None,
     control: TrainingSupervisor | None = None,
+    laya_control: LayaTrainingSupervisor | None = None,
 ):
     class ObserverHandler(BaseHTTPRequestHandler):
         def _send(self, status: int, body: bytes, content_type: str) -> None:
@@ -195,6 +202,14 @@ def _handler(
             payload = json.loads(self.rfile.read(length))
             return TrainingStartRequest.from_payload(payload)
 
+        def _laya_confirmation(self, expected: str) -> None:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length < 1 or length > 128 or self.headers.get_content_type() != "application/json":
+                raise ValueError("invalid Laya control request")
+            payload = json.loads(self.rfile.read(length))
+            if payload != {"confirmation": expected}:
+                raise ValueError("Laya control confirmation is invalid")
+
         def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
             request_id, status = uuid.uuid4().hex, 500
             try:
@@ -206,6 +221,9 @@ def _handler(
                     snapshot["view_control"] = _view_state(viewer, view_reason)
                     snapshot["training_control"] = control.snapshot() if control is not None else {
                         "status": "unavailable", "message": "Training control is unavailable.",
+                    }
+                    snapshot["laya_control"] = laya_control.snapshot() if laya_control is not None else {
+                        "status": "unavailable", "message": "Laya training control is unavailable.",
                     }
                     self._send_json(200, snapshot)
                     status = 200
@@ -225,9 +243,24 @@ def _handler(
         def do_POST(self) -> None:  # noqa: N802 - controlled local observer action
             request_id, status = uuid.uuid4().hex, 500
             try:
-                if self.path not in {"/api/view", "/api/recycle-stale", "/api/guidance", "/api/training/start", "/api/training/stop"}:
+                if self.path not in {"/api/view", "/api/recycle-stale", "/api/guidance", "/api/training/start", "/api/training/stop", "/api/laya/start", "/api/laya/stop"}:
                     self._send_json(405, {"error": "dashboard action is not available"})
                     status = 405
+                elif self.path in {"/api/laya/start", "/api/laya/stop"} and laya_control is None:
+                    self._send_json(503, {"error": "Laya training control is unavailable"})
+                    status = 503
+                elif self.path == "/api/laya/start":
+                    self._laya_confirmation("START_LAYA_TRAINING")
+                    result = laya_control.start()
+                    self._send_json(202, {"ok": True, **result})
+                    status = 202
+                    _log("INFO", "observer.laya_start_requested", request_id, path=self.path, status=status, run_id=result.get("run_id"))
+                elif self.path == "/api/laya/stop":
+                    self._laya_confirmation("STOP_LAYA_TRAINING")
+                    result = laya_control.stop()
+                    self._send_json(202, {"ok": True, **result})
+                    status = 202
+                    _log("WARNING", "observer.laya_stop_requested", request_id, path=self.path, status=status, run_id=result.get("run_id"))
                 elif self.path in {"/api/training/start", "/api/training/stop"} and control is None:
                     self._send_json(503, {"error": "training control is unavailable"})
                     status = 503
@@ -284,6 +317,9 @@ def _handler(
             except TrainingControlError as exc:
                 self._send_json(409, {"error": str(exc)})
                 _log("WARNING", "observer.training_control_failed", request_id, path=self.path, status=409)
+            except LayaTrainingControlError as exc:
+                self._send_json(409, {"error": str(exc)})
+                _log("WARNING", "observer.laya_control_failed", request_id, path=self.path, status=409)
             except Exception as exc:
                 _log("ERROR", "observer.control_failed", request_id, path=self.path, error=str(exc))
                 self._send_json(502, {"error": "training control request failed"})
@@ -307,11 +343,29 @@ def _serve(args: argparse.Namespace) -> int:
         raise ValueError("training observer must bind to loopback")
     viewer, view_reason = _load_viewer(args)
     control = TrainingSupervisor(REPO_ROOT)
-    server = ThreadingHTTPServer(
-        (args.host, args.port), _handler(args.database, args.live_directory, viewer, view_reason, control),
-    )
+    laya_control = LayaTrainingSupervisor(REPO_ROOT)
+    handler = _handler(args.database, args.live_directory, viewer, view_reason, control, laya_control)
+    bound_port = args.port
+    try:
+        server = ThreadingHTTPServer((args.host, bound_port), handler)
+    except OSError as error:
+        if error.errno != errno.EADDRINUSE:
+            raise
+        for candidate in range(args.port + 1, args.port + 10):
+            try:
+                server = ThreadingHTTPServer((args.host, candidate), handler)
+                bound_port = candidate
+                break
+            except OSError as candidate_error:
+                if candidate_error.errno != errno.EADDRINUSE:
+                    raise
+        else:
+            raise OSError(
+                errno.EADDRINUSE,
+                f"ports {args.port}-{args.port + 9} are already in use",
+            ) from error
     request_id = uuid.uuid4().hex
-    _log("INFO", "observer.started", request_id, url=f"http://{args.host}:{args.port}")
+    _log("INFO", "observer.started", request_id, url=f"http://{args.host}:{bound_port}", requested_port=args.port)
     try:
         server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:

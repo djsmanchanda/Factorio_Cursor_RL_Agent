@@ -32,6 +32,17 @@ def test_training_control_form_exposes_explicit_runtime_settings() -> None:
     assert "fetch('/api/training/start'" in script
     assert "fetch('/api/training/stop'" in script
 
+
+def test_laya_control_form_exposes_start_stop_and_metrics() -> None:
+    html = (REPO_ROOT / "tools" / "laya_observer.html").read_text(encoding="utf-8")
+    script = (REPO_ROOT / "tools" / "laya_observer.js").read_text(encoding="utf-8")
+    assert 'id="laya-start"' in html
+    assert 'id="laya-stop"' in html
+    assert 'id="metrics"' in html
+    assert "fetch(path" in script
+    assert "grad_norm" in script
+    assert "entropy" in script
+
 def test_training_start_request_validates_bounded_runtime_settings() -> None:
     request = TrainingStartRequest.from_payload({
         "server_count": 4, "runner_limit": 16, "initial_runners": 8,
@@ -76,6 +87,23 @@ class FakeTrainingControl:
     def stop(self) -> dict[str, object]:
         self.stopped = True
         return {"status": "stopping", "run_id": "training-observatory-test"}
+
+
+class FakeLayaControl:
+    def __init__(self) -> None:
+        self.started = False
+        self.stopped = False
+
+    def snapshot(self) -> dict[str, object]:
+        return {"status": "stopped", "message": "ready", "controller_alive": False}
+
+    def start(self) -> dict[str, object]:
+        self.started = True
+        return {"status": "starting", "run_id": "laya-test"}
+
+    def stop(self) -> dict[str, object]:
+        self.stopped = True
+        return {"status": "stopping", "run_id": "laya-test"}
 
 
 class FakeProcess:
@@ -145,6 +173,35 @@ def test_training_control_endpoints_forward_only_validated_requests() -> None:
         stop = Request(
             f"{base}/api/training/stop", method="POST", data=json.dumps({
                 "confirmation": "STOP_TRAINING",
+            }).encode("utf-8"), headers={"Content-Type": "application/json"},
+        )
+        with urlopen(stop, timeout=2) as response:
+            assert response.status == 202
+        assert control.stopped is True
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_laya_control_endpoints_require_exact_confirmations() -> None:
+    control = FakeLayaControl()
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(None, None, laya_control=control))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        start = Request(
+            f"{base}/api/laya/start", method="POST", data=json.dumps({
+                "confirmation": "START_LAYA_TRAINING",
+            }).encode("utf-8"), headers={"Content-Type": "application/json"},
+        )
+        with urlopen(start, timeout=2) as response:
+            assert response.status == 202
+        assert control.started is True
+        stop = Request(
+            f"{base}/api/laya/stop", method="POST", data=json.dumps({
+                "confirmation": "STOP_LAYA_TRAINING",
             }).encode("utf-8"), headers={"Content-Type": "application/json"},
         )
         with urlopen(stop, timeout=2) as response:

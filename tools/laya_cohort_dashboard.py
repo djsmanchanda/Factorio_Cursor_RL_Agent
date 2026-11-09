@@ -187,7 +187,7 @@ class Dashboard:
             for job in jobs:
                 if not isinstance(job, dict):
                     continue
-                row = {key: job.get(key) for key in ("id", "arm", "seed", "status", "started", "runner_exited", "termination_cause", "runner_stop", "failures", "accepted_ever", "accepted_final", "c5_predicate_version", "c6_predicate_version", "comparison_eligible", "typed_outcomes", "outcome_classifications", "untyped_stuck", "maintenance_failure_events", "evidence_errors")}
+                row = {key: job.get(key) for key in ("id", "arm", "seed", "status", "started", "runner_exited", "termination_cause", "runner_stop", "failures", "accepted_ever", "accepted_final", "c5_predicate_version", "c6_predicate_version", "comparison_eligible", "typed_outcomes", "outcome_classifications", "untyped_stuck", "maintenance_failure_events", "evidence_errors", "origin", "checkpoint", "generation_id", "pair_id", "loaded_tick", "strict_current_at_end", "strict_reached", "stage_latency", "progress_latency", "stop_classification", "server_seconds", "faults")}
                 acceptance = job.get("laya_acceptance")
                 row["laya_c6_version"] = acceptance.get("C6", {}).get("version") if isinstance(acceptance, dict) and isinstance(acceptance.get("C6"), dict) else None
                 arm = arms.get(job.get("arm"), {})
@@ -211,7 +211,18 @@ class Dashboard:
                     except (ValueError, OSError):
                         pass
                 clean.append(row)
-            result.append({"name": path.name, "planned": planned, "counts": dict(counts), "unaccounted": max(0, planned - len(jobs)) if isinstance(planned, int) else None, "updated": status.get("updated"), "created": freeze.get("frozen_at") or batch.get("created_at"), "queue_status": queue_by_name.get(path.name, {}).get("status"), "engine": freeze.get("engine"), "jobs": clean, "source": str(path / "report.md")})
+            mixed = None
+            if (path / 'regression.json').is_file():
+                try:
+                    if __package__:
+                        from tools.laya_checkpoint_regression import report
+                    else:
+                        from laya_checkpoint_regression import report
+                    mixed = report(path)
+                    mixed.pop('jobs', None)
+                except (OSError, ValueError, KeyError, TypeError) as error:
+                    mixed = {'error': str(error)}
+            result.append({"name": path.name, "planned": planned, "counts": dict(counts), "unaccounted": max(0, planned - len(jobs)) if isinstance(planned, int) else None, "updated": status.get("updated"), "created": freeze.get("frozen_at") or batch.get("created_at"), "queue_status": queue_by_name.get(path.name, {}).get("status"), "engine": freeze.get("engine"), "jobs": clean, "source": str(path / "report.md"), "mixed": mixed})
         return result
 
     def snapshot(self):

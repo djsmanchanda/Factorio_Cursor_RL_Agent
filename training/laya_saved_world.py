@@ -280,8 +280,13 @@ def submission_plan(plan):
 
 
 def configuration_actions(plan):
-    return [{**a, "action_type": "configure_entity"} for a in actions(plan)
-            if CONFIGURATION_FIELDS.intersection(a)]
+    result=[]
+    for action in actions(plan):
+        a=dict(action)
+        # Furnaces choose a recipe from their feed; set_recipe is an assembler API.
+        if a.get('entity') in {'stone-furnace','steel-furnace','electric-furnace'}:a.pop('recipe',None)
+        if CONFIGURATION_FIELDS.intersection(a):result.append({**a,'action_type':'configure_entity'})
+    return result
 
 
 class SavedWorldAdapter:
@@ -303,6 +308,9 @@ class SavedWorldAdapter:
 
     def close(self):
         self.bridge.close()
+
+    def validate_plan(self, plan):
+        validate_build_plan(plan)
 
     def quad_centers(self):
         centers = {(p["x"], p["y"]) for p in self.manifest.get("quad_centers", [])}
@@ -425,7 +433,7 @@ class SavedWorldAdapter:
         receipt_path.parent.mkdir(exist_ok=True)
         receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
         if candidate.get("plan"):
-            validate_build_plan(candidate["plan"])
+            self.validate_plan(candidate["plan"])
             fresh = self.query([candidate])["validations"][selected]
             if fresh.get("reason"):
                 receipt.update(status="rejected", reason=fresh["reason"])
@@ -448,6 +456,7 @@ class SavedWorldAdapter:
                 plan = {"surface": self.surface, "force": self.force, "atomic": True,
                         "phases": [{"name": "configure-observed-build", "actions": configs}]}
                 receipt["configuration"] = load_json(self.bridge.build_layout(build_layout_authorization([plan]), plan, timeout=30))
+                receipt_path.write_text(json.dumps(receipt, indent=2) + "\n")
                 if not receipt["configuration"]["ok"]:
                     raise SavedWorldError("configuration failed")
                 self.advance(measure_ticks)

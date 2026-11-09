@@ -85,13 +85,16 @@ class DeterministicSession:
     chain_economics_enabled = False
 
     def __init__(self, root: Path, *, goal_item: str = "automation-science-pack",
-                 reference_point: tuple[float, float] = (0.0, 0.0), emit: Callable[[str], None] = print) -> None:
+                 reference_point: tuple[float, float] = (0.0, 0.0), emit: Callable[[str], None] = print,
+                 origin_episode_id: str | None = None) -> None:
+        from training.laya_restart_state import validate_episode_id
         import json
+        episode_id = validate_episode_id(origin_episode_id if origin_episode_id is not None else f"laya-{root.name}")
         manifest = json.loads((root / "manifest.json").read_text())
         server = root / "server"
         password = (server / "rcon-password").read_text().strip()
         self.script_output = server / "script-output"
-        self.episode_id = f"laya-{root.name}"
+        self.episode_id = episode_id
         self.reference_point = reference_point
         self.emit = emit
         self.stock_networks = lambda: None
@@ -334,10 +337,27 @@ class DeterministicSession:
         except ObservationUnsupported as error:  # Telemetry failure: unknown, never a failed milestone.
             return {"error": str(error)[:200]}
         self._baseline = self._baseline or snapshot
-        self._history = (self._history + [snapshot])[-20:]
+        if not self._history or snapshot != self._history[-1]:
+            self._history = (self._history + [snapshot])[-20:]
         return {m.checkpoint_id: self._evaluator.evaluate(m.checkpoint_id, snapshot, baseline=self._baseline,
                                                           history=self._history).status.value
                 for m in self._evaluator.milestones}
+
+    def export_restart_state(self, *, mod_scope: str) -> dict:
+        from training.laya_restart_state import export_restart_state
+        if not hasattr(self, "_evaluator") or self._baseline is None:
+            raise ValueError("Strict acceptance baseline has not been observed")
+        return export_restart_state(self.script_output, self.episode_id, mod_scope,
+                                    self._baseline, self._history, self._evaluator)
+
+    def restore_restart_acceptance(self, state) -> None:
+        from training.laya_restart_state import RestartState
+        if (not isinstance(state, RestartState) or state.episode_id != self.episode_id
+                or state.script_output != self.script_output.resolve()):
+            raise ValueError("Restart state does not match session identity")
+        if hasattr(self, "_evaluator"):
+            raise ValueError("Cannot replace initialized strict acceptance state")
+        self._baseline, self._history, self._evaluator = state.baseline, list(state.history), state.evaluator
 
     def close(self) -> None:
         set_active_material_ledger(None)

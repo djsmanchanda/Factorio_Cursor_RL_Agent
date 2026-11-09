@@ -5,8 +5,10 @@ from copy import deepcopy
 from orchestrator.laya_operations import sha256_hash
 
 VERSION = 'mall-earned-supply-v1'
-MALL_KIT = {'requester-chest': 10, 'passive-provider-chest': 20,
-            'assembling-machine-1': 6, 'inserter': 12}
+LEGACY_MALL_KIT = {'requester-chest': 10, 'passive-provider-chest': 20,
+                   'assembling-machine-1': 6, 'inserter': 12}
+MALL_KIT = {'requester-chest': 6, 'passive-provider-chest': 12,
+            'assembling-machine-1': 4, 'inserter': 8}
 UPGRADE_BATCH = {'electric-mining-drill': 2, 'transport-belt': 10,
                  'inserter': 4, 'splitter': 1}
 PLATES = ('iron-plate', 'copper-plate')

@@ -1,0 +1,25 @@
+<!-- Path: tools/laya_observer.html -->
+<!-- Purpose: Show Laya dataset, GPU readiness, checkpoint, and promotion evidence inside the RL Observatory. -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Laya Director · RL Observatory</title>
+  <link rel="stylesheet" href="/laya.css">
+</head>
+<body>
+  <header><div><p class="eyebrow">RL training sidecar</p><h1>Laya Director</h1><p class="subtitle">Local decision policy, dataset, calibration, and promotion evidence</p></div><a href="/">Back to RL Observatory</a></header>
+  <main>
+    <section id="status" class="cards"></section>
+    <section class="panel"><div class="panel-title"><h2>Training readiness</h2><span id="updated">Waiting for snapshot</span></div><div id="preflight" class="readiness"></div><div class="laya-controls"><button id="laya-start" type="button">Start Laya training</button><button id="laya-stop" type="button" class="danger">Stop Laya training</button><span id="laya-control-status" class="control-status"></span></div><p class="note">These controls only start or stop disposable local fine-tuning. This page never grants Nauvis authority and never falls back to the deterministic controller.</p><pre class="command">python tools/laya_preflight.py
+python tools/train_laya_4060.py --cases $LAYA_CASES_PATH --model-dir $LAYA_MODEL_DIR --output-dir $LAYA_CHECKPOINT_DIR</pre></section>
+    <section class="grid"><article class="panel"><div class="panel-title"><h2>Dataset splits</h2><span id="dataset-path"></span></div><div id="splits"></div></article><article class="panel"><div class="panel-title"><h2>Model files</h2><span>local only</span></div><div id="checkpoint"></div></article></section>
+    <section class="panel"><div class="panel-title"><h2>Live training metrics</h2><span id="metric-phase">waiting</span></div><div id="metrics" class="metric-grid"></div><div id="progress-history" class="history"></div></section>
+    <section class="panel"><div class="panel-title"><h2>Benchmarks</h2><span>held-out evidence</span></div><div id="benchmarks" class="benchmark-grid"></div></section>
+    <section class="panel"><div class="panel-title"><h2>Promotion gates</h2><span>held-out evidence required</span></div><div class="gates"><div><strong>1</strong><span>Zero safety violations</span></div><div><strong>2</strong><span>Calibrated confidence</span></div><div><strong>3</strong><span>Beats frozen baseline</span></div><div><strong>4</strong><span>Three fresh successes per rung</span></div></div></section>
+  </main>
+  <footer>RL Observatory · disposable training and shadow policy only</footer>
+  <script src="/laya.js"></script>
+</body>
+</html>

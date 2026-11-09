@@ -263,3 +263,21 @@ def test_power_bridge_uses_full_medium_pole_reach_on_a_diagonal() -> None:
 def test_power_bridge_uses_exact_nine_tile_axial_hop() -> None:
     """Supply-area width must not shorten a legal nine-tile copper link."""
     assert _power_bridge_hops((0.5, 0.5), (18.5, 0.5), 9.0, set()) == [(9.5, 0.5)]
+
+
+@pytest.mark.live_regression
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("blocked", [set(), {(49, -37), (49, -29)}])
+def test_power_bridge_search_checks_actual_endpoint_centres(reverse, blocked) -> None:
+    start, end = (49.5, -44.5), (54.0, -17.0)
+    if reverse:
+        start, end = end, start
+
+    hops = _power_bridge_hops(start, end, 9.0, blocked, orthogonal=True)
+    chain = [start, *hops, end]
+
+    assert hops
+    assert all(x % 1 == y % 1 == 0.5 for x, y in hops)
+    assert not {(math.floor(x), math.floor(y)) for x, y in hops} & blocked
+    assert all(math.dist(a, b) <= 9.0 for a, b in zip(chain, chain[1:]))
+    assert all(a[0] == b[0] or a[1] == b[1] for a, b in zip(hops, hops[1:]))

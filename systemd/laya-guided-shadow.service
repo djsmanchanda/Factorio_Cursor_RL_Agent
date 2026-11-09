@@ -1,0 +1,18 @@
+# Path: systemd/laya-guided-shadow.service
+# Purpose: Persist the bounded disposable Laya guided-shadow batch outside a terminal session.
+
+[Unit]
+Description=Bounded disposable Laya guided-shadow batch
+After=default.target
+
+[Service]
+Type=exec
+WorkingDirectory=/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/.venv/bin/python /home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/tools/run_laya_shadow_batch.py --workers /home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/training-workers-linux.json --rcon-secret-file /home/miniship/.local/share/factorio-rl/training/01/worker/rcon-password --checkpoint /home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-checkpoints/laya-flex-v1 --base-model /home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-base --count 10 --attempts-per-scenario 1 --output /home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-shadow/guided-shadow-20260921b.jsonl --live-directory /home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/training/live --guidance-path /home/miniship/.local/share/factorio-rl/training/01/worker/script-output/factorio_mod/laya_guidance
+StandardOutput=append:/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/logs/laya-guided-shadow.log
+StandardError=append:/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/logs/laya-guided-shadow.log
+Restart=no
+
+[Install]
+WantedBy=default.target

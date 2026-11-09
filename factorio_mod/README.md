@@ -8,6 +8,10 @@ For the complete 19-command inventory, RCON/GameBridge usage, output directories
 ## Files
 - `info.json` (exception): Factorio requires strict JSON, so it cannot include comments.
 - `control.lua`: Loads the modules that register the mod's console-command surface.
+- `laya_coach.lua`: Adds the read-only **Laya Coach** window. It records bounded
+  observations, human priorities, corrections, outcomes, and optional labelled
+  choices under `script-output/factorio_mod/laya_guidance/`. It never executes a
+  build, research, upgrade, or other game action.
 
 ## Assumptions / Constraints
 - Targets **Factorio 2.0** (`factorio_version: 2.0`); uses the 2.0 API (`storage`, `helpers.*`, `event.entity`).
@@ -29,6 +33,30 @@ discovered mods on next launch.
    - `script-output/factorio_mod/snapshots/snapshot_<tick>.json`
 
 For a dedicated server, send `/snapshot` over RCON and read that server's own `script-output`, not a client-side directory. A snapshot is read-only, but raw `/sc` Lua and many other registered commands can mutate state.
+
+## Laya Coach window
+
+In a client game, click **Laya Coach** in the top GUI bar. Select the decision
+type and coaching focus, describe the goal or correction, and optionally enter
+comma-separated candidate IDs plus the chosen ID. **Capture observation** saves
+state without creating a training label. **Save guidance** creates a labelled
+record only when a chosen ID is present; otherwise it remains advisory context.
+
+The records are append-only JSON files and can be reviewed and merged into a
+future fine-tuning dataset:
+
+```bash
+.venv/bin/python tools/import_laya_coach_data.py \
+  --coach-file /path/to/factorio/script-output/factorio_mod/laya_guidance/coach-123.json \
+  --base-cases /tmp/factorio-laya-cases-all.jsonl \
+  --output /tmp/factorio-laya-cases-with-coaching.jsonl
+```
+
+Repeat `--coach-file` for multiple records. Guidance from real Nauvis is data
+only; it does not grant the model production authority. A disposable Laya
+runner can consume the directory live with `--guidance-path`; it injects the
+newest guidance per focus into the next decision as a soft priority, never as
+an executable command.
 
 ## Recipe knowledge export
 

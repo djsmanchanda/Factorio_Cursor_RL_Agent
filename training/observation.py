@@ -4,13 +4,18 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Any, Iterable, Mapping
 
 from training.telemetry import read_live_workers
+from training.laya_runtime import Laya4060Config, LayaRuntimeError, autocast_dtype, preflight
+
+
+_LAYA_CASE_CACHE: dict[str, object] = {"path": None, "mtime": None, "counts": {}}
 
 
 def _rows(
@@ -271,6 +276,102 @@ def _empty_durable() -> dict:
     }
 
 
+def _laya_snapshot() -> dict:
+    """Read-only local director status for the RL Observatory page."""
+    cases_path = Path(os.environ.get("LAYA_CASES_PATH", "data/laya-cases.jsonl"))
+    model_dir = Path(os.environ.get("LAYA_MODEL_DIR", "data/laya-base"))
+    checkpoint = Path(os.environ.get("LAYA_CHECKPOINT_DIR", "data/laya-4060-checkpoint"))
+    counts: dict[str, int] = {}
+    try:
+        mtime = cases_path.stat().st_mtime_ns
+    except OSError:
+        mtime = None
+    if cases_path.is_file() and (_LAYA_CASE_CACHE["path"], _LAYA_CASE_CACHE["mtime"]) == (str(cases_path), mtime):
+        counts = dict(_LAYA_CASE_CACHE["counts"])
+    elif cases_path.is_file():
+        try:
+            with cases_path.open(encoding="utf-8") as handle:
+                for line in handle:
+                    try:
+                        split = json.loads(line).get("split", "unknown")
+                    except json.JSONDecodeError:
+                        continue
+                    counts[split] = counts.get(split, 0) + 1
+            _LAYA_CASE_CACHE.update({"path": str(cases_path), "mtime": mtime, "counts": counts})
+        except OSError:
+            counts = {}
+    try:
+        readiness = preflight(Laya4060Config())
+        readiness["autocast_dtype"] = autocast_dtype()
+    except LayaRuntimeError as error:
+        readiness = {"profile": "laya-4060-lora", "status": "blocked", "reason": str(error)}
+    checkpoint_artifacts = {
+        "full_model": (checkpoint / "model.safetensors").is_file(),
+        "adapter": (checkpoint / "adapter_model.safetensors").is_file()
+        and (checkpoint / "adapter_config.json").is_file(),
+        "config": (checkpoint / "rl_agent_config.json").is_file(),
+    }
+    checkpoint_ready = bool(checkpoint_artifacts["config"] and (
+        checkpoint_artifacts["full_model"] or checkpoint_artifacts["adapter"]
+    ))
+    training_status: dict[str, Any] = {
+        "status": "not_started",
+        "reason": "Training has not produced a checkpoint yet.",
+    }
+    progress_history: list[dict[str, Any]] = []
+    status_path = checkpoint / "training-status.json"
+    progress_path = checkpoint / "progress.json"
+    for path in (status_path, progress_path):
+        if not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            training_status.update(payload)
+    history_path = checkpoint / "progress_history.jsonl"
+    if history_path.is_file():
+        try:
+            lines = history_path.read_text(encoding="utf-8").splitlines()[-120:]
+            for line in lines:
+                payload = json.loads(line)
+                if isinstance(payload, dict):
+                    progress_history.append(payload)
+        except (OSError, json.JSONDecodeError):
+            progress_history = []
+    if not checkpoint_ready and training_status.get("status") == "trained":
+        training_status["status"] = "checkpoint_incomplete"
+        training_status["reason"] = "Training reported complete, but checkpoint artifacts are incomplete."
+    evaluations: dict[str, dict] = {}
+    for split in ("held_out", "test"):
+        report_path = checkpoint / f"evaluation-{split}.json"
+        if not report_path.is_file():
+            continue
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            if isinstance(report, dict):
+                evaluations[split] = report
+        except (OSError, json.JSONDecodeError):
+            continue
+    return {
+        "profile": "laya-4060-lora",
+        "cases_path": str(cases_path),
+        "cases_present": cases_path.is_file(),
+        "case_counts": counts,
+        "case_total": sum(counts.values()),
+        "checkpoint_dir": str(checkpoint),
+        "checkpoint_present": checkpoint_ready,
+        "checkpoint_artifacts": checkpoint_artifacts,
+        "model_dir": str(model_dir),
+        "base_model_present": (model_dir / "rl_agent_config.json").is_file(),
+        "preflight": readiness,
+        "evaluations": evaluations,
+        "training": training_status,
+        "training_history": progress_history,
+    }
+
+
 def build_training_snapshot(database: Path | str, live_directory: Path | str) -> dict:
     """Return one stable JSON dashboard document without modifying training state."""
     database_path, connection = Path(database), None
@@ -293,6 +394,7 @@ def build_training_snapshot(database: Path | str, live_directory: Path | str) ->
         "database_present": database_path.is_file(), "database_error": database_error,
         "live_workers": workers, "autoresearch_live": _autoresearch_state(research),
         "adaptive_controller": _controller_snapshot(live_directory),
+        "laya": _laya_snapshot(),
         "active_workers": sum(
             worker.get("age_seconds") is not None and worker["age_seconds"] < 30
             and worker.get("phase") not in terminal_phases for worker in workers

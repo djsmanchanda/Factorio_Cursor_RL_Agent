@@ -55,18 +55,18 @@ def test_seeded_fixture_reserves_all_slots_without_colliding_with_utility_scaffo
 
 def test_seeded_and_committed_items_cannot_be_spent_as_newly_manufactured_output():
     f=facts();f['production']['inserter']=4
-    f['provider_stock']['inserter']=12
+    f['provider_stock']['inserter']=8
     # The four newly crafted items are WIP; the provider still holds seeded stock.
     assert manufactured_stock(f)['inserter']==0
-    f['provider_stock']['inserter']=16
+    f['provider_stock']['inserter']=12
     assert manufactured_stock(f)['inserter']==4
     f['ledger']['spent_crafting']['inserter']=4
-    f['provider_stock']['inserter']=12
+    f['provider_stock']['inserter']=8
     assert manufactured_stock(f)['inserter']==0
     f=facts();f['production']['inserter']=4
-    f['construction_committed']['inserter']=12;f['provider_stock']['inserter']=4
+    f['construction_committed']['inserter']=8;f['provider_stock']['inserter']=4
     assert manufactured_stock(f)['inserter']==4
-    f['construction_committed']['inserter']=14;f['provider_stock']['inserter']=2
+    f['construction_committed']['inserter']=10;f['provider_stock']['inserter']=2
     assert manufactured_stock(f)['inserter']==2
     f['customer_removed']['inserter']=2;f['provider_stock']['inserter']=0
     assert manufactured_stock(f)['inserter']==0
@@ -132,7 +132,7 @@ def test_stale_or_forged_selection_cannot_reach_executor(monkeypatch,tmp_path):
 def test_machine_controls_are_actor_options_and_lateness_survives_completion():
     from copy import deepcopy
     from training.laya_mall import outcome
-    f=facts();f['machines']=[{'position':{'x':-7.5,'y':-4.5},'recipe':'iron-gear-wheel','status':'working','active':True}]
+    f=facts();f['machines']=[{'name':'assembling-machine-1','position':{'x':-7.5,'y':-4.5},'recipe':'iron-gear-wheel','status':'working','active':True}]
     controls=[c for c in compile_candidates(f) if c['family']=='toggle']
     assert len(controls)==1 and controls[0]['active'] is False
     f['machines'][0]['active']=False

@@ -4,15 +4,17 @@ from planners.quad_mall_layout import QUAD_MALL_MACHINE_OFFSETS, generate_quad_m
 from planners.plan_validation import actions, entity_footprint_tiles
 
 
-def generate_quad_slot(recipe, spec, center, side):
+def generate_quad_slot(recipe, spec, center, side, *, machine='assembling-machine-1', inserter_type='inserter'):
+    if machine not in {'assembling-machine-1','assembling-machine-2'} or inserter_type not in {'inserter','fast-inserter'}:
+        raise ValueError('unsupported quad equipment')
     if side not in QUAD_MALL_MACHINE_OFFSETS:
         raise ValueError("quad side must be north, west, east or south")
     group = "top" if side in {"north", "west"} else "bottom"
     plan = generate_quad_mall_layout(
-        recipe, "assembling-machine-1", [p["name"] for p in spec["ingredients"]],
+        recipe, machine, [p["name"] for p in spec["ingredients"]],
         [p["amount"] for p in spec["ingredients"]], center, group,
         craft_time=spec["energy_ticks"] / 60, product_amount=spec["product_amount"],
-        inserter_type="inserter", support_inserter_type="long-handed-inserter", include_substation=False,
+        inserter_type=inserter_type, support_inserter_type="long-handed-inserter", include_substation=False,
     )
     dx, dy = QUAD_MALL_MACHINE_OFFSETS[side]
     machine_position = {"x": center[0] + dx, "y": center[1] + dy}
@@ -25,9 +27,9 @@ def generate_quad_slot(recipe, spec, center, side):
                      (center[0], center[1] + (-2 if side == "north" else 2))}
     selected = []
     for action in plan["phases"][0]["actions"]:
-        if action["entity"] == "assembling-machine-1" and action["position"] != machine_position:
+        if action["entity"] == machine and action["position"] != machine_position:
             continue
-        if action["entity"] in {"inserter", "long-handed-inserter"}:
+        if action["entity"] in {"inserter", "fast-inserter", "long-handed-inserter"}:
             p = action["position"]
             if (p["x"], p["y"]) not in transfers:
                 continue
@@ -36,7 +38,7 @@ def generate_quad_slot(recipe, spec, center, side):
     # requests while retaining requests for every other machine at the chest.
     if not any(a["entity"] == "requester-chest" for a in selected):
         top = generate_quad_mall_layout(
-            recipe, "assembling-machine-1", [p["name"] for p in spec["ingredients"]],
+            recipe, machine, [p["name"] for p in spec["ingredients"]],
             [p["amount"] for p in spec["ingredients"]], center, "top",
             craft_time=spec["energy_ticks"] / 60, product_amount=spec["product_amount"], include_substation=True,
         )
@@ -72,11 +74,14 @@ def quad_reservation_reason(plan, centers):
             reserved = [a for a in generate_quad_slot("iron-gear-wheel", spec, (center["x"], center["y"]), side)
                         if a["entity"] in {"assembling-machine-1", "long-handed-inserter"}]
             allowed = {signature(a) for a in reserved}
+            machine = next(a for a in reserved if a['entity']=='assembling-machine-1')
+            allowed.add(signature({**machine,'entity':'assembling-machine-2'}))
             tiles = frozenset().union(*(entity_footprint_tiles(a) for a in reserved))
             for action in placements:
                 if entity_footprint_tiles(action) & tiles and signature(action) not in allowed:
                     return "reserved_quad_expansion"
-            machine = next(a for a in reserved if a["entity"] == "assembling-machine-1")
-            if signature(machine) in submitted and not allowed <= submitted:
+            machine_submitted=signature(machine) in submitted or signature({**machine,'entity':'assembling-machine-2'}) in submitted
+            arms={signature(a) for a in reserved if a['entity']=='long-handed-inserter'}
+            if machine_submitted and not arms <= submitted:
                 return "quad_vertical_requires_long_handed_inserters"
     return None

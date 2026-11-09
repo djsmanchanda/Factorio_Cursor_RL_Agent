@@ -14,8 +14,9 @@ from training.laya_mall_supply import MALL_KIT, PLATES, UPGRADE_BATCH, plan_upgr
 from training.laya_saved_world import SavedWorldError
 
 RECIPES = ('iron-gear-wheel', 'copper-cable', 'electronic-circuit', 'transport-belt',
-           'inserter', 'long-handed-inserter', 'electric-mining-drill', 'splitter', 'assembling-machine-1')
-BUILD_ITEMS = frozenset((*MALL_KIT, 'long-handed-inserter'))
+           'inserter', 'long-handed-inserter', 'electric-mining-drill', 'splitter', 'assembling-machine-1',
+           'assembling-machine-2', 'fast-inserter', 'stone-furnace')
+BUILD_ITEMS = frozenset((*MALL_KIT, 'long-handed-inserter','assembling-machine-2','fast-inserter','stone-furnace','electric-mining-drill'))
 BOUNDS = {'x_min': -32, 'y_min': -32, 'x_max_exclusive': 32, 'y_max_exclusive': 32}
 
 
@@ -28,7 +29,7 @@ def scenario(seed, identity):
     centers = [pos(-4.5 + x, -4.5 + y) for x, y in DENSE_MALL_MODULE_OFFSETS]
     fixtures = [{'id': 'power', 'entity': 'electric-energy-interface', 'position': pos(-17, -4)},
                 {'id': 'roboport', 'entity': 'roboport', 'position': pos(-12, -1)},
-                {'id': 'starter', 'entity': 'passive-provider-chest', 'position': pos(-12.5, -5.5)},
+                {'id': 'starter', 'entity': 'passive-provider-chest', 'position': pos(-19.5, -4.5)},
                 {'id': 'returns', 'entity': 'storage-chest', 'position': pos(-9.5, -5.5)}]
     fixtures += [{'id': f'power-{i}', 'entity': 'substation', 'position': p}
                  for i, p in enumerate([pos(-1, -2), pos(5, 3), pos(-4, 8), pos(-13, -4)])]
@@ -42,6 +43,10 @@ def scenario(seed, identity):
                      'fixtures': fixtures, 'kit': dict(MALL_KIT), 'robots': {'construction': 50, 'logistic': 50},
                      'research_fixture': 'all_technologies', 'recipes': list(RECIPES), 'demands': demands,
                      'initial_queue': queue, 'required_upgrades': 1, 'max_episode_ticks': 36000,
+                     'growth_version':'mall-growth-v2','supply_chest_distance_tiles':15,
+                     'resources':[{'item':'stone','position':pos(8.5,10.5),'amount':10000},
+                                  {'item':'coal','position':pos(12.5,8.5),'amount':10000}],
+                     'smelter_sites':[pos(0,13),pos(4,10)],
                      'supply_rule': {'initial_per_second': dict.fromkeys(PLATES, 1),
                                      'increment_per_second': 1.5, 'batch': dict(UPGRADE_BATCH), 'cap': None}}
     # Replays of one scenario retain its split identity, regardless of server/menu IDs.
@@ -102,7 +107,7 @@ def plate_requirements(goal, facts):
 def priority_goal(facts):
     for goal in facts['queue']:
         if goal == 'expansion':
-            if facts['ledger']['upgrades'] < facts['scenario']['required_upgrades']: return goal
+            if facts['scenario'].get('growth_version') or facts['ledger']['upgrades'] < facts['scenario']['required_upgrades']: return goal
         else:
             task = next(d for d in facts['scenario']['demands'] if d['id'] == goal)
             if facts['elapsed_ticks'] >= task['release_ticks'] and facts['served'].get(goal, 0) < task['count']: return goal
@@ -132,19 +137,53 @@ def compile_candidates(facts):
         candidates.append(candidate)
     for index, center in enumerate(sc['centers']):
         for side in ('west', 'east', 'north', 'south'):
+            dx,dy=QUAD_MALL_MACHINE_OFFSETS[side]
+            target={'x':center['x']+dx,'y':center['y']+dy}
+            current=next((m for m in facts['machines'] if m['position']==target),None)
             for product, spec in facts['recipes'].items():
-                placements = generate_quad_slot(product, spec, (center['x'], center['y']), side)
-                target = next(a['position'] for a in placements if a['entity'] == 'assembling-machine-1')
-                if any(m['position'] == target and m.get('recipe') == product for m in facts['machines']): continue
-                plan = {'surface': sc['surface'], 'force': sc['force'], 'atomic': True,
-                        'phases': [{'name': 'mall-slot', 'actions': placements}]}
-                validate_build_plan(plan)
-                if quad_reservation_reason(plan, sc['centers']): continue
-                add('assemble', f'{product} {side} module {index}', product=product, module=index, side=side, plan=plan)
+                if current and current.get('recipe')==product:continue
+                for machine in ([current['name']] if current else ['assembling-machine-1','assembling-machine-2']):
+                    placements = generate_quad_slot(product, spec, (center['x'], center['y']), side,machine=machine)
+                    for a in placements:
+                        arm=next((e for e in facts.get('inserters',[]) if e['position']==a['position']),None)
+                        if a['entity']=='inserter' and arm and arm['name']=='fast-inserter':a['entity']='fast-inserter'
+                        if sc.get('growth_version') and a.get('logistic_sections'):
+                            for section in a['logistic_sections']:section['multiplier']=1
+                    plan = {'surface': sc['surface'], 'force': sc['force'], 'atomic': True,
+                            'phases': [{'name': 'mall-slot', 'actions': placements}]}
+                    validate_build_plan(plan)
+                    if quad_reservation_reason(plan, sc['centers']): continue
+                    add('assemble', f'{product} {side} module {index} {machine[-1]}', product=product,module=index,side=side,machine=machine,plan=plan)
+    for resource in sc.get('resources',[]):
+        p=resource['position']
+        if any(d['position']==p for d in facts.get('resource_drills',[])):continue
+        placements=[{'action_type':'place_ghost','entity':'electric-mining-drill','position':p,'direction':'north'},
+                    {'action_type':'place_ghost','entity':'passive-provider-chest','position':{'x':p['x'],'y':p['y']-2}}]
+        plan={'surface':sc['surface'],'force':sc['force'],'atomic':True,'phases':[{'name':'resource-cell','actions':placements}]}
+        add('assemble',f"Mine {resource['item']}",product=resource['item'],plan=plan)
+    for p in sc.get('smelter_sites',[]):
+        if any(m['position']==p for m in facts['machines']):continue
+        pos=lambda dx,dy:{'x':p['x']+dx,'y':p['y']+dy}
+        placements=[{'action_type':'place_ghost','entity':'stone-furnace','position':p},
+                    {'action_type':'place_ghost','entity':'requester-chest','position':pos(-2.5,.5),
+                     'logistic_requests':[{'name':'iron-plate','count':25},{'name':'coal','count':5}]},
+                    {'action_type':'place_ghost','entity':'inserter','position':pos(-1.5,.5),'direction':'west'},
+                    {'action_type':'place_ghost','entity':'inserter','position':pos(1.5,.5),'direction':'west'},
+                    {'action_type':'place_ghost','entity':'passive-provider-chest','position':pos(2.5,.5)}]
+        plan={'surface':sc['surface'],'force':sc['force'],'atomic':True,'phases':[{'name':'steel-cell','actions':placements}]}
+        add('assemble','Smelt steel',product='steel-plate',plan=plan)
+    for entity in [*facts['machines'],*facts.get('inserters',[])]:
+        replacement={'assembling-machine-1':'assembling-machine-2','inserter':'fast-inserter'}.get(entity.get('name'))
+        if replacement and not entity.get('upgrading') and facts['provider_stock'].get(replacement,0)-facts['reserved'].get(replacement,0)>0:
+            add('tier',f'Upgrade to {replacement}',product=replacement,position=entity['position'],from_name=entity['name'],to_name=replacement)
     fresh = manufactured_stock(facts)
     for machine in facts['machines']:
         add('toggle', ('Pause ' if machine['active'] else 'Resume ')+(machine.get('recipe') or 'empty machine'),
             product=machine.get('recipe'), position=machine['position'], active=not machine['active'])
+        if machine.get('name') in {'assembling-machine-1','assembling-machine-2'} and machine.get('recipe') and sc.get('growth_version'):
+            for multiplier in (1,4,15):
+                add('buffer',f"Buffer x{multiplier} {machine.get('recipe') or 'empty'}",product=machine.get('recipe'),
+                    position=machine['position'],multiplier=multiplier)
     for task in sc['demands']:
         gap = task['count'] - facts['served'].get(task['id'], 0)
         if facts['elapsed_ticks'] >= task['release_ticks'] and gap > 0 and fresh.get(task['item'], 0) > 0:
@@ -184,7 +223,7 @@ def decision_state(facts, candidates, run_id, model_ref, history=(), measurement
                 'summary': c['summary'], 'features': {'new_items': sum(c.get('bill',{}).values()),
                   'wait_ticks': c.get('wait_ticks',0)}, 'scope': scope,
                 'risk_tier': 'ghost_submit' if c.get('plan') else ('destructive_mutation' if c['family'] in {'deliver','upgrade'}
-                    else 'reversible_mutation' if c['family'] in {'toggle','priority'} else 'read_only')} for c in candidates]
+                    else 'reversible_mutation' if c['family'] in {'toggle','priority','tier','buffer'} else 'read_only')} for c in candidates]
     gap = sum(max(0, d['count']-facts['served'].get(d['id'],0)) for d in sc['demands'])
     mall = {'version': MALL_PROFILE, 'queue': facts['queue'], 'priority': goal,
             'demands': [{**d,'served':facts['served'].get(d['id'],0)} for d in sc['demands']],
@@ -193,11 +232,15 @@ def decision_state(facts, candidates, run_id, model_ref, history=(), measurement
             'fixture_delivered': facts['ledger']['fixture_delivered'], 'upgrade_count': facts['ledger']['upgrades'],
             'batch_available': {k:manufactured_stock(facts).get(k,0) for k in UPGRADE_BATCH},
             'needed_plates': needs, 'upgrade_supply': queue[0],
-            'machines': [{'module':i,'side':side,'recipe':m.get('recipe'),'status':m['status'],'active':m['active']}
+            'machines': [{'module':i,'side':side,'tier':m['name'],'recipe':m.get('recipe'),'status':m['status'],'active':m['active']}
                 for m in facts['machines'] for i,center in enumerate(sc['centers'])
                 for side,(dx,dy) in QUAD_MALL_MACHINE_OFFSETS.items()
                 if m['position']=={'x':center['x']+dx,'y':center['y']+dy}],
             'vertical_slots_require': {'long-handed-inserter':2}, 'robots': facts['robots']}
+    if sc.get('growth_version'):
+        mall['growth_version']=sc['growth_version']
+        mall['mines']=[[d['name'],d['status']] for d in facts.get('resource_drills',[])]
+        mall['smelters']=[[m['status'],m['active']] for m in facts['machines'] if m['name']=='stone-furnace']
     if measurement: mall['flow']={k:measurement[k] for k in ('production_per_second','fixture_input','customer_delivered')}
     state={'version':'1.0.0','run':{'run_id':run_id,'episode_id':run_id,'tick':facts['tick'],
        'elapsed_ticks':facts['elapsed_ticks'],'bootstrap_profile':'supplied-input-mall','surface':sc['surface'],
@@ -222,6 +265,12 @@ def decision_state(facts, candidates, run_id, model_ref, history=(), measurement
       'budget':{'materials_remaining':available,'construction_budget_remaining':None,'action_count_remaining':None,
                 'elapsed_ticks_remaining':max(0,sc['max_episode_ticks']-facts['elapsed_ticks'])},
       'observation_digest':{'mall':mall}}
+    if sc.get('growth_version'):
+        state['objective'].update(description='Manufacture necessary expansion batches earlier to grow earned supply and useful production.',unit='earned_plates_per_second',target=None)
+        extra=sum(facts['ledger']['rate_halves_per_second'].values())/2-2
+        state['acceptance_gap'].update(metric='earned_supply_gain',current=extra,target=None,remaining=None,unit='plates_per_second')
+        state['goal_stack'][0].update(objective='Grow earned supply; prioritize '+goal,
+            gap=sum(max(0,n-manufactured_stock(facts).get(p,0)) for p,n in UPGRADE_BATCH.items()))
     validate_state(state)
     return state
 
@@ -236,7 +285,7 @@ def outcome(before, after):
             'customer_delivered':{k:after['served'].get(k,0)-before['served'].get(k,0) for k in after['served']},
             'supply_upgrades':after['ledger']['upgrades']-before['ledger']['upgrades'],
             'completed':all(after['served'].get(d['id'],0)>=d['count'] for d in after['scenario']['demands'])
-               and after['ledger']['upgrades']>=after['scenario']['required_upgrades'] and after['pending_ghosts']==0,
+               and after['ledger']['upgrades']>=after['scenario']['required_upgrades'] and after['pending_ghosts']==0 and after.get('pending_upgrades',0)==0,
             'elapsed_ticks':after['elapsed_ticks'],'material_cost':sum(after['construction_committed'].values()),
             'late_ticks':sum(max(0,after.get('completed_at',{}).get(d['id'],after['elapsed_ticks'])-d['due_ticks'])
                              for d in after['scenario']['demands'])}

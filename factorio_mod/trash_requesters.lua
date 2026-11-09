@@ -8,7 +8,7 @@ local M = {}
 M.TRASH_MANAGED_FORCES = { player = true, planner = true }
 
 -- The exact request_filters payload a hand-exported blueprint carries for a
--- trash-enabled requester chest (verified live on 2.1.17: create_entity
+-- trash-enabled requester chest (verified live on Factorio 2.1: create_entity
 -- accepts it and bots then remove unrequested items; no runtime getter or
 -- setter exists, there is no section field for it, and the engine offers no
 -- blueprint-stamping API, so creation time is the only moment it can land).
