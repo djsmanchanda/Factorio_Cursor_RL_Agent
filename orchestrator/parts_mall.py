@@ -87,7 +87,7 @@ def mission_mall_targets(
         # PM/AC quad-mall cells never started. Keep one bill's worth on hand.
         if "long-handed-inserter" in recipes:
             targets["long-handed-inserter"] = max(
-                targets.get("long-handed-inserter", 0), 24,
+                targets.get("long-handed-inserter", 0), 48,
             )
     return {item: count for item, count in targets.items() if item in recipes}
 
