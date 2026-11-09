@@ -1140,11 +1140,23 @@ def _direct_single_belt_feed(
         key=lambda point: point[0] * vector[0] + point[1] * vector[1],
     )
 
-def _publish_output_chest(plan: dict) -> None:
+def _publish_output_chest(plan: dict, limit: int | None = None) -> None:
     """Make a stage's collection chest a passive provider, so its product is
     visible to the logistic network and can be requested by downstream stages
-    (and by construction bots for building material)."""
+    (and by construction bots for building material).
+
+    ``limit`` publishes only the first N chests, which are the terminal
+    collectors in planner order. Throughput collectors beyond the terminal one
+    stay plain steel: they still buffer output, but they no longer add a
+    passive provider to the construction bill. A permanent cell that needs
+    5-12 free providers to exist is not buildable while the base owns 2-3.
+    """
+    published = 0
     for phase in plan["phases"]:
         for action in phase["actions"]:
-            if action.get("entity") == "steel-chest":
-                action["entity"] = "passive-provider-chest"
+            if action.get("entity") != "steel-chest":
+                continue
+            if limit is not None and published >= limit:
+                continue
+            action["entity"] = "passive-provider-chest"
+            published += 1

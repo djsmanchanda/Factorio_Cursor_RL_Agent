@@ -3795,6 +3795,7 @@ def _conversion_feed_plan(
     belt_type: str, flow_direction: str, emit: Callable[[str], None], *,
     allow_logistic_inputs: bool, max_belt_route_tiles: int | None,
     direct_sideload_feeds: Mapping[str, tuple[Point, str]] | None = None,
+    force_belt_inputs: bool = False,
 ) -> tuple[dict, dict, dict, bool]:
     """Decide how each ingredient reaches this line, and preflight the routes.
 
@@ -3807,9 +3808,13 @@ def _conversion_feed_plan(
     # drawing 0.30 copper-plate/s -- a tenth of what bots carry -- demanded a
     # 128-tile belt corridor, could not afford any belt tier, and killed the run.
     # allow_logistic_inputs still forces bots for callers that must avoid belts.
+    # force_belt_inputs is the chest-free contract: a permanent cell may not
+    # fall back to requester chests just because its throughput is small. C82's
+    # PM consumer needed 6-12 requesters (unproducible before logistic science)
+    # and never built.
     modes = {
         ingredient: (
-            "belt" if recipe == "steel-plate"
+            "belt" if force_belt_inputs or recipe == "steel-plate"
             else "logistic" if allow_logistic_inputs
             else _transport_mode(recipe, ingredient, machine_count)
         )
@@ -4643,6 +4648,8 @@ def build_conversion_stage(
     belt_type: str = _DEFAULT_BELT,
     inserter_type: str | None = None,
     allow_logistic_inputs: bool = False,
+    terminal_provider_only: bool = False,
+    force_belt_inputs: bool = False,
     flow_direction: str = "east",
     side_tap_output: bool = False,
     direct_sideload_ingredients: frozenset[str] = frozenset(),
@@ -4717,12 +4724,13 @@ def build_conversion_stage(
             )
         elif power_anchor == "substation":
             emit("  STEEL STARTER POWER: using the stocked substation; no new pole recipe required")
-    _publish_output_chest(plan)
+    _publish_output_chest(plan, limit=1 if terminal_provider_only else None)
     modes, feed_positions, preflighted, direct_belt_input = _conversion_feed_plan(
         client, bridge, surface, force, recipe, plan, ingredient_sources,
         machine_count, belt_type, flow_direction, emit,
         allow_logistic_inputs=allow_logistic_inputs,
         max_belt_route_tiles=max_belt_route_tiles,
+        force_belt_inputs=force_belt_inputs,
         direct_sideload_feeds=direct_sideload_feeds,
     )
     machine = LINE_RECIPES[recipe]["machine"]
@@ -8239,6 +8247,8 @@ def _build_assembled_stage(
         build_conversion_stage(
             client, bridge, surface, force, item, sources, reference_point, emit,
             allow_logistic_inputs=not upgrade_bootstrap,
+            terminal_provider_only=upgrade_bootstrap,
+            force_belt_inputs=upgrade_bootstrap,
         )
     return None
 
