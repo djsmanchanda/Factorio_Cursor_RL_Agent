@@ -20,8 +20,8 @@ import copy
 import math
 from pathlib import Path
 from collections import Counter
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from orchestrator.laya_operations import sha256_hash
@@ -117,6 +117,28 @@ def _first_unmet(order: tuple[str, ...], unmet: set[str]) -> str:
 
 def _xy(position: Mapping) -> tuple[float, float]:
     return (float(position["x"]), float(position["y"]))
+
+
+DETOUR_MARGIN = 12.0  # tiles past a blocking zone's corner: clear of its edge with a roboport's footprint
+
+
+def detour_waypoints(source: tuple[float, float], target: tuple[float, float],
+                     rects: Sequence[Sequence[float]]) -> list[tuple[float, float]]:
+    """Corners (pushed out by DETOUR_MARGIN) of reserved zones the source->target line crosses, shortest detour first."""
+    def crosses(rect) -> bool:
+        x0, y0, x1, y1 = rect
+        steps = max(1, int(math.dist(source, target) // 2))
+        return any(x0 <= source[0] + (target[0] - source[0]) * k / steps <= x1
+                   and y0 <= source[1] + (target[1] - source[1]) * k / steps <= y1 for k in range(steps + 1))
+    corners = []
+    for x0, y0, x1, y1 in (r for r in rects if crosses(r)):
+        m = DETOUR_MARGIN
+        corners += [(x0 - m, y0 - m), (x1 + m, y0 - m), (x0 - m, y1 + m), (x1 + m, y1 + m)]
+    return sorted(corners, key=lambda c: math.dist(source, c) + math.dist(c, target))
+
+
+LOGISTIC_CHESTS = frozenset({"passive-provider-chest", "requester-chest", "active-provider-chest", "storage-chest",
+                             "buffer-chest"})
 
 
 def reach_reserved_tiles(plan: Mapping | None) -> frozenset[tuple[int, int]]:
@@ -239,6 +261,8 @@ class OilOptions:
         """The clean runner's hook: read the adapter's own disposable world and its land plan."""
         from training.laya_site_plan import load_plan
         plan = load_plan(Path(adapter.root, "evidence", "site-plan.json")) if getattr(adapter, "root", None) else None
+        self.reach_avoid_rects = tuple(tuple(z["rect"]) for z in (plan or {}).get("zones") or ()
+                                       if z["purpose"] in ("mall", "corridor"))
         return self.offer(World(adapter.bridge, adapter.surface, adapter.force), facts, board,
                           reach_avoid=reach_reserved_tiles(plan))
 
@@ -308,14 +332,26 @@ class OilOptions:
             result["facts"].update(cell_bill=intent["bill"], cell_draw_kw=intent["draw_kw"],
                                    grid_capacity_kw=None, power_capacity_verified=False,
                                    plan_tick=intent["tick"])
-        # Reach toward the oil field until it is covered, then toward the cell's (or coal mine's) remaining actions.
+        # Reach toward the oil field until it is covered, then toward the cell's (or coal mine's) remaining actions,
+        # then logistic coverage for the cell's chests: its plastic output must reach the network (eval-fixes-
+        # 20261109c s0: cell planned and in construction range, rejected logistic_coverage for 230 decisions).
         targets = [center] if not covered(center) else []
+        purpose = "construction"
         if not targets and uncovered:
             targets = [min(uncovered, key=lambda p: min(math.dist(_xy(q["position"]), p) for q in ports))]
+        if not targets and intent:
+            chests = [_xy(a["position"]) for phase in intent["phases"] for a in phase["actions"]
+                      if a["entity"] in LOGISTIC_CHESTS]
+            unreached = [c for c in chests if not any(
+                max(abs(c[0] - p["position"]["x"]), abs(c[1] - p["position"]["y"])) <= p["logistic_radius"] - 1
+                for p in ports)]
+            if unreached:
+                targets, purpose = [unreached[0]], "logistic"
+        result["facts"]["reach_purpose"] = purpose if targets else None
         if targets:
-            option = self._reach(world, ports, targets[0], center, build, reach_need, block)
+            option = self._reach(world, ports, targets[0], center, build, reach_need, block, purpose)
             if build:
-                block(oil_need, "needs:construction_coverage")
+                block(oil_need, f"needs:{purpose}_coverage")
         elif intent:
             option = self._oil(world, ports, intent, center, oil_need, block)
         else:
@@ -491,21 +527,32 @@ class OilOptions:
                                f"drills, belt source at {source}, {coal['output_side']} flow)",
                                phases, port, ports, oil_facts, product="coal")
 
-    def _reach(self, world, ports, target, center, intent, need, block) -> dict | None:
+    def _reach(self, world, ports, target, center, intent, need, block, purpose="construction") -> dict | None:
         from orchestrator.reach_survey import MissingReachSurvey
         from orchestrator.stage_services import ReachFacts, StuckError, plan_reach_step
         source = min(ports, key=lambda p: math.dist(_xy(p["position"]), target))
         # Land the plan keeps from coverage (mall, corridors) is routed around, not hopped into: with the mall
         # between base and oil, the direct hop was rejected reserved:mall every decision (eval-fixes-20261109b,
         # 4/4 C3 seeds stalled before C4).
-        reach_facts = ReachFacts(target=target, source=_xy(source["position"]),
+        reach_facts = ReachFacts(target=target, source=_xy(source["position"]), purpose=purpose,
                                  roboport_ghosts=world.roboport_ghosts(),
                                  reserved_tiles=frozenset(intent["footprint"] if intent else ()) | getattr(self, "reach_avoid", frozenset()))
         try:
             step, _surveys = resolve(plan_reach_step, reach_facts, world.read_reach_survey, MissingReachSurvey)
         except (StuckError, SurveyBudgetExceeded):
-            block(need, "reach_plan_failed")
-            return None
+            # A reserved block across the line (eval-fixes-20261109c s1: the mall west of the base, on the way to
+            # oil) can leave no hop toward the target; aim past the nearest corner of the blocking zone instead.
+            step = None
+            for waypoint in detour_waypoints(_xy(source["position"]), target, getattr(self, "reach_avoid_rects", ())):
+                try:
+                    step, _surveys = resolve(plan_reach_step, replace(reach_facts, target=waypoint),
+                                             world.read_reach_survey, MissingReachSurvey)
+                    break
+                except (StuckError, SurveyBudgetExceeded):
+                    continue
+            if step is None:
+                block(need, "reach_plan_failed")
+                return None
         if step.outcome != "hop":
             if step.outcome != "covered":
                 block(need, f"reach_{step.outcome}")

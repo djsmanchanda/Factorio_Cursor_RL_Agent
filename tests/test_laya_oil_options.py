@@ -477,3 +477,24 @@ def test_a_powered_built_cell_offers_nothing_more(planners):
     world = FakeWorld(machines={"oil-refinery": 4, "chemical-plant": 2})
     offer = OilOptions().offer(world, world_facts([port(0, 0), port(290, 10)]), BOARD)
     assert offer["candidates"] == [] and offer["blocked"] == {} and offer["facts"]["cell_built"]
+
+
+def test_a_cell_in_construction_range_but_not_logistic_range_reaches_for_logistic_coverage(planners):
+    """eval-fixes-20261109c s0: the planned cell was in construction range, but its output chest was not in
+    logistic range; the cell was rejected logistic_coverage for 230 decisions and nothing extended coverage."""
+    planners["plan"] = cell_plan(extra=[ghost("passive-provider-chest", 296.5, 12.5)])
+    world, facts = FakeWorld(), world_facts([port(0, 0), port(250, 10)])
+    offer = OilOptions().offer(world, facts, BOARD)
+    assert [c["family"] for c in offer["candidates"]] == ["reach"]
+    assert planners["reach"][-1].purpose == "logistic"
+    assert offer["facts"]["reach_purpose"] == "logistic"
+    assert offer["blocked"]["item:plastic-bar"] == {"needs:logistic_coverage": 1}
+
+
+def test_a_reserved_block_across_the_line_yields_corner_detours_shortest_first():
+    from tools.laya_oil_options import DETOUR_MARGIN, detour_waypoints
+    mall = (-54.0, -19.0, -14.0, 21.0)  # eval-fixes-20261109c s1: west of the base, on the way to oil
+    points = detour_waypoints((0.0, 0.0), (-280.0, -91.0), [mall, (100.0, 100.0, 110.0, 110.0)])
+    assert len(points) == 4  # only the zone the line crosses
+    assert points[0] == (-14.0 + DETOUR_MARGIN, -19.0 - DETOUR_MARGIN) or points[0][1] == -19.0 - DETOUR_MARGIN
+    assert detour_waypoints((0.0, 0.0), (-280.0, -91.0), [(100.0, 100.0, 110.0, 110.0)]) == []
