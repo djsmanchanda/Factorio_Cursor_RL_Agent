@@ -1091,8 +1091,14 @@ def _swap_infinity_chests(
                 # a steel chest does, and bots keep it alive meanwhile. Once the
                 # belt runs, the chest stays full and the request goes quiet on
                 # its own, so this costs nothing when the belt does exist.
-                action["entity"] = "requester-chest"
-                action["logistic_request"] = {"name": ingredient, "count": request_count}
+                if modes.get(ingredient) == "belt":
+                    # Chest-free contract: a belt feed may only land in a plain
+                    # chest. Turning it into a requester reintroduces the
+                    # unproducible logistic bill the caller asked to avoid.
+                    action["entity"] = "steel-chest"
+                else:
+                    action["entity"] = "requester-chest"
+                    action["logistic_request"] = {"name": ingredient, "count": request_count}
                 positions[ingredient] = (action["position"]["x"], action["position"]["y"])
     return positions
 
