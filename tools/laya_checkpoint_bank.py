@@ -9,6 +9,7 @@ import uuid
 from contextlib import contextmanager
 import fcntl
 
+from orchestrator.checkpoint_milestones import MILESTONE_IDS
 from tools.checkpoint_catalog import atomic_json
 from tools import milestone_checkpoint as checkpoints
 from training import laya_restart_checkpoint as restart
@@ -112,7 +113,7 @@ def discover(bank):
             _, meta, _ = _candidate(root, path.name)
             found.setdefault(meta['checkpoint_id'], []).append({'generation': path.name,
                 'validated': bool(validated_receipts(root, path.name))})
-    return {f'C{i}': found.get(f'C{i}', []) for i in range(7)} | found
+    return {checkpoint: found.get(checkpoint, []) for checkpoint in MILESTONE_IDS} | found
 
 
 def inspect(bank):

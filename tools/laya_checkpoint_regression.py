@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from orchestrator.checkpoint_milestones import MILESTONE_IDS
 from tools.laya_regression_scheduler import enqueue, read, run_one, run_campaign, recover, TERMINAL
 from training.laya_restart_checkpoint import load
 
@@ -50,8 +51,8 @@ def report(root):
         observations = job.get('strict_current')
         observations = observations if isinstance(observations, list) else []
         loaded = job.get('loaded_tick')
-        index = int(origin[1:]) if origin in {f'C{i}' for i in range(7)} else 6
-        for stage in (f'C{i}' for i in (index + 1, index + 2) if i <= 6):
+        index = MILESTONE_IDS.index(origin) if origin in MILESTONE_IDS else len(MILESTONE_IDS) - 1
+        for stage in MILESTONE_IDS[index + 1:index + 3]:
             rows = [row for row in observations if isinstance(row, dict) and
                     type(row.get('tick')) is int and type(loaded) is int and row['tick'] > loaded and
                     isinstance(row.get('statuses'), dict) and row['statuses'].get(stage) is True]
@@ -95,9 +96,9 @@ def report(root):
     signals = [{'origin':j.get('origin',j.get('checkpoint')), 'arm':j['arm'], 'generation':j.get('generation_id'),
                 'latency':j.get('progress_latency')} for j in status['jobs'] if j.get('progress_latency')]
     comparisons = []
-    for stage in (f'C{i}' for i in range(1,7)):
+    for stage in MILESTONE_IDS[1:]:
         by_origin = {}
-        for origin in (f'C{i}' for i in range(7)):
+        for origin in MILESTONE_IDS:
             rows = [j for j in status['jobs'] if j.get('origin',j.get('checkpoint')) == origin]
             if rows:
                 by_origin[origin] = {'planned':len(rows), 'observed_post_load':sum(stage in j.get('strict_reached',{}) for j in rows)}

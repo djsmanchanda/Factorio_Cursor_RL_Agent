@@ -17,6 +17,7 @@ import uuid
 import re
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 
+from orchestrator.checkpoint_milestones import MILESTONE_IDS
 from tools.checkpoint_catalog import atomic_json
 from tools.deterministic_fleet_runtime import create_detached_checkout
 from training.laya_restart_checkpoint import load as load_checkpoint
@@ -187,9 +188,9 @@ def enqueue(repo, registry, spec):
     selection = spec.get('capture_checkpoints')
     if selection is not None and (not setup or not spec.get('checkpoint_catalog') or
             not isinstance(selection, list) or not selection or
-            any(not isinstance(value, str) or value not in {f'C{i}' for i in range(1, 7)} for value in selection) or
+            any(not isinstance(value, str) or value not in MILESTONE_IDS[1:] for value in selection) or
             len(set(selection)) != len(selection)):
-        raise ValueError('Capture selection requires distinct C1-C6 setup checkpoints and a catalog')
+        raise ValueError(f'Capture selection requires distinct {MILESTONE_IDS[1]}-{MILESTONE_IDS[-1]} setup checkpoints and a catalog')
     if datetime.fromisoformat(spec['until']).timestamp() <= time.time():
         raise ValueError('A future campaign deadline is required')
     for predecessor in spec['after']:

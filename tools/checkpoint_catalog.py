@@ -354,7 +354,7 @@ DEFAULT_CHECKPOINT_DEFINITIONS = (
     ("C3", "Stone rollout", "c3-v1"),
     ("C4", "First plastic", "c4-v1"),
     ("C5", "Stable plastic startup", "c5-v2"),
-    ("C6", "Advanced circuit consumer", "c6-v1"),
+    ("C6", "Advanced circuit consumer", "c6-v2"),
     ("C7", "Chemical science research", "c7-v1"),
     ("C8", "Production science research", "c8-v1"),
     ("C9", "Mining productivity 4", "c9-v1"),

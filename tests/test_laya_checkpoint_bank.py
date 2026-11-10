@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from training import laya_restart_checkpoint as checkpoint
+from orchestrator.checkpoint_milestones import MILESTONE_IDS
 from tools import laya_checkpoint_bank as bank
 
 pytestmark = pytest.mark.fast
@@ -30,7 +31,8 @@ def test_clock_requires_paused_integer_tick():
 
 
 def test_missing_checkpoints_are_explicit(tmp_path):
-    assert bank.discover(tmp_path) == {f'C{i}': [] for i in range(7)}
+    assert bank.discover(tmp_path) == {checkpoint: [] for checkpoint in MILESTONE_IDS}
+    assert 'C9' in MILESTONE_IDS
 
 
 def test_changed_mods_need_an_explicit_directional_contract():

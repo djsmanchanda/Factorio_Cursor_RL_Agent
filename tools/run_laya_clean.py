@@ -31,6 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from orchestrator.checkpoint_milestones import MILESTONE_IDS
 from tools.laya_helper_agent import RUN_INDEX, launch as launch_helper
 from core.local_time import local_stamp
 from tools.run_ledger import LEDGER, record_laya_run
@@ -83,7 +84,7 @@ def main(argv=None) -> int:
                    help="guided: doc-rule preferences + exploration floor; exploration: uniform")
     p.add_argument("--variant", type=Path, help="Variant JSON (docs/rl/laya_variants/); default: the current workflow")
     p.add_argument("--until-phase", help="Experiment window: stop once this phase is reached")
-    p.add_argument("--until-accepted", choices=[f"C{i}" for i in range(7)],
+    p.add_argument("--until-accepted", choices=list(MILESTONE_IDS),
                    help="Ops only: stop after the shared checkpoint predicate passes")
     p.add_argument("--research-goal",
                    help="Natural goal run: end only when this technology's target_completed is verified "
@@ -107,9 +108,9 @@ def main(argv=None) -> int:
     p.add_argument("--export-checkpoint", type=Path, help="Save an earned C1 checkpoint after a successful run")
     p.add_argument("--restart-checkpoint", type=Path, help="Earned restart-conditioned ops bundle; fresh policy RNG")
     p.add_argument("--checkpoint-catalog", type=Path, help="Publish earned ops restart bundles between operations")
-    p.add_argument("--capture-checkpoints", nargs='+', choices=[f'C{i}' for i in range(1, 7)],
+    p.add_argument("--capture-checkpoints", nargs='+', choices=list(MILESTONE_IDS[1:]),
                    help="Limit setup capture to these strict checkpoints")
-    p.add_argument("--strict-target", choices=[f"C{i}" for i in range(1, 7)])
+    p.add_argument("--strict-target", choices=list(MILESTONE_IDS[1:]))
     p.add_argument("--validate-reload-only", action="store_true")
     p.add_argument("--reload-receipt", type=Path)
     p.add_argument("--checkpoint-bank", type=Path)
@@ -312,7 +313,7 @@ def main(argv=None) -> int:
                     adapter.go_live()
                     log("RESTART BENCHMARK: restored strict baseline and ownership; fresh controller/RNG")
                 published = set()
-                capture_set = set(args.capture_checkpoints or [f'C{i}' for i in range(1, 7)])
+                capture_set = set(args.capture_checkpoints or MILESTONE_IDS[1:])
                 def publish(adapter, session, statuses, summary, results):
                     from training.laya_restart_checkpoint import capture as capture_restart, paused_candidates
                     from training.laya_segment_evidence import current_predicates

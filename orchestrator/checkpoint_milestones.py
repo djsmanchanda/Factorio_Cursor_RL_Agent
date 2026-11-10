@@ -600,22 +600,45 @@ def _c5_v1(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, history
     })
 
 
-def _c6(snapshot: FactorySnapshot, baseline: FactorySnapshot | None, _history: Sequence[FactorySnapshot]) -> CheckpointResult:
-    produced, production_evidence = _new_output(snapshot, baseline, ADVANCED_CIRCUIT_ITEM)
+#: A logistics chest only moves stock; it is not a production consumer. c6-v1 accepted any owned
+#: recipe with advanced circuits among its ingredients, so 83/84 C55 and 56/56 C51 passes were chests.
+C6_LOGISTICS_CHESTS = frozenset({
+    "wooden-chest", "iron-chest", "steel-chest",
+    "passive-provider-chest", "active-provider-chest", "storage-chest",
+    "buffer-chest", "requester-chest",
+})
+
+
+def _consumer_leg(snapshot: FactorySnapshot, baseline: FactorySnapshot | None,
+                  *, exclude: frozenset[str] = frozenset()) -> tuple[bool | None, dict[str, int | None]]:
+    """Whether a non-excluded owned recipe consumed advanced circuits, and each recipe's delta."""
     consumer_checks: dict[str, bool | None] = {}
     consumer_deltas: dict[str, int | None] = {}
     for name, recipe in snapshot.recipes.items():
-        if recipe.owned is not True or ADVANCED_CIRCUIT_ITEM not in recipe.ingredients:
+        if recipe.owned is not True or ADVANCED_CIRCUIT_ITEM not in recipe.ingredients or name in exclude:
             continue
         before = None if baseline is None else baseline.recipes.get(name)
         delta = None if before is None else (None if recipe.progression() is None or before.progression() is None else recipe.progression() - before.progression())
         consumer_deltas[name] = delta
         consumer_checks[name] = None if delta is None else delta > 0
     if not consumer_checks:
-        consumer = None if baseline is None else False
-    else:
-        consumer = True if any(value is True for value in consumer_checks.values()) else (None if any(value is None for value in consumer_checks.values()) else False)
+        return (None if baseline is None else False), consumer_deltas
+    return (True if any(value is True for value in consumer_checks.values())
+            else (None if any(value is None for value in consumer_checks.values()) else False)), consumer_deltas
+
+
+def _c6(snapshot: FactorySnapshot, baseline: FactorySnapshot | None, _history: Sequence[FactorySnapshot]) -> CheckpointResult:
+    produced, production_evidence = _new_output(snapshot, baseline, ADVANCED_CIRCUIT_ITEM)
+    consumer, consumer_deltas = _consumer_leg(snapshot, baseline)
     return _all_checks("C6", "c6-v1", {"advanced_circuits_newly_produced": produced, "advanced_circuit_consumer_output": consumer}, {**production_evidence, "consumer_deltas": consumer_deltas})
+
+
+def _c6_v2(snapshot: FactorySnapshot, baseline: FactorySnapshot | None, _history: Sequence[FactorySnapshot]) -> CheckpointResult:
+    """C6 with a production consumer: logistics chests do not satisfy the consumer leg."""
+    produced, production_evidence = _new_output(snapshot, baseline, ADVANCED_CIRCUIT_ITEM)
+    consumer, consumer_deltas = _consumer_leg(snapshot, baseline, exclude=C6_LOGISTICS_CHESTS)
+    return _all_checks("C6", "c6-v2", {"advanced_circuits_newly_produced": produced, "advanced_circuit_consumer_output": consumer},
+                       {**production_evidence, "consumer_deltas": consumer_deltas, "excluded_logistics_chests": sorted(C6_LOGISTICS_CHESTS)})
 
 
 def _c5(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, _history: Sequence[FactorySnapshot]) -> CheckpointResult:
@@ -747,9 +770,11 @@ def _c9(snapshot: FactorySnapshot, baseline: FactorySnapshot | None, _history: S
 
 C5_V1 = MilestoneDefinition("C5", "stable_plastic", "c5-v1", _c5_v1)
 C5_V2 = MilestoneDefinition("C5", "stable_plastic_startup", "c5-v2", _c5)
+C6_V1 = MilestoneDefinition("C6", "advanced_circuit_consumption", "c6-v1", _c6)
+C6_V2 = MilestoneDefinition("C6", "advanced_circuit_consumption", "c6-v2", _c6_v2)
 
 # Retired predicates remain separately evaluable on the same observation.
-COMPARABLE_MILESTONES: tuple[MilestoneDefinition, ...] = (C1_V1, C5_V1)
+COMPARABLE_MILESTONES: tuple[MilestoneDefinition, ...] = (C1_V1, C5_V1, C6_V1)
 
 
 DEFAULT_MILESTONES: tuple[MilestoneDefinition, ...] = (
@@ -759,11 +784,15 @@ DEFAULT_MILESTONES: tuple[MilestoneDefinition, ...] = (
     MilestoneDefinition("C3", "stone_rollout", "c3-v1", _c3),
     MilestoneDefinition("C4", "first_plastic", "c4-v1", _c4),
     C5_V2,
-    MilestoneDefinition("C6", "advanced_circuit_consumption", "c6-v1", _c6),
+    C6_V2,
     MilestoneDefinition("C7", "chemical_science_research", "c7-v1", _c7),
     MilestoneDefinition("C8", "production_science_research", "c8-v1", _c8),
     MilestoneDefinition("C9", "mining_productivity_4", "c9-v1", _c9),
 )
+
+
+#: Ordered strict checkpoint IDs; CLI choices and reports derive from this, never from a fixed range.
+MILESTONE_IDS: tuple[str, ...] = tuple(item.checkpoint_id for item in DEFAULT_MILESTONES)
 
 
 def default_milestones() -> tuple[MilestoneDefinition, ...]:

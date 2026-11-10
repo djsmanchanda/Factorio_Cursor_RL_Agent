@@ -28,7 +28,7 @@ The ordered registry starts with these versioned predicates:
 | `C3` | The opening stone-brick district produces and delivers output; its temporary starter is absent. |
 | `C4` | New plastic production and provider delivery are observed. |
 | `C5` | C5-v2: new plastic output reaches two adjacent positive 30-second rates within 80% of each other during its first 120 game seconds; retained episode-start sampler required. Live deterministic replay currently reports unknown (`deterministic_startup_capture_unavailable`) until an attempt-scoped arm protocol exists. |
-| `C6` | Advanced circuits are newly produced, then an owned recipe which consumes them records new output. |
+| `C6` | C6-v2: advanced circuits are newly produced, then an owned production recipe which consumes them records new output. Logistics chests do not count (c6-v1, which counted them, stays evaluable for comparison). A blue science line is such a consumer. |
 | `C7` | Chemical science packs are newly produced and labs consume them (force pack statistics; labs present). |
 | `C8` | Production science packs are newly produced and labs consume them. |
 | `C9` | `mining-productivity-4` is complete (in Space Age, level 4 of the repeatable `mining-productivity-3`), and red, green, blue and purple packs were all made and consumed this run. |

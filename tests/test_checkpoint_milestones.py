@@ -4,6 +4,7 @@ from orchestrator.checkpoint_milestones import (
     C1_V1,
     C1_V2,
     C5_V1,
+    C6_V1,
     CheckpointEvaluator,
     FactorySnapshot,
     PredicateStatus,
@@ -38,7 +39,8 @@ def test_default_registry_is_ordered_and_versioned_with_advanced_circuit_milesto
     versions = {item.checkpoint_id: item.predicate_version for item in milestones}
     assert versions["C1"] == "c1-v2"
     assert versions["C5"] == "c5-v2"
-    assert all(version.endswith("-v1") for key, version in versions.items() if key not in {"C1", "C5"})
+    assert versions["C6"] == "c6-v2"
+    assert all(version.endswith("-v1") for key, version in versions.items() if key not in {"C1", "C5", "C6"})
     assert milestones[6].name == "advanced_circuit_consumption"
     assert milestones[-1].name == "mining_productivity_4"
 
@@ -172,6 +174,23 @@ def test_c6_proves_advanced_circuit_production_and_new_owned_consumer_output():
         "production": {"advanced-circuit": {"produced": 2}},
         "recipes": {"processing-unit": {"owned": True, "ingredients": ["advanced-circuit"], "output_count": 1}},
     }
+    assert evaluate_milestone("C6", current, baseline=baseline).passed
+
+
+def _c6_pair(consumer):
+    recipe = lambda count: {consumer: {"owned": True, "ingredients": ["advanced-circuit"], "output_count": count}}
+    return ({"production": {"advanced-circuit": {"produced": 2}}, "recipes": recipe(1)},
+            {"production": {"advanced-circuit": {"produced": 1}}, "recipes": recipe(0)})
+
+
+def test_c6_v2_rejects_a_logistics_chest_as_the_production_consumer():
+    current, baseline = _c6_pair("passive-provider-chest")
+    assert not evaluate_milestone("C6", current, baseline=baseline).passed
+    assert evaluate_milestone("C6", current, baseline=baseline, milestones=(C6_V1,)).passed  # retired v1 did
+
+
+def test_c6_v2_accepts_a_production_consumer():
+    current, baseline = _c6_pair("chemical-science-pack")
     assert evaluate_milestone("C6", current, baseline=baseline).passed
 
 
