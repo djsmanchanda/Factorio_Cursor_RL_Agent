@@ -4644,6 +4644,7 @@ def build_conversion_stage(
     ingredient_sources: dict[str, Point], reference_point: Point, emit: Callable[[str], None],
     *, placement_origin: Point | None = None,
     machine_count: int = _DEFAULT_MACHINE_COUNT,
+    zero_provider: bool = False,
     max_belt_route_tiles: int | None = None,
     belt_type: str = _DEFAULT_BELT,
     inserter_type: str | None = None,
@@ -4724,7 +4725,10 @@ def build_conversion_stage(
             )
         elif power_anchor == "substation":
             emit("  STEEL STARTER POWER: using the stocked substation; no new pole recipe required")
-    _publish_output_chest(plan, limit=1 if terminal_provider_only else None)
+    _publish_output_chest(
+        plan,
+        limit=0 if zero_provider else (1 if terminal_provider_only else None),
+    )
     modes, feed_positions, preflighted, direct_belt_input = _conversion_feed_plan(
         client, bridge, surface, force, recipe, plan, ingredient_sources,
         machine_count, belt_type, flow_direction, emit,
@@ -8249,6 +8253,7 @@ def _build_assembled_stage(
             allow_logistic_inputs=not upgrade_bootstrap,
             terminal_provider_only=upgrade_bootstrap,
             force_belt_inputs=upgrade_bootstrap,
+            zero_provider=zero_provider,
             # The service sized this cell (minimum_machines); the conversion
             # default of 2 silently doubled it. C86c's PM consumer billed 4
             # AM2 and 14 poles for a 1-machine request and never built.
@@ -8665,7 +8670,7 @@ def ensure_produced(
     minimum_machines: int = 1, allow_promotion: bool = True,
     stock_gate_target: int | None = None, storage_limit: int | None = None,
     fill_provider: bool = False, blocking_stock_target: int | None = None,
-    temporary_mall: bool = False,
+    temporary_mall: bool = False, zero_provider: bool = False,
 ) -> Point | None:
     """Returns the item's real output chest position if it's already producing;
     otherwise builds exactly ONE missing stage (the deepest unmet ingredient
