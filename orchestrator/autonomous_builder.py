@@ -7998,6 +7998,7 @@ def _build_assembled_stage(
     reference_point: Point, emit: Callable[[str], None], plan: _LinePlan,
     mall_provider: Point | None, *, upgrade_bootstrap: bool,
     stock_gate_target: int | None = None,
+    machine_count: int = _DEFAULT_MACHINE_COUNT,
 ) -> None:
     """Build one stage for an assembled item, once its inputs have sources."""
     # The pre-advanced-circuit budget is global. Previously only optional demand cells
@@ -8252,7 +8253,7 @@ def _build_assembled_stage(
             # The service sized this cell (minimum_machines); the conversion
             # default of 2 silently doubled it. C86c's PM consumer billed 4
             # AM2 and 14 poles for a 1-machine request and never built.
-            machine_count=max(1, int(minimum_machines)),
+            machine_count=max(1, int(machine_count)),
         )
     return None
 
@@ -8894,6 +8895,7 @@ def ensure_produced(
             client, bridge, surface, force, item, reference_point, emit, plan,
             mall_provider, upgrade_bootstrap=upgrade_bootstrap,
             stock_gate_target=stock_gate_target,
+            machine_count=max(1, int(minimum_machines)),
         )
         return None
     build_mining_stage(client, bridge, surface, force, item, reference_point, emit)
