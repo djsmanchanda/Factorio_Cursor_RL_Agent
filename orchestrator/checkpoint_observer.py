@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 
 from orchestrator.checkpoint_milestones import FactorySnapshot
+from tools.rcon_client import RconError
 from orchestrator import live_base
 from orchestrator.baseline_production import BASELINE_MACHINES
 from orchestrator.bootstrap_district import (
@@ -565,8 +566,44 @@ class LiveCheckpointObservationAdapter:
             "production": production,
             "providers": providers,
             "recipes": recipes,
+            "science": self._science(client),
         }
         return _normalize(snapshot, source="live-rcon-structured")
+
+    _SCIENCE_PACKS = ("automation-science-pack", "logistic-science-pack",
+                      "chemical-science-pack", "production-science-pack")
+
+    def _science(self, client: Any) -> Mapping[str, Any]:
+        """Force pack statistics, labs, recyclers and the completed mining-productivity level.
+
+        One read for C7-C9. A failed read leaves those three unknown and never fails the
+        observation, so earlier milestones are unaffected.
+        """
+        packs = ",".join(json.dumps(pack) for pack in self._SCIENCE_PACKS)
+        lua = (
+            f"local f=game.forces[{json.dumps(self.force)}];local s=game.surfaces[{json.dumps(self.surface)}];"
+            "local st=f.get_item_production_statistics(s);local o={packs={}};"
+            f"for _,p in pairs({{{packs}}}) do o.packs[p]={{produced=st.get_input_count(p),consumed=st.get_output_count(p)}} end;"
+            "o.labs=s.count_entities_filtered{force=f,type='lab'};"
+            "o.recyclers=prototypes.entity['recycler'] and s.count_entities_filtered{force=f,name='recycler'} or 0;"
+            # A repeatable technology keeps its first key (mining-productivity-3 in Space Age) while
+            # LuaTechnology.level advances; its completed level is one below the open level, and
+            # none of it is complete while the open level is still its first.
+            "local best=0;for name,t in pairs(f.technologies) do "
+            "local n=tonumber(name:match('^mining%-productivity%-(%d+)$'));if n then local done;"
+            "if t.prototype.max_level>t.prototype.level then "
+            "done=t.researched and t.level or (t.level>t.prototype.level and t.level-1 or 0) "
+            "else done=t.researched and n or 0 end;if done>best then best=done end end end;"
+            "o.mining_productivity_completed_level=best;rcon.print(helpers.table_to_json(o))"
+        )
+        try:
+            result = json.loads(client.command("/sc " + lua))
+        except (ValueError, TypeError, OSError, RconError) as error:
+            return {"unavailable_reason": f"science_read_failed: {type(error).__name__}"}
+        if not isinstance(result, Mapping) or not isinstance(result.get("packs"), Mapping):
+            return {"unavailable_reason": "science_read_malformed"}
+        return dict(result)
+
 
 
 __all__ = [
