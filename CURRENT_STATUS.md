@@ -529,3 +529,8 @@ Per user (latest, supersedes the same-day 3-day scale request): queued successor
 - Kept: `codex/deterministic-checkpoint-fleet` locally (the root worktree runs the live coordinators), `c86/*` and `c87/*` until their cohorts close, and `c88/*` for a future merge. Starship refs untouched. Helper-run logs stay local and untracked.
 - Evidence: fast gate 1656/1656 on the branch; all deleted branch tips are ancestors of `main`.
 - Lifecycle: nothing restarted; the deployed scheduler and dashboard still run from the root worktree.
+
+## [2026-11-11 01:45 IST] Read-only milestone evidence library
+- What: `tools/laya_evidence.py` reports each milestone as latch, ordered (prerequisite chain C2 → C3 → C4 → C5/C6 reached) and held at end, with the predicate version read from the job's own samples. C6 baselines a consumer key first seen mid-run, which removes the C72/C86c lifetime-counter artifact. First change from `docs/rl/laya_helper_runs/structural-review-20261110/REPORT.md` §4.3.
+- Evidence: six focused tests; parses all 152 recorded cohorts; fast gate 1664/1664. In C81–C87, 25 completed runs latched C4 without C3 and 11 latched C3 without C2; 61 made plastic before the stone rollout (counted once the chain completes). C86c's one C6 pass moves from tick 625,125 to 633,668.
+- Lifecycle: nothing. New read-only tool; the dashboard and `laya_cohort_performance.py` are not yet pointed at it.

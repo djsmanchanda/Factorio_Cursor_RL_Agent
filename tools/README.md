@@ -33,6 +33,14 @@ future autoresearch packets. Its **View in Factorio** control moves only the
 configured connected observer to an active `training/*` surface in spectator
 mode. These tools do not import or invoke the active Nauvis orchestrator.
 
+## Laya cohort evidence
+
+`python tools/laya_evidence.py data/laya-experiments/<cohort> [...]` prints, per arm,
+each milestone as latch / ordered / held at end, with the predicate versions the jobs
+recorded. Use it instead of raw `accepted_ever` counts: the latch is unordered and the C6
+consumer delta can carry a relabelled machine's lifetime counter. It is read-only and safe
+beside live cohorts.
+
 ## Snapshot Validator
 
 ### Install dependency
