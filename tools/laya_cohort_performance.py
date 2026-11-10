@@ -5,7 +5,8 @@
 Counts are strict milestones ever reached (``accepted_ever``) among completed jobs; the
 denominator is every planned job of the arm, so unstarted, cancelled and infrastructure
 failures stay visible. C6 before the c6-v2 predicate (b1ae062) is the chest-satisfiable
-c6-v1 latch and is labelled as such. Revisions come from the frozen spec or the arm's
+c6-v1 latch and is labelled as such, read from the arm's own milestone table (ancestry is
+unreliable: main carries b1ae062 through a history-only merge but still runs c6-v1). Revisions come from the frozen spec or the arm's
 detached worktree; a condensed cohort without either reports ``?``.
 """
 from __future__ import annotations
@@ -20,7 +21,6 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-C6_V2 = "b1ae062"
 MILESTONES = ("C2", "C3", "C4", "C6")
 
 
@@ -78,8 +78,12 @@ def _origin(cohort: Path) -> str:
 def _c6_label(revision: str | None) -> str:
     if not revision:
         return "c6-?"
-    known = subprocess.run(["git", "merge-base", "--is-ancestor", C6_V2, revision], cwd=ROOT).returncode
-    return "c6-v2" if known == 0 else "c6-v1"
+    source = subprocess.run(["git", "show", f"{revision}:orchestrator/checkpoint_milestones.py"],
+                            cwd=ROOT, capture_output=True, text=True)
+    if source.returncode:
+        return "c6-?"
+    match = re.search(r'MilestoneDefinition\("C6",[^)]*?"(c6-v\d+)"', source.stdout)
+    return match.group(1) if match else "c6-?"
 
 
 def cohort_rows(registry: Path) -> list[dict]:

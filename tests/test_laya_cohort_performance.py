@@ -25,3 +25,17 @@ def test_rows_count_every_planned_job_and_label_the_c6_predicate(tmp_path):
     assert rows["variant"]["ever"]["C6"] == 1 and rows["variant"]["median_s"] == 300
     assert rows["variant"]["state"] == "running"
     assert "| 1/2 | 1 | 1 | 1 | 0 (c6-v2) | 100 | running |" in markdown(list(rows.values()), "2026-11-09 22:00 IST")
+
+
+def test_c6_label_reads_the_arm_milestone_table_not_ancestry(monkeypatch) -> None:
+    """Main inherits b1ae062 through a history-only merge yet still evaluates c6-v1."""
+    import subprocess
+    from types import SimpleNamespace
+
+    from tools import laya_cohort_performance as perf
+
+    sources = {"v1": 'MilestoneDefinition("C6", "advanced_circuit_consumption", "c6-v1", _c6),',
+               "v2": 'MilestoneDefinition("C6", "advanced_circuit_consumption", "c6-v2", _c6),'}
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **_k: SimpleNamespace(
+        returncode=0 if cmd[2].split(":")[0] in sources else 128, stdout=sources.get(cmd[2].split(":")[0], "")))
+    assert [perf._c6_label(r) for r in ("v1", "v2", "gone", None)] == ["c6-v1", "c6-v2", "c6-?", "c6-?"]
