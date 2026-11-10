@@ -8001,7 +8001,7 @@ def _build_assembled_stage(
     client: RconClient, bridge: GameBridge, surface: str, force: str, item: str,
     reference_point: Point, emit: Callable[[str], None], plan: _LinePlan,
     mall_provider: Point | None, *, upgrade_bootstrap: bool,
-    stock_gate_target: int | None = None,
+    stock_gate_target: int | None = None, zero_provider: bool = False,
 ) -> None:
     """Build one stage for an assembled item, once its inputs have sources."""
     # The pre-advanced-circuit budget is global. Previously only optional demand cells
@@ -8898,7 +8898,7 @@ def ensure_produced(
         _build_assembled_stage(
             client, bridge, surface, force, item, reference_point, emit, plan,
             mall_provider, upgrade_bootstrap=upgrade_bootstrap,
-            stock_gate_target=stock_gate_target,
+            stock_gate_target=stock_gate_target, zero_provider=zero_provider,
         )
         return None
     build_mining_stage(client, bridge, surface, force, item, reference_point, emit)
