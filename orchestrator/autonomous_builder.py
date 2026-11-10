@@ -8249,6 +8249,10 @@ def _build_assembled_stage(
             allow_logistic_inputs=not upgrade_bootstrap,
             terminal_provider_only=upgrade_bootstrap,
             force_belt_inputs=upgrade_bootstrap,
+            # The service sized this cell (minimum_machines); the conversion
+            # default of 2 silently doubled it. C86c's PM consumer billed 4
+            # AM2 and 14 poles for a 1-machine request and never built.
+            machine_count=max(1, int(minimum_machines)),
         )
     return None
 
