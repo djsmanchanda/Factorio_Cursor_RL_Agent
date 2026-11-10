@@ -21,6 +21,13 @@ PLASTIC_ITEM = "plastic-bar"
 ADVANCED_CIRCUIT_ITEM = "advanced-circuit"
 IRON_GEAR_RECIPE = "iron-gear-wheel"
 COPPER_CABLE_RECIPE = "copper-cable"
+CHEMICAL_SCIENCE_ITEM = "chemical-science-pack"
+PRODUCTION_SCIENCE_ITEM = "production-science-pack"
+# Space Age removes mining-productivity-4 and makes mining-productivity-3 repeatable with red,
+# green, blue and purple packs; "mining-productivity-4" is its fourth completed level.
+MINING_PRODUCTIVITY_LEVEL = 4
+MINING_PRODUCTIVITY_PACKS = ("automation-science-pack", "logistic-science-pack",
+                             CHEMICAL_SCIENCE_ITEM, PRODUCTION_SCIENCE_ITEM)
 
 
 class PredicateStatus(str, Enum):
@@ -249,6 +256,9 @@ class FactorySnapshot:
     production: Mapping[str, CounterEvidence] = field(default_factory=dict)
     providers: Mapping[str, CounterEvidence] = field(default_factory=dict)
     recipes: Mapping[str, RecipeEvidence] = field(default_factory=dict)
+    # Force-wide science telemetry for C7-C9: per-pack produced/consumed counters, lab and
+    # recycler counts and the completed mining-productivity level, or {"unavailable_reason": ...}.
+    science: Mapping[str, Any] | None = None
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "FactorySnapshot":
@@ -288,6 +298,7 @@ class FactorySnapshot:
             production=production,
             providers=providers,
             recipes=recipes,
+            science=value.get("science") if isinstance(value.get("science"), Mapping) else None,
         )
 
 
@@ -575,6 +586,68 @@ def _c6_v2(snapshot: FactorySnapshot, baseline: FactorySnapshot | None, _history
                        {**production_evidence, "consumer_deltas": consumer_deltas, "excluded_logistics_chests": sorted(C6_LOGISTICS_CHESTS)})
 
 
+def _science_inputs(snapshot: FactorySnapshot, baseline: FactorySnapshot | None) -> tuple[Mapping, Mapping] | str:
+    """Both science observations, or the reason C7-C9 must stay unknown."""
+    if baseline is None:
+        return "baseline_missing"
+    for observed in (snapshot.science, baseline.science):
+        if not isinstance(observed, Mapping):
+            return "science_telemetry_missing"
+        if observed.get("unavailable_reason"):
+            return str(observed["unavailable_reason"])
+    # Labs are the only vanilla pack consumer; a recycler would make consumption ambiguous.
+    if snapshot.science.get("recyclers") != 0:
+        return "alternate_pack_consumer_present"
+    return snapshot.science, baseline.science
+
+
+def _pack_delta(current: Mapping, before: Mapping, pack: str, part: str) -> int | None:
+    now = _as_int(((current.get("packs") or {}).get(pack) or {}).get(part))
+    then = _as_int(((before.get("packs") or {}).get(pack) or {}).get(part))
+    return None if now is None or then is None else now - then
+
+
+def _lab_research(checkpoint: str, version: str, pack: str, snapshot: FactorySnapshot,
+                  baseline: FactorySnapshot | None) -> CheckpointResult:
+    """Labs consumed a pack the force also made since the baseline: research, not stored packs."""
+    inputs = _science_inputs(snapshot, baseline)
+    if isinstance(inputs, str):
+        return _all_checks(checkpoint, version, {"labs_consume_newly_made_packs": None}, {"reason": inputs})
+    current, before = inputs
+    produced, consumed = (_pack_delta(current, before, pack, part) for part in ("produced", "consumed"))
+    labs = _as_int(current.get("labs"))
+    return _all_checks(checkpoint, version, {
+        f"{pack}_newly_produced": None if produced is None else produced > 0,
+        f"{pack}_consumed_by_labs": None if consumed is None or labs is None else consumed > 0 and labs > 0,
+    }, {"pack": pack, "production_delta": produced, "consumption_delta": consumed, "labs": labs})
+
+
+def _c7(snapshot: FactorySnapshot, baseline: FactorySnapshot | None, _history: Sequence[FactorySnapshot]) -> CheckpointResult:
+    return _lab_research("C7", "c7-v1", CHEMICAL_SCIENCE_ITEM, snapshot, baseline)
+
+
+def _c8(snapshot: FactorySnapshot, baseline: FactorySnapshot | None, _history: Sequence[FactorySnapshot]) -> CheckpointResult:
+    return _lab_research("C8", "c8-v1", PRODUCTION_SCIENCE_ITEM, snapshot, baseline)
+
+
+def _c9(snapshot: FactorySnapshot, baseline: FactorySnapshot | None, _history: Sequence[FactorySnapshot]) -> CheckpointResult:
+    """mining-productivity-4 completed, with every one of its packs made and consumed in this run."""
+    inputs = _science_inputs(snapshot, baseline)
+    if isinstance(inputs, str):
+        return _all_checks("C9", "c9-v1", {"mining_productivity_level_completed": None}, {"reason": inputs})
+    current, before = inputs
+    level = _as_int(current.get("mining_productivity_completed_level"))
+    deltas = {pack: {part: _pack_delta(current, before, pack, part) for part in ("produced", "consumed")}
+              for pack in MINING_PRODUCTIVITY_PACKS}
+    values = [delta for pack in deltas.values() for delta in pack.values()]
+    earned = None if any(delta is None for delta in values) else all(delta > 0 for delta in values)
+    return _all_checks("C9", "c9-v1", {
+        "mining_productivity_level_completed": None if level is None else level >= MINING_PRODUCTIVITY_LEVEL,
+        "packs_made_and_consumed_this_run": earned,
+    }, {"completed_level": level, "target_level": MINING_PRODUCTIVITY_LEVEL,
+        "baseline_level": _as_int(before.get("mining_productivity_completed_level")), "pack_deltas": deltas})
+
+
 DEFAULT_MILESTONES: tuple[MilestoneDefinition, ...] = (
     MilestoneDefinition("C0", "base", "c0-v1", _c0),
     MilestoneDefinition("C1", "starter_mall", "c1-v1", _c1),
@@ -583,7 +656,13 @@ DEFAULT_MILESTONES: tuple[MilestoneDefinition, ...] = (
     MilestoneDefinition("C4", "first_plastic", "c4-v1", _c4),
     MilestoneDefinition("C5", "stable_plastic", "c5-v1", _c5),
     MilestoneDefinition("C6", "advanced_circuit_consumption", "c6-v2", _c6_v2),
+    MilestoneDefinition("C7", "chemical_science_research", "c7-v1", _c7),
+    MilestoneDefinition("C8", "production_science_research", "c8-v1", _c8),
+    MilestoneDefinition("C9", "mining_productivity_4", "c9-v1", _c9),
 )
+
+#: Ordered strict checkpoint IDs; CLI choices and reports derive from this, never from a fixed range.
+MILESTONE_IDS: tuple[str, ...] = tuple(item.checkpoint_id for item in DEFAULT_MILESTONES)
 
 
 def default_milestones() -> tuple[MilestoneDefinition, ...]:

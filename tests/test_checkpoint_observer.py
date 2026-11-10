@@ -384,3 +384,20 @@ def test_failed_census_leaves_foundations_unknown_with_the_raw_response(ledger):
     assert "too many arguments" in stone.census_error
     result = evaluate_milestone("C3", {"foundations": foundations, "starters": {"stone": {"present": False}}})
     assert result.status.value == "unknown"
+
+
+def test_science_read_returns_counters_and_degrades_to_an_unavailable_reason():
+    class _Science:
+        def __init__(self, reply):
+            self.reply = reply
+
+        def command(self, text):
+            assert "get_item_production_statistics" in text and "mining%-productivity" in text
+            return self.reply
+
+    reply = json.dumps({"packs": {"chemical-science-pack": {"produced": 3, "consumed": 2}}, "labs": 4,
+                        "recyclers": 0, "mining_productivity_completed_level": 2})
+    adapter = LiveCheckpointObservationAdapter(_Science(reply), surface="nauvis", force="player")
+    assert adapter._science(adapter.client)["mining_productivity_completed_level"] == 2
+    broken = LiveCheckpointObservationAdapter(_Science("Cannot execute command. Error: ..."))
+    assert broken._science(broken.client) == {"unavailable_reason": "science_read_failed: JSONDecodeError"}
