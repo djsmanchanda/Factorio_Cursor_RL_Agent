@@ -7,7 +7,7 @@
 This repository contains three isolated but interoperable systems:
 
 - **Deterministic runtime: current main showcase.** Its planners, validators and execution tooling (starters, mine/furnace lines, extensions, mall cells, belts, poles, pipelines) are Laya's action library; keep fixing and improving them.
-- **Laya over deterministic tooling: main focus.** A doc-guided decision layer chooses which deterministic operation to run and when. It replaces the deterministic decision layer (gates, defers, rationing, fixed stage order), not its geometry. Target: C0–C6 in `orchestrator/checkpoint_milestones.py`, then mining-productivity-4.
+- **Laya over deterministic tooling: main focus.** A doc-guided decision layer chooses which deterministic operation to run and when. It replaces the deterministic decision layer (gates, defers, rationing, fixed stage order), not its geometry. Target: C0–C9 in `orchestrator/checkpoint_milestones.py`; C9 is mining-productivity-4.
 - **RL: test bed** for experiments, training and A/B testing on disposable worlds.
 
 ## Core principle: Learn, don't accumulate exceptions

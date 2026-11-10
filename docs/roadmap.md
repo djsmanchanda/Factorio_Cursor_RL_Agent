@@ -6,7 +6,7 @@ Updated 2026-10-09. The August roadmap is in the [archive](archive/roadmap_2026-
 
 ## Main focus: Laya over deterministic tooling
 
-Target: C0–C6 (`orchestrator/checkpoint_milestones.py`), then mining-productivity-4.
+Target: C0–C9 (`orchestrator/checkpoint_milestones.py`): C7 chemical science, C8 production science, C9 mining-productivity-4. Utility science, rocket, space and planets come later.
 
 1. Truthful operation receipts and stock/bill/lender facts on every option.
 2. Break the foundation/steel dependency cycle that blocks C2.

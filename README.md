@@ -6,7 +6,7 @@ Build a factory from a starter kit, measure what it actually produces, and impro
 
 The **deterministic runtime is the current showcase**: reusable mine, furnace, mall, belt, power and fluid operations plan legal layouts and build them with funded construction bots. **Laya is the main development focus**. It chooses which of those operations to run using documented preferences and seeded exploration. The separate **RL test bed** supports training and controlled experiments on disposable worlds.
 
-The target is shared C0–C6 checkpoint acceptance, followed by verified **mining-productivity-4** research. Rate proxies, a one-time checkpoint pass and completed research are distinct measurements.
+The target is shared C0–C9 checkpoint acceptance: C7 chemical science and C8 production science consumed by labs, then C9 verified **mining-productivity-4** research. Rate proxies, a one-time checkpoint pass and completed research are distinct measurements.
 
 ## Measured progress
 

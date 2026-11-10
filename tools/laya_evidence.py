@@ -8,7 +8,7 @@ artifact). This module reads the samples the runner already records and reports,
 milestone:
 
 - ``reached_any``: the latch, as recorded (``strict_reached``, else ``accepted_ever``).
-- ``reached_ordered``: reached and its prerequisite chain (C2 -> C3 -> C4 -> C5/C6) reached too.
+- ``reached_ordered``: reached and its prerequisite chain (C2 -> C3 -> C4 -> C5/C6 -> C7 -> C8 -> C9) reached too.
   Order in time is not required: plastic before the stone rollout is a real path (61 of
   C81-C87's completed runs). C1 is not a prerequisite: C2 requires the starters to be gone,
   so C1 is transient and unsampled at restart origins.
@@ -31,8 +31,8 @@ import collections
 import json
 from pathlib import Path
 
-MILESTONES = ("C0", "C1", "C2", "C3", "C4", "C5", "C6")
-PREREQUISITE = {"C3": "C2", "C4": "C3", "C5": "C4", "C6": "C4"}
+MILESTONES = ("C0", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9")
+PREREQUISITE = {"C3": "C2", "C4": "C3", "C5": "C4", "C6": "C4", "C7": "C6", "C8": "C7", "C9": "C8"}
 
 
 def _samples(job: dict) -> list[dict]:
@@ -121,9 +121,10 @@ def _table(cohort: Path) -> str:
     jobs = ledger.get("jobs") if isinstance(ledger, dict) else ledger
     lines = [f"## {cohort.name}", "", "Cells are latch / ordered / held at end, over completed jobs. "
              "C6 ordered uses the baselined consumer.", "",
-             "| Arm | Done/planned | C2 | C3 | C4 | C5 | C6 | Predicates seen |", "|---|---|---|---|---|---|---|---|"]
+             "| Arm | Done/planned | C2 | C3 | C4 | C5 | C6 | C7 | C8 | C9 | Predicates seen |",
+             "|---|---|---|---|---|---|---|---|---|---|---|"]
     for name, arm in sorted(arm_summary(jobs or []).items()):
-        cells = [f"{arm['any'][m]} / {arm['ordered'][m]} / {arm['held'][m]}" for m in ("C2", "C3", "C4", "C5", "C6")]
+        cells = [f"{arm['any'][m]} / {arm['ordered'][m]} / {arm['held'][m]}" for m in MILESTONES[2:]]
         versions = ", ".join(sorted(arm["versions"])) or "?"
         lines.append(f"| {name} | {arm['completed']}/{arm['planned']} | " + " | ".join(cells) + f" | {versions} |")
     return "\n".join(lines) + "\n"

@@ -34,12 +34,13 @@ def _snapshot(**overrides):
 
 def test_default_registry_is_ordered_and_versioned_with_advanced_circuit_milestone():
     milestones = default_milestones()
-    assert [item.checkpoint_id for item in milestones] == ["C0", "C1", "C2", "C3", "C4", "C5", "C6"]
+    assert [item.checkpoint_id for item in milestones] == ["C0", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9"]
     versions = {item.checkpoint_id: item.predicate_version for item in milestones}
     assert versions["C1"] == "c1-v2"
     assert versions["C5"] == "c5-v2"
     assert all(version.endswith("-v1") for key, version in versions.items() if key not in {"C1", "C5"})
-    assert milestones[-1].name == "advanced_circuit_consumption"
+    assert milestones[6].name == "advanced_circuit_consumption"
+    assert milestones[-1].name == "mining_productivity_4"
 
 
 def test_missing_telemetry_is_unknown_not_failed():
@@ -207,3 +208,42 @@ def test_c1_idle_survey_now_reads_producers_false_without_changing_status():
     empty = evaluate_milestone("C1", _snapshot(mall_assemblers=[]))
     assert empty.unknown and empty.evidence["checks"]["iron_gear_producer_working"] is None
     assert empty.evidence["mall_status_counts"] == {}
+
+
+def _science(level=0, recyclers=0, labs=2, **packs):
+    counts = {pack: {"produced": 0, "consumed": 0} for pack in (
+        "automation-science-pack", "logistic-science-pack", "chemical-science-pack", "production-science-pack")}
+    for key, (produced, consumed) in packs.items():
+        counts[key.replace("_", "-")] = {"produced": produced, "consumed": consumed}
+    return {"tick": 1, "science": {"packs": counts, "labs": labs, "recyclers": recyclers,
+                                   "mining_productivity_completed_level": level}}
+
+
+def test_c7_needs_labs_to_consume_chemical_packs_made_this_run():
+    baseline = _science(chemical_science_pack=(10, 0))
+    stored = evaluate_milestone("C7", _science(chemical_science_pack=(10, 4)), baseline=baseline)
+    assert stored.failed  # inherited stock consumed, none made
+    made = evaluate_milestone("C7", _science(chemical_science_pack=(15, 4)), baseline=baseline)
+    assert made.passed and made.predicate_version == "c7-v1"
+    assert evaluate_milestone("C7", _science(labs=0, chemical_science_pack=(15, 4)), baseline=baseline).failed
+
+
+def test_c7_c8_c9_are_unknown_without_trustworthy_science_telemetry():
+    baseline = _science()
+    recycler = _science(recyclers=1, production_science_pack=(5, 5))
+    assert evaluate_milestone("C8", recycler, baseline=baseline).unknown
+    unavailable = {"tick": 2, "science": {"unavailable_reason": "science_read_failed: ValueError"}}
+    for checkpoint in ("C7", "C8", "C9"):
+        result = evaluate_milestone(checkpoint, unavailable, baseline=baseline)
+        assert result.unknown and result.evidence["reason"] == "science_read_failed: ValueError"
+        assert evaluate_milestone(checkpoint, baseline).unknown  # no baseline
+
+
+def test_c9_needs_level_four_and_every_pack_made_and_consumed_this_run():
+    earned = dict(automation_science_pack=(9, 9), logistic_science_pack=(9, 9),
+                  chemical_science_pack=(9, 9), production_science_pack=(9, 9))
+    baseline = _science(level=2)
+    assert evaluate_milestone("C9", _science(level=4, **earned), baseline=baseline).passed
+    assert evaluate_milestone("C9", _science(level=3, **earned), baseline=baseline).failed
+    no_purple = {**earned, "production_science_pack": (0, 0)}
+    assert evaluate_milestone("C9", _science(level=4, **no_purple), baseline=baseline).failed

@@ -111,6 +111,9 @@ class CheckpointFleetStore:
         ("C4", "First plastic"),
         ("C5", "Stable plastic"),
         ("C6", "Advanced circuit consumer"),
+        ("C7", "Chemical science research"),
+        ("C8", "Production science research"),
+        ("C9", "Mining productivity 4"),
     )
 
     def __init__(self, root: Path):

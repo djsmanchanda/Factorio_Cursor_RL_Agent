@@ -103,6 +103,8 @@ def _empty_state() -> dict[str, Any]:
         ("C2", "Iron + copper rollout"), ("C3", "Stone rollout"),
         ("C4", "First plastic"), ("C5", "Stable plastic"),
         ("C6", "Advanced circuit consumer"),
+        ("C7", "Chemical science research"), ("C8", "Production science research"),
+        ("C9", "Mining productivity 4"),
     )
     return {
         "schema_version": STATE_SCHEMA_VERSION,

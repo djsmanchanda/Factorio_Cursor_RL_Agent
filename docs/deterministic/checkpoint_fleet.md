@@ -29,6 +29,12 @@ The ordered registry starts with these versioned predicates:
 | `C4` | New plastic production and provider delivery are observed. |
 | `C5` | C5-v2: new plastic output reaches two adjacent positive 30-second rates within 80% of each other during its first 120 game seconds; retained episode-start sampler required. Live deterministic replay currently reports unknown (`deterministic_startup_capture_unavailable`) until an attempt-scoped arm protocol exists. |
 | `C6` | Advanced circuits are newly produced, then an owned recipe which consumes them records new output. |
+| `C7` | Chemical science packs are newly produced and labs consume them (force pack statistics; labs present). |
+| `C8` | Production science packs are newly produced and labs consume them. |
+| `C9` | `mining-productivity-4` is complete (in Space Age, level 4 of the repeatable `mining-productivity-3`), and red, green, blue and purple packs were all made and consumed this run. |
+
+C7-C9 read one force-wide science observation. A failed read, a missing baseline or any
+recycler on the surface (an alternate pack consumer) makes them unknown, never failed.
 
 Stable checkpoint IDs are independent of display order. An inserted checkpoint
 such as `C1a` creates a new registry version and explicit order
