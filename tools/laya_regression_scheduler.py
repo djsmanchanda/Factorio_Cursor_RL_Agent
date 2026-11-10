@@ -32,7 +32,14 @@ MIN_MIXED_JOBS = 120
 MAX_MIXED_JOBS = 150
 MAX_MIXED_WORKERS = 30
 MAX_MEASUREMENT_ARMS = 6
-TERMINAL = {"completed", "failed", "timeout", "cancelled", "infrastructure_failure", "incompatible"}
+# cancelled_before_start is written by close-out/refreeze paths; without it a
+# successor's after= gate treats a closed cohort as still running.
+TERMINAL = {"completed", "failed", "timeout", "cancelled", "cancelled_before_start",
+            "infrastructure_failure", "incompatible"}
+#: strict_current is a convenience copy of the journal; only the last row is
+#: needed for strict_current_at_end and strict_reached is already computed.
+#: Keeping every row made one cohort's job-status.json 55 MB.
+STRICT_CURRENT_KEEP = 20
 # Live game speed is frozen per cohort. New cohorts run at 2x (120 UPS), as the
 # batch cohorts through C48 did; roots frozen before the field existed ran at
 # the runner's 1x default and keep it on resume, so no live cohort changes speed.
@@ -453,7 +460,7 @@ def collect_result(world, job):
     first = min(relevant, key=lambda stage: reached[stage]) if relevant else None
     return {'faults':faults, 'accepted_ever':sorted(latches), 'accepted_final':final,
             'legacy_latch_reached':latches, 'strict_reached':reached, 'loaded_tick':loaded,
-            'strict_current':observations, 'strict_current_at_end':observations[-1]['statuses'] if observations else None,
+            'strict_current':observations[-STRICT_CURRENT_KEEP:], 'strict_current_at_end':observations[-1]['statuses'] if observations else None,
             'stage_latency':latency, 'progress_latency':latency.get(first, {}),
             'runner_stop':summary.get('stop'), 'stop_classification':summary.get('stop_classification', 'unknown'),
             'research_acceptance':summary.get('research_acceptance') or research,
