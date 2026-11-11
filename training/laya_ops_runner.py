@@ -671,7 +671,7 @@ def add_c6_consumer_options(menu: dict, phase: Mapping, facts: Mapping) -> dict:
         "product": "productivity-module", "need_id": "service:productivity-module",
         "params": {"item": "productivity-module", "stock_target": 1, "minimum_machines": 1,
                    "upgrade_bootstrap": True, "allow_promotion": False,
-                   "zero_provider": True},
+                   "zero_provider": True, "machine_cap": 1},
         "summary": "build a permanent productivity-module consumer line",
         "features": {"goal_need": True, "bill_known": False, "sustained_service_verified": False}})
     menu["needs"].append({"need_id": "service:productivity-module", "condition": "available",

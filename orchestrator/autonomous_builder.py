@@ -8673,6 +8673,7 @@ def ensure_produced(
     stock_gate_target: int | None = None, storage_limit: int | None = None,
     fill_provider: bool = False, blocking_stock_target: int | None = None,
     temporary_mall: bool = False, zero_provider: bool = False,
+    machine_cap: int | None = None,
 ) -> Point | None:
     """Returns the item's real output chest position if it's already producing;
     otherwise builds exactly ONE missing stage (the deepest unmet ingredient
@@ -8897,6 +8898,11 @@ def ensure_produced(
                 client, surface, force, item, plan, stock_gate_target, emit,
                 bridge=bridge, reference_point=reference_point,
             )
+        if machine_cap is not None:
+            # A consumer service names its own size. A reserve target elsewhere
+            # in this function can raise minimum_machines; a 1-machine PM cell
+            # was being built as a 7-machine district.
+            minimum_machines = min(minimum_machines, max(1, int(machine_cap)))
         _build_assembled_stage(
             client, bridge, surface, force, item, reference_point, emit, plan,
             mall_provider, upgrade_bootstrap=upgrade_bootstrap,
