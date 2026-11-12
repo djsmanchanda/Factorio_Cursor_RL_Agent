@@ -93,7 +93,8 @@ def main(argv=None):
         return 0 if result['reload_verified'] else 1
     try:
         plan = plan_replay(args.bank, args.generation, args.root, game_port=args.game_port,
-                           rcon_port=args.rcon_port, deadline=args.deadline, planned=1)
+                           rcon_port=args.rcon_port, deadline=args.deadline, planned=1,
+                           mods_source=args.mods_source)
     except ReplayError as error:
         print(json.dumps({'kind': 'laya-pm-replay-blocked-v1', 'blocker': str(error)}, indent=2))
         return 2
@@ -201,12 +202,43 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
     return summary
 
 
+def check_mods(bundle: Path, mods_source: Path) -> dict:
+    """Compare the source tree with the bundle's recorded mod file hashes.
+
+    A C4 reload is only provenance-valid when the candidate boots the same mod
+    bytes that produced the capture. Missing or different files are a blocker,
+    never a warning.
+    """
+    import hashlib
+    metadata = json.loads((bundle / "checkpoint.json").read_text())
+    wanted = ((metadata.get("provenance") or {}).get("mod_hashes") or {})
+    if not wanted:
+        raise ReplayError("checkpoint bundle records no mod hashes")
+    missing, changed = [], []
+    for name, sha in wanted.items():
+        target = mods_source / name
+        if not target.is_file():
+            missing.append(name)
+            continue
+        if hashlib.sha256(target.read_bytes()).hexdigest() != sha:
+            changed.append(name)
+    if missing or changed:
+        raise ReplayError(f"mod source does not match the bundle: {len(missing)} missing, {len(changed)} changed")
+    return {"kind": "laya-pm-mods-v1", "mods_source": str(mods_source), "files": len(wanted),
+            "mods_verified": True}
+
+
 def plan_replay(bank: Path, generation: str, root: Path, *, game_port: int, rcon_port: int,
-                deadline: float, planned: int = 1, now: float | None = None) -> dict:
+                deadline: float, planned: int = 1, now: float | None = None,
+                mods_source: Path | None = None) -> dict:
     """Validate every launch precondition without touching a world."""
     import time as _time
     now = _time.time() if now is None else now
     info = preflight(bank, generation)
+    mods = None
+    if mods_source is not None:
+        mods = check_mods(bank/'generations'/generation, mods_source)
+        info = {**info, "mods": mods}
     if root.exists():
         raise ReplayError("replay root must be fresh; existing worlds are preserved")
     for name, base in (("game", game_port), ("rcon", rcon_port)):

@@ -79,3 +79,30 @@ def test_a_generic_c6_pass_is_not_pm_consumption(tmp_path):
     assert summary["pm_placed"] is True
     assert summary["pm_consumption_verified"] is False
     assert summary["pm_evidence_complete"] is False
+
+
+def _bundle_with_mods(tmp_path, files):
+    import hashlib
+    bundle = tmp_path / "bundle"; bundle.mkdir()
+    hashes = {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}
+    (bundle / "checkpoint.json").write_text(json.dumps({"provenance": {"mod_hashes": hashes}}))
+    mods = tmp_path / "mods"
+    for name, data in files.items():
+        target = mods / name; target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    return bundle, mods
+
+
+def test_mods_must_match_the_bundle_hashes(tmp_path):
+    bundle, mods = _bundle_with_mods(tmp_path, {"a/control.lua": b"x", "a/data.lua": b"y"})
+    assert replay.check_mods(bundle, mods)["mods_verified"] is True
+    (mods / "a/data.lua").write_bytes(b"changed")
+    with pytest.raises(replay.ReplayError, match="changed"):
+        replay.check_mods(bundle, mods)
+
+
+def test_a_missing_mod_file_blocks_the_replay(tmp_path):
+    bundle, mods = _bundle_with_mods(tmp_path, {"a/control.lua": b"x"})
+    (mods / "a/control.lua").unlink()
+    with pytest.raises(replay.ReplayError, match="missing"):
+        replay.check_mods(bundle, mods)
