@@ -182,6 +182,9 @@ def enqueue(repo, registry, spec):
         raise ValueError('Distinct nonnegative seeds required')
     if spec['max_game_ticks'] <= 0 or spec['trial_wall_seconds'] <= 0:
         raise ValueError('Positive tick and wall budgets required')
+    if spec.get('max_workers') is not None and (
+            type(spec['max_workers']) is not int or not 1 <= spec['max_workers'] <= MAX_MIXED_WORKERS):
+        raise ValueError(f'max_workers must be an integer in 1..{MAX_MIXED_WORKERS}')
     speed = spec.setdefault('game_speed', DEFAULT_GAME_SPEED)
     if type(speed) not in (int, float) or not .25 <= speed <= 8:
         raise ValueError('Game speed must be 0.25..8')
@@ -619,11 +622,28 @@ def run_one(root, *, executor=subprocess.run):
         return _dispatch(root, executor)
 
 
+def cohort_workers(spec, workers=MAX_MIXED_WORKERS):
+    """Dispatch threads for one cohort: the spec may ask for fewer.
+
+    A cohort that cannot be admitted still holds a thread per dispatch attempt
+    on the global admission lock. Bounding the pool by the cohort's realistic
+    share keeps a waiting cohort from queueing ahead of admitted work.
+    """
+    value = spec.get('max_workers')
+    if value is None:
+        return int(workers)
+    if type(value) is not int or not 1 <= value <= int(workers):
+        raise ValueError(f'max_workers must be an integer in 1..{int(workers)}')
+    return value
+
+
 def run_campaign(root, *, workers=MAX_MIXED_WORKERS, executor=subprocess.run):
     """Interleave the frozen plan with concurrent, host-admitted attempts."""
     root = root.resolve()
     with lock(root/'coordinator.lock'):
         recover(root)
+        spec = read(root/'regression.json')
+        workers = cohort_workers(spec, workers)
         with ThreadPoolExecutor(max_workers=workers) as pool:
             active = set()
             while True:

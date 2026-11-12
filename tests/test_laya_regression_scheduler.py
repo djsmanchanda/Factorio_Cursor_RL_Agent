@@ -292,3 +292,11 @@ def test_waiting_dispatch_heartbeats_without_rewriting_the_whole_status(tmp_path
     atomic_json(root/'job-status.json', {'updated': time.time(), 'jobs': [{'id': 'a', 'status': 'queued'}]})
     scheduler._publish(root, lambda status: {'id': 'a', 'status': 'preparing'}, min_interval=240)
     assert json.loads((root/'job-status.json').read_text())['updated'] > now
+
+
+def test_max_workers_defaults_to_the_pool_size_and_is_bounded():
+    assert scheduler.cohort_workers({}) == scheduler.MAX_MIXED_WORKERS
+    assert scheduler.cohort_workers({'max_workers': 8}) == 8
+    for bad in (0, -1, scheduler.MAX_MIXED_WORKERS + 1, '8', 8.0, True):
+        with pytest.raises(ValueError):
+            scheduler.cohort_workers({'max_workers': bad})
