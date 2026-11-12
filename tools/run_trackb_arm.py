@@ -14,8 +14,10 @@ the world journal as ``strict_current`` and ``acceptance`` events tagged
 ``"source": "strict_sidecar"``, which the scheduler's ``collect_result`` reads
 exactly as it reads Track A's in-run rows.
 
-Unsupported scheduler options (restart bundles, strict/research targets,
-checkpoint capture) fail loudly rather than being silently ignored.
+``--strict-target`` (for example C9) ends B's run once the sidecar records that
+milestone; otherwise B runs until its own stall stop or the tick window.
+Unsupported scheduler options (restart bundles, research targets, checkpoint
+capture) fail loudly rather than being silently ignored.
 """
 from __future__ import annotations
 
@@ -30,7 +32,7 @@ from pathlib import Path
 
 CODE = Path(__file__).resolve().parents[1]
 DEFAULT_VARIANT = "docs/rl/laya_variants/patience48.json"
-UNSUPPORTED = ("--restart-checkpoint", "--strict-target", "--research-target", "--checkpoint-catalog",
+UNSUPPORTED = ("--restart-checkpoint", "--research-target", "--checkpoint-catalog",
                "--capture-checkpoints", "--checkpoint-bank", "--validate-reload-only")
 
 
@@ -49,6 +51,7 @@ def parse(argv):
     parser.add_argument("--speed", type=float, default=2.0)
     parser.add_argument("--variant", default=DEFAULT_VARIANT)
     parser.add_argument("--sidecar-interval", type=float, default=60.0)
+    parser.add_argument("--strict-target", help="Stop B once the sidecar records this strict milestone")
     for flag in UNSUPPORTED:
         parser.add_argument(flag, nargs="*", dest=flag.strip("-").replace("-", "_"))
     args = parser.parse_args(argv)
@@ -79,6 +82,13 @@ def journal_rows(summary: dict, run_id: str | None) -> list[dict]:
     return rows
 
 
+def target_reached(out: Path, target: str) -> bool:
+    try:
+        return target in (json.loads(out.read_text()).get("strict_reached") or {})
+    except (OSError, ValueError):
+        return False
+
+
 def run(args) -> int:
     root = args.root.resolve()
     evidence = root / "evidence"
@@ -93,6 +103,11 @@ def run(args) -> int:
         forward += ["--max-game-ticks", str(args.max_game_ticks)]
     child = subprocess.Popen(clean_runner(forward))
     signal.signal(signal.SIGTERM, lambda *_: child.send_signal(signal.SIGTERM))
+    while child.poll() is None:
+        time.sleep(15)
+        if args.strict_target and target_reached(out, args.strict_target):
+            child.send_signal(signal.SIGTERM)  # goal reached: end B the way the scheduler would
+            break
     code = child.wait()
     time.sleep(args.sidecar_interval + 15)  # one more sample of the final state while the server is still up
     sidecar.send_signal(signal.SIGTERM)
