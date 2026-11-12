@@ -19,7 +19,7 @@ const chip = (text, tone = 'muted', title = '') => `<span class="chip" data-tone
 // Page-session preferences. The snapshot token is never stored anywhere.
 const keep = (storage, key, fallback) => { try { return JSON.parse(storage.getItem(key)) ?? fallback; } catch { return fallback; } };
 const save = (storage, key, value) => { try { storage.setItem(key, JSON.stringify(value)); } catch { /* storage may be unavailable */ } };
-const ui = {tab: 'overview', hours: 6, panels: ['runs', 'ups', 'temp'], hiddenSeries: [], family: 'strict', milestone: 'C6', registryState: 'all', unranked: false, historyView: 'trend', trendMetric: 'ever', trendMilestones: ['C2', 'C3', 'C4', 'C5', 'C6'], trendWindow: 'all', trendExp: 'mean', trendCI: false, ...keep(localStorage, 'laya.ui.v1', {})};
+const ui = {tab: 'overview', hours: 6, panels: ['runs', 'ups', 'temp'], hiddenSeries: [], family: 'strict', milestone: 'C6', registryState: 'all', unranked: false, historyView: 'trend', trendMetric: 'ever', trendMilestones: ['C2', 'C3', 'C4', 'C5', 'C6'], trendWindow: 'all', trendOrigin: 'full', trendExp: 'mean', trendCI: false, ...keep(localStorage, 'laya.ui.v1', {})};
 const persistUi = () => save(localStorage, 'laya.ui.v1', ui);
 const drafts = new Map(Object.entries(keep(sessionStorage, 'laya.drafts.v1', {})));
 const persistDrafts = () => save(sessionStorage, 'laya.drafts.v1', Object.fromEntries(drafts));
@@ -613,7 +613,9 @@ const median = values => { const v = values.filter(isNum).sort((a, b) => a - b);
 const shortId = id => String(id).replace(/-?2026\d{4}-?/, '-').replace(/^-|-$/g, '').replace(/^(.{9}).+$/, '$1…');
 const ptsPct = v => isNum(v) ? `${Math.round(v * 100)}%` : 'unknown';
 function trendModel(data) {
- const fam = ui.family, metric = ui.trendMetric, wf = ui.trendWindow;
+ const fam = ui.family, metric = ui.trendMetric, wf = ui.trendWindow, of = ui.trendOrigin || 'full';
+ // Unrecorded origins (the hand-curated rows up to 2026-10-28) count as full starts; restart cohorts are marked.
+ const originOf = c => c.origin ?? 'unrecorded', keepOrigin = c => of === 'all' || (of === 'full' ? ['C0', 'unrecorded'].includes(originOf(c)) : ['restart', 'mixed'].includes(originOf(c)));
  const rate = (a, m) => {
   const planned = a.planned, ever = a.ever?.[m], fin = a.final?.[m], latched = (a.caveats || []).some(x => /latch/i.test(x));
   if (!Number.isInteger(planned) || planned <= 0) return null;
@@ -623,7 +625,7 @@ function trendModel(data) {
  };
  const windowOf = arms => { const set = new Set(arms.map(a => a.window_max_game_ticks ?? null)); return set.size === 1 ? [...set][0] : arms.length ? 'mixed' : null; };
  const windows = new Map();
- const sorted = data.cohorts.filter(c => !UNRANKED_STATUS.has(c.status)).sort((a, b) => (a.date || '').localeCompare(b.date || '') || String(a.id).localeCompare(String(b.id), undefined, {numeric: true}));
+ const sorted = data.cohorts.filter(c => !UNRANKED_STATUS.has(c.status) && keepOrigin(c)).sort((a, b) => (a.date || '').localeCompare(b.date || '') || String(a.id).localeCompare(String(b.id), undefined, {numeric: true}));
  const rows = sorted.map(c => {
   const arms = (c.arms || []).filter(a => a.predicate_family === fam);
   arms.forEach(a => { const w = a.window_max_game_ticks ?? 'unknown'; windows.set(w, (windows.get(w) || 0) + 1); });
@@ -634,7 +636,7 @@ function trendModel(data) {
    const versions = new Set(points.map(a => a.source.predicate_versions?.[m] ?? null)), windows = new Set(points.map(a => a.source.window_max_game_ticks ?? null));
    // Different explicit definitions or budgets cannot form one milestone rate.
    if (versions.size !== 1 || windows.size !== 1) return null;
-   const version = [...versions][0], window = [...windows][0], metadata = version && isNum(window) ? JSON.stringify([fam, version, window]) : null;
+   const version = [...versions][0], window = [...windows][0], metadata = version && isNum(window) ? JSON.stringify([fam, version, window, originOf(c)]) : null;
    const best = points.reduce((a, b) => b.r.p > a.r.p ? b : a), selected = bestOnly ? best : points[0];
    const single = bestOnly || points.length === 1;
    return {p: single ? selected.r.p : points.reduce((sum, a) => sum + a.r.p, 0) / points.length,
@@ -678,11 +680,11 @@ function renderTrend(data) {
  $('trend-ci').checked = ui.trendCI;
  const counts = [...model.windows.entries()].sort((a, b) => b[1] - a[1]);
  setHTML($('trend-window'), `<option value="all">All windows (metadata changes are dotted)</option>${counts.map(([w, n]) => `<option value="${esc(w)}">${isNum(w) ? Math.round(w / 1000) + 'k ticks' : 'window unknown'} · ${n} arms</option>`).join('')}`);
- $('trend-window').value = ui.trendWindow;
+ $('trend-window').value = ui.trendWindow; $('trend-origin').value = ui.trendOrigin || 'full';
  const has = m => model.rows.some(r => r.base[m] || r.exp[m]);
  setHTML($('trend-legend'), `<span class="static">Milestones</span>${TREND_MS.map(m => `<button type="button" class="m${m.slice(1)}" data-tm="${m}" aria-pressed="${ui.trendMilestones.includes(m)}" ${has(m) ? '' : 'disabled title="No data for this selection"'}><i></i>${m}</button>`).join('')}`);
  setHTML($('trend-summary'), model.rows.length >= 2 ? trendSummaryHTML(model) : '');
- $('trend-hint').innerHTML = `${esc(METRICS[ui.trendMetric][0])} = % ${esc(METRICS[ui.trendMetric][1])}. <strong>Solid</strong> segments share a known tick window and predicate definition; <strong>dotted</strong> segments have differing or unknown metadata. Neither establishes a matched comparison. Hollow markers have missing window or definition metadata. Mixed definitions/windows are not averaged into one point. Means use reported arms only, so composition can change. Base roles are inferred from names; missing roles and counts remain gaps. Individual arm binomial ranges assume independent runs; repeated seeds and early stopping can make them optimistic. ${ui.trendExp === 'best' ? 'Best arm is chosen after the fact and overstates a typical experiment. ' : ''}${ui.family === 'proxy' ? 'Proxy rates only cover one early campaign, so there is no trend. ' : ''}`;
+ $('trend-hint').innerHTML = `${esc(METRICS[ui.trendMetric][0])} = % ${esc(METRICS[ui.trendMetric][1])}. <strong>Solid</strong> segments share a known tick window and predicate definition; <strong>dotted</strong> segments have differing or unknown metadata, including a change of start (full start versus restart). Restart cohorts reach milestones at or below their origin trivially, so they are hidden under "Full start". Neither establishes a matched comparison. Hollow markers have missing window or definition metadata. Mixed definitions/windows are not averaged into one point. Means use reported arms only, so composition can change. Base roles are inferred from names; missing roles and counts remain gaps. Individual arm binomial ranges assume independent runs; repeated seeds and early stopping can make them optimistic. ${ui.trendExp === 'best' ? 'Best arm is chosen after the fact and overstates a typical experiment. ' : ''}${ui.family === 'proxy' ? 'Proxy rates only cover one early campaign, so there is no trend. ' : ''}`;
  drawTrend(model);
 }
 function drawTrend(model = trendModelCache) {
@@ -850,6 +852,7 @@ document.addEventListener('toggle', event => {
  if (key.startsWith('review:') && element.open) loadNotes(key.slice(7)); else if (key.startsWith('cohort:')) renderJobs();
 }, true);
 $('trend-window').addEventListener('change', event => { ui.trendWindow = event.target.value; persistUi(); renderHistory(); });
+$('trend-origin').addEventListener('change', event => { ui.trendOrigin = event.target.value; persistUi(); renderHistory(); });
 $('trend-ci').addEventListener('change', event => { ui.trendCI = event.target.checked; persistUi(); renderHistory(); });
 document.addEventListener('change', event => { if (event.target.dataset?.jobfilter) { jobFilter.set(event.target.dataset.jobfilter, event.target.value); pageSize.delete(event.target.dataset.jobfilter); renderJobs(); } });
 document.addEventListener('input', event => {

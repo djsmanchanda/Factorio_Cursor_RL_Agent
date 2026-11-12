@@ -162,6 +162,7 @@
    <div class="toolbar wrap">
     <div class="segmented" role="group" aria-label="Trend metric" id="trend-metric"><button type="button" data-metric="ever" aria-pressed="true" title="Share of planned runs that ever reached the milestone">Reached</button><button type="button" data-metric="final" aria-pressed="false" title="Share of planned runs accepted at the last sample, not sustained operation">Final sample</button><button type="button" data-metric="retention" aria-pressed="false" title="Of the runs that ever reached it, the share still accepted at the end">Retention</button></div>
     <label class="inline">Tick window <select id="trend-window"></select></label>
+    <label class="inline">Start <select id="trend-origin"><option value="full">Full start (C0)</option><option value="restart">Restart or mixed</option><option value="all">All starts</option></select></label>
     <div class="segmented" role="group" aria-label="Experimental summary" id="trend-exp"><button type="button" data-texp="mean" aria-pressed="true" title="Unweighted mean over the experimental arms of each cohort">Mean arm</button><button type="button" data-texp="best" aria-pressed="false" title="Best arm per cohort: optimistic, selected after the fact">Best arm</button></div>
     <label class="inline check"><input type="checkbox" id="trend-ci" title="Single base-arm binomial ranges only; multiple base arms are not pooled"> Nominal 95% base ranges</label>
    </div>

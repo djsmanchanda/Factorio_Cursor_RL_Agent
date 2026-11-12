@@ -521,3 +521,12 @@ def test_dashboard_assets_stay_csp_clean_and_mutations_stay_explicit():
     assert not re.search(r"(localStorage|sessionStorage|save\([^)]*)[^\n]*\btoken\b", script.replace("token = next.token", ""))
     if shutil.which("node"):
         assert subprocess.run(["node", "--check", str(dashboard.ASSETS / "app.js")], capture_output=True).returncode == 0
+
+
+def test_cohort_origin_separates_full_starts_from_restart_cohorts():
+    from tools.laya_cohort_dashboard import cohort_origin
+    assert cohort_origin({"include_full": True}) == "C0"
+    assert cohort_origin({"checkpoints": ["bank/C4/g1"]}) == "restart"
+    assert cohort_origin({"checkpoints": ["bank/C4/g1"], "include_full": True}) == "mixed"
+    assert cohort_origin({"design": "mixed-start-v1"}) == "mixed"
+    assert cohort_origin(None) is None

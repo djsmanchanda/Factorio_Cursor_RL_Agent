@@ -113,6 +113,19 @@ def listener_evidence(world, port, proc_root=Path('/proc')):
     return result
 
 
+def cohort_origin(spec):
+    """Where a cohort's runs start: "C0" (full start), "restart" (saved checkpoint worlds) or "mixed".
+
+    Restart cohorts reach milestones at or below their origin trivially, so a trend must not
+    join them with full starts (C49-C57 read ~100% C4 from C3/C4 origins, C58+ ~60% from C0).
+    """
+    if not isinstance(spec, dict):
+        return None
+    if spec.get("design") == "mixed-start-v1" or (spec.get("checkpoints") and spec.get("include_full")):
+        return "mixed"
+    return "restart" if spec.get("checkpoints") else "C0"
+
+
 class Dashboard:
     def __init__(self, repo, registry, host, data, enable_controls=False, viewer_bind=None, viewer_address=None):
         self.repo, self.registry, self.host, self.data = map(Path, (repo, registry, host, data))
@@ -276,7 +289,7 @@ class Dashboard:
             result.append({"name": path.name, "planned": planned, "counts": dict(counts), "unaccounted": max(0, planned - len(jobs)) if isinstance(planned, int) else None, "updated": status.get("updated"), "created": freeze.get("frozen_at") or batch.get("created_at"), "queue_status": queue_by_name.get(path.name, {}).get("status"), "engine": freeze.get("engine"), "jobs": clean, "source": str(path / "report.md"), "mixed": mixed})
         return result
 
-    def _auto_curated(self, curated):
+    def _auto_curated(self, curated):  # noqa: C901 -- one pass over the registry
         """Append registry cohorts newer than the curated feed.
 
         The Trends tab reads docs/rl/laya_cohort_curated_history.json, which is
@@ -312,6 +325,7 @@ class Dashboard:
                 continue
             freeze = self.cached(path.parent / "freeze.json", {}) or {}
             spec = self.cached(path.parent / "regression.json", {}) or {}
+            origin = cohort_origin(spec)
             arms = {}
             for job in jobs:
                 if not isinstance(job, dict):
@@ -358,6 +372,7 @@ class Dashboard:
                 "finding": "Auto-generated from job-status (unreviewed): " + ", ".join(
                     f"{k} {v}" for k, v in sorted(counts.items())),
                 "sources": [str(path.parent)],
+                "origin": origin,
                 "arms": list(arms.values()),
             })
         curated = dict(curated)
