@@ -567,8 +567,29 @@ class LiveCheckpointObservationAdapter:
             "providers": providers,
             "recipes": recipes,
             "science": self._science(client),
+            "ac_consumers": self._ac_consumers(client),
         }
         return _normalize(snapshot, source="live-rcon-structured")
+
+    def _ac_consumers(self, client: Any) -> Any:
+        """Every assembler whose current recipe takes advanced circuits: unit, recipe, products_finished.
+
+        One read for c6-v3. A failed read leaves the C6 consumer leg unknown, never failed.
+        """
+        lua = (
+            f"local s=game.surfaces[{json.dumps(self.surface)}];local f=game.forces[{json.dumps(self.force)}];local o={{}};"
+            "for _,e in pairs(s.find_entities_filtered{force=f,type='assembling-machine'}) do "
+            "local r=e.get_recipe();if r then for _,i in pairs(r.ingredients) do "
+            "if i.name=='advanced-circuit' then o[#o+1]={unit=e.unit_number,recipe=r.name,count=e.products_finished};break end "
+            "end end end;rcon.print(helpers.table_to_json(o))"
+        )
+        try:
+            result = json.loads(client.command("/sc " + lua))
+        except (ValueError, TypeError, OSError, RconError):
+            return None
+        if result == {}:  # Factorio encodes an empty Lua table as {}
+            return []
+        return result if isinstance(result, list) else None
 
     _SCIENCE_PACKS = ("automation-science-pack", "logistic-science-pack",
                       "chemical-science-pack", "production-science-pack")

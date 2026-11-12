@@ -1,6 +1,7 @@
 # Path: tests/test_checkpoint_milestones.py
 # Purpose: Verify structured, versioned, monotonic checkpoint predicates.
 from orchestrator.checkpoint_milestones import (
+    C6_V2,
     CheckpointEvaluator,
     FactorySnapshot,
     PredicateStatus,
@@ -32,7 +33,7 @@ def _snapshot(**overrides):
 def test_default_registry_is_ordered_and_versioned_with_advanced_circuit_milestone():
     milestones = default_milestones()
     assert [item.checkpoint_id for item in milestones] == ["C0", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9"]
-    assert [item.predicate_version for item in milestones] == [f"c{i}-v1" for i in range(6)] + ["c6-v2", "c7-v1", "c8-v1", "c9-v1"]
+    assert [item.predicate_version for item in milestones] == [f"c{i}-v1" for i in range(6)] + ["c6-v3", "c7-v1", "c8-v1", "c9-v1"]
     assert milestones[6].name == "advanced_circuit_consumption"
 
 
@@ -115,7 +116,7 @@ def test_c6_proves_advanced_circuit_production_and_new_owned_consumer_output():
         "production": {"advanced-circuit": {"produced": 2}},
         "recipes": {"processing-unit": {"owned": True, "ingredients": ["advanced-circuit"], "output_count": 1}},
     }
-    assert evaluate_milestone("C6", current, baseline=baseline).passed
+    assert evaluate_milestone("C6", current, baseline=baseline, milestones=(C6_V2,)).passed
 
 
 def test_c6_v2_rejects_a_logistics_chest_as_the_production_consumer():
@@ -127,7 +128,7 @@ def test_c6_v2_rejects_a_logistics_chest_as_the_production_consumer():
         "production": {"advanced-circuit": {"produced": 2}},
         "recipes": {"passive-provider-chest": {"owned": True, "ingredients": ["advanced-circuit"], "output_count": 1}},
     }
-    assert not evaluate_milestone("C6", current, baseline=baseline).passed
+    assert not evaluate_milestone("C6", current, baseline=baseline, milestones=(C6_V2,)).passed
 
 
 def test_c6_v2_accepts_a_production_consumer():
@@ -139,7 +140,7 @@ def test_c6_v2_accepts_a_production_consumer():
         "production": {"advanced-circuit": {"produced": 2}},
         "recipes": {"processing-unit": {"owned": True, "ingredients": ["advanced-circuit"], "output_count": 1}},
     }
-    assert evaluate_milestone("C6", current, baseline=baseline).passed
+    assert evaluate_milestone("C6", current, baseline=baseline, milestones=(C6_V2,)).passed
 
 
 def test_evaluator_keeps_passed_checkpoint_monotonic():
@@ -214,3 +215,33 @@ def test_c9_needs_level_four_and_every_pack_made_and_consumed_this_run():
     assert evaluate_milestone("C9", _science(level=3, **earned), baseline=baseline).failed
     no_purple = {**earned, "production_science_pack": (0, 0)}
     assert evaluate_milestone("C9", _science(level=4, **no_purple), baseline=baseline).failed
+
+
+def _ac(tick, produced, machines):
+    return FactorySnapshot.from_mapping({"tick": tick, "production": {"advanced-circuit": {"produced": produced}},
+                                         "ac_consumers": [{"unit": u, "recipe": r, "count": c} for u, r, c in machines]})
+
+
+def test_c6_v3_does_not_count_a_relabelled_machines_lifetime_counter():
+    # C89 C0-smallcell-s83343: a mall cell switched to electric-furnace arrives with 2294 lifetime crafts.
+    baseline = _ac(1, 0, [])
+    relabel = _ac(2, 411, [(7, "electric-furnace", 2294)])
+    result = evaluate_milestone("C6", relabel, baseline=baseline, history=[baseline, relabel])
+    assert result.predicate_version == "c6-v3" and result.failed
+    assert result.evidence["machine_consumption"] == {}
+    later = _ac(3, 413, [(7, "electric-furnace", 2295)])
+    passed = evaluate_milestone("C6", later, baseline=baseline, history=[baseline, relabel, later])
+    assert passed.passed and passed.evidence["machine_consumption"] == {"electric-furnace": 1}
+
+
+def test_c6_v3_ignores_chests_and_recipe_switches_between_samples():
+    baseline = _ac(1, 0, [(3, "requester-chest", 0), (4, "productivity-module", 0)])
+    switched = _ac(2, 9, [(3, "requester-chest", 5), (4, "processing-unit", 40)])
+    result = evaluate_milestone("C6", switched, baseline=baseline, history=[baseline, switched])
+    assert result.failed and result.evidence["machine_consumption"] == {}
+
+
+def test_c6_v3_consumer_leg_is_unknown_without_machine_telemetry():
+    baseline = _ac(1, 0, [])
+    unreadable = FactorySnapshot.from_mapping({"tick": 2, "production": {"advanced-circuit": {"produced": 5}}})
+    assert evaluate_milestone("C6", unreadable, baseline=baseline, history=[baseline, unreadable]).unknown
