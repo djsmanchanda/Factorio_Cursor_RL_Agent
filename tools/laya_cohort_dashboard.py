@@ -160,16 +160,67 @@ class Dashboard:
             return False, "Scheduler process identity unavailable"
         return True, "Verified live scheduler heartbeat and source"
 
+    def status_summary(self, path):
+        """job-status with the oversized strict_current array dropped.
+
+        MAX_JSON (12 MB) silently skipped every completed cohort's 25-75 MB
+        status, so they rendered as 0/100. strict_current is ~99% of the file
+        and the dashboard only needs strict_current_at_end / strict_reached.
+        The trimmed copy is cached on disk keyed by mtime+size.
+        """
+        source = path / "job-status.json"
+        try:
+            stamp = source.stat()
+        except OSError:
+            return {}
+        cache_dir = self.data / "status-cache"
+        cache = cache_dir / f"{path.name}.json"
+        try:
+            cached = json.loads(cache.read_text(encoding="utf-8"))
+            if (cached.get("mtime_ns") == stamp.st_mtime_ns
+                    and cached.get("size") == stamp.st_size
+                    and isinstance(cached.get("status"), dict)):
+                return cached["status"]
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        try:
+            status = json.loads(source.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        if not isinstance(status, dict):
+            return {}
+        for job in status.get("jobs") or []:
+            if isinstance(job, dict):
+                job.pop("strict_current", None)
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            cache.write_text(json.dumps({"mtime_ns": stamp.st_mtime_ns,
+                                         "size": stamp.st_size,
+                                         "status": status}), encoding="utf-8")
+        except OSError:
+            pass
+        return status
+
     def cohorts(self):
         queue = self.cached(self.repo / "data/laya-orchestration/laya-loop/queue.json", {}) or {}
         if not isinstance(queue, dict):
             queue = {}
         queue_by_name = {row.get("name"): row for row in queue.get("cohorts", []) if isinstance(row, dict)}
         result = []
-        for path in sorted(self.registry.iterdir() if self.registry.exists() else []):
-            if not path.is_dir() or path.name.startswith("_"):
-                continue
-            status = self.cached(path / "job-status.json", {}) or {}
+        paths = [p for p in (self.registry.iterdir() if self.registry.exists() else [])
+                 if p.is_dir() and not p.name.startswith("_")]
+        # 155 cohorts / 1.16 GB of job-status made /api/snapshot take 90 s and
+        # return 12.8 MB. The dashboard only needs the live tail: keep the most
+        # recently updated cohorts (running ones always sort first).
+        def _mtime(path):
+            try:
+                return (path / "job-status.json").stat().st_mtime
+            except OSError:
+                return 0.0
+        paths.sort(key=_mtime, reverse=True)
+        paths = paths[:getattr(self, "recent_cohorts", 40)]
+        for path in paths:
+            status = self.status_summary(path) or {}
             batch = self.cached(path / "batch.json", {}) or {}
             freeze = self.cached(path / "freeze.json", {}) or {}
             plan = self.cached(path / "planned-jobs.json", {}) or {}
@@ -187,7 +238,7 @@ class Dashboard:
             for job in jobs:
                 if not isinstance(job, dict):
                     continue
-                row = {key: job.get(key) for key in ("id", "arm", "seed", "status", "started", "runner_exited", "termination_cause", "runner_stop", "failures", "accepted_ever", "accepted_final", "c5_predicate_version", "c6_predicate_version", "comparison_eligible", "typed_outcomes", "outcome_classifications", "untyped_stuck", "maintenance_failure_events", "evidence_errors")}
+                row = {key: job.get(key) for key in ("id", "arm", "seed", "status", "started", "runner_exited", "termination_cause", "runner_stop", "failures", "accepted_ever", "accepted_final", "c5_predicate_version", "c6_predicate_version", "comparison_eligible", "typed_outcomes", "outcome_classifications", "untyped_stuck", "maintenance_failure_events", "evidence_errors", "origin", "checkpoint", "generation_id", "pair_id", "loaded_tick", "strict_current_at_end", "strict_reached", "stage_latency", "progress_latency", "stop_classification", "server_seconds", "faults")}
                 acceptance = job.get("laya_acceptance")
                 row["laya_c6_version"] = acceptance.get("C6", {}).get("version") if isinstance(acceptance, dict) and isinstance(acceptance.get("C6"), dict) else None
                 arm = arms.get(job.get("arm"), {})
@@ -211,8 +262,107 @@ class Dashboard:
                     except (ValueError, OSError):
                         pass
                 clean.append(row)
-            result.append({"name": path.name, "planned": planned, "counts": dict(counts), "unaccounted": max(0, planned - len(jobs)) if isinstance(planned, int) else None, "updated": status.get("updated"), "created": freeze.get("frozen_at") or batch.get("created_at"), "queue_status": queue_by_name.get(path.name, {}).get("status"), "engine": freeze.get("engine"), "jobs": clean, "source": str(path / "report.md")})
+            mixed = None
+            if (path / 'regression.json').is_file():
+                try:
+                    if __package__:
+                        from tools.laya_checkpoint_regression import report
+                    else:
+                        from laya_checkpoint_regression import report
+                    mixed = report(path)
+                    mixed.pop('jobs', None)
+                except (OSError, ValueError, KeyError, TypeError) as error:
+                    mixed = {'error': str(error)}
+            result.append({"name": path.name, "planned": planned, "counts": dict(counts), "unaccounted": max(0, planned - len(jobs)) if isinstance(planned, int) else None, "updated": status.get("updated"), "created": freeze.get("frozen_at") or batch.get("created_at"), "queue_status": queue_by_name.get(path.name, {}).get("status"), "engine": freeze.get("engine"), "jobs": clean, "source": str(path / "report.md"), "mixed": mixed})
         return result
+
+    def _auto_curated(self, curated):
+        """Append registry cohorts newer than the curated feed.
+
+        The Trends tab reads docs/rl/laya_cohort_curated_history.json, which is
+        hand-maintained and stopped at 2026-10-28. Build the same arm shape from
+        job-status for later cohorts, marked unreviewed, so the trend includes
+        the current line without rewriting the curated document.
+        """
+        if not isinstance(curated, dict) or not isinstance(curated.get("cohorts"), list):
+            return curated
+        existing = curated["cohorts"]
+        last_date = max((str(c.get("date") or "") for c in existing), default="")
+        cohorts = list(existing)
+        try:
+            from tools.laya_regression_scheduler import _milestone_versions
+        except Exception:  # noqa: BLE001 -- optional display enrichment
+            _milestone_versions = None
+        for path in sorted(self.registry.glob("*/job-status.json")):
+            name = path.parent.name
+            if name.startswith("_"):
+                continue
+            try:
+                created = (path.parent / "freeze.json").stat().st_mtime
+            except OSError:
+                created = path.stat().st_mtime
+            date = time.strftime("%Y-%m-%d", time.localtime(created))
+            if date <= last_date:
+                continue
+            status = self.status_summary(path.parent)
+            jobs = status.get("jobs") or []
+            if not jobs or not any(
+                isinstance(j, dict) and j.get("status") == "completed" for j in jobs
+            ):
+                continue
+            freeze = self.cached(path.parent / "freeze.json", {}) or {}
+            spec = self.cached(path.parent / "regression.json", {}) or {}
+            arms = {}
+            for job in jobs:
+                if not isinstance(job, dict):
+                    continue
+                arm_id = str(job.get("arm") or "unknown")
+                arm = arms.setdefault(arm_id, {"id": arm_id, "commit": None,
+                                               "planned": 0, "ever": {}, "final": {}})
+                arm["planned"] += 1
+                reached = job.get("strict_reached") or {}
+                end = job.get("strict_current_at_end") or {}
+                for milestone in ("C1", "C2", "C3", "C4", "C5", "C6"):
+                    if reached.get(milestone) is not None:
+                        arm["ever"][milestone] = arm["ever"].get(milestone, 0) + 1
+                    if end.get(milestone) is True:
+                        arm["final"][milestone] = arm["final"].get(milestone, 0) + 1
+            for arm in arms.values():
+                revisions = freeze.get("arms") or []
+                for row in revisions:
+                    if isinstance(row, dict) and row.get("id") == arm["id"]:
+                        arm["commit"] = row.get("revision")
+                        break
+                versions = {}
+                code = path.parent / "arms" / arm["id"] / "code" / "orchestrator" / "checkpoint_milestones.py"
+                if _milestone_versions is not None and code.is_file():
+                    try:
+                        versions = _milestone_versions(code)
+                    except Exception:  # noqa: BLE001
+                        versions = {}
+                arm["predicate_family"] = "strict"
+                arm["predicate_versions"] = {m: versions.get(m) for m in ("C1", "C2", "C3", "C4", "C5", "C6")}
+                arm["ever"] = {m: arm["ever"].get(m) for m in ("C1", "C2", "C3", "C4", "C5", "C6")}
+                arm["final"] = {m: arm["final"].get(m) for m in ("C1", "C2", "C3", "C4", "C5", "C6")}
+                arm["comparison_eligible"] = True
+                arm["window_max_game_ticks"] = int(spec.get("max_game_ticks") or 540000)
+            counts = {}
+            for job in jobs:
+                if isinstance(job, dict):
+                    key = str(job.get("status"))
+                    counts[key] = counts.get(key, 0) + 1
+            cohorts.append({
+                "id": name,
+                "date": date,
+                "status": "completed" if counts.get("completed") else "stopped",
+                "finding": "Auto-generated from job-status (unreviewed): " + ", ".join(
+                    f"{k} {v}" for k, v in sorted(counts.items())),
+                "sources": [str(path.parent)],
+                "arms": list(arms.values()),
+            })
+        curated = dict(curated)
+        curated["cohorts"] = cohorts
+        return curated
 
     def snapshot(self):
         target = self.cached(self.host / "target.json", {}) or {}
@@ -224,7 +374,7 @@ class Dashboard:
         curated = self.cached(self.repo / "docs/rl/laya_cohort_curated_history.json", None)
         if not curated:
             curated = self.cached(self.repo / "docs/rl/laya_helper_runs/terra-review-20261028/cohorts.json", {}) or {}
-        return {"now": time.time(), "target": target, "config": config, "history": history["rows"], "history_window": history, "cohorts": self.cohorts(), "curated": curated, "notes": notes, "audit": audit, "cooling": read_json(self.data / "cooling.json", {}) or {}, "controls_enabled": self.enable_controls and compatible, "scheduler_compatibility": compatibility, "viewer_available": bool(self.viewer_bind and self.viewer_address)}
+        return {"now": time.time(), "target": target, "config": config, "history": history["rows"], "history_window": history, "cohorts": self.cohorts(), "curated": self._auto_curated(curated), "notes": notes, "audit": audit, "cooling": read_json(self.data / "cooling.json", {}) or {}, "controls_enabled": self.enable_controls and compatible, "scheduler_compatibility": compatibility, "viewer_available": bool(self.viewer_bind and self.viewer_address)}
 
     def selected_job(self, cohort, run):
         if not isinstance(cohort, str) or Path(cohort).name != cohort or cohort.startswith("_"):
@@ -528,7 +678,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def safe_host(self):
         host = self.headers.get("Host", "")
-        return host in {f"localhost:{self.server.server_port}", f"127.0.0.1:{self.server.server_port}"}
+        allowed = {f"localhost:{self.server.server_port}", f"127.0.0.1:{self.server.server_port}"}
+        allowed.update(getattr(self.server.dashboard, "allowed_hosts", ()))
+        return host in allowed
 
     def send(self, code, data, content_type):
         self.send_response(code)
@@ -544,6 +696,13 @@ class Handler(BaseHTTPRequestHandler):
         if not self.safe_host():
             return self.send(403, b"Forbidden", "text/plain")
         if self.path == "/api/snapshot":
+            dash = self.server.dashboard
+            cached = getattr(dash, "_snapshot_cache", None)
+            if cached and time.time() - cached[0] < 300:
+                return self.send(200, json.dumps(cached[1]).encode(), "application/json")
+            data = dash.snapshot()
+            dash._snapshot_cache = (time.time(), data)
+            return self.send(200, json.dumps(data).encode(), "application/json")
             data = self.server.dashboard.snapshot()
             data["token"] = self.server.dashboard.token
             return self.send(200, json.dumps(data, allow_nan=False).encode(), "application/json")
@@ -621,6 +780,12 @@ def main():
     parser.add_argument("--host-root", type=Path)
     parser.add_argument("--data-root", type=Path)
     parser.add_argument("--port", type=int, default=9138)
+    parser.add_argument("--recent-cohorts", type=int, default=40,
+                        help="serve only the N most recently updated cohorts (default 40)")
+    parser.add_argument("--bind", default="127.0.0.1",
+                        help="HTTP bind address; 0.0.0.0 exposes the read-only view on the LAN")
+    parser.add_argument("--allow-host", action="append", default=[],
+                        help="Host:port allowed through the Host check (repeatable), e.g. 192.168.29.144:9138")
     parser.add_argument("--enable-controls", action="store_true", help="enable only after deploying and restarting the updated scheduler")
     parser.add_argument("--viewer-bind", help="Dedicated private IPv4 address for optional UDP viewing relays")
     parser.add_argument("--viewer-address", help="Only this Starship IPv4 address can send viewer packets")
@@ -629,15 +794,18 @@ def main():
     args = parser.parse_args()
     repo = args.repo_root.resolve()
     dashboard = Dashboard(repo, args.registry or repo / "data/laya-experiments", args.host_root or repo / "data/laya-host", args.data_root or repo / "data/laya-cohort-dashboard", args.enable_controls, args.viewer_bind, args.viewer_address)
+    dashboard.allowed_hosts = tuple(args.allow_host)
+    dashboard.recent_cohorts = max(1, int(args.recent_cohorts))
     if args.restore_cooling:
         dashboard.restore(args.restore_cooling)
         return
     if args.recover_cooling:
         dashboard.recover()
         return
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    server = ThreadingHTTPServer((args.bind, args.port), Handler)
     server.dashboard = dashboard
-    print(f"Laya cohort dashboard: http://127.0.0.1:{args.port}", flush=True)
+    shown = "127.0.0.1" if args.bind in {"0.0.0.0", "::"} else args.bind
+    print(f"Laya cohort dashboard: http://{shown}:{args.port} (bind {args.bind})", flush=True)
     server.serve_forever()
 
 
