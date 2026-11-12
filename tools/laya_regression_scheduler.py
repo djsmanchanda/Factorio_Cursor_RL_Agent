@@ -549,7 +549,10 @@ def _dispatch(root, executor):
                 raise ValueError('Checkpoint manifest changed')
         (root/'logs').mkdir(exist_ok=True)
         with (root/'logs'/f'{job["id"]}.log').open('a') as log:
-            base = [spec['python'], str(code/spec.get('runner', 'tools/run_laya_clean.py'))]
+            # Track B arms run a different binary interface; allow one runner
+            # per arm, falling back to the cohort-wide runner.
+            arm_runner = ((spec.get('arms') or {}).get(job.get('arm')) or {}).get('runner')
+            base = [spec['python'], str(code/(arm_runner or spec.get('runner', 'tools/run_laya_clean.py')))]
             def execute(arguments):
                 return executor(base+arguments, cwd=code, check=True, stdout=log, stderr=subprocess.STDOUT,
                                 env={**os.environ, 'LAYA_CHECKPOINT_RUNTIME_ROOT':str(Path(spec['factorio_binary']).resolve().parents[2])},
