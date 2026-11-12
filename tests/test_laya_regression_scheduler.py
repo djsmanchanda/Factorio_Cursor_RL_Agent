@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -267,3 +268,107 @@ def test_collect_result_preserves_research_receipt(tmp_path):
     result = scheduler.collect_result(tmp_path, {'origin':'C0','strict_target':None})
     assert result['research_acceptance'] == receipt
     assert result['objective_version'] == 'laya-research-consumption-v1'
+
+
+@pytest.mark.parametrize('field', ['game_port_base', 'rcon_port_base'])
+@pytest.mark.parametrize('base', [0, 65533, 65600, True, '49100'])
+def test_invalid_port_range_rejected_before_freeze(tmp_path, field, base):
+    spec = {'game_port_base': 49100, 'rcon_port_base': 49200, field: base}
+    with pytest.raises(ValueError, match=field):
+        scheduler.validate_port_ranges(spec, 4, tmp_path/'registry')
+    assert not (tmp_path/'registry').exists()
+
+
+def test_ports_conflict_only_with_same_protocol_or_unreleased_worlds(tmp_path):
+    registry = tmp_path/'registry'
+    root = registry/'old'
+    atomic_json(root/'regression.json', {'game_port_base': 50000, 'rcon_port_base': 51000})
+    atomic_json(root/'freeze.json', {'planned_jobs': 4})
+    atomic_json(root/'job-status.json', {'jobs': [{'status': 'running'}]})
+    spec = {'game_port_base': 50002, 'rcon_port_base': 52000}
+    with pytest.raises(ValueError, match='overlaps old'):
+        scheduler.validate_port_ranges(spec, 4, registry)
+    scheduler.validate_port_ranges({**spec, 'after': ['old']}, 4, registry)
+    # UDP and TCP can use the same numeric port. Bounds are inclusive.
+    scheduler.validate_port_ranges({'game_port_base': 51000, 'rcon_port_base': 50000}, 4, registry)
+    scheduler.validate_port_ranges({'game_port_base': 65532, 'rcon_port_base': 65532}, 4)
+    atomic_json(root/'job-status.json', {'jobs': [{'status': 'completed', 'world': 'owned'}]})
+    with pytest.raises(ValueError, match='overlaps old'):
+        scheduler.validate_port_ranges(spec, 4, registry)
+    atomic_json(root/'job-status.json', {'jobs': [{'status': 'cancelled_before_start'}]})
+    scheduler.validate_port_ranges(spec, 4, registry)
+
+
+def test_geometry_status_receipts_are_not_invented_tool_errors(tmp_path):
+    evidence = tmp_path/'evidence'
+    evidence.mkdir()
+    outcomes = [{'status': 'planned'}, {'status': 'construction_pending'},
+                {'ok': True}, {'ok': False, 'code': 'power_route_unavailable'},
+                {'status': 'failed', 'error_type': 'SavedWorldError', 'error': 'selected plan became illegal'}]
+    (evidence/'decision-states.jsonl').write_text('\n'.join(
+        json.dumps({'outcome': outcome}) for outcome in outcomes))
+    result = scheduler.collect_result(tmp_path, {'origin': 'C0'})
+    assert result['faults'] == {'power_route_unavailable': 1, 'runner_error:SavedWorldError': 1}
+    (evidence/'clean-decisions.jsonl').write_text(json.dumps({'event': 'summary', 'faults': {}, 'stop': 'stalled'}))
+    assert scheduler.collect_result(tmp_path, {'origin': 'C0'})['faults'] == {}
+    assert scheduler.collect_result(tmp_path, {'origin': 'C0'})['stop_classification'] == 'genuine_failure'
+
+
+def test_coordinator_heartbeat_does_not_fake_job_progress(tmp_path):
+    atomic_json(tmp_path/'job-status.json', {'updated': 1, 'progress_updated': 2,
+                                           'jobs': [{'id': 'job', 'status': 'running'}]})
+    scheduler.coordinator_heartbeat(tmp_path)
+    status = scheduler.read(tmp_path/'job-status.json')
+    assert status['coordinator_heartbeat']['pid'] == os.getpid()
+    assert status['coordinator_heartbeat']['updated'] > 2
+    assert status['progress_updated'] == 2
+    scheduler._update_job(tmp_path, 'job', {'status': 'completed'})
+    assert scheduler.read(tmp_path/'job-status.json')['progress_updated'] > 2
+
+
+def test_report_uses_early_latches_after_history_trim_and_per_arm_target(tmp_path):
+    root, _ = frozen_suite(tmp_path)
+    spec = scheduler.read(root/'regression.json')
+    spec['arms']['candidate']['research_target'] = 'mining-productivity-4'
+    atomic_json(root/'regression.json', spec)
+    status = scheduler.read(root/'job-status.json')
+    status['jobs'][0].update(status='completed', loaded_tick=100, strict_reached={'C4': 120, 'C7': 150},
+                            strict_current=[{'tick': 2000, 'statuses': {'C4': False, 'C7': None}}])
+    atomic_json(root/'job-status.json', status)
+    group = next(g for g in report(root)['groups'] if g['arm'] == 'candidate')
+    assert group['strict_reach']['C4']['reached'] == 1
+    assert group['strict_reach']['C7']['reached'] == 1
+    assert group['held_at_end']['C7']['unknown'] == 2
+    assert group['research']['target'] == 'mining-productivity-4'
+
+
+def test_waiting_dispatch_heartbeats_without_rewriting_the_whole_status(tmp_path):
+    """A waiting dispatch must not rewrite the cohort status on every poll.
+
+    The status carries every job's strict history (15 MB in C94); rewriting it
+    under the global admission lock starved other cohorts' admissions.
+    """
+    root = tmp_path/'cohort'
+    root.mkdir()
+    now = time.time()
+    atomic_json(root/'job-status.json', {'updated': now, 'jobs': [{'id': 'a', 'status': 'queued'}]})
+    before = (root/'job-status.json').stat().st_mtime_ns
+    waiting = lambda status: 'waiting_for_host_budget'
+    assert scheduler._publish(root, waiting, min_interval=240) == 'waiting_for_host_budget'
+    assert (root/'job-status.json').stat().st_mtime_ns == before
+    # The heartbeat still refreshes once the interval has elapsed.
+    atomic_json(root/'job-status.json', {'updated': now-241, 'jobs': [{'id': 'a', 'status': 'queued'}]})
+    scheduler._publish(root, waiting, min_interval=240)
+    assert json.loads((root/'job-status.json').read_text())['updated'] > now-241
+    # A transition publishes immediately even inside the interval.
+    atomic_json(root/'job-status.json', {'updated': time.time(), 'jobs': [{'id': 'a', 'status': 'queued'}]})
+    scheduler._publish(root, lambda status: {'id': 'a', 'status': 'preparing'}, min_interval=240)
+    assert json.loads((root/'job-status.json').read_text())['updated'] > now
+
+
+def test_max_workers_defaults_to_the_pool_size_and_is_bounded():
+    assert scheduler.cohort_workers({}) == scheduler.MAX_MIXED_WORKERS
+    assert scheduler.cohort_workers({'max_workers': 8}) == 8
+    for bad in (0, -1, scheduler.MAX_MIXED_WORKERS + 1, '8', 8.0, True):
+        with pytest.raises(ValueError):
+            scheduler.cohort_workers({'max_workers': bad})

@@ -182,9 +182,18 @@ def enqueue(repo, registry, spec):
         raise ValueError('Distinct nonnegative seeds required')
     if spec['max_game_ticks'] <= 0 or spec['trial_wall_seconds'] <= 0:
         raise ValueError('Positive tick and wall budgets required')
+    if spec.get('max_workers') is not None and (
+            type(spec['max_workers']) is not int or not 1 <= spec['max_workers'] <= MAX_MIXED_WORKERS):
+        raise ValueError(f'max_workers must be an integer in 1..{MAX_MIXED_WORKERS}')
     speed = spec.setdefault('game_speed', DEFAULT_GAME_SPEED)
     if type(speed) not in (int, float) or not .25 <= speed <= 8:
         raise ValueError('Game speed must be 0.25..8')
+    for _arm, _config in (spec.get('arms') or {}).items():
+        _target = (_config or {}).get('research_target')
+        if _target is not None and (
+                not isinstance(_target, str)
+                or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,127}', _target)):
+            raise ValueError('Per-arm research target must be a bounded technology name')
     if spec.get('research_target') is not None and (
             not isinstance(spec['research_target'], str) or
             not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,127}', spec['research_target'])):
@@ -252,6 +261,7 @@ def enqueue(repo, registry, spec):
                         'status': 'queued', 'admission_reserved': False})
         if setup and len(jobs) > 12:
             raise ValueError('Disposable setup cap exceeded')
+    validate_port_ranges(spec, len(jobs), registry)
     root = registry / name
     root.mkdir(parents=True, exist_ok=False)
     status = {'name': name, 'updated': time.time(), 'jobs': jobs}
@@ -340,6 +350,52 @@ def enqueue(repo, registry, spec):
     finally:
         atomic_json(root/'freeze.json', freeze)
     return root
+
+
+def validate_port_ranges(spec, planned_jobs, registry=None):
+    """Reject impossible ranges before creating a freeze or reserving a world.
+
+    Factorio game ports are UDP and RCON is TCP: equal port numbers across
+    those protocols do not collide. Same-protocol reuse needs an explicit
+    predecessor gate, or proof the old jobs have released their worlds.
+    """
+    ranges = {}
+    for field in ('game_port_base', 'rcon_port_base'):
+        base = spec.get(field)
+        if type(base) is not int or not 1 <= base <= base + planned_jobs - 1 <= 65535:
+            raise ValueError(f'{field} range must fit in 1..65535 for {planned_jobs} jobs')
+        ranges[field] = (base, base + planned_jobs - 1)
+    if registry is None:
+        return
+    predecessors = set()
+    pending = list(spec.get('after', []))
+    while pending:
+        name = pending.pop()
+        if name in predecessors:
+            continue
+        predecessors.add(name)
+        path = registry/name/'regression.json'
+        if path.exists():
+            pending.extend(read(path).get('after', []))
+    for path in registry.glob('*/regression.json'):
+        if path.parent.name in predecessors:
+            continue
+        other = read(path)
+        status_path = path.parent/'job-status.json'
+        if not status_path.exists():
+            continue
+        # Read the potentially large status only for a numeric overlap.
+        count = read(path.parent/'freeze.json')['planned_jobs']
+        overlaps = [field for field, (low, high) in ranges.items()
+                    if type(other.get(field)) is int
+                    and low <= other[field] + count - 1 and other[field] <= high]
+        if not overlaps:
+            continue
+        jobs = read(status_path)['jobs']
+        if any(j.get('status') not in TERMINAL or j.get('admission_reserved')
+               or (j.get('world') and not j.get('cleanup_completed')) for j in jobs):
+            raise ValueError(f'Port range overlaps {path.parent.name}: {", ".join(overlaps)}; '
+                             'use distinct ranges or an explicit predecessor gate')
 
 
 def ports_free(game, rcon):
@@ -454,15 +510,24 @@ def collect_result(world, job):
                                   'decisions':row.get('decisions')}
     target = job.get('strict_target')
     passed = True if target in reached else False if target and observations else None
-    faults = summary.get('faults') or dict(__import__('collections').Counter(
-        str(r.get('code') or 'tool_error') for r in outcomes if not r.get('ok')))
+    # Geometry receipts use status rather than ok. A missing field is unknown,
+    # not a failed tool call; an explicitly empty summary is authoritative too.
+    faults = summary.get('faults')
+    if faults is None:
+        faults = dict(__import__('collections').Counter(
+            str(r.get('code') or ('runner_error:' + str(r.get('error_type') or 'unknown')
+                                  if r.get('status') == 'failed' else 'tool_error'))
+            for r in outcomes if r.get('ok') is False or r.get('status') == 'failed'))
+    classification = summary.get('stop_classification')
+    if classification is None:
+        classification = 'genuine_failure' if summary.get('stop') == 'stalled' else 'unknown'
     relevant = [stage for stage in reached if stage > job.get('origin', job.get('checkpoint', 'C0'))]
     first = min(relevant, key=lambda stage: reached[stage]) if relevant else None
     return {'faults':faults, 'accepted_ever':sorted(latches), 'accepted_final':final,
             'legacy_latch_reached':latches, 'strict_reached':reached, 'loaded_tick':loaded,
             'strict_current':observations[-STRICT_CURRENT_KEEP:], 'strict_current_at_end':observations[-1]['statuses'] if observations else None,
             'stage_latency':latency, 'progress_latency':latency.get(first, {}),
-            'runner_stop':summary.get('stop'), 'stop_classification':summary.get('stop_classification', 'unknown'),
+            'runner_stop':summary.get('stop'), 'stop_classification':classification,
             'research_acceptance':summary.get('research_acceptance') or research,
             'objective_version':summary.get('objective_version'),
             'decisions':summary.get('decisions'), 'failures':summary.get('failures'),
@@ -471,10 +536,21 @@ def collect_result(world, job):
             'exact_continuation':False, 'full_run_acceptance_gate':'not_evaluated'}
 
 
-def _publish(root, mutate):
+#: A dispatch that finds no host budget changes nothing, but rewriting the whole
+#: job-status (which carries every job's strict history) on each poll holds the
+#: global admission lock for seconds. Refresh the cohort's liveness at this
+#: interval instead, so the host keeps seeing it without the write storm.
+HEARTBEAT_SECONDS = 240
+WAITING_OUTCOMES = frozenset({'waiting_for_host_budget', 'waiting_for_admission_interval', 'ports_unavailable'})
+
+
+def _publish(root, mutate, min_interval=0.0):
     with lock(root/'status.lock'):
         status = read(root/'job-status.json')
         value = mutate(status)
+        if (isinstance(value, str) and value in WAITING_OUTCOMES
+                and time.time() - float(status.get('updated') or 0.0) < min_interval):
+            return value
         status['updated'] = time.time()
         atomic_json(root/'job-status.json', status)
         return value
@@ -483,6 +559,14 @@ def _publish(root, mutate):
 def _update_job(root, identity, values):
     def change(status):
         next(j for j in status['jobs'] if j['id'] == identity).update(values)
+        status['progress_updated'] = time.time()
+    _publish(root, change)
+
+
+def coordinator_heartbeat(root):
+    """Publish coordinator liveness separately from job progress and keepalives."""
+    def change(status):
+        status['coordinator_heartbeat'] = {'pid': os.getpid(), 'updated': time.time()}
     _publish(root, change)
 
 
@@ -530,7 +614,7 @@ def _dispatch(root, executor):
         return dict(job)
     # All admission records, including this suite, use the host's real lock.
     with lock(root.parent/'.host-admission.lock'):
-        job = _publish(root, reserve)
+        job = _publish(root, reserve, min_interval=HEARTBEAT_SECONDS)
     if isinstance(job, str):
         return job
     code = root/'arms'/job['arm']/'code'
@@ -549,7 +633,10 @@ def _dispatch(root, executor):
                 raise ValueError('Checkpoint manifest changed')
         (root/'logs').mkdir(exist_ok=True)
         with (root/'logs'/f'{job["id"]}.log').open('a') as log:
-            base = [spec['python'], str(code/spec.get('runner', 'tools/run_laya_clean.py'))]
+            # Track B arms run a different binary interface; allow one runner
+            # per arm, falling back to the cohort-wide runner.
+            arm_runner = ((spec.get('arms') or {}).get(job.get('arm')) or {}).get('runner')
+            base = [spec['python'], str(code/(arm_runner or spec.get('runner', 'tools/run_laya_clean.py')))]
             def execute(arguments):
                 return executor(base+arguments, cwd=code, check=True, stdout=log, stderr=subprocess.STDOUT,
                                 env={**os.environ, 'LAYA_CHECKPOINT_RUNTIME_ROOT':str(Path(spec['factorio_binary']).resolve().parents[2])},
@@ -565,8 +652,9 @@ def _dispatch(root, executor):
                    '--speed',f"{float(spec.get('game_speed', LEGACY_GAME_SPEED)):g}",*restart]
             if job.get('strict_target'):
                 run += ['--strict-target',job['strict_target']]
-            if spec.get('research_target'):
-                run += ['--research-target', spec['research_target']]
+            arm_research = ((spec.get('arms') or {}).get(job.get('arm')) or {}).get('research_target')
+            if arm_research or spec.get('research_target'):
+                run += ['--research-target', arm_research or spec['research_target']]
             if spec.get('checkpoint_catalog'):
                 run += ['--checkpoint-catalog',spec['checkpoint_catalog']]
             if spec.get('capture_checkpoints'):
@@ -605,14 +693,36 @@ def run_one(root, *, executor=subprocess.run):
         return _dispatch(root, executor)
 
 
+def cohort_workers(spec, workers=MAX_MIXED_WORKERS):
+    """Dispatch threads for one cohort: the spec may ask for fewer.
+
+    A cohort that cannot be admitted still holds a thread per dispatch attempt
+    on the global admission lock. Bounding the pool by the cohort's realistic
+    share keeps a waiting cohort from queueing ahead of admitted work.
+    """
+    value = spec.get('max_workers')
+    if value is None:
+        return int(workers)
+    if type(value) is not int or not 1 <= value <= int(workers):
+        raise ValueError(f'max_workers must be an integer in 1..{int(workers)}')
+    return value
+
+
 def run_campaign(root, *, workers=MAX_MIXED_WORKERS, executor=subprocess.run):
     """Interleave the frozen plan with concurrent, host-admitted attempts."""
     root = root.resolve()
     with lock(root/'coordinator.lock'):
         recover(root)
+        spec = read(root/'regression.json')
+        validate_port_ranges(spec, len(read(root/'job-status.json')['jobs']))
+        workers = cohort_workers(spec, workers)
         with ThreadPoolExecutor(max_workers=workers) as pool:
             active = set()
+            heartbeat_at = 0.0
             while True:
+                if time.monotonic() - heartbeat_at >= HEARTBEAT_SECONDS:
+                    coordinator_heartbeat(root)
+                    heartbeat_at = time.monotonic()
                 status = read(root/'job-status.json')
                 queued = any(j['status']=='queued' for j in status['jobs'])
                 if not active and not queued:
