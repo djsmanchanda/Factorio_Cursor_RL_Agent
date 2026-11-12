@@ -21,10 +21,10 @@ from tools.rcon_client import RconClient
 Point = tuple[float, float]
 
 
-def _existing_stage_feed_positions(
+def _existing_stage_feed_contract(
     recipe: str, machine_positions: Sequence[Point],
-) -> tuple[dict[str, Point], dict[str, str]]:
-    """Reconstruct declared feed chests from the immutable line geometry."""
+) -> tuple[dict[str, Point], dict[str, str], dict[str, str]]:
+    """Reconstruct feed positions and prototypes using the line constructor."""
     if not machine_positions:
         raise StuckError(f"existing {recipe} stage has no machine positions")
     ordered = sorted(machine_positions)
@@ -50,7 +50,20 @@ def _existing_stage_feed_positions(
         recipe, len(ordered), int(origin_x), int(origin_y),
         feed_style="chest", terminal_collector=True,
     )
-    return _swap_infinity_chests(plan, modes), modes
+    feeds = _swap_infinity_chests(plan, modes)
+    actions = {
+        (action["position"]["x"], action["position"]["y"]): action["entity"]
+        for phase in plan["phases"] for action in phase["actions"]
+        if "position" in action and "entity" in action
+    }
+    return feeds, modes, {ingredient: actions[position] for ingredient, position in feeds.items()}
+
+
+def _existing_stage_feed_positions(
+    recipe: str, machine_positions: Sequence[Point],
+) -> tuple[dict[str, Point], dict[str, str]]:
+    feeds, modes, _ = _existing_stage_feed_contract(recipe, machine_positions)
+    return feeds, modes
 
 
 def repair_existing_ingredient_transport(
@@ -64,15 +77,10 @@ def repair_existing_ingredient_transport(
     the caller should re-survey. A completed repair is verified by machine
     status after a bounded first-item transit window.
     """
-    feeds, modes = _existing_stage_feed_positions(recipe, machine_positions)
+    feeds, modes, prototypes = _existing_stage_feed_contract(recipe, machine_positions)
     for ingredient, position in sorted(feeds.items()):
         entity = live_base.entity_at(client, surface, position)
-        # Every normal line feeder is converted from the sandbox's
-        # ``infinity-chest`` into a requester, even when its steady-state
-        # transport mode is a belt. Recovery must validate that real build
-        # contract rather than the intended transport mode; expecting a plain
-        # steel chest here rejected the exact requester layout it had built.
-        expected = "requester-chest"
+        expected = prototypes[ingredient]
         if entity is None or entity["name"] != expected:
             found = "nothing" if entity is None else entity["name"]
             raise StuckError(
