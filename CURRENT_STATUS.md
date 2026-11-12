@@ -357,3 +357,8 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - What: Pruned 41 old Starship package archives, two old Factorio downloads across hosts, and unused Miniship uv cache entries; retained installed/recent packages, source mirrors and live runtime cache paths.
 - Evidence: available filesystem space increased 26.30 GB on Starship and 8.11 GB on Miniship. Both Python import checks passed; C36/C37 each passed 1,145 frozen-file hashes. Records: data/cleanup-20261025/cache-cleanup-20261026/.
 - Lifecycle: none; packages, active cohorts and scheduler were not installed, edited or restarted.
+
+## [2026-11-12 07:00 IST] Track B 2x2 A/B cohorts frozen and queued
+- What: Replaced the unfair B-world-only paired cohort with two frozen cells that hold the mod pack constant (B's staged pack) and vary runner x start save: `laya-trackb-ab-bworld-2x-20261112` (B save) and `laya-trackb-ab-aworld-2x-20261112` (A save), 40 matched seeds 84100-84139 each, arms reference 369b7d6 + `run_laya_mixed.py` and b 5f7e8e48 + `run_trackb_arm.py`/patience48. Old spec `laya-trackb-ab-2x-20261112` marked superseded before start.
+- Evidence: both freezes `ready`, 80 jobs each, shared predicate `0277ecc2`, self-consistent spec hashes; units started and waiting on C94 (0 started). Wiring smokes: B on B latched strict C4 at tick 572,648 and held C5; A stalls before C2 on B's world (78 decisions, 23 power_route_unavailable) and also stalls at C2 on A's save with B's mods (58 decisions); B cannot use A's mod pack (layout-receipt timeout) and runs fine on A's save with B's mods (proxy C4).
+- Lifecycle: cohort units active and gated on C94; smokes end by themselves. No Track A unit, config or code touched; nothing pushed.
