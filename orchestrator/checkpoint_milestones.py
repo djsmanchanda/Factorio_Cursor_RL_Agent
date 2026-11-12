@@ -259,6 +259,10 @@ class FactorySnapshot:
     # Force-wide science telemetry for C7-C9: per-pack produced/consumed counters, lab and
     # recycler counts and the completed mining-productivity level, or {"unavailable_reason": ...}.
     science: Mapping[str, Any] | None = None
+    # Per-machine advanced-circuit consumers for c6-v3: [{"unit", "recipe", "count"}] from
+    # products_finished, or {"unavailable_reason": ...}. A machine's counter is lifetime, so only
+    # increases between consecutive samples on the same recipe count as consumption.
+    ac_consumers: Any = None
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "FactorySnapshot":
@@ -299,6 +303,7 @@ class FactorySnapshot:
             providers=providers,
             recipes=recipes,
             science=value.get("science") if isinstance(value.get("science"), Mapping) else None,
+            ac_consumers=value.get("ac_consumers"),
         )
 
 
@@ -586,6 +591,45 @@ def _c6_v2(snapshot: FactorySnapshot, baseline: FactorySnapshot | None, _history
                        {**production_evidence, "consumer_deltas": consumer_deltas, "excluded_logistics_chests": sorted(C6_LOGISTICS_CHESTS)})
 
 
+def _machine_consumption(samples: Sequence[FactorySnapshot]) -> dict[str, int] | None:
+    """Crafts per recipe, counted only between consecutive samples where a machine kept that recipe.
+
+    A mall cell re-recipe'd to a consumer recipe brings its lifetime products_finished with it
+    (C72, C86c, C89 s83343: 0 -> 2294 furnaces with 411 circuits ever made); the first sample on a
+    recipe is therefore a baseline, never consumption.
+    """
+    rows = [s.ac_consumers for s in samples]
+    if not rows or not all(isinstance(r, (list, tuple)) for r in rows):
+        return None
+    per_recipe: dict[str, int] = {}
+    for before, after in zip(rows, rows[1:]):
+        previous = {(m.get("unit"), m.get("recipe")): m.get("count") for m in before if isinstance(m, Mapping)}
+        for machine in after:
+            if not isinstance(machine, Mapping) or machine.get("recipe") in C6_LOGISTICS_CHESTS:
+                continue
+            then, now = previous.get((machine.get("unit"), machine.get("recipe"))), machine.get("count")
+            if isinstance(then, int) and isinstance(now, int) and now > then:
+                per_recipe[machine["recipe"]] = per_recipe.get(machine["recipe"], 0) + now - then
+    return per_recipe
+
+
+def _c6_v3(snapshot: FactorySnapshot, baseline: FactorySnapshot | None, history: Sequence[FactorySnapshot]) -> CheckpointResult:
+    """C6 counted per machine: new advanced circuits, and a non-chest machine crafted with them."""
+    produced, production_evidence = _new_output(snapshot, baseline, ADVANCED_CIRCUIT_ITEM)
+    samples = list(history) if history and history[-1] is snapshot else [*history, snapshot]
+    samples = [s for s in samples if s.ac_consumers is not None]
+    consumed = None if baseline is None or snapshot.ac_consumers is None else _machine_consumption(samples)
+    legacy, legacy_deltas = _consumer_leg(snapshot, baseline, exclude=C6_LOGISTICS_CHESTS)
+    return _all_checks("C6", "c6-v3", {
+        "advanced_circuits_newly_produced": produced,
+        "advanced_circuit_consumer_output": None if consumed is None else any(v > 0 for v in consumed.values()),
+    }, {**production_evidence, "machine_consumption": consumed, "window_samples": len(samples),
+        "c6_v2_consumer_output": legacy, "consumer_deltas": legacy_deltas})
+
+
+C6_V2 = MilestoneDefinition("C6", "advanced_circuit_consumption", "c6-v2", _c6_v2)
+
+
 def _science_inputs(snapshot: FactorySnapshot, baseline: FactorySnapshot | None) -> tuple[Mapping, Mapping] | str:
     """Both science observations, or the reason C7-C9 must stay unknown."""
     if baseline is None:
@@ -655,7 +699,7 @@ DEFAULT_MILESTONES: tuple[MilestoneDefinition, ...] = (
     MilestoneDefinition("C3", "stone_rollout", "c3-v1", _c3),
     MilestoneDefinition("C4", "first_plastic", "c4-v1", _c4),
     MilestoneDefinition("C5", "stable_plastic", "c5-v1", _c5),
-    MilestoneDefinition("C6", "advanced_circuit_consumption", "c6-v2", _c6_v2),
+    MilestoneDefinition("C6", "advanced_circuit_consumption", "c6-v3", _c6_v3),
     MilestoneDefinition("C7", "chemical_science_research", "c7-v1", _c7),
     MilestoneDefinition("C8", "production_science_research", "c8-v1", _c8),
     MilestoneDefinition("C9", "mining_productivity_4", "c9-v1", _c9),
