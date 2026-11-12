@@ -1,0 +1,2 @@
+RUN LEDGER: stalled highest=C1 -> /home/miniship/.local/share/factorio-rl/run-ledger.jsonl
+{"run_id": "b-merged4-s0-s0-1794451757", "journal": "/home/miniship/Github_Desktop/Factorio_Cursor_RL_Agent/data/trackb/b-on-a-code/data/laya-saved-world/b-merged4-s0/evidence/clean-decisions.jsonl", "decisions": 107, "failures": 3, "phases_reached": ["C0", "C1"], "stop": "stalled", "phase_ticks": {"C0": 19937, "C1": 30374}}

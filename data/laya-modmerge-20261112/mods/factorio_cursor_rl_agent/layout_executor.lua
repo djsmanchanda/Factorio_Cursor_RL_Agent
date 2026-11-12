@@ -1,0 +1,1443 @@
+-- Path: factorio_mod/layout_executor.lua
+-- Purpose: Execute authorized BuildPlan placements with exact idempotency checks.
+
+
+
+local shared = require("sandbox_shared")
+local get_or_create_sandbox_surface = shared.get_or_create_sandbox_surface
+local get_or_create_planner_force = shared.get_or_create_planner_force
+local find_exact_entity = shared.find_exact_entity
+
+local function find_exact_ghost(surface, force, inner_name, position)
+  local ghosts = surface.find_entities_filtered({
+    name = "entity-ghost",
+    area = {
+      { position.x - 0.01, position.y - 0.01 },
+      { position.x + 0.01, position.y + 0.01 }
+    },
+    force = force
+  })
+  for _, ghost in pairs(ghosts) do
+    if ghost.position.x == position.x and ghost.position.y == position.y
+      and ghost.ghost_name == inner_name then
+      return ghost
+    end
+  end
+  return nil
+end
+
+local function find_exact_tile_ghost(surface, force, tile_name, position)
+  local ghosts = surface.find_entities_filtered({
+    name = "tile-ghost",
+    area = {
+      { position.x - 0.01, position.y - 0.01 },
+      { position.x + 0.01, position.y + 0.01 }
+    },
+    force = force
+  })
+  for _, ghost in pairs(ghosts) do
+    if ghost.position.x == position.x and ghost.position.y == position.y
+      and ghost.ghost_name == tile_name then
+      return ghost
+    end
+  end
+  return nil
+end
+
+-- Flying robots and the character share tiles with everything while
+-- colliding with nothing: counting them made ghost placement fail whenever a
+-- bot happened to cross the tile mid-flight (live run of 2026-08-24 18:47).
+local function collides_with_tiles(entity)
+  if not entity or not entity.valid then return false end
+  if entity.type == "character" then return false end
+  local prototype = entity.prototype
+  local mask = prototype and prototype.collision_mask or nil
+  if not mask then return true end
+  local layers = mask.layers or mask
+  if type(layers) ~= "table" then return true end
+  for _, enabled in pairs(layers) do
+    if enabled == true then return true end
+  end
+  return false
+end
+
+local function exact_position_occupants(surface, force, position)
+  local exact = {}
+  local candidates = surface.find_entities_filtered({
+    area = {
+      { position.x - 0.01, position.y - 0.01 },
+      { position.x + 0.01, position.y + 0.01 }
+    },
+    force = force
+  })
+  for _, entity in pairs(candidates) do
+    if entity.position.x == position.x and entity.position.y == position.y
+      and collides_with_tiles(entity) then
+      table.insert(exact, entity)
+    end
+  end
+  return exact
+end
+
+local function collision_layers(prototype)
+  local mask = prototype and prototype.collision_mask or nil
+  if not mask then return nil end
+  return mask.layers or mask
+end
+
+local function masks_overlap(left, right)
+  if not left or not right then return true end
+  for layer, enabled in pairs(left) do
+    if enabled == true and right[layer] == true then return true end
+  end
+  return false
+end
+
+local function oriented_collision_area(action, direction)
+  local prototype = prototypes.entity[action.entity]
+  local box = prototype and prototype.collision_box or nil
+  if not box then return nil end
+  local left_top = box.left_top or box[1]
+  local right_bottom = box.right_bottom or box[2]
+  if not left_top or not right_bottom then return nil end
+  local left = left_top.x or left_top[1]
+  local top = left_top.y or left_top[2]
+  local right = right_bottom.x or right_bottom[1]
+  local bottom = right_bottom.y or right_bottom[2]
+  if not left or not top or not right or not bottom then return nil end
+
+  if direction == defines.direction.east or direction == defines.direction.west then
+    left, top, right, bottom = -bottom, left, -top, right
+  elseif direction ~= nil
+    and direction ~= defines.direction.north
+    and direction ~= defines.direction.south then
+    local radius = math.max(
+      math.abs(left), math.abs(top), math.abs(right), math.abs(bottom)
+    )
+    left, top, right, bottom = -radius, -radius, radius, radius
+  end
+  local position = action.position
+  return {
+    { position.x + left + 0.001, position.y + top + 0.001 },
+    { position.x + right - 0.001, position.y + bottom - 0.001 }
+  }
+end
+
+local function exact_removal_targets(surface, force, action)
+  if type(action.entity) ~= "string" or type(action.position) ~= "table"
+    or type(action.position.x) ~= "number" or type(action.position.y) ~= "number" then
+    return {}
+  end
+  local targets = {}
+  local entity = find_exact_entity(surface, force, action.entity, action.position)
+  if entity and entity.valid then targets[entity] = true end
+  local ghost = find_exact_ghost(surface, force, action.entity, action.position)
+  if ghost and ghost.valid then targets[ghost] = true end
+  return targets
+end
+
+local function collect_atomic_removals(surface, force, build_plan)
+  local targets = {}
+  for _, phase in ipairs(build_plan.phases) do
+    for _, action in ipairs(phase.actions or {}) do
+      if action.action_type == "remove_entity" then
+        for entity in pairs(exact_removal_targets(surface, force, action)) do
+          targets[entity] = true
+        end
+      end
+    end
+  end
+  return targets
+end
+
+local function terrain_blocks_placement(surface, action, area)
+  local prototype = prototypes.entity[action.entity]
+  local layers = collision_layers(prototype)
+  if not layers then return true end
+  local left_top, right_bottom = area[1], area[2]
+  local min_x = math.floor(left_top[1])
+  local min_y = math.floor(left_top[2])
+  local max_x = math.ceil(right_bottom[1]) - 1
+  local max_y = math.ceil(right_bottom[2]) - 1
+  for x = min_x, max_x do
+    for y = min_y, max_y do
+      local tile = surface.get_tile(x, y)
+      if not tile or not tile.valid then return true end
+      for layer, enabled in pairs(layers) do
+        if enabled == true and tile.collides_with(layer) then return true end
+      end
+    end
+  end
+  return false
+end
+
+-- Trees and minable rocks: a player's blueprint builds over them and robots clear them.
+-- Plans opt in with build_plan.clear_natural_obstacles (Track B's runner always does);
+-- plans without the flag keep treating them as collisions exactly as before.
+local function clearable_obstacle(entity)
+  if not entity or not entity.valid then return false end
+  local ok, kind, minable = pcall(function() return entity.type, entity.minable end)
+  return ok and (kind == "tree" or (kind == "simple-entity" and minable == true))
+end
+
+local function blocked_only_by_removals(surface, action, direction, removals, clear_natural)
+  local area = oriented_collision_area(action, direction)
+  if not area or terrain_blocks_placement(surface, action, area) then return false end
+  local candidate_layers = collision_layers(prototypes.entity[action.entity])
+  local saw_removal = false
+  for _, entity in pairs(surface.find_entities_filtered({ area = area })) do
+    if entity.valid then
+      local entity_prototype = entity.prototype or prototypes.entity[entity.name]
+      if masks_overlap(candidate_layers, collision_layers(entity_prototype)) then
+        if removals[entity] or (clear_natural and clearable_obstacle(entity)) then
+          saw_removal = true
+        else
+          return false
+        end
+      end
+    end
+  end
+  return saw_removal
+end
+
+local function atomic_placement_blocked(surface, force, action, removals, clear_natural)
+  local position = action.position
+  if find_exact_entity(surface, force, action.entity, position) ~= nil then
+    return false
+  end
+  if find_exact_ghost(surface, force, action.entity, position) ~= nil then
+    return false
+  end
+  local check_type = defines.build_check_type.manual
+    or defines.build_check_type.ghost_revive
+  local direction = action.direction and defines.direction[action.direction] or nil
+  local ok, can_place = pcall(function()
+    return surface.can_place_entity({
+      name = action.entity,
+      position = { position.x, position.y },
+      direction = direction,
+      type = action.underground_type,
+      force = force,
+      build_check_type = check_type
+    })
+  end)
+  if not ok then return true end
+  if can_place == true then return false end
+  return not blocked_only_by_removals(surface, action, direction, removals, clear_natural)
+end
+
+-- Order deconstruction of the trees and rocks in a ghost's footprint before the ghost is created, as a
+-- blueprint does. Returns the number ordered, or nil plus a reason when one cannot be ordered.
+local function order_obstacle_deconstruction(surface, force, action, direction)
+  local area = oriented_collision_area(action, direction)
+  local layers = collision_layers(prototypes.entity[action.entity])
+  if not area or not layers then return 0 end
+  local ordered = 0
+  for _, entity in pairs(surface.find_entities_filtered({ area = area })) do
+    if entity.valid and clearable_obstacle(entity)
+      and masks_overlap(layers, collision_layers(entity.prototype or prototypes.entity[entity.name])) then
+      if entity.to_be_deconstructed() or entity.order_deconstruction(force) then
+        ordered = ordered + 1
+      else
+        return nil, "obstacle_deconstruction_refused"
+      end
+    end
+  end
+  return ordered
+end
+
+local function atomic_planned_placement_blocked(action, planned_actions)
+  local direction = action.direction and defines.direction[action.direction] or nil
+  local area = oriented_collision_area(action, direction)
+  if not area then return true end
+  local layers = collision_layers(prototypes.entity[action.entity])
+  for _, planned in ipairs(planned_actions) do
+    local planned_direction = planned.direction
+      and defines.direction[planned.direction] or nil
+    local planned_area = oriented_collision_area(planned, planned_direction)
+    if not planned_area then return true end
+    local horizontal_overlap = area[1][1] < planned_area[2][1]
+      and area[2][1] > planned_area[1][1]
+    local vertical_overlap = area[1][2] < planned_area[2][2]
+      and area[2][2] > planned_area[1][2]
+    if horizontal_overlap and vertical_overlap
+      and masks_overlap(layers, collision_layers(prototypes.entity[planned.entity])) then
+      return true
+    end
+  end
+  return false
+end
+
+local function recipe_name(entity)
+  local ok, recipe = pcall(function() return entity.get_recipe() end)
+  if not ok then return nil, "recipe_read_failed" end
+  return recipe and recipe.name or nil, nil
+end
+
+local function infinity_filter_configuration(entity)
+  local ok, filter
+  if entity.type == "infinity-pipe" then
+    ok, filter = pcall(function() return entity.get_infinity_pipe_filter() end)
+  else
+    ok, filter = pcall(function() return entity.get_infinity_container_filter(1) end)
+  end
+  if not ok then return nil, "infinity_filter_read_failed" end
+  if not filter then return nil, nil end
+  return filter, nil
+end
+
+local function inventory_limit_details(entity, limit)
+  local inventory = entity.get_inventory(defines.inventory.chest)
+  local prototype = prototypes.item[limit.name]
+  if not inventory then return nil, nil, "inventory_limit_missing_inventory" end
+  if not prototype then return nil, nil, "inventory_limit_unknown_item" end
+  local group_name = prototype.subgroup and prototype.subgroup.group
+    and prototype.subgroup.group.name or ""
+  if limit.fill_chest then
+    return inventory, #inventory + 1, nil
+  end
+  local group_minimums = limit.minimum_stacks_by_group or {}
+  local minimum_stacks = tonumber(group_minimums[group_name]) or 1
+  local target_stacks = math.ceil(limit.count / prototype.stack_size)
+  local usable_slots = math.max(minimum_stacks, target_stacks)
+  return inventory, math.min(#inventory + 1, usable_slots + 1), nil
+end
+
+-- One chest may feed several machines, so its requests are kept as one NAMED
+-- SECTION per machine set rather than merged into a single slot list. That
+-- bookkeeping lives in logistic_sections.lua, where it can be tested without a
+-- running game -- a chest holding no requests is indistinguishable from one
+-- that was never asked for any, so the failure mode is silent.
+local logistic_sections = require("logistic_sections")
+local trash_requesters = require("trash_requesters")
+local cell_release = require("cell_release")
+local find_section_by_group = logistic_sections.find_section_by_group
+local claim_section_for_group = logistic_sections.claim_section_for_group
+local verify_section_slots = logistic_sections.verify_section_slots
+local write_section_slots = logistic_sections.write_section_slots
+local clear_logistic_groups = logistic_sections.clear_logistic_groups
+local has_settings = logistic_sections.has_settings
+local needs_reconfiguration = logistic_sections.needs_reconfiguration
+
+local function splitter_priority_error(entity, action)
+  if action.input_priority then
+    local ok, actual = pcall(function() return entity.splitter_input_priority end)
+    if not ok then return "splitter_input_priority_read_failed" end
+    if actual ~= action.input_priority then
+      return "splitter_input_priority_mismatch:expected=" .. action.input_priority
+        .. ",actual=" .. tostring(actual)
+    end
+  end
+  if action.output_priority then
+    local ok, actual = pcall(function() return entity.splitter_output_priority end)
+    if not ok then return "splitter_output_priority_read_failed" end
+    if actual ~= action.output_priority then
+      return "splitter_output_priority_mismatch:expected=" .. action.output_priority
+        .. ",actual=" .. tostring(actual)
+    end
+  end
+  return nil
+end
+
+local function configuration_error(entity, action, direction)
+  if action.release_cell then
+    local reason=cell_release.verify(entity, action.release_cell)
+    if reason then return reason end
+  end
+  if direction ~= nil and entity.direction ~= direction then
+    return "direction_mismatch"
+  end
+  if action.mirroring ~= nil then
+    local ok, actual = pcall(function() return entity.mirroring end)
+    if not ok then return "mirroring_read_failed" end
+    if actual ~= action.mirroring then return "mirroring_mismatch" end
+  end
+  if action.underground_type then
+    local ok, actual = pcall(function() return entity.belt_to_ground_type end)
+    if not ok then return "underground_type_read_failed" end
+    if actual ~= action.underground_type then
+      return "underground_type_mismatch:expected=" .. action.underground_type
+        .. ",actual=" .. tostring(actual)
+    end
+  end
+  if action.recipe then
+    local actual, read_error = recipe_name(entity)
+    if read_error then return read_error end
+    if actual ~= action.recipe then
+      return "recipe_mismatch:expected=" .. action.recipe .. ",actual=" .. tostring(actual)
+    end
+  end
+  local priority_error = splitter_priority_error(entity, action)
+  if priority_error then return priority_error end
+  if action.infinity_filter then
+    local filter, read_error = infinity_filter_configuration(entity)
+    if read_error then return read_error end
+    local actual = filter and (filter.name or (filter.id and filter.id.name)) or nil
+    if actual ~= action.infinity_filter then
+      return "infinity_filter_mismatch:expected=" .. action.infinity_filter
+        .. ",actual=" .. tostring(actual)
+    end
+    if entity.type == "infinity-pipe" then
+      if not filter or filter.mode ~= "at-least" then
+        return "infinity_pipe_mode_mismatch"
+      end
+      local expected_percentage = tonumber(action.fill_percentage) or 1.0
+      local actual_percentage = tonumber(filter.percentage)
+      if actual_percentage == nil
+        or math.abs(actual_percentage - expected_percentage) > 0.000001 then
+        return "infinity_filter_percentage_mismatch"
+      end
+    else
+      if not filter or filter.mode ~= "exactly" then
+        return "infinity_container_mode_mismatch"
+      end
+      if tonumber(filter.count) ~= 1000 then
+        return "infinity_container_count_mismatch"
+      end
+      if entity.remove_unfiltered_items ~= true then
+        return "infinity_container_remove_unfiltered_items_mismatch"
+      end
+    end
+  end
+  if action.inventory_limit then
+    local inventory, expected, detail = inventory_limit_details(entity, action.inventory_limit)
+    if detail then return detail end
+    local ok, actual = pcall(function() return inventory.get_bar() end)
+    if not ok then return "inventory_limit_read_failed" end
+    if actual ~= expected then
+      return "inventory_limit_mismatch:expected=" .. expected .. ",actual=" .. tostring(actual)
+    end
+  end
+  if action.clear_inventory_limit then
+    local inventory = entity.get_inventory(defines.inventory.chest)
+    if not inventory then return "inventory_limit_missing_inventory" end
+    local ok = pcall(function()
+      if inventory.supports_bar() then inventory.set_bar() end
+    end)
+    if not ok then return "inventory_limit_read_failed" end
+  end
+  if action.clear_logistic_condition then
+    local behavior = entity.get_or_create_control_behavior()
+    if not behavior then return "logistic_condition_unsupported" end
+    if behavior.connect_to_logistic_network == true then
+      return "logistic_condition_not_cleared"
+    end
+  end
+  if action.clear_chest_gate then
+    local behavior = entity.get_control_behavior()
+    if behavior and behavior.circuit_enable_disable == true then
+      return "chest_gate_not_cleared"
+    end
+  end
+  local requests = action.logistic_requests
+  if not requests and action.logistic_request then
+    requests = { action.logistic_request }
+  end
+  if requests then
+    local ok, detail = pcall(function()
+      local sections = entity.get_logistic_sections()
+      local section = sections and sections.sections[1] or nil
+      if not section then error("missing_section") end
+      if action.logistic_group and section.group ~= action.logistic_group then
+        error("group_expected=" .. action.logistic_group .. ",actual=" .. tostring(section.group))
+      end
+      verify_section_slots(section, requests)
+    end)
+    if not ok then return "logistic_request_mismatch:" .. tostring(detail) end
+  end
+  if action.logistic_sections then
+    local ok, detail = pcall(function()
+      local sections = entity.get_logistic_sections()
+      if not sections then error("missing_sections") end
+      for _, spec in ipairs(action.logistic_sections) do
+        local section = find_section_by_group(sections, spec.group)
+        if not section then error("missing_group=" .. tostring(spec.group)) end
+        verify_section_slots(section, spec.requests)
+        local expected_multiplier = tonumber(spec.multiplier) or 1
+        local actual_multiplier = tonumber(section.multiplier) or 1
+        if math.abs(actual_multiplier - expected_multiplier) > 0.000001 then
+          error("group=" .. tostring(spec.group) .. ",multiplier_expected="
+            .. expected_multiplier .. ",actual=" .. tostring(actual_multiplier))
+        end
+      end
+    end)
+    if not ok then return "logistic_section_mismatch:" .. tostring(detail) end
+  end
+  return nil
+end
+
+local function position_inside_box(position, box)
+  return position.x >= box.left_top.x and position.x <= box.right_bottom.x
+    and position.y >= box.left_top.y and position.y <= box.right_bottom.y
+end
+
+local function return_feeding_inserter_hands(entity)
+  -- Changing an assembler recipe while its input inserter is holding an old
+  -- ingredient leaves that inserter permanently waiting for destination
+  -- space. Return it to the pickup chest, spilling any remainder for bots
+  -- when the source is a belt or the chest is full. This is part of set_recipe
+  -- so the simulation cannot refill the hand between recovery and the switch.
+  local box = entity.bounding_box
+  local search = {
+    { box.left_top.x - 3, box.left_top.y - 3 },
+    { box.right_bottom.x + 3, box.right_bottom.y + 3 }
+  }
+  for _, inserter in pairs(entity.surface.find_entities_filtered({
+    area = search, type = "inserter", force = entity.force
+  })) do
+    local drop = inserter.drop_position
+    local held = inserter.held_stack
+    if drop and position_inside_box(drop, box)
+      and held and held.valid_for_read then
+      local source = entity.surface.find_entities_filtered({
+        position = inserter.pickup_position,
+        type = { "container", "logistic-container" },
+        force = entity.force,
+        limit = 1
+      })[1]
+      local original_count = held.count
+      local stack = { name = held.name, count = original_count }
+      local quality_ok, quality = pcall(function() return held.quality end)
+      if quality_ok and quality then stack.quality = quality.name end
+      local inserted = 0
+      if source then
+        local insert_ok, count = pcall(function() return source.insert(stack) end)
+        if not insert_ok then return "recipe_switch_held_stack_return_failed" end
+        inserted = tonumber(count) or 0
+      end
+      if inserted >= original_count then
+        held.clear()
+      elseif inserted > 0 then
+        held.count = original_count - inserted
+      end
+      if inserted < original_count then
+        local remaining = { name = stack.name, count = original_count - inserted, quality = stack.quality }
+        local spill_ok = pcall(function()
+          entity.surface.spill_item_stack({ position = inserter.pickup_position, stack = remaining,
+            enable_looted = true, force = entity.force, allow_belts = false })
+        end)
+        if not spill_ok then return "recipe_switch_held_stack_spill_failed" end
+        held.clear()
+      end
+    end
+  end
+  return nil
+end
+
+local function return_removed_items(entity, removed)
+  -- set_recipe removes the machine's ingredients, output and work in progress
+  -- and returns them; discarding that return deletes items. Put them in the
+  -- feeding chest (as held stacks are), and spill any rest for robots.
+  if type(removed) ~= "table" then return nil end
+  local source = nil
+  local box = entity.bounding_box
+  for _, inserter in pairs(entity.surface.find_entities_filtered({
+    area = { { box.left_top.x - 3, box.left_top.y - 3 }, { box.right_bottom.x + 3, box.right_bottom.y + 3 } },
+    type = "inserter", force = entity.force
+  })) do
+    if inserter.drop_position and position_inside_box(inserter.drop_position, box) then
+      source = entity.surface.find_entities_filtered({
+        position = inserter.pickup_position, type = { "container", "logistic-container" },
+        force = entity.force, limit = 1
+      })[1]
+      if source then break end
+    end
+  end
+  for key, value in pairs(removed) do
+    -- 2.0 returns {name, count, quality} records; 1.x returned name -> count.
+    local stack = type(value) == "table" and { name = value.name, count = value.count, quality = value.quality }
+      or { name = key, count = value }
+    local count = tonumber(stack.count) or 0
+    if count > 0 then
+      local inserted = 0
+      if source then
+        local ok, n = pcall(function() return source.insert(stack) end)
+        inserted = ok and (tonumber(n) or 0) or 0
+      end
+      if inserted < count then
+        local rest = { name = stack.name, count = count - inserted, quality = stack.quality }
+        local ok = pcall(function()
+          entity.surface.spill_item_stack({ position = entity.position, stack = rest,
+            enable_looted = true, force = entity.force, allow_belts = false })
+        end)
+        if not ok then return "recipe_switch_removed_items_lost" end
+      end
+    end
+  end
+  return nil
+end
+
+-- Pure compare-before-write: never create a behavior or requester section here.
+local function configuration_precondition_error(surface, force, action)
+  if action.configuration_preconditions == nil then return nil end
+  local function check()
+    if action.action_type ~= "configure_entity" then return "wrong_action_kind" end
+    local expected = action.configuration_preconditions
+    local function exact_keys(value, keys)
+      if type(value) ~= "table" then return false end
+      for key in pairs(value) do if not keys[key] then return false end end
+      for key in pairs(keys) do if value[key] == nil then return false end end
+      return true
+    end
+    local function positive_integer(value)
+      return type(value) == "number" and value > 0 and value < math.huge and value == math.floor(value)
+    end
+    local comparators = { ["<"]=true, [">"]=true, ["="]=true, ["≥"]=true,
+      ["≤"]=true, ["≠"]=true, [">="]=true, ["<="]=true, ["!="]=true }
+    if not exact_keys(expected, {unit_number=true, recipe=true, logistic_condition=true,
+      circuit_enabled=true, requester=true}) then return "invalid_shape" end
+    local gate, requester = expected.logistic_condition, expected.requester
+    if not positive_integer(expected.unit_number) or type(expected.recipe) ~= "string"
+      or type(expected.circuit_enabled) ~= "boolean"
+      or not exact_keys(gate, {signal=true, comparator=true, constant=true})
+      or type(gate.signal) ~= "string" or gate.signal == "" or not comparators[gate.comparator]
+      or type(gate.constant) ~= "number" or math.abs(gate.constant) == math.huge
+      or gate.constant ~= math.floor(gate.constant)
+      or not exact_keys(requester, {entity=true, position=true, unit_number=true, groups=true})
+      or requester.entity ~= "requester-chest" or not positive_integer(requester.unit_number)
+      or not exact_keys(requester.position, {x=true, y=true})
+      or type(requester.position.x) ~= "number" or type(requester.position.y) ~= "number"
+      or type(requester.groups) ~= "table" then return "invalid_shape" end
+    local previous, group_count = nil, 0
+    for index, group in pairs(requester.groups) do
+      if not positive_integer(index) or index > #requester.groups
+        or type(group) ~= "string" or group == "" then return "invalid_groups" end
+      group_count = group_count + 1
+    end
+    if group_count ~= #requester.groups then return "invalid_groups" end
+    for _, group in ipairs(requester.groups) do
+      if previous and previous > group then return "invalid_groups" end
+      previous = group
+    end
+    local entity = find_exact_entity(surface, force, action.entity, action.position)
+    if not entity or not entity.valid then return "target_missing" end
+    if entity.unit_number ~= expected.unit_number then return "unit_number_mismatch" end
+    local recipe = entity.get_recipe()
+    if not recipe or recipe.name ~= expected.recipe then return "recipe_mismatch" end
+    local behavior = entity.get_control_behavior()
+    if not behavior or behavior.connect_to_logistic_network ~= true then return "logistic_disabled" end
+    if behavior.circuit_enable_disable ~= expected.circuit_enabled then return "circuit_enabled_mismatch" end
+    local condition = behavior.logistic_condition
+    condition = condition and (condition.condition or condition)
+    local signal = condition and condition.first_signal
+    -- Factorio 2.1 reads item signals back without `type` (SignalID defaults to item).
+    if not signal or (signal.type ~= nil and signal.type ~= "item") or signal.name ~= gate.signal
+      or (signal.quality ~= nil and signal.quality ~= "normal")
+      or condition.second_signal ~= nil or condition.comparator ~= gate.comparator
+      or condition.constant ~= gate.constant then return "logistic_condition_mismatch" end
+    local chest = find_exact_entity(surface, force, requester.entity, requester.position)
+    if not chest or not chest.valid or chest.unit_number ~= requester.unit_number then
+      return "requester_mismatch"
+    end
+    local sections = chest.get_logistic_sections()
+    if not sections or not sections.sections then return "requester_groups_unknown" end
+    local groups = {}
+    for _, section in pairs(sections.sections) do
+      if not section.valid or type(section.group) ~= "string" then return "requester_groups_unknown" end
+      if section.group ~= "" then groups[#groups + 1] = section.group end
+    end
+    table.sort(groups)
+    if #groups ~= #requester.groups then return "requester_groups_mismatch" end
+    for index, group in ipairs(groups) do
+      if group ~= requester.groups[index] then return "requester_groups_mismatch" end
+    end
+    return nil
+  end
+  local ok, detail = pcall(check)
+  if not ok then detail = "read_failed" end
+  if detail then return "configuration_precondition_failed:" .. detail end
+  return nil
+end
+
+local function configure_created_entity(entity, action)
+  if action.release_cell then
+    if action.recipe then return "release_recipe_conflict" end
+    return cell_release.apply(entity, action.release_cell)
+  end
+  if action.mirroring ~= nil then
+    local ok = pcall(function() entity.mirroring = action.mirroring end)
+    if not ok then return "mirroring_set_failed" end
+  end
+  if action.recipe then
+    local actual, read_error = recipe_name(entity)
+    if read_error then return read_error end
+    if actual ~= action.recipe then
+      local recovery_error = return_feeding_inserter_hands(entity)
+      if recovery_error then return recovery_error end
+      local removed
+      local ok = pcall(function() removed = entity.set_recipe(action.recipe) end)
+      if not ok then return "recipe_set_failed" end
+      local return_error = return_removed_items(entity, removed)
+      if return_error then return return_error end
+    end
+  end
+  if action.input_priority then
+    local ok = pcall(function() entity.splitter_input_priority = action.input_priority end)
+    if not ok then return "splitter_input_priority_set_failed" end
+  end
+  if action.output_priority then
+    local ok = pcall(function() entity.splitter_output_priority = action.output_priority end)
+    if not ok then return "splitter_output_priority_set_failed" end
+  end
+  if action.infinity_filter then
+    local ok
+    if entity.type == "infinity-pipe" then
+      ok = pcall(function()
+        entity.set_infinity_pipe_filter({
+          name = action.infinity_filter,
+          percentage = tonumber(action.fill_percentage) or 1.0,
+          mode = "at-least"
+        })
+      end)
+    else
+      ok = pcall(function()
+        entity.set_infinity_container_filter(1, {
+          name = action.infinity_filter, count = 1000, mode = "exactly", index = 1
+        })
+        entity.remove_unfiltered_items = true
+      end)
+    end
+    if not ok then return "infinity_filter_set_failed" end
+  end
+  if action.inventory_limit then
+    local inventory, bar, detail = inventory_limit_details(entity, action.inventory_limit)
+    if detail then return detail end
+    -- set_bar() with no argument CLEARS the limit; there is no clear_bar().
+    -- The clearing branch only runs when the target needs the whole chest, so
+    -- it went unexercised until a stock cap lifted to a full chest of belts and
+    -- the first plan that reached it died on a nil method.
+    local ok = pcall(function()
+      if not inventory.supports_bar() then return end
+      if bar <= #inventory then inventory.set_bar(bar) else inventory.set_bar() end
+    end)
+    if not ok then return "inventory_limit_set_failed" end
+  end
+  if action.clear_inventory_limit then
+    local inventory = entity.get_inventory(defines.inventory.chest)
+    if not inventory then return "inventory_limit_missing_inventory" end
+    local ok = pcall(function()
+      if inventory.supports_bar() then inventory.set_bar() end
+    end)
+    if not ok then return "inventory_limit_set_failed" end
+  end
+  local requests = action.logistic_requests
+  if not requests and action.logistic_request then
+    requests = { action.logistic_request }
+  end
+  if requests then
+    -- One requester may hold several recipe-proportional item requests. The
+    -- optional group makes copied mall cells share the same named settings.
+    local ok = pcall(function()
+      local sections = entity.get_logistic_sections()
+      local section = sections.sections[1] or sections.add_section()
+      if action.logistic_group then section.group = action.logistic_group end
+      write_section_slots(section, requests)
+    end)
+    if not ok then return "logistic_request_set_failed" end
+  end
+  if action.clear_logistic_condition then
+    local behavior = entity.get_or_create_control_behavior()
+    if not behavior then return "logistic_condition_unsupported" end
+    local ok = pcall(function()
+      behavior.connect_to_logistic_network = false
+    end)
+    if not ok or behavior.connect_to_logistic_network == true then
+      return "logistic_condition_clear_failed"
+    end
+  end
+  if action.logistic_condition then
+    -- A machine reads the LOGISTIC network directly; it needs no wire, no
+    -- roboport connection and no combinator, only to stand inside roboport
+    -- coverage. Failure is reported rather than swallowed: a gate that never
+    -- lands looks exactly like a machine nobody asked to gate, which is the
+    -- silent-skip failure SETTING_FIELDS exists to prevent.
+    local behavior = entity.get_or_create_control_behavior()
+    if not behavior then return "logistic_condition_unsupported" end
+    local ok = pcall(function()
+      behavior.connect_to_logistic_network = true
+      behavior.logistic_condition = {
+        first_signal = { type = "item", name = action.logistic_condition.signal },
+        comparator = action.logistic_condition.comparator,
+        constant = action.logistic_condition.constant,
+      }
+    end)
+    if not ok then return "logistic_condition_set_failed" end
+    if behavior.connect_to_logistic_network ~= true then
+      return "logistic_condition_not_applied"
+    end
+  end
+  if action.clear_chest_gate then
+    local behavior = entity.get_or_create_control_behavior()
+    if not behavior then return "chest_gate_unsupported" end
+    local ok = pcall(function() behavior.circuit_enable_disable = false end)
+    if not ok then return "chest_gate_clear_failed" end
+  end
+  if action.chest_gate then
+    -- Unlike the logistic gate, this caps ONE chest: the machine reads its own
+    -- provider over a green wire. Both ends must be built; a wire on a ghost
+    -- would report success for a cap that never lands.
+    local gate = action.chest_gate
+    local chest = entity.surface.find_entities_filtered{
+      position = { gate.chest.x, gate.chest.y }, radius = 0.01, force = entity.force,
+      type = { "container", "logistic-container" },
+    }[1]
+    if not chest then return "chest_gate_chest_missing" end
+    local behavior = entity.get_or_create_control_behavior()
+    if not behavior then return "chest_gate_unsupported" end
+    local ok = pcall(function()
+      local own = entity.get_wire_connector(defines.wire_connector_id.circuit_green, true)
+      local other = chest.get_wire_connector(defines.wire_connector_id.circuit_green, true)
+      if not own.is_connected_to(other) then own.connect_to(other, false) end
+      behavior.circuit_enable_disable = true
+      behavior.circuit_condition = {
+        first_signal = { type = "item", name = gate.signal },
+        comparator = gate.comparator,
+        constant = gate.constant,
+      }
+    end)
+    if not ok then return "chest_gate_set_failed" end
+    local own = entity.get_wire_connector(defines.wire_connector_id.circuit_green, false)
+    if not (own and own.is_connected_to(chest.get_wire_connector(defines.wire_connector_id.circuit_green, false)))
+      or behavior.circuit_enable_disable ~= true then
+      return "chest_gate_not_applied"
+    end
+  end
+  if action.clear_logistic_groups then
+    local ok, detail = pcall(function()
+      clear_logistic_groups(entity, action.clear_logistic_groups)
+    end)
+    if not ok then return "logistic_group_clear_failed:" .. tostring(detail) end
+  end
+  if action.logistic_sections then
+    local ok, detail = pcall(function()
+      local sections = entity.get_logistic_sections()
+      if not sections then error("no_logistic_sections") end
+      for _, spec in ipairs(action.logistic_sections) do
+        -- Upsert by group: a section already carrying this label is rewritten
+        -- in place, and any OTHER machine's section on the same chest is left
+        -- exactly as it is. That is what lets one chest serve two machines
+        -- without either build erasing the other's requests.
+        -- The label must be applied BEFORE the slots. Assigning a group that
+        -- already exists makes the section adopt that group's filters, which
+        -- silently discards anything written first (observed live: mall
+        -- requests came back empty). Naming it first means the slots below are
+        -- written into the group itself.
+        local section = find_section_by_group(sections, spec.group)
+          or claim_section_for_group(sections, spec.group)
+        write_section_slots(section, spec.requests)
+        section.multiplier = tonumber(spec.multiplier) or 1
+      end
+    end)
+    if not ok then return "logistic_section_set_failed:" .. tostring(detail) end
+  end
+  return nil
+end
+
+-- Factorio's create_entity auto-wires nearby poles unreliably once dozens of
+-- poles already exist on the surface (verified live: two poles 5 tiles apart
+-- always auto-connect, but the same distance silently fails to connect once
+-- ~60 poles already exist nearby) -- so every place_entity/place_ghost pole
+-- placement must be followed by an explicit wiring pass rather than trusting
+-- the implicit auto-connect. Reach values come straight from the prototype
+-- (get_max_wire_distance), matching planners/infrastructure.py's POLE_SPECS.
+local function repair_existing_inserter_direction(entity, action, direction, mismatch)
+  -- Mall cells are idempotent: an older deployment may have created the
+  -- inserter facing the drop side. Inserters are the only existing entities we
+  -- retarget in place; chests and machines must never be silently replaced.
+  if mismatch ~= "direction_mismatch" or direction == nil
+    or string.find(action.entity or "", "inserter", 1, true) == nil then
+    return mismatch
+  end
+  local ok = pcall(function() entity.direction = direction end)
+  if not ok then return mismatch end
+  return configuration_error(entity, action, direction)
+end
+
+local function ensure_pole_wiring(surface, force, area)
+  local poles = surface.find_entities_filtered({ type = "electric-pole", force = force, area = area })
+  local reach_cache = {}
+  local function reach(entity)
+    local cached = reach_cache[entity.name]
+    if cached then return cached end
+    local value = prototypes.entity[entity.name].get_max_wire_distance()
+    reach_cache[entity.name] = value
+    return value
+  end
+  local connected = 0
+  for i = 1, #poles do
+    local a = poles[i]
+    if a.valid then
+      for j = i + 1, #poles do
+        local b = poles[j]
+        if b.valid and a.electric_network_id ~= b.electric_network_id then
+          local dx = a.position.x - b.position.x
+          local dy = a.position.y - b.position.y
+          local distance = math.sqrt(dx * dx + dy * dy)
+          if distance <= math.min(reach(a), reach(b)) then
+            local wire_a = a.get_wire_connector(defines.wire_connector_id.pole_copper, true)
+            local wire_b = b.get_wire_connector(defines.wire_connector_id.pole_copper, true)
+            if wire_a.connect_to(wire_b, false, defines.wire_origin.script) then
+              connected = connected + 1
+            end
+          end
+        end
+      end
+    end
+  end
+  return connected
+end
+
+local function execute_build_plan(authorization, build_plan)
+  local approved = {}
+  for _, action in ipairs(authorization.approved_actions or {}) do
+    approved[action] = true
+  end
+  if type(build_plan.phases) ~= "table" then
+    error("BuildPlan must include phases")
+  end
+
+  local required_authorization = {
+    place_ghost = "project_more_ghosts",
+    place_ghost_no_reconcile = "project_more_ghosts",
+    place_tile_ghost = "project_more_ghosts",
+    configure_entity_if_unit_number = "place_core_infrastructure",
+    place_entity = "place_core_infrastructure",
+    configure_entity = "place_core_infrastructure",
+    remove_entity = "remove_entities"
+  }
+  -- Optional: target an existing surface/force (e.g. "nauvis"/"player") instead
+  -- of the isolated sandbox, for building directly onto a real base.
+  local surface = get_or_create_sandbox_surface(build_plan.surface)
+  local force = get_or_create_planner_force(build_plan.force)
+  local counts = {
+    attempted_ghosts = 0,
+    placed_ghosts = 0,
+    already_present_ghosts = 0,
+    failed_ghosts = 0,
+    attempted_entities = 0,
+    placed_entities = 0,
+    already_present_entities = 0,
+    failed_entities = 0,
+    attempted_placements = 0
+  }
+  local placement_failures = {}
+  local recipe_failures = 0
+  local removed_entities = 0
+  local placement_bounds = nil
+  local pole_wire_margin = 0
+
+  local function record_failure(phase, action, reason)
+    if string.find(reason, "recipe", 1, true) then
+      recipe_failures = recipe_failures + 1
+    end
+    table.insert(placement_failures, {
+      phase = phase.name,
+      action_type = action.action_type,
+      entity = action.entity or action.tile,
+      position = { x = action.position.x, y = action.position.y },
+      reason = reason
+    })
+  end
+
+  -- Reject the entire submission before mutation when any guarded snapshot is stale.
+  for _, phase in ipairs(build_plan.phases) do
+    for _, action in ipairs(phase.actions or {}) do
+      local failure = configuration_precondition_error(surface, force, action)
+      if failure then
+        counts.attempted_entities = counts.attempted_entities + 1
+        record_failure(phase, action, failure)
+      end
+    end
+  end
+  if #placement_failures > 0 then
+    counts.failed_entities = #placement_failures
+    counts.failed_placements = #placement_failures
+    counts.placement_failures = placement_failures
+    counts.error = "configuration_precondition_failed"
+    return counts
+  end
+
+  -- Fail before any plan mutation: production construction must consume a
+  -- blueprint ghost through bots, even when legacy callers request direct placement.
+  if force.name == "player" then
+    for _, phase in ipairs(build_plan.phases) do
+      for _, action in ipairs(phase.actions or {}) do
+        if action.action_type == "place_entity"
+          and not find_exact_entity(surface, force, action.entity, action.position) then
+          counts.attempted_entities = counts.attempted_entities + 1
+          record_failure(phase, action, "direct_construction_forbidden")
+        end
+      end
+    end
+    if #placement_failures > 0 then
+      counts.failed_entities = #placement_failures
+      counts.failed_placements = #placement_failures
+      counts.attempted_placements = counts.attempted_entities
+      counts.placement_failures = placement_failures
+      counts.error = "direct_construction_forbidden"
+      return counts
+    end
+  end
+
+  if build_plan.atomic == true then
+    for _, phase in ipairs(build_plan.phases) do
+      for _, action in ipairs(phase.actions or {}) do
+        local permission = required_authorization[action.action_type]
+        if not permission then
+          error("Unsupported build plan action: " .. tostring(action.action_type))
+        end
+        if not approved[permission] then
+          error("Authorization does not permit " .. permission .. " for " .. action.action_type)
+        end
+        local position = action.position
+        if type(position) ~= "table" or type(position.x) ~= "number"
+          or type(position.y) ~= "number" then
+          error("BuildPlan action requires numeric position with x and y")
+        end
+        if action.action_type ~= "place_tile_ghost" and type(action.entity) ~= "string" then
+          error("BuildPlan entity action requires entity name")
+        end
+        if action.action_type == "place_tile_ghost" and type(action.tile) ~= "string" then
+          error("BuildPlan tile action requires tile name")
+        end
+        if action.direction and defines.direction[action.direction] == nil then
+          error("Unknown direction: " .. tostring(action.direction))
+        end
+      end
+    end
+    local removals = collect_atomic_removals(surface, force, build_plan)
+    local planned_placements = {}
+    for _, phase in ipairs(build_plan.phases) do
+      for _, action in ipairs(phase.actions or {}) do
+        if action.action_type == "place_entity" or action.action_type == "place_ghost"
+          or action.action_type == "place_ghost_no_reconcile" then
+          counts.attempted_placements = counts.attempted_placements + 1
+          local blocked = atomic_placement_blocked(surface, force, action, removals,
+            build_plan.clear_natural_obstacles == true)
+          if atomic_planned_placement_blocked(action, planned_placements) then
+            blocked = true
+          end
+          if blocked then
+            record_failure(phase, action, "atomic_footprint_blocked")
+          end
+          table.insert(planned_placements, action)
+        end
+      end
+    end
+    if #placement_failures > 0 then
+      counts.failed_placements = #placement_failures
+      counts.placement_failures = placement_failures
+      counts.error = "atomic_footprint_blocked"
+      return counts
+    end
+  end
+
+  -- Clear first, then place: robots remove the trees and rocks and build the ghost on the cleared tiles.
+  if build_plan.clear_natural_obstacles == true then
+    for _, phase in ipairs(build_plan.phases) do
+      for _, action in ipairs(phase.actions or {}) do
+        if action.action_type == "place_ghost" or action.action_type == "place_ghost_no_reconcile" then
+          local direction = action.direction and defines.direction[action.direction] or nil
+          local ordered, reason = order_obstacle_deconstruction(surface, force, action, direction)
+          if not ordered then record_failure(phase, action, reason) end
+        end
+      end
+    end
+    if #placement_failures > 0 then
+      counts.failed_placements = #placement_failures
+      counts.placement_failures = placement_failures
+      counts.error = "obstacle_deconstruction_refused"
+      return counts
+    end
+  end
+
+  for _, phase in ipairs(build_plan.phases) do
+    for _, action in ipairs(phase.actions or {}) do
+      local permission = required_authorization[action.action_type]
+      if not permission then
+        error("Unsupported build plan action: " .. tostring(action.action_type))
+      end
+      if not approved[permission] then
+        error("Authorization does not permit " .. permission .. " for " .. action.action_type)
+      end
+
+      local position = action.position
+      if type(position) ~= "table" or position.x == nil or position.y == nil then
+        error("BuildPlan action requires position with x and y")
+      end
+      if action.action_type ~= "remove_entity" and action.configuration_preconditions == nil then
+        if not placement_bounds then
+          placement_bounds = {
+            min_x = position.x, min_y = position.y,
+            max_x = position.x, max_y = position.y
+          }
+        else
+          placement_bounds.min_x = math.min(placement_bounds.min_x, position.x)
+          placement_bounds.min_y = math.min(placement_bounds.min_y, position.y)
+          placement_bounds.max_x = math.max(placement_bounds.max_x, position.x)
+          placement_bounds.max_y = math.max(placement_bounds.max_y, position.y)
+        end
+        local prototype = action.entity and prototypes.entity[action.entity] or nil
+        if prototype and prototype.type == "electric-pole" then
+          pole_wire_margin = math.max(
+            pole_wire_margin, prototype.get_max_wire_distance()
+          )
+        end
+      end
+      local direction = nil
+      if action.direction then
+        direction = defines.direction[action.direction]
+        if direction == nil then
+          error("Unknown direction: " .. tostring(action.direction))
+        end
+      end
+
+      if action.action_type == "configure_entity" or action.action_type == "configure_entity_if_unit_number" then
+        counts.attempted_entities = counts.attempted_entities + 1
+        local existing = find_exact_entity(surface, force, action.entity, position)
+        if not existing then
+          counts.failed_entities = counts.failed_entities + 1
+          record_failure(phase, action, "configure_target_missing")
+        elseif action.action_type == "configure_entity_if_unit_number"
+          and (type(action.expected_unit_number) ~= "number"
+            or action.expected_unit_number < 1
+            or action.expected_unit_number % 1 ~= 0
+            or existing.unit_number ~= action.expected_unit_number) then
+          counts.failed_entities = counts.failed_entities + 1
+          record_failure(phase, action, "configure_target_unit_number_mismatch")
+        else
+          local configure_error = configuration_precondition_error(surface, force, action)
+          if not configure_error then configure_error = configure_created_entity(existing, action) end
+          local mismatch = configure_error or configuration_error(existing, action, direction)
+          if mismatch then
+            counts.failed_entities = counts.failed_entities + 1
+            record_failure(phase, action, mismatch)
+          else
+            counts.already_present_entities = counts.already_present_entities + 1
+          end
+        end
+      elseif action.action_type == "place_tile_ghost" then
+        counts.attempted_ghosts = counts.attempted_ghosts + 1
+        local tile = surface.get_tile(position.x, position.y)
+        local existing = find_exact_tile_ghost(surface, force, action.tile, position)
+        if tile and tile.valid and tile.name == action.tile then
+          counts.already_present_ghosts = counts.already_present_ghosts + 1
+        elseif existing then
+          counts.already_present_ghosts = counts.already_present_ghosts + 1
+        elseif not tile or not tile.valid or not tile.collides_with("water_tile") then
+          counts.failed_ghosts = counts.failed_ghosts + 1
+          record_failure(phase, action, "landfill_target_is_not_water")
+        else
+          local ghost = surface.create_entity({
+            name = "tile-ghost",
+            inner_name = action.tile,
+            position = { position.x, position.y },
+            force = force
+          })
+          if ghost and ghost.valid then
+            counts.placed_ghosts = counts.placed_ghosts + 1
+          else
+            counts.failed_ghosts = counts.failed_ghosts + 1
+            record_failure(phase, action, "create_tile_ghost_returned_nil")
+          end
+        end
+      elseif action.action_type == "place_ghost" or action.action_type == "place_ghost_no_reconcile" then
+        counts.attempted_ghosts = counts.attempted_ghosts + 1
+        local built = find_exact_entity(surface, force, action.entity, position)
+        local ghost = find_exact_ghost(surface, force, action.entity, position)
+        local existing = built or ghost
+        if existing then
+          local configure_error = nil
+          if action.action_type == "place_ghost" and needs_reconfiguration(action, existing) then
+            configure_error = configure_created_entity(existing, action)
+          end
+          local mismatch = configure_error or configuration_error(existing, action, direction)
+          if action.action_type == "place_ghost" then
+            mismatch = repair_existing_inserter_direction(existing, action, direction, mismatch)
+          end
+          if mismatch then
+            counts.failed_ghosts = counts.failed_ghosts + 1
+            record_failure(phase, action, mismatch)
+          else
+            counts.already_present_ghosts = counts.already_present_ghosts + 1
+          end
+        elseif #exact_position_occupants(surface, force, position) > 0 then
+          counts.failed_ghosts = counts.failed_ghosts + 1
+          record_failure(phase, action, action.action_type == "place_ghost_no_reconcile"
+            and "guarded_ghost_position_occupied" or "exact_position_occupied_by_different_entity")
+        else
+          ghost = surface.create_entity({
+            name = "entity-ghost",
+            inner_name = action.entity,
+            position = { position.x, position.y },
+            direction = direction,
+            mirror = action.mirror,
+            type = action.underground_type,
+            force = force,
+            tags = action.research_lab_ownership or action.optimizer_ownership
+          })
+          if ghost and ghost.valid then
+            local configure_error = configure_created_entity(ghost, action)
+            local verify_error = configure_error or configuration_error(ghost, action, direction)
+            if verify_error then
+              counts.failed_ghosts = counts.failed_ghosts + 1
+              record_failure(phase, action, verify_error)
+              ghost.destroy()
+            else
+              counts.placed_ghosts = counts.placed_ghosts + 1
+            end
+          else
+            counts.failed_ghosts = counts.failed_ghosts + 1
+            record_failure(phase, action, "create_entity_returned_nil")
+          end
+        end
+      elseif action.action_type == "place_entity" then
+        counts.attempted_entities = counts.attempted_entities + 1
+        local existing = find_exact_entity(surface, force, action.entity, position)
+        if existing then
+          local configure_error = nil
+          if needs_reconfiguration(action, existing) then
+            configure_error = configure_created_entity(existing, action)
+          end
+          local mismatch = configure_error or configuration_error(existing, action, direction)
+          mismatch = repair_existing_inserter_direction(existing, action, direction, mismatch)
+          if mismatch then
+            counts.failed_entities = counts.failed_entities + 1
+            record_failure(phase, action, mismatch)
+          else
+            counts.already_present_entities = counts.already_present_entities + 1
+          end
+        elseif force.name == "player" then
+          counts.failed_entities = counts.failed_entities + 1
+          record_failure(phase, action, "direct_construction_forbidden")
+        elseif #exact_position_occupants(surface, force, position) > 0 then
+          counts.failed_entities = counts.failed_entities + 1
+          record_failure(phase, action, "exact_position_occupied_by_different_entity")
+        else
+          local params = {
+            name = action.entity,
+            position = { position.x, position.y },
+            direction = direction,
+            type = action.underground_type,
+            force = force
+          }
+          -- Sandbox-only direct creation; production reaches this branch only
+          -- through ghosts and never replaces bot-built chests for settings.
+          for key, value in pairs(trash_requesters.creation_params(action.entity)) do
+            params[key] = value
+          end
+          local entity = surface.create_entity(params)
+          if entity and entity.valid then
+            local configure_error = configure_created_entity(entity, action)
+            local verify_error = configure_error or configuration_error(entity, action, direction)
+            if verify_error then
+              counts.failed_entities = counts.failed_entities + 1
+              record_failure(phase, action, verify_error)
+              entity.destroy()
+            else
+              counts.placed_entities = counts.placed_entities + 1
+            end
+          else
+            counts.failed_entities = counts.failed_entities + 1
+            record_failure(phase, action, "create_entity_returned_nil")
+          end
+        end
+      else
+        for entity in pairs(exact_removal_targets(surface, force, action)) do
+          if entity.valid then
+            entity.destroy()
+            removed_entities = removed_entities + 1
+          end
+        end
+      end
+    end
+  end
+
+  counts.wires_connected = 0
+  if placement_bounds and pole_wire_margin > 0 then
+    local area = {
+      {
+        placement_bounds.min_x - pole_wire_margin,
+        placement_bounds.min_y - pole_wire_margin
+      },
+      {
+        placement_bounds.max_x + pole_wire_margin,
+        placement_bounds.max_y + pole_wire_margin
+      }
+    }
+    counts.wires_connected = ensure_pole_wiring(surface, force, area)
+  end
+  counts.attempted_placements = counts.attempted_ghosts + counts.attempted_entities
+  counts.succeeded_placements = counts.placed_ghosts + counts.placed_entities
+  counts.already_present_placements = counts.already_present_ghosts
+    + counts.already_present_entities
+  counts.failed_placements = counts.failed_ghosts + counts.failed_entities
+  counts.placement_failures = placement_failures
+  counts.recipe_failures = recipe_failures
+  counts.removed_entities = removed_entities
+  return counts
+end
+local function write_layout_report(report, request_id)
+  -- Correlated calls name the report after the request id; legacy calls keep
+  -- the tick-named report Track A reads.
+  local json = helpers.table_to_json(report)
+  if report.placement_failures and #report.placement_failures == 0 then
+    json = json:gsub('"placement_failures":{}', '"placement_failures":[]')
+  end
+  local suffix = request_id or tostring(game.tick)
+  helpers.write_file("factorio_mod/layout_reports/layout_" .. suffix .. ".json", json, false)
+end
+
+commands.add_command("layout_executor_capabilities", "Read executor protocol capabilities.", function()
+  rcon.print('{"configuration_preconditions":1}')
+end)
+
+commands.add_command("build_layout_plan", "Execute an authorized BuildPlan with explicit positions on planner-sandbox.", function(command)
+  local ok, payload = pcall(function()
+    return helpers.json_to_table(command.parameter or "")
+  end)
+  if not ok or type(payload) ~= "table" or type(payload.authorization) ~= "table" or type(payload.build_plan) ~= "table" then
+    game.print("BuildPlan error: payload must include authorization and build_plan")
+    return
+  end
+
+  -- Correlated submissions (Track B's runner) carry a request id and digest;
+  -- streamed submissions also carry a stream id and sequence. A duplicate may
+  -- replay the receipt but never the world mutation; a missing receipt is not
+  -- permission to retry. Legacy uncorrelated calls skip this block and behave
+  -- exactly as before.
+  local request_id, digest = payload.request_id, payload.request_digest
+  local stream_id, sequence = payload.stream_id, payload.sequence
+  local streamed = stream_id ~= nil or sequence ~= nil
+  local correlated = request_id ~= nil or digest ~= nil or streamed
+  local entry = nil
+  if payload.optimizer_ownership ~= nil or payload.optimizer_tag_protocol ~= nil then
+    game.print("BuildPlan error: shared optimizer tags are not supported by this executor")
+    return
+  end
+  if correlated then
+    local valid = type(request_id) == "string" and #request_id == 32 and request_id:match("^[0-9a-f]+$")
+      and type(digest) == "string" and #digest == 64 and digest:match("^[0-9a-f]+$")
+      and type(command.parameter) == "string" and #command.parameter <= 262144
+    for key in pairs(payload) do
+      if key ~= "request_id" and key ~= "request_digest" and key ~= "authorization" and key ~= "build_plan"
+        and key ~= "stream_id" and key ~= "sequence" then
+        valid = false
+      end
+    end
+    if streamed then
+      valid = valid and type(stream_id) == "string" and #stream_id == 16 and stream_id:match("^[0-9a-f]+$")
+        and type(sequence) == "number" and sequence >= 1 and sequence <= 4294967295 and sequence % 1 == 0
+      if valid then valid = request_id == stream_id .. string.format("%016x", sequence) end
+    end
+    if not valid then game.print("BuildPlan error: invalid correlated request"); return end
+    if streamed then
+      -- One stream retains only its latest request. Older sequence numbers are
+      -- rejected, so bounded retention cannot turn an old retry into a new build.
+      if storage.layout_submission_streams == nil then
+        storage.layout_submission_streams = {count=0, entries={}}
+      end
+      local state = storage.layout_submission_streams
+      if type(state) ~= "table" or type(state.entries) ~= "table" or type(state.count) ~= "number"
+        or state.count < 0 or state.count % 1 ~= 0 then
+        game.print("BuildPlan error: invalid stream journal"); return
+      end
+      local legacy = storage.layout_submission_receipts
+      if legacy ~= nil and (type(legacy) ~= "table" or type(legacy.entries) ~= "table") then
+        game.print("BuildPlan error: invalid receipt journal"); return
+      end
+      if legacy and legacy.entries[request_id] ~= nil then
+        game.print("BuildPlan error: request id belongs to legacy journal"); return
+      end
+      entry = state.entries[stream_id]
+      if entry == nil then
+        if sequence ~= 1 then game.print("BuildPlan error: stream must begin at sequence 1"); return end
+        if state.count >= 128 then game.print("BuildPlan error: stream journal capacity exceeded"); return end
+        entry = {sequence=0, status="completed"}
+        state.entries[stream_id] = entry
+        state.count = state.count + 1
+      elseif type(entry) ~= "table" or type(entry.sequence) ~= "number" or entry.sequence < 1
+        or entry.sequence % 1 ~= 0 then
+        game.print("BuildPlan error: invalid stream entry"); return
+      end
+      if sequence == entry.sequence then
+        if entry.payload ~= command.parameter then
+          game.print("BuildPlan error: stream request conflicts with stored payload"); return
+        end
+        if entry.status ~= "completed" or type(entry.report) ~= "table" then
+          game.print("BuildPlan error: prior submission outcome unknown"); return
+        end
+        write_layout_report(entry.report, request_id)
+        return
+      end
+      if sequence ~= entry.sequence + 1 or entry.status ~= "completed" then
+        game.print("BuildPlan error: stream sequence is stale, skipped, or pending"); return
+      end
+      entry.sequence = sequence
+      entry.payload = command.parameter
+      entry.status = "pending"
+      entry.report = nil
+    else
+      if storage.layout_submission_receipts == nil then
+        storage.layout_submission_receipts = {count=0, entries={}}
+      end
+      local state = storage.layout_submission_receipts
+      if type(state) ~= "table" or type(state.entries) ~= "table" or type(state.count) ~= "number"
+        or state.count < 0 or state.count % 1 ~= 0 then
+        game.print("BuildPlan error: invalid receipt journal"); return
+      end
+      local streams = storage.layout_submission_streams
+      if streams ~= nil and (type(streams) ~= "table" or type(streams.entries) ~= "table") then
+        game.print("BuildPlan error: invalid stream journal"); return
+      end
+      if streams and streams.entries[string.sub(request_id, 1, 16)] ~= nil then
+        game.print("BuildPlan error: request id belongs to a stream"); return
+      end
+      entry = state.entries[request_id]
+      if entry ~= nil then
+        if type(entry) ~= "table" or entry.payload ~= command.parameter then
+          game.print("BuildPlan error: request id conflicts with stored payload"); return
+        end
+        if entry.status ~= "completed" or type(entry.report) ~= "table" then
+          game.print("BuildPlan error: prior submission outcome unknown"); return
+        end
+        write_layout_report(entry.report, request_id)
+        return
+      end
+      if state.count >= 128 then game.print("BuildPlan error: receipt journal capacity exceeded"); return end
+      entry = {payload=command.parameter, status="pending"}
+      state.entries[request_id] = entry
+      state.count = state.count + 1
+    end
+  end
+
+  local run_ok, result = pcall(function()
+    return execute_build_plan(payload.authorization, payload.build_plan)
+  end)
+
+  local report = { tick = game.tick, ok = false }
+  if run_ok then
+    for key, value in pairs(result) do
+      report[key] = value
+    end
+    report.ok = result.failed_placements == 0
+    if not report.ok then
+      report.error = result.error or (tostring(result.failed_placements) .. " placement(s) failed")
+    end
+  else
+    report.error = tostring(result)
+  end
+
+  if correlated then
+    report.request_id = request_id
+    report.request_digest = digest
+    report.receipt_version = streamed and "layout-submission-receipt-v2" or "layout-submission-receipt-v1"
+    if streamed then report.stream_id, report.sequence = stream_id, sequence end
+    entry.report = report
+    entry.status = "completed"
+  end
+  -- Always keep Track A's tick-named report; correlated calls also write the
+  -- request-id-named report Track B's runner polls for.
+  write_layout_report(report, nil)
+  if correlated then write_layout_report(report, request_id) end
+end)
