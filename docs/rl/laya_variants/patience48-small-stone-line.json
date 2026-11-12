@@ -1,0 +1,15 @@
+{
+  "version": "1.0.0",
+  "variant_id": "patience48-small-stone-line",
+  "description": "patience48 plus a preference for the small stone-brick line (direct starters sized to the electric furnaces on hand) over the full six-furnace module (user rule 2026-11-12).",
+  "settings": {"stall_decisions": 48},
+  "catalog_patch": {
+    "mission.starter-mines": {
+      "prefer": [
+        {"when": {"need": "item:iron-*"}, "weight": 1.5},
+        {"when": {"need": "item:copper-*"}, "weight": 1.5},
+        {"when": {"small_line": true}, "weight": 2.0}
+      ]
+    }
+  }
+}

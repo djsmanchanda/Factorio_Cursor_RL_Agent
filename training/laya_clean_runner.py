@@ -46,7 +46,7 @@ from training.laya_experiment_context import reservation_view
 from training.laya_site_plan import (base_zones, draw_command, load_plan, plan_options, reservation_reason,
                                     ring_expand_candidates, save_plan)
 from training.laya_lines import clear_of, line_candidates
-from training.laya_starters import STARTER_ORE, starter_bill, starter_candidates
+from training.laya_starters import STARTER_ORE, small_line_candidates, starter_bill, starter_candidates
 from training.laya_saved_world import (SAVED_WORLD_GHOST_FIELDS, SavedWorldAdapter, SavedWorldError,
                                        compile_candidates, decision_state, evaluate_required_checks,
                                        required_check_reason)
@@ -524,6 +524,14 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     # logistic chests need advanced circuits no recipe can make, so no chest slot or chest order exists.
     have = available_items(facts, board)
     recipes = facts.get("recipes") or {}
+    # A smaller stone line takes only the electric furnaces on hand instead of waiting
+    # for a full six-furnace module (user rule 2026-11-12; electric-only invariant kept).
+    electric_furnaces = sum(int((n.get("items") or {}).get("electric-furnace", 0))
+                            for n in (facts.get("networks") or {}).values())
+    if "stone-brick" in plates and electric_furnaces >= 2:
+        proposed += small_line_candidates(
+            facts, site_plan, "stone-brick", "stone", min(electric_furnaces, 6), obstacles=obstacles,
+        )
 
     def unobtainable(item: str) -> str | None:
         """The input that blocks a known recipe now; items without a known recipe keep their old handling."""
