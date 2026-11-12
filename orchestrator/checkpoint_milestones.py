@@ -11,7 +11,7 @@ measured negative result and makes predicates replayable in tests.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
@@ -21,6 +21,13 @@ PLASTIC_ITEM = "plastic-bar"
 ADVANCED_CIRCUIT_ITEM = "advanced-circuit"
 IRON_GEAR_RECIPE = "iron-gear-wheel"
 COPPER_CABLE_RECIPE = "copper-cable"
+CHEMICAL_SCIENCE_ITEM = "chemical-science-pack"
+PRODUCTION_SCIENCE_ITEM = "production-science-pack"
+# Space Age removes mining-productivity-4 and makes mining-productivity-3 repeatable with red,
+# green, blue and purple packs; "mining-productivity-4" is its fourth completed level.
+MINING_PRODUCTIVITY_LEVEL = 4
+MINING_PRODUCTIVITY_PACKS = ("automation-science-pack", "logistic-science-pack",
+                             CHEMICAL_SCIENCE_ITEM, PRODUCTION_SCIENCE_ITEM)
 
 
 class PredicateStatus(str, Enum):
@@ -69,6 +76,7 @@ class MachineEvidence:
     craft_count: int | None = None
     output_count: int | None = None
     name: str | None = None
+    status: str | None = None  # raw entity status, e.g. "working" or "output_full"; measurement only
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any] | Any) -> "MachineEvidence":
@@ -87,6 +95,7 @@ class MachineEvidence:
             craft_count=_item_counter(value, "craft_count", "crafts", "products_finished"),
             output_count=_item_counter(value, "output_count", "output", "produced"),
             name=value.get("name"),
+            status=None if value.get("status") is None else str(value.get("status")),
         )
 
 
@@ -99,17 +108,35 @@ class FoundationEvidence:
     healthy: bool | None = None
     producing: bool | None = None
     output_count: int | None = None
+    working_count: int | None = None
+    identity_source: str | None = None
+    counter_basis: str | None = None
+    district_id: str | None = None
+    district_revision: int | None = None
+    machines: tuple[Mapping[str, Any], ...] = ()
+    # Why the census could not measure this foundation (counts are then unknown).
+    census_error: str | None = None
 
     @classmethod
     def from_mapping(cls, name: str, value: Mapping[str, Any] | Any) -> "FoundationEvidence":
         if not isinstance(value, Mapping):
             return cls(name=name, machine_count=_as_int(value))
+        # Legacy snapshots use a scalar `machines` as the count alias.
+        machines = value.get("machines")
+        rows = machines if isinstance(machines, (list, tuple)) else ()
         return cls(
             name=str(value.get("name", name)),
             machine_count=_as_int(value.get("machine_count", value.get("machines"))),
             healthy=_as_bool(value.get("healthy", value.get("valid"))),
             producing=_as_bool(value.get("producing", value.get("active"))),
             output_count=_item_counter(value, "output_count", "output", "produced"),
+            working_count=_as_int(value.get("working_count")),
+            identity_source=value.get("identity_source"),
+            counter_basis=value.get("counter_basis"),
+            district_id=value.get("district_id"),
+            district_revision=_as_int(value.get("district_revision")),
+            machines=tuple(dict(machine) for machine in rows if isinstance(machine, Mapping)),
+            census_error=value.get("census_error"),
         )
 
 
@@ -229,6 +256,13 @@ class FactorySnapshot:
     production: Mapping[str, CounterEvidence] = field(default_factory=dict)
     providers: Mapping[str, CounterEvidence] = field(default_factory=dict)
     recipes: Mapping[str, RecipeEvidence] = field(default_factory=dict)
+    # Force-wide science telemetry for C7-C9: per-pack produced/consumed counters, lab and
+    # recycler counts and the completed mining-productivity level, or {"unavailable_reason": ...}.
+    science: Mapping[str, Any] | None = None
+    # Per-machine advanced-circuit consumers for c6-v3: [{"unit", "recipe", "count"}] from
+    # products_finished, or {"unavailable_reason": ...}. A machine's counter is lifetime, so only
+    # increases between consecutive samples on the same recipe count as consumption.
+    ac_consumers: Any = None
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "FactorySnapshot":
@@ -268,6 +302,8 @@ class FactorySnapshot:
             production=production,
             providers=providers,
             recipes=recipes,
+            science=value.get("science") if isinstance(value.get("science"), Mapping) else None,
+            ac_consumers=value.get("ac_consumers"),
         )
 
 
@@ -350,19 +386,47 @@ def _starter_ready(snapshot: FactorySnapshot, name: str) -> bool | None:
     return True
 
 
+def starter_blocker(snapshot: FactorySnapshot, name: str) -> str:
+    """First failing starter fact, for evidence only; readiness is still decided by _starter_ready."""
+    starter = snapshot.starters.get(name)
+    if starter is None:
+        return "unobserved"
+    for fact, label in (("present", "absent"), ("healthy", "unhealthy"), ("producing", "not_producing")):
+        if getattr(starter, fact) is False:
+            return label
+    return "ready" if _starter_ready(snapshot, name) else "unknown"
+
+
 def _c1(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, _history: Sequence[FactorySnapshot]) -> CheckpointResult:
-    working = [machine for machine in snapshot.mall_assemblers if machine.working is True]
-    has_recipe = {recipe: any(machine.recipe == recipe for machine in working) for recipe in (IRON_GEAR_RECIPE, COPPER_CABLE_RECIPE)}
-    count_ok: bool | None = len(working) >= 4 if snapshot.mall_assemblers else None
+    observed = snapshot.mall_assemblers
+    working = [machine for machine in observed if machine.working is True]
+    recipes = (IRON_GEAR_RECIPE, COPPER_CABLE_RECIPE)
+    has_recipe = {recipe: any(machine.recipe == recipe for machine in working) for recipe in recipes}
+    count_ok: bool | None = len(working) >= 4 if observed else None
+    # Producer checks read every observed machine: with no working machine a present-but-idle producer is a
+    # measured False, and only an empty survey is unknown. Status cannot change: an observed survey with no
+    # working machine already fails the count check.
     checks = {
         "iron_starter_ready": _starter_ready(snapshot, "iron"),
         "copper_starter_ready": _starter_ready(snapshot, "copper"),
         "stone_starter_ready": _starter_ready(snapshot, "stone"),
         "at_least_four_working_mall_assemblers": count_ok,
-        "iron_gear_producer_working": has_recipe[IRON_GEAR_RECIPE] if working else None,
-        "copper_cable_producer_working": has_recipe[COPPER_CABLE_RECIPE] if working else None,
+        "iron_gear_producer_working": has_recipe[IRON_GEAR_RECIPE] if observed else None,
+        "copper_cable_producer_working": has_recipe[COPPER_CABLE_RECIPE] if observed else None,
     }
-    return _all_checks("C1", "c1-v1", checks, {"working_mall_count": len(working), "recipes": has_recipe})
+    status_counts: dict[str, int] = {}
+    for machine in observed:
+        key = machine.status or "unreported"
+        status_counts[key] = status_counts.get(key, 0) + 1
+    evidence = {
+        "working_mall_count": len(working),
+        "observed_mall_count": len(observed),
+        "recipes": has_recipe,
+        "recipes_present": {recipe: any(machine.recipe == recipe for machine in observed) for recipe in recipes},
+        "mall_status_counts": dict(sorted(status_counts.items())),
+        "starter_blockers": {name: starter_blocker(snapshot, name) for name in ("iron", "copper", "stone")},
+    }
+    return _all_checks("C1", "c1-v1", checks, evidence)
 
 
 def _foundation_ready(snapshot: FactorySnapshot, name: str) -> bool | None:
@@ -394,12 +458,20 @@ def _c2(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, _history: 
         "iron_starter_absent": _starter_absent(snapshot, "iron"),
         "copper_starter_absent": _starter_absent(snapshot, "copper"),
     }
-    return _all_checks("C2", "c2-v1", checks, {})
+    return _all_checks("C2", "c2-v1", checks, _foundation_evidence(snapshot, "iron", "copper"))
 
 
 def _c3(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, _history: Sequence[FactorySnapshot]) -> CheckpointResult:
     checks = {"stone_foundation_ready": _foundation_ready(snapshot, "stone"), "stone_starter_absent": _starter_absent(snapshot, "stone")}
-    return _all_checks("C3", "c3-v1", checks, {})
+    return _all_checks("C3", "c3-v1", checks, _foundation_evidence(snapshot, "stone"))
+
+
+def _foundation_evidence(snapshot: FactorySnapshot, *names: str) -> dict[str, Any]:
+    """Keep the census that produced a receipt, including on a failed check."""
+    return {"tick": snapshot.tick, "foundations": {
+        name: asdict(snapshot.foundations[name]) if name in snapshot.foundations else None
+        for name in names
+    }}
 
 
 def _new_output(snapshot: FactorySnapshot, baseline: FactorySnapshot | None, item: str) -> tuple[bool | None, dict[str, Any]]:
@@ -478,22 +550,146 @@ def _c5(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, history: S
     })
 
 
-def _c6(snapshot: FactorySnapshot, baseline: FactorySnapshot | None, _history: Sequence[FactorySnapshot]) -> CheckpointResult:
-    produced, production_evidence = _new_output(snapshot, baseline, ADVANCED_CIRCUIT_ITEM)
+#: A logistics chest only moves stock; it is not a production consumer. c6-v1 accepted any owned
+#: recipe with advanced circuits among its ingredients, so 83/84 C55 and 56/56 C51 passes were chests.
+C6_LOGISTICS_CHESTS = frozenset({
+    "wooden-chest", "iron-chest", "steel-chest",
+    "passive-provider-chest", "active-provider-chest", "storage-chest",
+    "buffer-chest", "requester-chest",
+})
+
+
+def _consumer_leg(snapshot: FactorySnapshot, baseline: FactorySnapshot | None,
+                  *, exclude: frozenset[str] = frozenset()) -> tuple[bool | None, dict[str, int | None]]:
+    """Whether a non-excluded owned recipe consumed advanced circuits, and each recipe's delta."""
     consumer_checks: dict[str, bool | None] = {}
     consumer_deltas: dict[str, int | None] = {}
     for name, recipe in snapshot.recipes.items():
-        if recipe.owned is not True or ADVANCED_CIRCUIT_ITEM not in recipe.ingredients:
+        if recipe.owned is not True or ADVANCED_CIRCUIT_ITEM not in recipe.ingredients or name in exclude:
             continue
         before = None if baseline is None else baseline.recipes.get(name)
         delta = None if before is None else (None if recipe.progression() is None or before.progression() is None else recipe.progression() - before.progression())
         consumer_deltas[name] = delta
         consumer_checks[name] = None if delta is None else delta > 0
     if not consumer_checks:
-        consumer = None if baseline is None else False
-    else:
-        consumer = True if any(value is True for value in consumer_checks.values()) else (None if any(value is None for value in consumer_checks.values()) else False)
+        return (None if baseline is None else False), consumer_deltas
+    return (True if any(value is True for value in consumer_checks.values())
+            else (None if any(value is None for value in consumer_checks.values()) else False)), consumer_deltas
+
+
+def _c6(snapshot: FactorySnapshot, baseline: FactorySnapshot | None, _history: Sequence[FactorySnapshot]) -> CheckpointResult:
+    produced, production_evidence = _new_output(snapshot, baseline, ADVANCED_CIRCUIT_ITEM)
+    consumer, consumer_deltas = _consumer_leg(snapshot, baseline)
     return _all_checks("C6", "c6-v1", {"advanced_circuits_newly_produced": produced, "advanced_circuit_consumer_output": consumer}, {**production_evidence, "consumer_deltas": consumer_deltas})
+
+
+def _c6_v2(snapshot: FactorySnapshot, baseline: FactorySnapshot | None, _history: Sequence[FactorySnapshot]) -> CheckpointResult:
+    """C6 with a production consumer: logistics chests do not satisfy the consumer leg."""
+    produced, production_evidence = _new_output(snapshot, baseline, ADVANCED_CIRCUIT_ITEM)
+    consumer, consumer_deltas = _consumer_leg(snapshot, baseline, exclude=C6_LOGISTICS_CHESTS)
+    return _all_checks("C6", "c6-v2", {"advanced_circuits_newly_produced": produced, "advanced_circuit_consumer_output": consumer},
+                       {**production_evidence, "consumer_deltas": consumer_deltas, "excluded_logistics_chests": sorted(C6_LOGISTICS_CHESTS)})
+
+
+def _machine_consumption(samples: Sequence[FactorySnapshot]) -> dict[str, int] | None:
+    """Crafts per recipe, counted only between consecutive samples where a machine kept that recipe.
+
+    A mall cell re-recipe'd to a consumer recipe brings its lifetime products_finished with it
+    (C72, C86c, C89 s83343: 0 -> 2294 furnaces with 411 circuits ever made); the first sample on a
+    recipe is therefore a baseline, never consumption.
+    """
+    rows = [s.ac_consumers for s in samples]
+    if not rows or not all(isinstance(r, (list, tuple)) for r in rows):
+        return None
+    per_recipe: dict[str, int] = {}
+    for before, after in zip(rows, rows[1:]):
+        previous = {(m.get("unit"), m.get("recipe")): m.get("count") for m in before if isinstance(m, Mapping)}
+        for machine in after:
+            if not isinstance(machine, Mapping) or machine.get("recipe") in C6_LOGISTICS_CHESTS:
+                continue
+            then, now = previous.get((machine.get("unit"), machine.get("recipe"))), machine.get("count")
+            if isinstance(then, int) and isinstance(now, int) and now > then:
+                per_recipe[machine["recipe"]] = per_recipe.get(machine["recipe"], 0) + now - then
+    return per_recipe
+
+
+def _c6_v3(snapshot: FactorySnapshot, baseline: FactorySnapshot | None, history: Sequence[FactorySnapshot]) -> CheckpointResult:
+    """C6 counted per machine: new advanced circuits, and a non-chest machine crafted with them."""
+    produced, production_evidence = _new_output(snapshot, baseline, ADVANCED_CIRCUIT_ITEM)
+    samples = list(history) if history and history[-1] is snapshot else [*history, snapshot]
+    samples = [s for s in samples if s.ac_consumers is not None]
+    consumed = None if baseline is None or snapshot.ac_consumers is None else _machine_consumption(samples)
+    legacy, legacy_deltas = _consumer_leg(snapshot, baseline, exclude=C6_LOGISTICS_CHESTS)
+    return _all_checks("C6", "c6-v3", {
+        "advanced_circuits_newly_produced": produced,
+        "advanced_circuit_consumer_output": None if consumed is None else any(v > 0 for v in consumed.values()),
+    }, {**production_evidence, "machine_consumption": consumed, "window_samples": len(samples),
+        "c6_v2_consumer_output": legacy, "consumer_deltas": legacy_deltas})
+
+
+C6_V2 = MilestoneDefinition("C6", "advanced_circuit_consumption", "c6-v2", _c6_v2)
+
+
+def _science_inputs(snapshot: FactorySnapshot, baseline: FactorySnapshot | None) -> tuple[Mapping, Mapping] | str:
+    """Both science observations, or the reason C7-C9 must stay unknown."""
+    if baseline is None:
+        return "baseline_missing"
+    for observed in (snapshot.science, baseline.science):
+        if not isinstance(observed, Mapping):
+            return "science_telemetry_missing"
+        if observed.get("unavailable_reason"):
+            return str(observed["unavailable_reason"])
+    # Labs are the only vanilla pack consumer; a recycler would make consumption ambiguous.
+    if snapshot.science.get("recyclers") != 0:
+        return "alternate_pack_consumer_present"
+    return snapshot.science, baseline.science
+
+
+def _pack_delta(current: Mapping, before: Mapping, pack: str, part: str) -> int | None:
+    now = _as_int(((current.get("packs") or {}).get(pack) or {}).get(part))
+    then = _as_int(((before.get("packs") or {}).get(pack) or {}).get(part))
+    return None if now is None or then is None else now - then
+
+
+def _lab_research(checkpoint: str, version: str, pack: str, snapshot: FactorySnapshot,
+                  baseline: FactorySnapshot | None) -> CheckpointResult:
+    """Labs consumed a pack the force also made since the baseline: research, not stored packs."""
+    inputs = _science_inputs(snapshot, baseline)
+    if isinstance(inputs, str):
+        return _all_checks(checkpoint, version, {"labs_consume_newly_made_packs": None}, {"reason": inputs})
+    current, before = inputs
+    produced, consumed = (_pack_delta(current, before, pack, part) for part in ("produced", "consumed"))
+    labs = _as_int(current.get("labs"))
+    return _all_checks(checkpoint, version, {
+        f"{pack}_newly_produced": None if produced is None else produced > 0,
+        f"{pack}_consumed_by_labs": None if consumed is None or labs is None else consumed > 0 and labs > 0,
+    }, {"pack": pack, "production_delta": produced, "consumption_delta": consumed, "labs": labs})
+
+
+def _c7(snapshot: FactorySnapshot, baseline: FactorySnapshot | None, _history: Sequence[FactorySnapshot]) -> CheckpointResult:
+    return _lab_research("C7", "c7-v1", CHEMICAL_SCIENCE_ITEM, snapshot, baseline)
+
+
+def _c8(snapshot: FactorySnapshot, baseline: FactorySnapshot | None, _history: Sequence[FactorySnapshot]) -> CheckpointResult:
+    return _lab_research("C8", "c8-v1", PRODUCTION_SCIENCE_ITEM, snapshot, baseline)
+
+
+def _c9(snapshot: FactorySnapshot, baseline: FactorySnapshot | None, _history: Sequence[FactorySnapshot]) -> CheckpointResult:
+    """mining-productivity-4 completed, with every one of its packs made and consumed in this run."""
+    inputs = _science_inputs(snapshot, baseline)
+    if isinstance(inputs, str):
+        return _all_checks("C9", "c9-v1", {"mining_productivity_level_completed": None}, {"reason": inputs})
+    current, before = inputs
+    level = _as_int(current.get("mining_productivity_completed_level"))
+    deltas = {pack: {part: _pack_delta(current, before, pack, part) for part in ("produced", "consumed")}
+              for pack in MINING_PRODUCTIVITY_PACKS}
+    values = [delta for pack in deltas.values() for delta in pack.values()]
+    earned = None if any(delta is None for delta in values) else all(delta > 0 for delta in values)
+    return _all_checks("C9", "c9-v1", {
+        "mining_productivity_level_completed": None if level is None else level >= MINING_PRODUCTIVITY_LEVEL,
+        "packs_made_and_consumed_this_run": earned,
+    }, {"completed_level": level, "target_level": MINING_PRODUCTIVITY_LEVEL,
+        "baseline_level": _as_int(before.get("mining_productivity_completed_level")), "pack_deltas": deltas})
 
 
 DEFAULT_MILESTONES: tuple[MilestoneDefinition, ...] = (
@@ -503,8 +699,14 @@ DEFAULT_MILESTONES: tuple[MilestoneDefinition, ...] = (
     MilestoneDefinition("C3", "stone_rollout", "c3-v1", _c3),
     MilestoneDefinition("C4", "first_plastic", "c4-v1", _c4),
     MilestoneDefinition("C5", "stable_plastic", "c5-v1", _c5),
-    MilestoneDefinition("C6", "advanced_circuit_consumption", "c6-v1", _c6),
+    MilestoneDefinition("C6", "advanced_circuit_consumption", "c6-v3", _c6_v3),
+    MilestoneDefinition("C7", "chemical_science_research", "c7-v1", _c7),
+    MilestoneDefinition("C8", "production_science_research", "c8-v1", _c8),
+    MilestoneDefinition("C9", "mining_productivity_4", "c9-v1", _c9),
 )
+
+#: Ordered strict checkpoint IDs; CLI choices and reports derive from this, never from a fixed range.
+MILESTONE_IDS: tuple[str, ...] = tuple(item.checkpoint_id for item in DEFAULT_MILESTONES)
 
 
 def default_milestones() -> tuple[MilestoneDefinition, ...]:
