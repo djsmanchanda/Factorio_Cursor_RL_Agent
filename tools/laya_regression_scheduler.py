@@ -255,6 +255,13 @@ def enqueue(repo, registry, spec):
                         'status': 'queued', 'admission_reserved': False})
         if setup and len(jobs) > 12:
             raise ValueError('Disposable setup cap exceeded')
+    # A base plus the cohort's job count must stay inside the TCP port range;
+    # otherwise ports_free() raises OverflowError only at admission time and
+    # every job stays queued with no diagnostic.
+    for field in ('game_port_base', 'rcon_port_base'):
+        base = spec.get(field)
+        if type(base) is not int or base < 1 or base + len(jobs) - 1 > 65535:
+            raise ValueError(f'{field} + planned jobs - 1 must be within 1..65535')
     root = registry / name
     root.mkdir(parents=True, exist_ok=False)
     status = {'name': name, 'updated': time.time(), 'jobs': jobs}

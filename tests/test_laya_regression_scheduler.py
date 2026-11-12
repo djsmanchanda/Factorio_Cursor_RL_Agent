@@ -300,3 +300,13 @@ def test_max_workers_defaults_to_the_pool_size_and_is_bounded():
     for bad in (0, -1, scheduler.MAX_MIXED_WORKERS + 1, '8', 8.0, True):
         with pytest.raises(ValueError):
             scheduler.cohort_workers({'max_workers': bad})
+
+
+def test_enqueue_rejects_port_bases_that_run_past_65535(tmp_path):
+    """A port base above the TCP limit only fails at admission; refuse it at freeze time."""
+    root, registry = frozen_suite(tmp_path)
+    base = json.loads((root/'regression.json').read_text())
+    for field, value in (('game_port_base', 66600), ('rcon_port_base', 67600)):
+        spec = {**base, 'name': f'overflow-{field}', field: value}
+        with pytest.raises(ValueError, match=field):
+            scheduler.enqueue(tmp_path/'repo', registry, spec)
