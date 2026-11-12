@@ -471,10 +471,21 @@ def collect_result(world, job):
             'exact_continuation':False, 'full_run_acceptance_gate':'not_evaluated'}
 
 
-def _publish(root, mutate):
+#: A dispatch that finds no host budget changes nothing, but rewriting the whole
+#: job-status (which carries every job's strict history) on each poll holds the
+#: global admission lock for seconds. Refresh the cohort's liveness at this
+#: interval instead, so the host keeps seeing it without the write storm.
+HEARTBEAT_SECONDS = 240
+WAITING_OUTCOMES = frozenset({'waiting_for_host_budget', 'waiting_for_admission_interval', 'ports_unavailable'})
+
+
+def _publish(root, mutate, min_interval=0.0):
     with lock(root/'status.lock'):
         status = read(root/'job-status.json')
         value = mutate(status)
+        if (isinstance(value, str) and value in WAITING_OUTCOMES
+                and time.time() - float(status.get('updated') or 0.0) < min_interval):
+            return value
         status['updated'] = time.time()
         atomic_json(root/'job-status.json', status)
         return value
@@ -530,7 +541,7 @@ def _dispatch(root, executor):
         return dict(job)
     # All admission records, including this suite, use the host's real lock.
     with lock(root.parent/'.host-admission.lock'):
-        job = _publish(root, reserve)
+        job = _publish(root, reserve, min_interval=HEARTBEAT_SECONDS)
     if isinstance(job, str):
         return job
     code = root/'arms'/job['arm']/'code'

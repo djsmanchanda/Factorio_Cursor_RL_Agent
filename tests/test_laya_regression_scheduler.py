@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -267,3 +268,27 @@ def test_collect_result_preserves_research_receipt(tmp_path):
     result = scheduler.collect_result(tmp_path, {'origin':'C0','strict_target':None})
     assert result['research_acceptance'] == receipt
     assert result['objective_version'] == 'laya-research-consumption-v1'
+
+
+def test_waiting_dispatch_heartbeats_without_rewriting_the_whole_status(tmp_path):
+    """A waiting dispatch must not rewrite the cohort status on every poll.
+
+    The status carries every job's strict history (15 MB in C94); rewriting it
+    under the global admission lock starved other cohorts' admissions.
+    """
+    root = tmp_path/'cohort'
+    root.mkdir()
+    now = time.time()
+    atomic_json(root/'job-status.json', {'updated': now, 'jobs': [{'id': 'a', 'status': 'queued'}]})
+    before = (root/'job-status.json').stat().st_mtime_ns
+    waiting = lambda status: 'waiting_for_host_budget'
+    assert scheduler._publish(root, waiting, min_interval=240) == 'waiting_for_host_budget'
+    assert (root/'job-status.json').stat().st_mtime_ns == before
+    # The heartbeat still refreshes once the interval has elapsed.
+    atomic_json(root/'job-status.json', {'updated': now-241, 'jobs': [{'id': 'a', 'status': 'queued'}]})
+    scheduler._publish(root, waiting, min_interval=240)
+    assert json.loads((root/'job-status.json').read_text())['updated'] > now-241
+    # A transition publishes immediately even inside the interval.
+    atomic_json(root/'job-status.json', {'updated': time.time(), 'jobs': [{'id': 'a', 'status': 'queued'}]})
+    scheduler._publish(root, lambda status: {'id': 'a', 'status': 'preparing'}, min_interval=240)
+    assert json.loads((root/'job-status.json').read_text())['updated'] > now
