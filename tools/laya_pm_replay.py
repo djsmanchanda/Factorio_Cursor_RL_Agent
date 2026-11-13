@@ -104,6 +104,8 @@ def main(argv=None):
     replay.add_argument('--max-steps', type=int, default=40)
     replay.add_argument('--engine-binary', type=Path,
                         default=Path('/home/miniship/.local/share/factorio-rl/runtime/factorio-2.1.24/bin/x64/factorio'))
+    replay.add_argument('--allow-busy-host', action='store_true',
+                        help='skip the host-idle gate (diagnostics only)')
     replay.add_argument('--execute', action='store_true',
                         help='boot the disposable world; without it the plan is validated only')
     report = commands.add_parser('report')
@@ -138,6 +140,12 @@ def main(argv=None):
     if not args.execute:
         print(json.dumps({**plan, 'mode': 'dry_run', 'world_touched': False}, indent=2))
         return 0
+    if not getattr(args, "allow_busy_host", False):
+        try:
+            check_host_idle()
+        except ReplayError as error:
+            print(json.dumps({"kind": "laya-pm-replay-blocked-v1", "blocker": str(error)}, indent=2))
+            return 2
     import subprocess as _sp
     engine = engine_receipt(Path(args.engine_binary) if getattr(args, "engine_binary", None)
                             else ROOT/"factorio_bin_placeholder")
@@ -392,6 +400,34 @@ def sample_consumption(root: Path, report: Path, *, python: str | None = None,
                 process.kill()
                 process.wait()
     return sidecar_consumption(report)
+
+
+_HOST_INFRA = ("dashboard", "scheduler", "cool-recovery", "pm-replay")
+
+
+def busy_cohort_units(listing: str) -> list[str]:
+    """Active laya cohort units from ``systemctl list-units`` output."""
+    busy = []
+    for line in listing.splitlines():
+        fields = line.split()
+        if not fields or not fields[0].startswith("laya-") or not fields[0].endswith(".service"):
+            continue
+        if any(token in fields[0] for token in _HOST_INFRA):
+            continue
+        busy.append(fields[0])
+    return busy
+
+
+def check_host_idle(run=None) -> list[str]:
+    """Refuse to boot a replay while any other Laya cohort unit is active."""
+    import subprocess
+    run = run or (lambda args: subprocess.check_output(args, text=True))
+    listing = run(["systemctl", "--user", "list-units", "laya-*", "--state=active",
+                   "--no-legend", "--plain"])
+    busy = busy_cohort_units(listing)
+    if busy:
+        raise ReplayError("host is not idle for a disposable replay: " + ", ".join(busy))
+    return []
 
 
 def engine_receipt(binary: Path) -> dict:

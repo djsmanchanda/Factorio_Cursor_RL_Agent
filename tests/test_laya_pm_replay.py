@@ -307,3 +307,19 @@ def test_report_combines_provenance_placement_and_consumption(tmp_path):
     assert report["pm_evidence_complete"] is True
     assert report["placement"]["machines"] == 1
     assert report["consumption"]["pm_consumption_verified"] is True
+
+
+def test_host_idle_gate_names_active_cohorts_only():
+    listing = """laya-cohort-dashboard.service loaded active running
+laya-host-scheduler.service loaded active running
+laya-trackb-b-amerge-2x-20261112-p2.service loaded active running
+laya-pm-replay-20261113.service loaded active running
+"""
+    assert replay.busy_cohort_units(listing) == ["laya-trackb-b-amerge-2x-20261112-p2.service"]
+    with pytest.raises(replay.ReplayError, match="not idle"):
+        replay.check_host_idle(lambda args: listing)
+    idle = """laya-cohort-dashboard.service loaded active running
+laya-host-scheduler.service loaded active running
+laya-pm-replay-20261113.service loaded active running
+"""
+    assert replay.check_host_idle(lambda args: idle) == []
