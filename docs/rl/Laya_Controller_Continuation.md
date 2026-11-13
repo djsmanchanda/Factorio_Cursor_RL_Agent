@@ -2,11 +2,18 @@
 
 # Controller continuation and reporting
 
-An experiment completion is one wake source. A controller with an unfinished
-implementation or fixture also needs a bounded continuation wake. Every wake
-must perform the next concrete step, or record the exact blocker and the next
-eligible lifecycle boundary. A plan/status-only turn does not complete an
-implementation item. Keep reports in the owning controller thread; do not send
+Controllers have no hourly or other periodic schedules (user instruction,
+2026-11-14). The supervisor monitors cohorts on its existing schedule and wakes
+the owner after terminal accounting and physical cleanup. A completion also
+wakes any waiting controller whose explicitly queued fixture or replay becomes
+eligible: A's PM replay must receive that wake when B's cohort releases the
+host. A missing controller timer is expected, not a follow-through gap.
+
+The supervisor deduplicates completion/dependency notifications and retains
+material-failure alerts. Controllers do concrete review, implementation,
+verification and successor queueing when woken; they do not create timers to
+poll or continue independently. A plan/status-only turn does not complete an
+implementation item. Keep reports in the owning controller thread; never send
 routine reports to the user's review thread.
 
 For each pending item, retain its next action, evidence path, last substantive
