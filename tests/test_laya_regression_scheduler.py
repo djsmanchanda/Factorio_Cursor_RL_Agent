@@ -372,3 +372,57 @@ def test_max_workers_defaults_to_the_pool_size_and_is_bounded():
     for bad in (0, -1, scheduler.MAX_MIXED_WORKERS + 1, '8', 8.0, True):
         with pytest.raises(ValueError):
             scheduler.cohort_workers({'max_workers': bad})
+
+
+def test_contended_admission_does_not_queue_dispatch_threads(tmp_path):
+    root, _ = frozen_suite(tmp_path)
+    atomic_json(root.parent/'predecessor/job-status.json', {'jobs':[{'status':'completed'}]})
+    with scheduler.lock(root.parent/'.host-admission.lock'):
+        assert scheduler._reserve_job(root) == 'waiting_for_admission_lock'
+    assert all(j['status']=='queued' for j in scheduler.read(root/'job-status.json')['jobs'])
+
+
+def test_adaptive_campaign_exceeds_old_cap_but_obeys_host_budget(tmp_path, monkeypatch):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    root, registry = frozen_suite(tmp_path, arms=tuple(f'arm{i}' for i in range(6)))
+    spec = scheduler.read(root/'regression.json')
+    spec['max_workers'] = 8
+    atomic_json(root/'regression.json', spec)
+    freeze = scheduler.read(root/'freeze.json')
+    freeze['spec_sha256'] = scheduler.sha(root/'regression.json')
+    atomic_json(root/'freeze.json', freeze)
+    atomic_json(registry/'predecessor/job-status.json', {'jobs':[{'status':'completed'}]})
+    release, full = threading.Event(), threading.Event()
+    def budget(*args, **kwargs):
+        jobs = scheduler.read(root/'job-status.json')['jobs']
+        return sum(bool(j.get('admission_reserved')) for j in jobs) < 10
+    def execute(root, executor, spec, freeze, job):
+        if sum(bool(j.get('admission_reserved')) for j in scheduler.read(root/'job-status.json')['jobs']) == 10:
+            full.set()
+        assert release.wait(25)
+        scheduler._update_job(root, job['id'], {'status':'completed','admission_reserved':False,'cleanup_completed':True})
+        return 'completed'
+    # Remove the production spacing only in this bounded concurrency test.
+    original_publish = scheduler._publish
+    def publish(root, mutate, **kwargs):
+        def without_spacing(status):
+            status['last_admit'] = 0
+            return mutate(status)
+        return original_publish(root, without_spacing, **kwargs)
+    monkeypatch.setattr(scheduler, '_publish', publish)
+    monkeypatch.setattr(scheduler, 'may_admit', budget)
+    monkeypatch.setattr(scheduler, 'ports_free', lambda *args: True)
+    monkeypatch.setattr(scheduler, '_execute_job', execute)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        result = pool.submit(scheduler.run_campaign, root, adaptive=True)
+        try:
+            assert full.wait(20), 'host budget of ten was never filled above the frozen cap of eight'
+            jobs = scheduler.read(root/'job-status.json')['jobs']
+            assert sum(bool(j.get('admission_reserved')) for j in jobs) == 10
+            assert sum(j['status']=='queued' for j in jobs) == 2
+        finally:
+            release.set()
+        assert result.result(timeout=20) == 'complete'
+    assert scheduler.read(root/'dispatch-control.json')['frozen_max_workers'] == 8
+    assert scheduler.sha(root/'regression.json') == freeze['spec_sha256']

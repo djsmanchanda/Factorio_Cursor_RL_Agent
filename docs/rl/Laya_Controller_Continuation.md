@@ -48,3 +48,23 @@ New coordinators publish `coordinator_heartbeat` separately from
 does not prove dispatcher liveness or useful progress. Compare job transitions
 and bounded runner evidence as well. Waiting with ongoing progress is not a
 stall. Existing cohorts keep their loaded coordinator until their cleanup.
+
+## Adaptive concurrency (2026-11-13)
+
+The user requested restoration of the host's measured stable-point search.
+Use `tools/laya_checkpoint_regression.py run --adaptive-workers` for new and
+safely resumed coordinators. This explicitly overrides only a frozen dispatch
+pool cap and records `dispatch-control.json`; source, mods, seeds, speed and
+acceptance predicates retain their frozen identities. Report the operational
+boundary when comparing runs. Never force a fixed population of 16.
+
+Admissions now happen once in the coordinator, before submitting execution to
+its pool. Contended host admission returns immediately, so idle worker threads
+cannot form a queue on the shared lock. The host gate still checks every
+reservation and owns temperature, memory, UPS and aggregate-throughput limits.
+
+`tools/laya_dispatch_handoff.py` can pause new admissions and replace a
+coordinator only after every started job has finished and cleaned up, with no
+remaining listeners. It preserves the active cooling request and restores the
+prior automatic search target. A later manual ceiling supersedes the handoff;
+the drain expires after two hours even if replacement cannot complete.

@@ -124,6 +124,8 @@ def report(root):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['enqueue', 'step', 'run', 'cleanup', 'report', 'catalog', 'validate'])
+    parser.add_argument('--adaptive-workers', action='store_true',
+                        help='use host admission instead of the frozen dispatch-pool cap; records an operational override')
     parser.add_argument('--spec', type=Path)
     parser.add_argument('--root', type=Path)
     parser.add_argument('--registry', type=Path, default=ROOT/'data/laya-experiments')
@@ -162,7 +164,7 @@ def main(argv=None):
     elif args.action == 'report':
         print(json.dumps(report(root), indent=2))
     else:
-        state = run_one(root) if args.action == 'step' else run_campaign(root)
+        state = run_one(root) if args.action == 'step' else run_campaign(root, adaptive=args.adaptive_workers)
         print(json.dumps({'time':time.time(),'state':state}),flush=True)
     return 0
 

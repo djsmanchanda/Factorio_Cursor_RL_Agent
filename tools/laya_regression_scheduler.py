@@ -541,7 +541,7 @@ def collect_result(world, job):
 #: global admission lock for seconds. Refresh the cohort's liveness at this
 #: interval instead, so the host keeps seeing it without the write storm.
 HEARTBEAT_SECONDS = 240
-WAITING_OUTCOMES = frozenset({'waiting_for_host_budget', 'waiting_for_admission_interval', 'ports_unavailable'})
+WAITING_OUTCOMES = frozenset({'waiting_for_host_budget', 'waiting_for_admission_interval', 'ports_unavailable', 'waiting_for_admission_lock'})
 
 
 def _publish(root, mutate, min_interval=0.0):
@@ -585,7 +585,7 @@ def recover(root):
             _update_job(root, job['id'], updates)
 
 
-def _dispatch(root, executor):
+def _reserve_job(root):
     spec, freeze = read(root/'regression.json'), read(root/'freeze.json')
     if sha(root/'regression.json') != freeze.get('spec_sha256') or freeze['state'] != 'ready':
         raise ValueError('Suite is not ready or frozen specification changed')
@@ -613,10 +613,22 @@ def _dispatch(root, executor):
         status['last_admit'] = time.time()
         return dict(job)
     # All admission records, including this suite, use the host's real lock.
-    with lock(root.parent/'.host-admission.lock'):
+    # Do not queue a cohort's idle workers on the shared lock.
+    with (root.parent/'.host-admission.lock').open('a') as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return 'waiting_for_admission_lock'
         job = _publish(root, reserve, min_interval=HEARTBEAT_SECONDS)
-    if isinstance(job, str):
-        return job
+    return job if isinstance(job, str) else (spec, freeze, job)
+
+
+def _dispatch(root, executor):
+    reserved = _reserve_job(root)
+    return reserved if isinstance(reserved, str) else _execute_job(root, executor, *reserved)
+
+
+def _execute_job(root, executor, spec, freeze, job):
     code = root/'arms'/job['arm']/'code'
     world = Path(job['world'])
     identity = next(a for a in freeze['arms'] if a['id'] == job['arm'])
@@ -693,29 +705,32 @@ def run_one(root, *, executor=subprocess.run):
         return _dispatch(root, executor)
 
 
-def cohort_workers(spec, workers=MAX_MIXED_WORKERS):
-    """Dispatch threads for one cohort: the spec may ask for fewer.
+def cohort_workers(spec, workers=MAX_MIXED_WORKERS, *, adaptive=False):
+    """Retain the frozen pool limit unless host-adaptive dispatch is requested.
 
-    A cohort that cannot be admitted still holds a thread per dispatch attempt
-    on the global admission lock. Bounding the pool by the cohort's realistic
-    share keeps a waiting cohort from queueing ahead of admitted work.
+    Adaptive mode raises only the execution-pool ceiling. The host admission
+    gate still approves each world before it receives an execution thread.
     """
     value = spec.get('max_workers')
     if value is None:
         return int(workers)
     if type(value) is not int or not 1 <= value <= int(workers):
         raise ValueError(f'max_workers must be an integer in 1..{int(workers)}')
-    return value
+    return int(workers) if adaptive else value
 
 
-def run_campaign(root, *, workers=MAX_MIXED_WORKERS, executor=subprocess.run):
+def run_campaign(root, *, workers=MAX_MIXED_WORKERS, executor=subprocess.run, adaptive=False):
     """Interleave the frozen plan with concurrent, host-admitted attempts."""
     root = root.resolve()
     with lock(root/'coordinator.lock'):
         recover(root)
         spec = read(root/'regression.json')
         validate_port_ranges(spec, len(read(root/'job-status.json')['jobs']))
-        workers = cohort_workers(spec, workers)
+        workers = cohort_workers(spec, workers, adaptive=adaptive)
+        if adaptive:
+            atomic_json(root/'dispatch-control.json', {'mode':'host-adaptive', 'pool_max':workers,
+                'frozen_max_workers':spec.get('max_workers'), 'started':time.time(),
+                'coordinator_pid':os.getpid(), 'scheduler_source_sha256':sha(Path(__file__))})
         with ThreadPoolExecutor(max_workers=workers) as pool:
             active = set()
             heartbeat_at = 0.0
@@ -727,10 +742,14 @@ def run_campaign(root, *, workers=MAX_MIXED_WORKERS, executor=subprocess.run):
                 queued = any(j['status']=='queued' for j in status['jobs'])
                 if not active and not queued:
                     return 'complete'
-                if len(active) < workers and queued:
-                    active.add(pool.submit(_dispatch, root, executor))
-                done, active = wait(active, timeout=1, return_when=FIRST_COMPLETED)
                 idle = False
+                if len(active) < workers and queued:
+                    reserved = _reserve_job(root)
+                    if isinstance(reserved, str):
+                        idle = reserved.startswith('waiting') or reserved == 'ports_unavailable'
+                    else:
+                        active.add(pool.submit(_execute_job, root, executor, *reserved))
+                done, active = wait(active, timeout=1, return_when=FIRST_COMPLETED)
                 for future in done:
                     outcome = future.result()
                     idle |= outcome.startswith('waiting') or outcome == 'ports_unavailable'
