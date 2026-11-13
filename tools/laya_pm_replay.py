@@ -34,12 +34,18 @@ def preflight(bank: Path, generation: str) -> dict:
             'next_gate': 'fresh target-code reload, PM placement receipt, then c6-v3 PM consumption'}
 
 
+def _empty_stream():
+    import io
+    return io.StringIO("")
+
+
 def consumption(world: Path) -> dict:
     manifest = json.loads((world/'manifest.json').read_text())
     if manifest.get('production_authority') is not False:
         raise ValueError('PM replay evidence must come from an explicitly disposable world')
     matches = []
-    with (world/'evidence/clean-decisions.jsonl').open() as stream:
+    journal = world/'evidence/clean-decisions.jsonl'
+    with journal.open() if journal.is_file() else _empty_stream() as stream:
         for line in stream:
             row = json.loads(line)
             if row.get('event') != 'strict_current':
@@ -50,7 +56,14 @@ def consumption(world: Path) -> dict:
                     and (row.get('statuses') or {}).get('C6') is True
                     and type(count) is int and count > 0):
                 matches.append({'tick': row.get('tick'), 'run_id': row.get('run_id'), 'crafts': count})
-    return {'kind': 'laya-pm-consumption-v1', 'world': str(world.resolve()),
+    source = "clean_decisions"
+    if not matches:
+        sidecar = world / "evidence/strict.json"
+        if sidecar.is_file():
+            side = sidecar_consumption(sidecar)
+            matches = side["samples"]
+            source = "strict_sidecar"
+    return {'kind': 'laya-pm-consumption-v1', 'world': str(world.resolve()), 'source': source,
             'pm_consumption_verified': bool(matches), 'samples': matches,
             'evidence_scope': 'diagnostic_replay_only',
             'placement_receipt_required': True, 'automatic_adoption': False}

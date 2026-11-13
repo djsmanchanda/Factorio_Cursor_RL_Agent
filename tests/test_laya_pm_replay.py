@@ -277,3 +277,17 @@ def test_the_journal_streams_before_a_later_failure(tmp_path):
     lines = [json.loads(l) for l in evidence.read_text().splitlines() if l.strip()]
     assert [l["event"] for l in lines] == ["pm_replay_step"]
     assert lines[0]["step"] == 1
+
+
+def test_verify_falls_back_to_the_sidecar_report(tmp_path):
+    world = tmp_path / "world"; world.mkdir()
+    (world / "manifest.json").write_text(json.dumps({"production_authority": False}))
+    (world / "evidence").mkdir()
+    _sidecar_report(world / "evidence/strict.json", [
+        {"tick": 9, "predicate_evidence": {"C6": {"predicate_version": "c6-v3", "status": "passed",
+                                                  "evidence": {"machine_consumption": {"productivity-module": 2}}}},
+         "statuses": {"C6": True}}])
+    result = replay.consumption(world)
+    assert result["source"] == "strict_sidecar"
+    assert result["pm_consumption_verified"] is True
+    assert result["samples"][0]["crafts"] == 2
