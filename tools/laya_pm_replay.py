@@ -132,7 +132,8 @@ def main(argv=None):
         return 0 if result['reload_verified'] else 1
     try:
         plan = plan_replay(args.bank, args.generation, args.root, game_port=args.game_port,
-                           rcon_port=args.rcon_port, deadline=args.deadline, planned=1,
+                           rcon_port=args.rcon_port, deadline=args.deadline,
+                           max_steps=args.max_steps, planned=1,
                            mods_source=args.mods_source)
     except ReplayError as error:
         print(json.dumps({'kind': 'laya-pm-replay-blocked-v1', 'blocker': str(error)}, indent=2))
@@ -316,8 +317,8 @@ def check_mods(bundle: Path, mods_source: Path) -> dict:
 
 
 def plan_replay(bank: Path, generation: str, root: Path, *, game_port: int, rcon_port: int,
-                deadline: float, planned: int = 1, now: float | None = None,
-                mods_source: Path | None = None) -> dict:
+                deadline: float, max_steps: int = 40, planned: int = 1,
+                now: float | None = None, mods_source: Path | None = None) -> dict:
     """Validate every launch precondition without touching a world."""
     import time as _time
     now = _time.time() if now is None else now
@@ -335,9 +336,11 @@ def plan_replay(bank: Path, generation: str, root: Path, *, game_port: int, rcon
         raise ReplayError("game and rcon ports must be distinct")
     if deadline <= now:
         raise ReplayError("replay deadline is not in the future")
+    if max_steps < 1:
+        raise ReplayError("replay needs at least one decision step")
     return {**info, "kind": "laya-pm-replay-plan-v1", "root": str(root),
             "game_port": game_port, "rcon_port": rcon_port,
-            "deadline": deadline, "max_steps": 40,
+            "deadline": deadline, "max_steps": max_steps,
             "next_gate": "fresh C4 reload on candidate code/mods, then PM placement and c6-v3 PM consumption"}
 
 

@@ -38,6 +38,18 @@ def test_plan_rejects_a_port_range_above_the_tcp_limit(tmp_path):
                                game_port=64000, rcon_port=65600, deadline=2 ** 40)
 
 
+def test_plan_echoes_the_requested_step_budget(tmp_path):
+    with patch.object(replay, "preflight", return_value={"kind": "x", "capture_tick": 1}):
+        plan = replay.plan_replay(tmp_path / "bank", "gen", tmp_path / "root",
+                                  game_port=64000, rcon_port=65000, deadline=2 ** 40,
+                                  max_steps=8)
+        assert plan["max_steps"] == 8
+        with pytest.raises(replay.ReplayError, match="at least one"):
+            replay.plan_replay(tmp_path / "bank", "gen", tmp_path / "root",
+                               game_port=64000, rcon_port=65000, deadline=2 ** 40,
+                               max_steps=0)
+
+
 def test_plan_rejects_an_existing_root(tmp_path):
     root = tmp_path / "root"; root.mkdir()
     with patch.object(replay, "preflight", return_value={"kind": "x", "capture_tick": 1}):
