@@ -335,3 +335,34 @@ laya-host-scheduler.service loaded active running
 laya-pm-replay-20261113.service loaded active running
 """
     assert replay.check_host_idle(lambda args: idle) == []
+
+
+def test_the_session_trace_is_journaled_even_when_a_step_raises(tmp_path):
+    class Traced(FakeSession):
+        def __init__(self):
+            super().__init__([{"ok": True, "code": None}], cells_at=99)
+            self.emitted = [["  CELL DELIVERY: moved 8 plastic-bar"], ["  gate refresh"]]
+            self.index = 0
+
+        def run(self, operation, **params):
+            outcome = super().run(operation, **params)
+            if len(self.calls) == 2:
+                raise RuntimeError("runner died")
+            return outcome
+
+    session = Traced()
+
+    def reader():
+        lines = session.emitted[session.index] if session.index < len(session.emitted) else []
+        session.index += 1
+        return list(lines)
+
+    evidence = tmp_path / "e.jsonl"
+    with pytest.raises(RuntimeError):
+        replay.drive(session, evidence, max_steps=3, stock_reader=lambda s: {},
+                     consumption_probe=None, message_reader=reader)
+    rows = [json.loads(line) for line in evidence.read_text().splitlines()]
+    traced = [(row["step"], row["line"]) for row in rows if row["event"] == "pm_replay_message"]
+    assert traced == [(1, "  CELL DELIVERY: moved 8 plastic-bar"), (2, "  gate refresh")]
+    step_row = next(row for row in rows if row["event"] == "pm_replay_step")
+    assert step_row["step"] == 1 and step_row["messages"] == 1

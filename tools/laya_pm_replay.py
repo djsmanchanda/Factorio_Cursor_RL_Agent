@@ -162,12 +162,24 @@ def main(argv=None):
         print(json.dumps({**reload_info, 'prepared': prepared}, indent=2))
         return 3
     from orchestrator.operation_session import DeterministicSession
-    session = DeterministicSession(args.root, emit=lambda line: print(line, flush=True))
+    trail: list[str] = []
+
+    def _emit(line):
+        print(line, flush=True)
+        trail.append(line)
+
+    def _read_trail():
+        lines = list(trail)
+        trail.clear()
+        return lines
+
+    session = DeterministicSession(args.root, emit=_emit)
     evidence = args.root/'evidence/pm-replay.jsonl'
     try:
         summary = drive(session, evidence, max_steps=max(1, args.max_steps),
                         deadline=args.deadline,
                         stock_reader=lambda s: ((s.economics() or {}).get('stock') or {}).get('network') or {},
+                        message_reader=_read_trail,
                         consumption_probe=lambda: sample_consumption(
                             args.root, args.root/'evidence/strict.json'))
     finally:
@@ -207,16 +219,36 @@ def pm_bill(outcome: dict) -> dict:
                       if int(count) > int((details.get("available") or {}).get(name, 0))}}
 
 
+def _drain_messages(reader) -> list[str]:
+    """Session lines emitted since the last step, when a reader was supplied."""
+    if reader is None:
+        return []
+    try:
+        return [str(line) for line in (reader() or [])]
+    except Exception:  # noqa: BLE001 -- a broken trail must not gate the replay
+        return []
+
+
+def _journal_messages(stream, index: int, lines: list[str]) -> None:
+    for line in lines:
+        stream.write(json.dumps({"event": "pm_replay_message", "step": index, "line": line}) + "\n")
+    if lines:
+        stream.flush()
+
+
 def drive(session, evidence_path: Path, *, max_steps: int = 40,
           stock_reader=lambda session: {}, consumption_probe=None,
-          deadline: float | None = None, clock=None) -> dict:
+          deadline: float | None = None, clock=None, message_reader=None) -> dict:
     """Run the existing production_service operation until PM places and consumes.
 
     ``session`` is the real DeterministicSession in live replay, or a fake with
     the same ``run`` / ``economics`` surface in tests. Every step is journaled
     with the selected operation, its typed outcome, the exact bill, stock
-    changes and the PM-cell census. No priority rule is added here: the caller
-    fixes the first demonstrated failure, not an unfunded-bill label.
+    changes and the PM-cell census; when ``message_reader`` supplies the lines
+    the session emitted, they are streamed as ``pm_replay_message`` events so a
+    live trace can show whether a remedy branch (e.g. cell delivery) ran
+    without depending on the unit journal. No priority rule is added here: the
+    caller fixes the first demonstrated failure, not an unfunded-bill label.
     """
     import time as _time
     clock = _time.time if clock is None else clock
@@ -236,8 +268,11 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
                                   minimum_machines=1, upgrade_bootstrap=True,
                                   allow_promotion=False, machine_cap=1)
         except BaseException:
+            _journal_messages(stream, index, _drain_messages(message_reader))
             stream.close()
             raise
+        trail = _drain_messages(message_reader)
+        _journal_messages(stream, index, trail)
         after = dict(stock_reader(session) or {})
         cells = pm_cells(session.economics())
         step = {"step": index, "operation": "production_service", "item": PM_ITEM,
@@ -246,7 +281,8 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
                 "state": outcome.get("state"),
                 "details": outcome.get("details"),
                 "message": outcome.get("message"), "bill": pm_bill(outcome),
-                "stock_delta": stock_delta(before, after), "pm_cells": len(cells),
+                "stock_delta": stock_delta(before, after), "messages": len(trail),
+                "pm_cells": len(cells),
                 "pm_machines": sum(int(cell.get("machines") or 0) for cell in cells)}
         steps.append(step)
         stream.write(json.dumps({"event": "pm_replay_step", **step}) + "\n")
