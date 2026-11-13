@@ -390,15 +390,27 @@ def materialize(bundle: Path, root: Path, *, mods_source: Path, game_port: int, 
     source = bundle / "world.zip"
     if not source.is_file():
         raise ReplayError("checkpoint bundle has no world.zip")
-    root.mkdir(parents=True)
-    shutil.copy2(source, root / "baseline.zip")
+    # run_laya_saved_world.prepare creates the root itself. Stage the save and
+    # the provenance beside it so the receipt exists before the world boots;
+    # move the receipt in only after a successful prepare.
+    staged_save = root.with_name(root.name + ".baseline.zip")
+    staged_provenance = root.with_name(root.name + ".provenance.json")
+    shutil.copy2(source, staged_save)
     if provenance is not None:
-        (root / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
+        staged_provenance.write_text(json.dumps(provenance, indent=2) + "\n")
     command = [sys.executable, str(ROOT / "tools/run_laya_saved_world.py"), "prepare",
-               "--root", str(root), "--source-save", str(root / "baseline.zip"),
+               "--root", str(root), "--source-save", str(staged_save),
                "--mods-source", str(mods_source), "--game-port", str(game_port),
                "--rcon-port", str(rcon_port), "--nice", str(nice)]
-    result = subprocess.run(command, cwd=ROOT, check=True, capture_output=True, text=True)
+    try:
+        result = subprocess.run(command, cwd=ROOT, check=True, capture_output=True, text=True)
+    finally:
+        pass
+    if provenance is not None and staged_provenance.exists():
+        root.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(staged_provenance, root / "provenance.json")
+        staged_provenance.unlink()
+    staged_save.unlink(missing_ok=True)
     return json.loads(result.stdout.strip().splitlines()[-1])
 
 

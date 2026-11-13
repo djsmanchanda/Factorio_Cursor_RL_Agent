@@ -157,7 +157,7 @@ def test_materialize_writes_provenance_before_booting(tmp_path, monkeypatch):
 
     def fake_run(command, **kwargs):
         seen["command"] = command
-        seen["provenance_before_boot"] = (root / "provenance.json").is_file()
+        seen["provenance_before_boot"] = (root.with_name(root.name + ".provenance.json")).is_file()
         class Done:
             stdout = json.dumps({"root": str(root), "status": "prepared", "tick": 514525}) + "\n"
         return Done()
