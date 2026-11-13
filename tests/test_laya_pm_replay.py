@@ -261,3 +261,19 @@ def test_steps_retain_typed_details_for_diagnosis(tmp_path):
     assert step["classification"] == "bug"
     assert step["state"] == "supply_wait"
     assert step["details"]["target_item"] == "advanced-circuit"
+
+
+def test_the_journal_streams_before_a_later_failure(tmp_path):
+    class Boom(FakeSession):
+        def run(self, operation, **params):
+            if self.calls:
+                raise RuntimeError("runner died")
+            return super().run(operation, **params)
+
+    session = Boom([{"ok": True, "code": None}], cells_at=99)
+    evidence = tmp_path / "e.jsonl"
+    with pytest.raises(RuntimeError):
+        replay.drive(session, evidence, max_steps=3, stock_reader=lambda s: {}, consumption_probe=None)
+    lines = [json.loads(l) for l in evidence.read_text().splitlines() if l.strip()]
+    assert [l["event"] for l in lines] == ["pm_replay_step"]
+    assert lines[0]["step"] == 1

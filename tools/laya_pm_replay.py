@@ -176,6 +176,8 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
     """
     import time as _time
     clock = _time.time if clock is None else clock
+    evidence_path.parent.mkdir(parents=True, exist_ok=True)
+    stream = evidence_path.open("a")
     steps = []
     placed = False
     consumed = False
@@ -185,9 +187,13 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
             deadline_reached = True
             break
         before = dict(stock_reader(session) or {})
-        outcome = session.run("production_service", item=PM_ITEM, stock_target=1,
-                              minimum_machines=1, upgrade_bootstrap=True,
-                              allow_promotion=False, machine_cap=1)
+        try:
+            outcome = session.run("production_service", item=PM_ITEM, stock_target=1,
+                                  minimum_machines=1, upgrade_bootstrap=True,
+                                  allow_promotion=False, machine_cap=1)
+        except BaseException:
+            stream.close()
+            raise
         after = dict(stock_reader(session) or {})
         cells = pm_cells(session.economics())
         step = {"step": index, "operation": "production_service", "item": PM_ITEM,
@@ -199,6 +205,8 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
                 "stock_delta": stock_delta(before, after), "pm_cells": len(cells),
                 "pm_machines": sum(int(cell.get("machines") or 0) for cell in cells)}
         steps.append(step)
+        stream.write(json.dumps({"event": "pm_replay_step", **step}) + "\n")
+        stream.flush()
         if cells and not placed:
             placed = True
             receipt_path = evidence_path.parent / "pm-placement.json"
@@ -230,12 +238,11 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
                "placement_receipt": str(evidence_path.parent / "pm-placement.json") if placed else None,
                "pm_evidence_complete": bool(placed and consumed),
                "evidence_scope": "diagnostic_replay_only", "automatic_adoption": False}
-    evidence_path.parent.mkdir(parents=True, exist_ok=True)
-    with evidence_path.open("a") as stream:
-        for step in steps:
-            stream.write(json.dumps({"event": "pm_replay_step", **step}) + "\n")
+    try:
         stream.write(json.dumps({"event": "pm_replay_summary", **{k: v for k, v in summary.items()
                                                                   if k != "steps"}}) + "\n")
+    finally:
+        stream.close()
     return summary
 
 
