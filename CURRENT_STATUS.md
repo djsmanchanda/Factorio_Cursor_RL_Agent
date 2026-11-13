@@ -417,3 +417,8 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - What: Headline `...b-p2` finished 120/120 completed with all cleanup; the drain-safe adaptive handoff ran the tail without a restart. Launched `aa2-p2` (60), `aown-p2` (30) and `amerge-p2` (30) with the isolated coordinator and `--adaptive-workers`, no keepalive.
 - Evidence: all port ranges end <= 65535 and same-protocol bind checks were free; aown admitted 2 running + 1 preparing at launch, the others queue for host capacity. C95b 120/120 complete; C96d cancelled (12/120).
 - Lifecycle: ladder continues to the b1 pair after these three; corrected reporter for the reads.
+
+## [2026-11-13 07:40 IST] Headline cohort review: B-away C4 32/60 and 26/60; next is B-home
+- What: Reviewed `laya-trackb-b-aworld-ownmods-2x-20261112b-p2` (120/120). Strict C4 32/60 (b) and 26/60 (b_rep); paired p=0.238, inside the A/A spread; exposure dominates (above-median 28/30 vs 22/30, below 4/30 vs 4/30). C5 reached by the same runs as C4 and held 0; C2 0 (A-shaped), C3 null/unknown 60; C6-C9 0 with no recipe evidence. All stalled; classification unmapped (91 unknown/29 genuine_failure). 91 legacy tool_error counters are unconfirmed; 3 real SavedWorldError `item_shortfall:transport-belt` on s84047/s84052/s84055 (arm b).
+- Evidence: corrected reporter on the registry; A home (C95b) C4 40/60 and 44/60 with one recipe-evidenced C6. Not like-for-like: B is away from home.
+- Lifecycle: queue entry set complete; next cohort is the frozen B-home pair (`home-p2` 120 jobs, `home-merged...b-p2` 30) after the acceptance triple; then a B-side improvement arm targeting run length and the belt-abort. No adoption claim.
