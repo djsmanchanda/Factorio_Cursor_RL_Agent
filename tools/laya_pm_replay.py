@@ -123,7 +123,8 @@ def main(argv=None):
         summary = drive(session, evidence, max_steps=max(1, args.max_steps),
                         deadline=args.deadline,
                         stock_reader=lambda s: ((s.economics() or {}).get('stock') or {}).get('network') or {},
-                        consumption_probe=lambda: consumption(args.root))
+                        consumption_probe=lambda: sample_consumption(
+                            args.root, args.root/'evidence/strict.json'))
     finally:
         session.close()
     print(json.dumps({**summary, 'prepared': prepared, 'reload': reload_info}, indent=2))
@@ -269,6 +270,39 @@ def plan_replay(bank: Path, generation: str, root: Path, *, game_port: int, rcon
             "game_port": game_port, "rcon_port": rcon_port,
             "deadline": deadline, "max_steps": 40,
             "next_gate": "fresh C4 reload on candidate code/mods, then PM placement and c6-v3 PM consumption"}
+
+
+def sidecar_consumption(path: Path) -> dict:
+    """Read PM consumption from a strict-sidecar JSON report.
+
+    The replay session does not write runner evidence, so the sidecar is the
+    measurement source: a c6-v3 pass is accepted only when the same sample
+    carries positive machine_consumption["productivity-module"].
+    """
+    data = json.loads(path.read_text())
+    matches = []
+    for row in data.get("strict_current") or []:
+        if not isinstance(row, dict):
+            continue
+        c6 = (row.get("predicate_evidence") or {}).get("C6") or {}
+        evidence = c6.get("evidence") or {}
+        count = (evidence.get("machine_consumption") or {}).get("productivity-module")
+        passed = c6.get("status") == "passed" or (row.get("statuses") or {}).get("C6") is True
+        if c6.get("predicate_version") == "c6-v3" and passed and type(count) is int and count > 0:
+            matches.append({"tick": row.get("tick"), "run_id": row.get("run_id"), "crafts": count})
+    return {"kind": "laya-pm-sidecar-consumption-v1", "report": str(path),
+            "pm_consumption_verified": bool(matches), "samples": matches,
+            "evidence_scope": "diagnostic_replay_only", "placement_receipt_required": True}
+
+
+def sample_consumption(root: Path, report: Path, *, python: str | None = None) -> dict:
+    """Run the strict sidecar once over the disposable world and parse its report."""
+    import subprocess
+    import sys as _sys
+    command = [python or _sys.executable, str(ROOT / "tools/laya_strict_sidecar.py"),
+               "--world-root", str(root), "--out", str(report)]
+    subprocess.run(command, cwd=ROOT, check=True, capture_output=True, text=True, timeout=900)
+    return sidecar_consumption(report)
 
 
 def engine_receipt(binary: Path) -> dict:

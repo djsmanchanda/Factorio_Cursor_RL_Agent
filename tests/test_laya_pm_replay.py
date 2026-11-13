@@ -170,3 +170,35 @@ def test_materialize_writes_provenance_before_booting(tmp_path, monkeypatch):
     assert "--game-port" in seen["command"] and "64800" in seen["command"]
     assert receipt["tick"] == 514525
     assert json.loads((root / "provenance.json").read_text())["kind"] == "provenance"
+
+
+def _sidecar_report(path, rows):
+    path.write_text(json.dumps({"strict_current": rows}))
+
+
+def test_sidecar_pm_consumption_requires_c6_v3_and_positive_crafts(tmp_path):
+    report = tmp_path / "strict.json"
+    _sidecar_report(report, [
+        {"tick": 1, "predicate_evidence": {"C6": {"predicate_version": "c6-v3", "status": "passed",
+                                                  "evidence": {"machine_consumption": {"productivity-module": 3}}}},
+         "statuses": {"C6": True}},
+        {"tick": 2, "predicate_evidence": {"C6": {"predicate_version": "c6-v3", "status": "failed",
+                                                  "evidence": {"machine_consumption": {}}}},
+         "statuses": {"C6": False}},
+    ])
+    result = replay.sidecar_consumption(report)
+    assert result["pm_consumption_verified"] is True
+    assert result["samples"][0]["crafts"] == 3
+
+
+def test_a_bulk_inserter_c6_or_c6_v2_is_not_pm_consumption(tmp_path):
+    report = tmp_path / "strict.json"
+    _sidecar_report(report, [
+        {"tick": 1, "predicate_evidence": {"C6": {"predicate_version": "c6-v2", "status": "passed",
+                                                  "evidence": {"consumer_deltas": {"bulk-inserter": 2}}}},
+         "statuses": {"C6": True}},
+        {"tick": 2, "predicate_evidence": {"C6": {"predicate_version": "c6-v3", "status": "passed",
+                                                  "evidence": {"machine_consumption": {"bulk-inserter": 2}}}},
+         "statuses": {"C6": True}},
+    ])
+    assert replay.sidecar_consumption(report)["pm_consumption_verified"] is False
