@@ -28,3 +28,48 @@ def test_an_empty_requester_inside_a_fed_network_keeps_the_gate_path(monkeypatch
 def test_a_stocked_requester_needs_no_delivery(monkeypatch):
     assert _run(monkeypatch, held={"plastic-bar": 2, "copper-cable": 4,
                                    "electronic-circuit": 2}, local=None) is False
+
+
+def _loan(monkeypatch):
+    from orchestrator.mall_bootstrap import MallBootstrapLoan, MallBootstrapStep
+    loan = MallBootstrapLoan(
+        original_recipe="iron-gear-wheel", target_item="assembling-machine-2",
+        target_count=1, side="left", requester_position=(39.5, 32.5),
+        current_recipe="electronic-circuit", step_recipe="electronic-circuit",
+        step_target_count=3, step_baseline_finished=862,
+        step_required_crafts=2, step_minimum_crafts=2)
+    stock = {"electronic-circuit": 1, "copper-cable": 4, "iron-plate": 956}
+    monkeypatch.setattr(builder, "_LOAN_GATE_REFRESH_ATTEMPTS", {})
+    monkeypatch.setattr(builder, "_bootstrap_loan_stock", lambda *_a: (dict(stock), dict(stock)))
+    monkeypatch.setattr(builder, "next_bootstrap_step",
+                        lambda *_a, **_k: MallBootstrapStep("electronic-circuit", 3, 2))
+    monkeypatch.setattr(builder.live_base, "progress_counters",
+                        lambda *_a, **_k: {(36.5, 32.5): 862000})
+    monkeypatch.setattr(builder.live_base, "entity_status_name",
+                        lambda *_a: "disabled_by_control_behavior")
+    monkeypatch.setattr(builder, "_bootstrap_loan_persisted_step", lambda *_a: None)
+    monkeypatch.setattr(builder, "consume_wait", lambda *_a: None)
+    monkeypatch.setattr(builder.time, "sleep", lambda *_a: None)
+    monkeypatch.setattr(builder, "_submit", lambda *_a, **_k: None)
+    return loan
+
+
+def test_a_fed_but_unreachable_cell_delivers_without_spending_refresh_budget(monkeypatch):
+    loan = _loan(monkeypatch)
+    monkeypatch.setattr(builder, "_loan_step_cell_fed", lambda *_a, **_k: True)
+    monkeypatch.setattr(builder, "_loan_step_requester_unreachable", lambda *_a, **_k: True)
+    monkeypatch.setattr(builder, "_deliver_cell_ingredients", lambda *_a, **_k: True)
+    messages = []
+    remedy = builder._submit_bootstrap_loan(object(), object(), "nauvis", "player", loan, messages.append)
+    assert "delivery" in remedy.lower()
+    assert any("CELL DELIVERY" in message for message in messages)
+    assert builder._LOAN_GATE_REFRESH_ATTEMPTS == {}
+
+
+def test_a_failed_delivery_keeps_the_refresh_path(monkeypatch):
+    loan = _loan(monkeypatch)
+    monkeypatch.setattr(builder, "_loan_step_cell_fed", lambda *_a, **_k: True)
+    monkeypatch.setattr(builder, "_loan_step_requester_unreachable", lambda *_a, **_k: True)
+    monkeypatch.setattr(builder, "_deliver_cell_ingredients", lambda *_a, **_k: False)
+    builder._submit_bootstrap_loan(object(), object(), "nauvis", "player", loan, lambda *_: None)
+    assert list(builder._LOAN_GATE_REFRESH_ATTEMPTS.values()) == [1]
