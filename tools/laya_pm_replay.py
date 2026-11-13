@@ -195,7 +195,21 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
                 "stock_delta": stock_delta(before, after), "pm_cells": len(cells),
                 "pm_machines": sum(int(cell.get("machines") or 0) for cell in cells)}
         steps.append(step)
-        placed = placed or bool(cells)
+        if cells and not placed:
+            placed = True
+            receipt_path = evidence_path.parent / "pm-placement.json"
+            receipt_path.parent.mkdir(parents=True, exist_ok=True)
+            receipt_path.write_text(json.dumps({
+                "kind": "laya-pm-placement-v1", "step": index,
+                "pm_item": PM_ITEM,
+                "cells": [{"recipe": cell.get("recipe"), "machines": cell.get("machines"),
+                           "network": cell.get("network"), "position": cell.get("position")}
+                          for cell in cells],
+                "machines": sum(int(cell.get("machines") or 0) for cell in cells),
+                "stock_delta": step["stock_delta"], "bill": step["bill"],
+                "evidence_scope": "diagnostic_replay_only",
+                "placement_receipt": True}, indent=2) + "\n")
+            step["placement_receipt"] = str(receipt_path)
         if placed and consumption_probe is not None:
             probe = consumption_probe() or {}
             consumed = bool(probe.get("pm_consumption_verified"))
@@ -209,6 +223,7 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
     summary = {"kind": "laya-pm-replay-v1", "steps": steps,
                "deadline_reached": deadline_reached,
                "pm_placed": placed, "pm_consumption_verified": consumed,
+               "placement_receipt": str(evidence_path.parent / "pm-placement.json") if placed else None,
                "pm_evidence_complete": bool(placed and consumed),
                "evidence_scope": "diagnostic_replay_only", "automatic_adoption": False}
     evidence_path.parent.mkdir(parents=True, exist_ok=True)

@@ -202,3 +202,16 @@ def test_a_bulk_inserter_c6_or_c6_v2_is_not_pm_consumption(tmp_path):
          "statuses": {"C6": True}},
     ])
     assert replay.sidecar_consumption(report)["pm_consumption_verified"] is False
+
+
+def test_placement_writes_a_receipt_once(tmp_path):
+    session = FakeSession([{"ok": True, "code": None}], cells_at=2)
+    summary = replay.drive(session, tmp_path / "evidence" / "e.jsonl", max_steps=4,
+                           stock_reader=lambda s: {}, consumption_probe=lambda: {"pm_consumption_verified": False})
+    receipt_path = tmp_path / "evidence" / "pm-placement.json"
+    assert summary["pm_placed"] is True
+    assert receipt_path.is_file()
+    receipt = json.loads(receipt_path.read_text())
+    assert receipt["placement_receipt"] is True
+    assert receipt["machines"] == 1
+    assert receipt["step"] == 2
