@@ -111,7 +111,8 @@ def main(argv=None):
                                     args.mods_source, engine, revision, planned=1)
     prepared = materialize(args.bank/'generations'/args.generation, args.root,
                            mods_source=args.mods_source, game_port=args.game_port,
-                           rcon_port=args.rcon_port, provenance=provenance)
+                           rcon_port=args.rcon_port, provenance=provenance,
+                           runtime_root=args.engine_binary.resolve().parents[2])
     reload_info = reload_receipt(args.root, int(plan['capture_tick']))
     if not reload_info['reload_verified']:
         print(json.dumps({**reload_info, 'prepared': prepared}, indent=2))
@@ -377,7 +378,8 @@ def provenance_receipt(plan: dict, bundle: Path, mods_source: Path, engine: dict
 
 
 def materialize(bundle: Path, root: Path, *, mods_source: Path, game_port: int, rcon_port: int,
-                nice: int = 10, provenance: dict | None = None) -> dict:
+                nice: int = 10, provenance: dict | None = None,
+                runtime_root: Path | None = None) -> dict:
     """Copy the C4 world to a fresh disposable root and boot it via the saved-world interface.
 
     This is the only live step in the driver and is called by the CLI only with
@@ -403,7 +405,11 @@ def materialize(bundle: Path, root: Path, *, mods_source: Path, game_port: int, 
                "--mods-source", str(mods_source), "--game-port", str(game_port),
                "--rcon-port", str(rcon_port), "--nice", str(nice)]
     try:
-        result = subprocess.run(command, cwd=ROOT, check=True, capture_output=True, text=True)
+        import os as _os
+        env = dict(_os.environ)
+        if runtime_root is not None:
+            env["LAYA_CHECKPOINT_RUNTIME_ROOT"] = str(runtime_root)
+        result = subprocess.run(command, cwd=ROOT, check=True, capture_output=True, text=True, env=env)
     finally:
         pass
     if provenance is not None and staged_provenance.exists():

@@ -158,6 +158,7 @@ def test_materialize_writes_provenance_before_booting(tmp_path, monkeypatch):
     def fake_run(command, **kwargs):
         seen["command"] = command
         seen["provenance_before_boot"] = (root.with_name(root.name + ".provenance.json")).is_file()
+        seen["env"] = kwargs.get("env") or {}
         class Done:
             stdout = json.dumps({"root": str(root), "status": "prepared", "tick": 514525}) + "\n"
         return Done()
@@ -169,6 +170,7 @@ def test_materialize_writes_provenance_before_booting(tmp_path, monkeypatch):
     assert seen["provenance_before_boot"] is True
     assert "--game-port" in seen["command"] and "64800" in seen["command"]
     assert receipt["tick"] == 514525
+    assert "LAYA_CHECKPOINT_RUNTIME_ROOT" not in seen["env"]  # only set when runtime_root is passed
     assert json.loads((root / "provenance.json").read_text())["kind"] == "provenance"
 
 
