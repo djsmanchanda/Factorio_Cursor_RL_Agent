@@ -192,6 +192,9 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
         cells = pm_cells(session.economics())
         step = {"step": index, "operation": "production_service", "item": PM_ITEM,
                 "outcome": outcome.get("code"), "ok": outcome.get("ok"),
+                "classification": outcome.get("classification"),
+                "state": outcome.get("state"),
+                "details": outcome.get("details"),
                 "message": outcome.get("message"), "bill": pm_bill(outcome),
                 "stock_delta": stock_delta(before, after), "pm_cells": len(cells),
                 "pm_machines": sum(int(cell.get("machines") or 0) for cell in cells)}

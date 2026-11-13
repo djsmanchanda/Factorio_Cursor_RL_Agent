@@ -247,3 +247,17 @@ def test_sample_consumption_waits_for_a_report_then_terminates(tmp_path, monkeyp
     result = replay.sample_consumption(tmp_path, report, timeout=5, poll=0.01)
     assert result["pm_consumption_verified"] is True
     assert seen["proc"].terminated is True
+
+
+def test_steps_retain_typed_details_for_diagnosis(tmp_path):
+    rich = short()
+    rich["classification"] = "bug"
+    rich["state"] = "supply_wait"
+    rich["details"]["target_item"] = "advanced-circuit"
+    session = FakeSession([rich], cells_at=99)
+    summary = replay.drive(session, tmp_path / "e.jsonl", max_steps=1,
+                           stock_reader=lambda s: {}, consumption_probe=None)
+    step = summary["steps"][0]
+    assert step["classification"] == "bug"
+    assert step["state"] == "supply_wait"
+    assert step["details"]["target_item"] == "advanced-circuit"
