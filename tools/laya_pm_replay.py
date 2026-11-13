@@ -69,6 +69,22 @@ def consumption(world: Path) -> dict:
             'placement_receipt_required': True, 'automatic_adoption': False}
 
 
+def replay_report(world: Path) -> dict:
+    """One summary for the controller: provenance, placement and PM consumption."""
+    provenance = json.loads((world / "provenance.json").read_text()) if (world / "provenance.json").is_file() else None
+    placement_path = world / "evidence/pm-placement.json"
+    placement = json.loads(placement_path.read_text()) if placement_path.is_file() else None
+    try:
+        use = consumption(world)
+    except (OSError, ValueError) as error:
+        use = {"pm_consumption_verified": False, "error": str(error)}
+    complete = bool(placement and use.get("pm_consumption_verified"))
+    return {"kind": "laya-pm-replay-report-v1", "world": str(world.resolve()),
+            "provenance": provenance, "placement": placement, "consumption": use,
+            "pm_evidence_complete": complete,
+            "evidence_scope": "diagnostic_replay_only", "automatic_adoption": False}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='action', required=True)
@@ -90,6 +106,8 @@ def main(argv=None):
                         default=Path('/home/miniship/.local/share/factorio-rl/runtime/factorio-2.1.24/bin/x64/factorio'))
     replay.add_argument('--execute', action='store_true',
                         help='boot the disposable world; without it the plan is validated only')
+    report = commands.add_parser('report')
+    report.add_argument('--world', type=Path, required=True)
     reload_cmd = commands.add_parser('reload')
     reload_cmd.add_argument('--root', type=Path, required=True)
     reload_cmd.add_argument('--expected-tick', type=int, required=True)
@@ -102,6 +120,10 @@ def main(argv=None):
         result = consumption(args.world)
         print(json.dumps(result, indent=2))
         return 0 if result['pm_consumption_verified'] else 1
+    if args.action == 'report':
+        result = replay_report(args.world)
+        print(json.dumps(result, indent=2))
+        return 0 if result["pm_evidence_complete"] else 4
     if args.action == 'reload':
         result = reload_receipt(args.root, args.expected_tick)
         print(json.dumps(result, indent=2))

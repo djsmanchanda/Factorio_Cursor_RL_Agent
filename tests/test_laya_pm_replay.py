@@ -291,3 +291,19 @@ def test_verify_falls_back_to_the_sidecar_report(tmp_path):
     assert result["source"] == "strict_sidecar"
     assert result["pm_consumption_verified"] is True
     assert result["samples"][0]["crafts"] == 2
+
+
+def test_report_combines_provenance_placement_and_consumption(tmp_path):
+    world = tmp_path / "world"; world.mkdir()
+    (world / "manifest.json").write_text(json.dumps({"production_authority": False}))
+    (world / "provenance.json").write_text(json.dumps({"kind": "provenance"}))
+    (world / "evidence").mkdir()
+    (world / "evidence/pm-placement.json").write_text(json.dumps({"placement_receipt": True, "machines": 1}))
+    _sidecar_report(world / "evidence/strict.json", [
+        {"tick": 9, "predicate_evidence": {"C6": {"predicate_version": "c6-v3", "status": "passed",
+                                                  "evidence": {"machine_consumption": {"productivity-module": 2}}}},
+         "statuses": {"C6": True}}])
+    report = replay.replay_report(world)
+    assert report["pm_evidence_complete"] is True
+    assert report["placement"]["machines"] == 1
+    assert report["consumption"]["pm_consumption_verified"] is True
