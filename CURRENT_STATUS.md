@@ -412,3 +412,8 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - What: All six frozen Track B cohorts had port bases above 65535, so ports_free raised OverflowError at admission and nothing could start. Superseded them and refroze with valid bases: headline `...b-p2` 63000/62000, `aa2-p2` 63200/62200, `aown-p2` 63300/62300, `amerge-p2` 63400/62400, `home-p2` 63800/62800, `home-merged...b-p2` 64100/63100. Restarted the headline and its keepalive.
 - Evidence: first job `C0-b-s84000` started 19:24:35 on game 63000 / rcon 62000 with a bootstrapped server; the unit survives and publishes normally (heartbeat patch), which it could not do before. Freezer validation patch ready on branch `trackb/harness-heartbeat-20261112` (`e49c37cc`, delta `docs/handoffs/2026-11-12-port-validation-delta.patch`, 15/15 tests) but not applied because the root scheduler now has Controller A's per-arm research_target change; A asked to ack.
 - Lifecycle: headline running; acceptance cells frozen with valid ports and gated behind it via the hourly ladder.
+
+## [2026-11-13 07:20 IST] Headline complete; acceptance batch launched
+- What: Headline `...b-p2` finished 120/120 completed with all cleanup; the drain-safe adaptive handoff ran the tail without a restart. Launched `aa2-p2` (60), `aown-p2` (30) and `amerge-p2` (30) with the isolated coordinator and `--adaptive-workers`, no keepalive.
+- Evidence: all port ranges end <= 65535 and same-protocol bind checks were free; aown admitted 2 running + 1 preparing at launch, the others queue for host capacity. C95b 120/120 complete; C96d cancelled (12/120).
+- Lifecycle: ladder continues to the b1 pair after these three; corrected reporter for the reads.
