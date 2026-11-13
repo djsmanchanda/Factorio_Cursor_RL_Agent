@@ -215,3 +215,33 @@ def test_placement_writes_a_receipt_once(tmp_path):
     assert receipt["placement_receipt"] is True
     assert receipt["machines"] == 1
     assert receipt["step"] == 2
+
+
+def test_sample_consumption_waits_for_a_report_then_terminates(tmp_path, monkeypatch):
+    import subprocess
+    report = tmp_path / "strict.json"
+
+    class FakeProc:
+        def __init__(self, *a, **k):
+            _sidecar_report(report, [{"tick": 1, "predicate_evidence": {"C6": {
+                "predicate_version": "c6-v3", "status": "passed",
+                "evidence": {"machine_consumption": {"productivity-module": 4}}}},
+                "statuses": {"C6": True}}])
+            self.terminated = False
+        def poll(self):
+            return None
+        def terminate(self):
+            self.terminated = True
+        def wait(self, timeout=None):
+            return 0
+        def kill(self):
+            pass
+
+    seen = {}
+    def fake_popen(*a, **k):
+        seen["proc"] = FakeProc()
+        return seen["proc"]
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    result = replay.sample_consumption(tmp_path, report, timeout=5, poll=0.01)
+    assert result["pm_consumption_verified"] is True
+    assert seen["proc"].terminated is True

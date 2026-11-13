@@ -310,13 +310,41 @@ def sidecar_consumption(path: Path) -> dict:
             "evidence_scope": "diagnostic_replay_only", "placement_receipt_required": True}
 
 
-def sample_consumption(root: Path, report: Path, *, python: str | None = None) -> dict:
-    """Run the strict sidecar once over the disposable world and parse its report."""
+def sample_consumption(root: Path, report: Path, *, python: str | None = None,
+                       timeout: float = 180.0, poll: float = 1.0) -> dict:
+    """Take one strict sample, then stop the sidecar.
+
+    laya_strict_sidecar runs until SIGTERM by design, so the replay starts it,
+    waits for the first atomically written report, terminates it and parses that
+    report. Never leave a sampling child behind.
+    """
     import subprocess
     import sys as _sys
+    import time as _time
     command = [python or _sys.executable, str(ROOT / "tools/laya_strict_sidecar.py"),
                "--world-root", str(root), "--out", str(report)]
-    subprocess.run(command, cwd=ROOT, check=True, capture_output=True, text=True, timeout=900)
+    process = subprocess.Popen(command, cwd=ROOT, stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, text=True)
+    try:
+        deadline = _time.monotonic() + timeout
+        while _time.monotonic() < deadline:
+            if process.poll() is not None:
+                break
+            try:
+                data = json.loads(report.read_text())
+            except (OSError, ValueError):
+                data = None
+            if data and data.get("strict_current"):
+                break
+            _time.sleep(poll)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
     return sidecar_consumption(report)
 
 
