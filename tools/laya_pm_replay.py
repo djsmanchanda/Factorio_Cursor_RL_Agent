@@ -73,6 +73,8 @@ def main(argv=None):
     replay.add_argument('--rcon-port', type=int, required=True)
     replay.add_argument('--deadline', type=float, required=True, help='epoch seconds; the world stops by then')
     replay.add_argument('--max-steps', type=int, default=40)
+    replay.add_argument('--engine-binary', type=Path,
+                        default=Path('/home/miniship/.local/share/factorio-rl/runtime/factorio-2.1.24/bin/x64/factorio'))
     replay.add_argument('--execute', action='store_true',
                         help='boot the disposable world; without it the plan is validated only')
     reload_cmd = commands.add_parser('reload')
@@ -101,9 +103,15 @@ def main(argv=None):
     if not args.execute:
         print(json.dumps({**plan, 'mode': 'dry_run', 'world_touched': False}, indent=2))
         return 0
+    import subprocess as _sp
+    engine = engine_receipt(Path(args.engine_binary) if getattr(args, "engine_binary", None)
+                            else ROOT/"factorio_bin_placeholder")
+    revision = _sp.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    provenance = provenance_receipt(plan, args.bank/'generations'/args.generation,
+                                    args.mods_source, engine, revision, planned=1)
     prepared = materialize(args.bank/'generations'/args.generation, args.root,
                            mods_source=args.mods_source, game_port=args.game_port,
-                           rcon_port=args.rcon_port)
+                           rcon_port=args.rcon_port, provenance=provenance)
     reload_info = reload_receipt(args.root, int(plan['capture_tick']))
     if not reload_info['reload_verified']:
         print(json.dumps({**reload_info, 'prepared': prepared}, indent=2))
@@ -254,8 +262,36 @@ def plan_replay(bank: Path, generation: str, root: Path, *, game_port: int, rcon
             "next_gate": "fresh C4 reload on candidate code/mods, then PM placement and c6-v3 PM consumption"}
 
 
+def engine_receipt(binary: Path) -> dict:
+    """Hash the engine binary and record its self-reported version."""
+    import hashlib
+    import subprocess
+    if not binary.is_file():
+        raise ReplayError("engine binary is missing")
+    try:
+        version = subprocess.check_output([str(binary), "--version"], text=True, timeout=20).strip().splitlines()[0]
+    except (OSError, subprocess.SubprocessError, IndexError):
+        version = "unknown"
+    return {"binary": str(binary), "sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+            "version": version}
+
+
+def provenance_receipt(plan: dict, bundle: Path, mods_source: Path, engine: dict,
+                       code_revision: str, planned: int = 1) -> dict:
+    """Immutable provenance written inside the disposable world before boot."""
+    return {"kind": "laya-pm-replay-provenance-v1",
+            "bundle": str(bundle.resolve()), "bundle_sha256": plan.get("world_sha256"),
+            "generation": plan.get("generation"), "capture_tick": plan.get("capture_tick"),
+            "acceptance_eligible": plan.get("acceptance_eligible"),
+            "evidence_scope": "diagnostic_replay_only",
+            "mods_source": str(mods_source.resolve()), "mods_verified": True,
+            "engine": engine, "code_revision": code_revision,
+            "game_port": plan.get("game_port"), "rcon_port": plan.get("rcon_port"),
+            "deadline": plan.get("deadline"), "planned_attempts": planned}
+
+
 def materialize(bundle: Path, root: Path, *, mods_source: Path, game_port: int, rcon_port: int,
-                nice: int = 10) -> dict:
+                nice: int = 10, provenance: dict | None = None) -> dict:
     """Copy the C4 world to a fresh disposable root and boot it via the saved-world interface.
 
     This is the only live step in the driver and is called by the CLI only with
@@ -270,6 +306,8 @@ def materialize(bundle: Path, root: Path, *, mods_source: Path, game_port: int, 
         raise ReplayError("checkpoint bundle has no world.zip")
     root.mkdir(parents=True)
     shutil.copy2(source, root / "baseline.zip")
+    if provenance is not None:
+        (root / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
     command = [sys.executable, str(ROOT / "tools/run_laya_saved_world.py"), "prepare",
                "--root", str(root), "--source-save", str(root / "baseline.zip"),
                "--mods-source", str(mods_source), "--game-port", str(game_port),

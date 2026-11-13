@@ -106,3 +106,26 @@ def test_a_missing_mod_file_blocks_the_replay(tmp_path):
     (mods / "a/control.lua").unlink()
     with pytest.raises(replay.ReplayError, match="missing"):
         replay.check_mods(bundle, mods)
+
+
+def test_provenance_receipt_is_immutable_and_plans_one_attempt(tmp_path):
+    plan = {"generation": "g", "capture_tick": 514525, "world_sha256": "a" * 64,
+            "acceptance_eligible": False, "game_port": 64800, "rcon_port": 63800,
+            "deadline": 2 ** 40}
+    receipt = replay.provenance_receipt(plan, tmp_path / "bundle", tmp_path / "mods",
+                                        {"binary": "f", "sha256": "b" * 64, "version": "v"},
+                                        "c" * 40, planned=1)
+    assert receipt["kind"] == "laya-pm-replay-provenance-v1"
+    assert receipt["evidence_scope"] == "diagnostic_replay_only"
+    assert receipt["planned_attempts"] == 1
+    assert receipt["capture_tick"] == 514525
+    assert receipt["mods_verified"] is True
+
+
+def test_engine_receipt_hashes_and_reports_the_binary(tmp_path):
+    binary = tmp_path / "factorio"
+    binary.write_text("#!/bin/sh\necho 'Factorio 2.1.24 (test)'\n")
+    binary.chmod(0o755)
+    receipt = replay.engine_receipt(binary)
+    assert receipt["version"].startswith("Factorio 2.1.24")
+    assert len(receipt["sha256"]) == 64
