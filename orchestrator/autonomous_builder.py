@@ -5981,6 +5981,51 @@ def _loan_step_cell_fed(
     return True
 
 
+def _loan_step_requester_unreachable(
+    client: RconClient, surface: str, force: str,
+    loan: MallBootstrapLoan, step,
+) -> bool:
+    """Whether the loan cell's own requester is short and its network cannot feed it.
+
+    C92/C4 replay: the requester held 0 plastic/cable/circuits while the base
+    held 1,693 cable and 74 circuits, and ``network_item_count`` at the
+    requester read none. Spendable stock elsewhere is not deliverable there;
+    the gate-refresh loop then raised mall_loan_gate_mismatch. This predicate
+    names that state so the caller can use the existing cell delivery instead
+    of counting a configuration refresh that cannot help.
+    """
+    try:
+        spec = LINE_RECIPES.get(step.recipe, {})
+        needs = [
+            (str(item), float(amount))
+            for item, amount in zip(
+                spec.get("ingredients", ()), spec.get("amounts", ()),
+                strict=True,
+            )
+        ]
+    except Exception:
+        return False
+    if not needs:
+        return False
+    try:
+        held = live_base.chest_contents(client, surface, loan.requester_position)
+    except Exception:
+        return False
+    short = [(item, amount) for item, amount in needs if float(held.get(item, 0)) < amount]
+    if not short:
+        return False
+    for item, _amount in short:
+        try:
+            local = live_base.network_item_count(
+                client, surface, force, loan.requester_position, item,
+            )
+        except Exception:
+            return False
+        if local is not None and local > 0:
+            return False
+    return True
+
+
 def _bootstrap_loan_products_finished(
     client: RconClient, surface: str, loan: MallBootstrapLoan,
 ) -> int | None:
@@ -6821,6 +6866,25 @@ def _submit_bootstrap_loan(
                         f"{step.recipe} ingredients for the "
                         f"{loan.target_item} seed"
                     )
+                if _loan_step_requester_unreachable(client, surface, force, loan, step):
+                    try:
+                        delivered = _deliver_cell_ingredients(
+                            client, bridge, surface, force, step.recipe,
+                            loan.requester_position, emit,
+                            requester_position=loan.requester_position,
+                        )
+                    except Exception:  # noqa: BLE001 -- delivery is opportunistic
+                        delivered = False
+                    if delivered:
+                        emit(
+                            f"  MALL BOOTSTRAP LOAN CELL DELIVERY: {step.recipe} "
+                            f"at {loan.requester_position} was empty outside any "
+                            "network; moved stock into its requester"
+                        )
+                        return (
+                            f"borrowed {loan.original_recipe} cell waits for "
+                            f"{step.recipe} delivery into its requester"
+                        )
                 refresh_key = (
                     live_loan_group, step.recipe, step.target_count,
                 )
