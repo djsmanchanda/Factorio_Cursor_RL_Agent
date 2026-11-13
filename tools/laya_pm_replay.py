@@ -74,13 +74,17 @@ def replay_report(world: Path) -> dict:
     provenance = json.loads((world / "provenance.json").read_text()) if (world / "provenance.json").is_file() else None
     placement_path = world / "evidence/pm-placement.json"
     placement = json.loads(placement_path.read_text()) if placement_path.is_file() else None
+    reload_path = world / "provenance-reload.json"
+    reload_info = json.loads(reload_path.read_text()) if reload_path.is_file() else None
     try:
         use = consumption(world)
     except (OSError, ValueError) as error:
         use = {"pm_consumption_verified": False, "error": str(error)}
     complete = bool(placement and use.get("pm_consumption_verified"))
     return {"kind": "laya-pm-replay-report-v1", "world": str(world.resolve()),
-            "provenance": provenance, "placement": placement, "consumption": use,
+            "provenance": provenance, "reload": reload_info,
+            "reload_verified": bool(reload_info and reload_info.get("reload_verified")),
+            "placement": placement, "consumption": use,
             "pm_evidence_complete": complete,
             "evidence_scope": "diagnostic_replay_only", "automatic_adoption": False}
 
@@ -161,6 +165,10 @@ def main(argv=None):
     if not reload_info['reload_verified']:
         print(json.dumps({**reload_info, 'prepared': prepared}, indent=2))
         return 3
+    # Persist the reload leg now: it reads live state and cannot be recomputed
+    # after the disposable server is closed.
+    (args.root/'provenance-reload.json').write_text(
+        json.dumps({**reload_info, 'prepared': prepared}, indent=2) + "\n")
     from orchestrator.operation_session import DeterministicSession
     trail: list[str] = []
 
@@ -352,6 +360,20 @@ def check_mods(bundle: Path, mods_source: Path) -> dict:
             "mods_verified": True}
 
 
+def port_is_free(port: int, kind: str = "game") -> bool:
+    """Whether Factorio could bind this port right now (UDP game, TCP rcon)."""
+    import socket
+    sock = socket.socket(socket.AF_INET,
+                         socket.SOCK_DGRAM if kind == "game" else socket.SOCK_STREAM)
+    try:
+        sock.bind(("0.0.0.0", port))
+    except OSError:
+        return False
+    finally:
+        sock.close()
+    return True
+
+
 def plan_replay(bank: Path, generation: str, root: Path, *, game_port: int, rcon_port: int,
                 deadline: float, max_steps: int = 40, planned: int = 1,
                 now: float | None = None, mods_source: Path | None = None) -> dict:
@@ -370,6 +392,10 @@ def plan_replay(bank: Path, generation: str, root: Path, *, game_port: int, rcon
             raise ReplayError(f"{name} port range {base}..{base + planned - 1} is outside 1..65535")
     if game_port == rcon_port:
         raise ReplayError("game and rcon ports must be distinct")
+    if not port_is_free(game_port, "game"):
+        raise ReplayError(f"game port {game_port} is already in use")
+    if not port_is_free(rcon_port, "rcon"):
+        raise ReplayError(f"rcon port {rcon_port} is already in use")
     if deadline <= now:
         raise ReplayError("replay deadline is not in the future")
     if max_steps < 1:

@@ -39,7 +39,8 @@ def test_plan_rejects_a_port_range_above_the_tcp_limit(tmp_path):
 
 
 def test_plan_echoes_the_requested_step_budget(tmp_path):
-    with patch.object(replay, "preflight", return_value={"kind": "x", "capture_tick": 1}):
+    with patch.object(replay, "preflight", return_value={"kind": "x", "capture_tick": 1}), \
+         patch.object(replay, "port_is_free", return_value=True):
         plan = replay.plan_replay(tmp_path / "bank", "gen", tmp_path / "root",
                                   game_port=64000, rcon_port=65000, deadline=2 ** 40,
                                   max_steps=8)
@@ -48,6 +49,32 @@ def test_plan_echoes_the_requested_step_budget(tmp_path):
             replay.plan_replay(tmp_path / "bank", "gen", tmp_path / "root",
                                game_port=64000, rcon_port=65000, deadline=2 ** 40,
                                max_steps=0)
+
+
+def test_plan_refuses_a_port_already_in_use(tmp_path):
+    with patch.object(replay, "preflight", return_value={"kind": "x", "capture_tick": 1}), \
+         patch.object(replay, "port_is_free", side_effect=lambda port, kind: kind != "game"):
+        with pytest.raises(replay.ReplayError, match="game port 64000 is already in use"):
+            replay.plan_replay(tmp_path / "bank", "gen", tmp_path / "root",
+                               game_port=64000, rcon_port=65000, deadline=2 ** 40)
+    with patch.object(replay, "preflight", return_value={"kind": "x", "capture_tick": 1}), \
+         patch.object(replay, "port_is_free", side_effect=lambda port, kind: kind != "rcon"):
+        with pytest.raises(replay.ReplayError, match="rcon port 65000 is already in use"):
+            replay.plan_replay(tmp_path / "bank", "gen", tmp_path / "root",
+                               game_port=64000, rcon_port=65000, deadline=2 ** 40)
+
+
+def test_port_is_free_sees_a_real_listener():
+    import socket
+    for kind, sock_type in (("game", socket.SOCK_DGRAM), ("rcon", socket.SOCK_STREAM)):
+        held = socket.socket(socket.AF_INET, sock_type)
+        try:
+            held.bind(("0.0.0.0", 0))
+            if sock_type == socket.SOCK_STREAM:
+                held.listen(1)
+            assert replay.port_is_free(held.getsockname()[1], kind) is False
+        finally:
+            held.close()
 
 
 def test_plan_rejects_an_existing_root(tmp_path):
@@ -315,10 +342,15 @@ def test_report_combines_provenance_placement_and_consumption(tmp_path):
         {"tick": 9, "predicate_evidence": {"C6": {"predicate_version": "c6-v3", "status": "passed",
                                                   "evidence": {"machine_consumption": {"productivity-module": 2}}}},
          "statuses": {"C6": True}}])
+    (world / "provenance-reload.json").write_text(json.dumps(
+        {"kind": "laya-pm-reload-v1", "expected_tick": 514525,
+         "observed_tick": 514525, "reload_verified": True}))
     report = replay.replay_report(world)
     assert report["pm_evidence_complete"] is True
     assert report["placement"]["machines"] == 1
     assert report["consumption"]["pm_consumption_verified"] is True
+    assert report["reload_verified"] is True
+    assert report["reload"]["observed_tick"] == 514525
 
 
 def test_host_idle_gate_names_active_cohorts_only():
