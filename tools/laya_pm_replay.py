@@ -121,6 +121,7 @@ def main(argv=None):
     evidence = args.root/'evidence/pm-replay.jsonl'
     try:
         summary = drive(session, evidence, max_steps=max(1, args.max_steps),
+                        deadline=args.deadline,
                         stock_reader=lambda s: ((s.economics() or {}).get('stock') or {}).get('network') or {},
                         consumption_probe=lambda: consumption(args.root))
     finally:
@@ -161,7 +162,8 @@ def pm_bill(outcome: dict) -> dict:
 
 
 def drive(session, evidence_path: Path, *, max_steps: int = 40,
-          stock_reader=lambda session: {}, consumption_probe=None) -> dict:
+          stock_reader=lambda session: {}, consumption_probe=None,
+          deadline: float | None = None, clock=None) -> dict:
     """Run the existing production_service operation until PM places and consumes.
 
     ``session`` is the real DeterministicSession in live replay, or a fake with
@@ -170,10 +172,16 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
     changes and the PM-cell census. No priority rule is added here: the caller
     fixes the first demonstrated failure, not an unfunded-bill label.
     """
+    import time as _time
+    clock = _time.time if clock is None else clock
     steps = []
     placed = False
     consumed = False
+    deadline_reached = False
     for index in range(1, max_steps + 1):
+        if deadline is not None and clock() >= deadline:
+            deadline_reached = True
+            break
         before = dict(stock_reader(session) or {})
         outcome = session.run("production_service", item=PM_ITEM, stock_target=1,
                               minimum_machines=1, upgrade_bootstrap=True,
@@ -198,6 +206,7 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
             # let the next step re-observe. The journal records every attempt.
             continue
     summary = {"kind": "laya-pm-replay-v1", "steps": steps,
+               "deadline_reached": deadline_reached,
                "pm_placed": placed, "pm_consumption_verified": consumed,
                "pm_evidence_complete": bool(placed and consumed),
                "evidence_scope": "diagnostic_replay_only", "automatic_adoption": False}

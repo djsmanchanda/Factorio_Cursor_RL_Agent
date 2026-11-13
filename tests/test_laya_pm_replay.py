@@ -129,3 +129,44 @@ def test_engine_receipt_hashes_and_reports_the_binary(tmp_path):
     receipt = replay.engine_receipt(binary)
     assert receipt["version"].startswith("Factorio 2.1.24")
     assert len(receipt["sha256"]) == 64
+
+
+def test_drive_stops_at_the_deadline_without_running_a_step(tmp_path):
+    calls = {"n": 0}
+
+    class Counter(FakeSession):
+        def run(self, operation, **params):
+            calls["n"] += 1
+            return super().run(operation, **params)
+
+    session = Counter([{"ok": True, "code": None}], cells_at=99)
+    summary = replay.drive(session, tmp_path / "e.jsonl", max_steps=10,
+                           stock_reader=lambda s: {}, consumption_probe=None,
+                           deadline=100.0, clock=lambda: 101.0)
+    assert summary["deadline_reached"] is True
+    assert summary["steps"] == []
+    assert calls["n"] == 0
+
+
+def test_materialize_writes_provenance_before_booting(tmp_path, monkeypatch):
+    import subprocess
+    bundle = tmp_path / "bundle"; bundle.mkdir()
+    (bundle / "world.zip").write_bytes(b"world")
+    root = tmp_path / "root"
+    seen = {}
+
+    def fake_run(command, **kwargs):
+        seen["command"] = command
+        seen["provenance_before_boot"] = (root / "provenance.json").is_file()
+        class Done:
+            stdout = json.dumps({"root": str(root), "status": "prepared", "tick": 514525}) + "\n"
+        return Done()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    receipt = replay.materialize(bundle, root, mods_source=tmp_path / "mods",
+                                 game_port=64800, rcon_port=63800,
+                                 provenance={"kind": "provenance"})
+    assert seen["provenance_before_boot"] is True
+    assert "--game-port" in seen["command"] and "64800" in seen["command"]
+    assert receipt["tick"] == 514525
+    assert json.loads((root / "provenance.json").read_text())["kind"] == "provenance"
