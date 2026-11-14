@@ -204,6 +204,8 @@ def power_variants(candidate: Mapping, facts: Mapping) -> list[dict]:
         variant = internal_power_variant(candidate, facts)
         return [variant] if variant else []
     power, build = split_build(candidate)
+    if not power and not any(a['entity'] in POWERED for a in build):
+        return [dict(candidate)]  # Belt-only maintenance needs no electrical layout.
     grid = [p for p in facts["poles"] if p["generated"]]
     targets = [a for a in build if a["entity"] in POWERED]
     if not grid or not targets:

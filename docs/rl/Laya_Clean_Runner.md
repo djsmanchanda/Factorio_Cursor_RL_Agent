@@ -180,7 +180,7 @@ rate rises over time with decisions in parallel on different aspects.
 `tools/laya_oil_options.py` adds two option families that follow the "Oil facts" survey above (`Settings.oil_options`, default on). `tools/run_laya_clean.py` injects it as `run(..., oil_options=...)`, because `training/` may not import `orchestrator.stage_*` (`training/isolation.py`). It is an adapter only: it reads the disposable world through the deterministic read-only functions and drives the pure planners `plan_reach_step`, `plan_power_bridge` (`orchestrator/stage_services.py`) and `plan_oil_cell_intent` (`orchestrator/stage_chemical.py`), answering each survey they name, then rerunning them. The families read nothing and the menu is unchanged unless `facts["oil_field"]` is found and plastic, petroleum gas or crude oil is an unmet board need.
 
 - **`reach`** (need: the most upstream unmet item of crude oil, petroleum gas, plastic): while the oil-field centre, then any planned cell action, lies outside construction coverage (Euclidean distance from a powered port, within its construction radius), one candidate is the next `plan_reach_step` hop: its power bridge and roboport as ghosts. It avoids the planned cell footprint. Pending ghosts are blocked as `reach_in_flight`, missing ports as `reach_no_source`, and geometry failures as `reach_plan_failed`.
-- **`oil`** (need: plastic first): keep the planner's packet/phase boundaries. Release funded sections as materials appear, with outstanding ghost work bounded by the network's construction robots, their availability, observed roboport charge and logistic-bot availability. Future packet shortages remain mall demand, but do not reserve the entire district bill. Inspect exact entity and ghost positions before each release; persist the opening geometry and power bridge in `evidence/opening-oil-intent.json` across restarts. Keep the complete future footprint reserved for reach planning. Existing missing-source, coverage, landfill, legality, funding and power checks still apply.
+- **`oil`** (need: plastic first): keep the planner's packet/phase boundaries. Release funded sections as materials appear, with outstanding ghost work bounded by the network's construction robots, their availability, observed roboport charge and logistic-bot availability. Infrastructure-only packets (belts, power or pipes) are real work: require a nonempty validated bill, without requiring a chemical plant in every packet. Future packet shortages remain mall demand, but do not reserve the entire district bill. Inspect exact entity and ghost positions before each release; persist the opening geometry and power bridge in `evidence/opening-oil-intent.json` across restarts. Keep the complete future footprint reserved for reach planning. Existing missing-source, coverage, landfill, legality, funding and power checks still apply.
 - Each candidate declares `scope_bounds` (action bounds plus 4 tiles) and carries its own power, so it receives no relay variants. The land check reads all phases. A candidate that overlaps a footprint Laya has already submitted is blocked as `already_submitted`. `reach` may cross ore, smelting and oil land like `expand`, and the mall stays reserved. Validation is the usual live check: `item_shortfall`/`missing` become stock needs, so roboports, poles, pumpjacks, refineries, chemical plants, pipes and other short items fund the mall. `pipe-to-ground`, `offshore-pump` and `substation` were added to the clean runner's exported recipes; only enabled recipes appear.
 - **Facts and journal:** `oil_facts` on each option record (reach: target, `hops_left`, `distance_to_oil`, bill; oil: packets, bill, `cell_draw_kw` nominal estimate, `power_capacity_verified: false`, bridge). `menu["oil_options"]` (facts, offered scopes and hops, blocked reasons) is written to the decision record and to `observation_digest.oil_options`. A failed read is blocked as `oil_options_error`, never as a failed decision.
 
@@ -230,3 +230,30 @@ and output taps constrain the route. Both belt interface headings and the 90-til
 required. A collision in a machine body still requires another site; an impossible detour remains
 blocked. All returned belt actions are ghosts, and the original land, coverage, power and live
 placement/funding validators still run. No pole is removed or reconfigured by this operation.
+
+## Owned line expansion — 2026-11-14
+
+For six-furnace ore-fed lines, each six-furnace extension includes enough new
+drills to bring the owned surviving drill count to the target furnace count.
+Extend the paired collector away from its haul head, preserving the existing
+haul. Every drill still passes exact mining-area, mixed-resource, collision,
+land, power and coverage checks; reject incomplete supply packets. An older
+twelve-furnace/eight-drill receipt gets a four-drill repair and terminal
+collection before further furnace expansion. This is a construction contract;
+counts alone do not establish measured throughput.
+
+Collection follows the approved refinery's terminal interface. Shared
+requester-fed electric steel lines grow along the existing belts, retaining
+the requester. Once such a line exists, offer its extensions rather than
+independent additional steel banks. Never guess ownership: reconstruct older
+shared-line metadata only by matching the complete recorded deterministic plan.
+
+Build nonconflicting additions and the new collection endpoint first. Persist
+exact retirement references and remaining placements in the transaction. After
+observing construction, recheck unit identities while paused and order shared
+bot recovery of obsolete owned equipment. Leave passive providers until fewer
+than five actual inventory slots remain occupied; unknown occupancy retains
+them. Only after observing actual removal may Laya select the funded ghost
+packet on the cleared tiles. Keep the product constructing through cutover,
+including across restart. Repair/cutover packets may contain only infrastructure
+and remain eligible after the product's phase target is satisfied.

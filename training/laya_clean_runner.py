@@ -119,7 +119,7 @@ MAX_CONSECUTIVE_FAILURES = 3
 # The entity each family exists to add; live checks credit entities already placed.
 PRIMARY_ENTITY = {"expand": "roboport", "mine": "electric-mining-drill", "smelt": "electric-furnace",
                   "starter": "electric-mining-drill", "line": "electric-furnace",
-                  "assemble": "assembling-machine-1", "reach": "roboport", "oil": "chemical-plant",
+                  "assemble": "assembling-machine-1", "reach": "roboport",
                   "coal-feed": "electric-mining-drill", "power-hookup": "big-electric-pole"}
 # Recipes the clean runner needs exported in addition to the shared helper's list.
 RECIPE_LIST_END = '"chemical-plant","oil-refinery","pumpjack"}'
@@ -472,7 +472,7 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
                  external_check: Callable[[Mapping, Mapping], tuple[str | None, Mapping | None]] | None = None,
                  external_shortfalls: Mapping[str, int] | None = None,
                  oil_offer: Mapping | None = None, lifecycle_candidates: Sequence[Mapping] = (),
-                 constructing_products: Sequence[str] = ()) -> dict:
+                 constructing_products: Sequence[str] = (), managed_products: Sequence[str] = ()) -> dict:
     """Group legal options by the unmet need they serve.
 
     Each sampled build is offered with its power alternatives (training/laya_power.py).
@@ -518,7 +518,8 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     proposed += mall_cell_candidates(facts, site_plan, unmet, obstacles=obstacles)
     proposed += list(lifecycle_candidates)
     steel = next((n for n in board['needs'] if n['item'] == 'steel-plate'), None)
-    if site_plan and "steel-plate" in unmet and 'steel-plate' not in constructing_products and steel \
+    if site_plan and "steel-plate" in unmet and 'steel-plate' not in constructing_products \
+            and 'steel-plate' not in managed_products and steel \
             and (steel.get('capacity') is None or steel['capacity'] < steel['required']):
         proposed += [c for c in zone_smelt_candidates(facts, site_plan, {"steel-plate"})
                      if clear_of(list(actions(c["plan"])), obstacles)]
@@ -760,7 +761,8 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
                 if result is None:
                     continue
                 reason = result.get("reason")
-                primary = PRIMARY_ENTITY.get(candidate["family"])
+                primary = (None if candidate.get('maintenance') and (candidate.get('repair_of') or candidate.get('cutover_of'))
+                           else PRIMARY_ENTITY.get(candidate["family"]))
                 if not reason and (not result.get("bill") or (primary and primary not in result["bill"])):
                     reason = "no_op"  # Its main entity already exists; only power pieces would be new.
                 if not reason and need == "coverage":
@@ -1503,7 +1505,8 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                                 additional_observations=demand_observations, external_check=external_check,
                                 external_shortfalls=unfunded, oil_offer=oil_offer,
                                 lifecycle_candidates=lifecycle.get("candidates", ()),
-                                constructing_products=lifecycle.get("constructing_products", ()))
+                                constructing_products=lifecycle.get("constructing_products", ()),
+                                managed_products=lifecycle.get("managed_products", ()))
             lap("menu")
             # Items the checks found short become small demand targets on the next board.
             stock_demand = {item: settings.stock_rate for item in menu["shortfalls"]}

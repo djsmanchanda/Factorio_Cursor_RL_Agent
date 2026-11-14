@@ -7,10 +7,10 @@ from pathlib import Path
 
 from orchestrator.recoverable_retirement import retire_entities_via_bots
 from orchestrator.laya_operations import sha256_hash
-from planners.smelter_block import generate_refinery_extension_plan
-from planners.resource_layouts import collector_drill_infill
+from planners.smelter_block import generate_managed_refinery_plan, generate_requester_smelting_line
+from planners.owned_line_extension import paired_collector_extension, split_owned_line_change, requester_line_identity
 from training.laya_layout_stream import atomic_json
-from training.laya_lines import clear_of
+from training.laya_lines import clear_of, output_taps
 from training.laya_power import POLES, world_obstacles
 from training.laya_receipts import receipts
 from training.laya_saved_world import target_key
@@ -24,6 +24,10 @@ def owned_targets(receipt):
         return {}
     return {target_key(t): t['unit_number'] for t in (receipt.get('construction') or {}).get('targets', ())
             if t.get('state') == 'built' and type(t.get('unit_number')) is int}
+
+
+def actions(candidate):
+    return [a for phase in candidate['plan']['phases'] for a in phase['actions']]
 
 
 class GeometryMaintenance:
@@ -104,14 +108,90 @@ class GeometryMaintenance:
                     retired.add(target_key(a))
                     recovered.append(target_key(a))
                 atomic_json(path, ledger)
+        finishes, pending = self._transitions(adapter, rows, raw, ledger, retired, emit)
         atomic_json(path, ledger)
-        proposals = self._growth(rows, facts, retired, {p.name for p, r in raw.items() if owned_targets(r)})
+        proposals = finishes + self._growth(rows, facts, retired, {p.name for p, r in raw.items() if owned_targets(r)},
+                                            {r['candidate'].get('line_owner') for p, r in rows if p.name in pending})
         return {'candidates': proposals, 'retired': recovered,
-                'constructing_products': sorted({r['candidate']['product'] for _, r in rows
+                'managed_products': sorted({r['candidate']['product'] for _, r in rows
+                                            if r['candidate'].get('shared_feed')}),
+                'constructing_products': sorted({r['candidate']['product'] for p, r in rows
                                                 if (r['candidate']['family'] == 'line' or r['candidate'].get('shared_feed'))
-                                                and r['status'] != 'observed'})}
+                                                and (r['status'] != 'observed' or p.name in pending)})}
 
-    def _growth(self, rows, facts, retired, owners):
+    def _transitions(self, adapter, rows, raw, ledger, retired, emit):
+        """Resume exact owned cutovers from receipts; removals never enter execute()."""
+        proposals, pending = [], set()
+        done = ledger.setdefault('transitions_done', [])
+        by_name = {p.name: r for p, r in raw.items()}
+        for p, r in rows:
+            c = r['candidate']
+            transition = c.get('line_transition')
+            if not transition or p.name in done:
+                continue
+            pending.add(p.name)
+            full = by_name.get(p.name)
+            if not full or not owned_targets(full):
+                continue
+            refs = transition['retire']
+            expected = [(ref, owned_targets(by_name.get(ref['owner'], {})).get(target_key(ref['action'])))
+                        for ref in refs]
+            if any(unit is None for _, unit in expected):
+                continue
+            # Recheck prepared construction and old unit identities in the same paused interval.
+            with adapter.clock_paused() if hasattr(adapter, 'clock_paused') else nullcontext():
+                adapter._check_instance()
+                ready = adapter.query(inspect=c['plan'])['targets']
+                owned = owned_targets(full)
+                if not ready or any(t.get('state') != 'built' or owned.get(target_key(t)) != t.get('unit_number')
+                                    for t in ready):
+                    continue
+                targets = adapter.query(inspect={'phases': [{'actions': [ref['action'] for ref in refs]}]})['targets'] if refs else []
+                observed = {target_key(t): t for t in targets}
+                if any(target_key(ref['action']) not in observed or
+                       (observed[target_key(ref['action'])].get('state') == 'built' and
+                        observed[target_key(ref['action'])].get('unit_number') != unit) or
+                       (observed[target_key(ref['action'])].get('state') != 'built' and
+                        target_key(ref['action']) not in retired) for ref, unit in expected):
+                    continue
+                remove = []
+                for ref, unit in expected:
+                    a = ref['action']
+                    key = target_key(a)
+                    if key in retired:
+                        continue
+                    slots = observed[key].get('inventory_slots_used')
+                    if a['entity'] == 'passive-provider-chest' and not (type(slots) is int and 0 <= slots < 5):
+                        continue
+                    remove.append((ref, unit))
+                if remove:
+                    plan = {'phases': [{'actions': [{'action_type': 'remove_entity', 'entity': ref['action']['entity'],
+                                                    'position': ref['action']['position']} for ref, _unit in remove]}]}
+                    retire_entities_via_bots(adapter.bridge, adapter.bridge, adapter.surface, adapter.force,
+                                            plan, p.stem, emit, wait=False)
+                    for ref, unit in remove:
+                        key = target_key(ref['action'])
+                        ledger['retired'].append({'owner': ref['owner'], 'key': list(key), 'unit_number': unit})
+                        retired.add(key)
+                    atomic_json(Path(adapter.root, 'evidence', 'geometry-maintenance.json'), ledger)
+                    continue  # Observe actual bot removal on a later pass.
+                if any(t.get('state') != 'missing' for t in targets):
+                    continue
+            finish = transition['finish']
+            completions = [other for _, other in rows if other['candidate'].get('cutover_of') == p.name]
+            if not finish or any(other['status'] == 'observed' and owned_targets(by_name.get(op.name, {}))
+                                 for op, other in rows if other['candidate'].get('cutover_of') == p.name):
+                done.append(p.name)
+                pending.remove(p.name)
+            elif not completions:
+                candidate = self._candidate(c, finish, c['line_owner'], repair=True)
+                candidate.pop('repair_of')
+                candidate.update(cutover_of=p.name, target_furnaces=c['target_furnaces'],
+                                 summary='Finish owned line after observed bot cutover')
+                proposals.append(candidate)
+        return proposals, pending
+
+    def _growth(self, rows, facts, retired, owners, pending=()):
         proposals = []
         obstacles = world_obstacles(facts)
         submitted = [a for _, r in rows for phase in r['candidate']['plan']['phases'] for a in phase['actions']
@@ -121,65 +201,77 @@ class GeometryMaintenance:
             c = r['candidate']
             if p.name not in owners:
                 continue
-            if c['family'] != 'line' or c.get('growth_of') or c.get('repair_of'):
+            if (c['family'] != 'line' and not c.get('shared_feed')) or any(c.get(k) for k in ('growth_of', 'repair_of', 'cutover_of')):
                 continue
-            extensions = [other for _, other in rows if other['candidate'].get('growth_of') == p.name]
-            original = [a for phase in c['plan']['phases'] for a in phase['actions']]
-            drills = [a for a in original if a['entity'] == 'electric-mining-drill']
-            if not drills:
+            extensions = [(op, other) for op, other in rows if other['candidate'].get('line_owner') == p.name
+                          or other['candidate'].get('growth_of') == p.name or other['candidate'].get('repair_of') == p.name]
+            if p.name in pending or any(other['status'] != 'observed' or op.name not in owners for op, other in extensions):
                 continue
-            ys = sorted({a['position']['y'] for a in drills})
-            if len(ys) != 2:
+            if r['status'] != 'observed':
                 continue
-            belt_y = (ys[0] + ys[1]) / 2
-            collector = [a for a in original if a['entity'] == 'transport-belt' and a['position']['y'] == belt_y
-                         and a.get('direction') in ('east', 'west')]
-            # Infill uses the already connected collector; never another haul or provider.
-            repairs = [a for a in collector_drill_infill(collector) if clear_of([a], obstacles)]
-            lineage_drills = drills + [a for other in extensions for phase in other['candidate']['plan']['phases']
-                                      for a in phase['actions'] if a['entity'] == 'electric-mining-drill']
-            lost = sum(target_key(a) in retired for a in lineage_drills)
-            for a in repairs[:12] if lost else ():
-                proposals.append(self._candidate(c, [a], p.name, repair=True))
-            if r['status'] != 'observed' or c.get('furnaces') != 6:
+            current = max([c.get('furnaces', 0)] + [other['candidate'].get('target_furnaces', 0) for _, other in extensions])
+            lineage = [(p, r), *extensions]
+            existing = {target_key(a): (op.name, a) for op, other in lineage for a in actions(other['candidate'])
+                        if target_key(a) not in retired}
+            supply = []
+            if c.get('shared_feed'):
+                identity = requester_line_identity(c)
+                if identity is None:
+                    continue
+                origin, flow, count = identity
+                target = current + 2
+                desired = actions({'plan': generate_requester_smelting_line(c['product'], target, origin_x=origin[0],
+                                                                          origin_y=origin[1], request_count=count, flow=flow)})
+                assembly_keys = {target_key(a) for a in actions({'plan': generate_requester_smelting_line(
+                    c['product'], current, origin_x=origin[0], origin_y=origin[1], request_count=count, flow=flow)})}
+                repair = False
+            else:
+                origin = c.get('line_origin')
+                drills = [a for _, a in existing.values() if a['entity'] == 'electric-mining-drill']
+                ys = sorted({a['position']['y'] for a in drills})
+                if origin is None or len(ys) != 2 or c.get('furnaces') != 6:
+                    continue
+                belt_y = sum(ys) / 2
+                collector = [a for _, a in existing.values() if a['entity'] == 'transport-belt'
+                             and a['position']['y'] == belt_y and a.get('direction') in ('east', 'west')]
+                if not collector:
+                    continue
+                # First repair previously submitted partial growth; never compound its capacity deficit.
+                output = generate_managed_refinery_plan(c['product'], current, origin_x=origin[0], origin_y=origin[1], variant='basic')
+                endpoint = output['phases'][-1]['actions']
+                repair = len(drills) < current or any(target_key(a) not in existing for a in endpoint if a['entity'] not in POLES)
+                target = current if repair else current + 6
+                if len(drills) < target:
+                    supply = paired_collector_extension(drills, collector, target - len(drills))
+                desired = actions({'plan': generate_managed_refinery_plan(c['product'], target, origin_x=origin[0], origin_y=origin[1], variant='basic')})
+                assembly_keys = {target_key(a) for a in actions({'plan': output})}
+                # Original geometry used a different tap-power location. Retain shared power.
+                legacy = output_taps(1, *origin, taps=c.get('output_taps', 1), inserter=c.get('tap_inserter', 'fast-inserter'))
+                assembly_keys.update(target_key(a) for a in legacy if a['entity'] not in POLES)
+                desired_keys = {target_key(a) for a in desired}
+                desired += [a for _, a in existing.values() if a['entity'] in POLES and target_key(a) in assembly_keys
+                            and target_key(a) not in desired_keys]
+            assembly = [a for key, (_, a) in existing.items() if key in assembly_keys]
+            prepare, remove, finish = split_owned_line_change(assembly, desired)
+            additions = prepare + supply
+            if not additions or not clear_of(additions, obstacles):
                 continue
-            if any(other['status'] != 'observed' for other in extensions):
+            # Finish may replace only owned blockers, never foreign infrastructure.
+            removed_keys = {target_key(a) for a in remove}
+            other_obstacles = [a for a in obstacles if target_key(a) not in removed_keys]
+            if finish and not clear_of(finish, other_obstacles + additions):
                 continue
-            current = max([6] + [other['candidate'].get('target_furnaces', 12) for other in extensions])
-            # The approved basic template's first furnace offset is part of its interface.
-            # New receipts record the origin; old receipts cannot authorize a guessed expansion.
-            origin = c.get('line_origin')
-            if origin is None:
+            from planners.plan_validation import validate_build_plan
+            try:
+                validate_build_plan({'phases': [{'name': 'owned_line_growth', 'actions': additions}]})
+            except ValueError:
                 continue
-            plan = generate_refinery_extension_plan(c['product'], current, current + 6, origin_x=origin[0], origin_y=origin[1],
-                                                    current_variant='basic')
-            additions = [a for phase in plan['phases'] for a in phase['actions']]
-            if any(a['action_type'] != 'place_ghost' for a in additions):
-                continue
-            existing = original + [a for other in extensions for phase in other['candidate']['plan']['phases']
-                                   for a in phase['actions']]
-            known = {target_key(a): a for a in existing}
-            # Shared boundary tiles are reused only when their direction agrees.
-            if any(target_key(a) in known and a.get('direction', 'north') != known[target_key(a)].get('direction', 'north')
-                   for a in additions):
-                continue
-            additions = [a for a in additions if target_key(a) not in known]
-            if not clear_of(additions, obstacles):
-                continue
-            # Existing collector infill supplies growth; if no drill site is free, expansion is not ready.
-            if not repairs:
-                continue
-            infill = []
-            for a in repairs:
-                if clear_of([a], infill + additions):
-                    infill.append(a)
-                    if len(infill) == 6:
-                        break
-            if infill:
-                growth = self._candidate(c, additions + infill, p.name)
-                growth['target_furnaces'] = current + 6
-                growth['summary'] = f"Extend owned refinery to {current + 6} furnaces"
-                proposals.append(growth)
+            growth = self._candidate(c, additions, p.name, repair=repair)
+            growth.update(target_furnaces=target, shared_feed=bool(c.get('shared_feed')),
+                          summary=(f'Repair owned {current}-furnace supply and output' if repair else f'Extend owned line to {target} furnaces'),
+                          line_transition={'retire': [{'owner': existing[target_key(a)][0], 'action': a} for a in remove],
+                                           'finish': finish})
+            proposals.append(growth)
         return proposals
 
     @staticmethod
@@ -190,7 +282,7 @@ class GeometryMaintenance:
         return {'option_id': f'line.g{digest}', 'family': 'line', 'product': parent['product'],
                 'summary': ('Replace depleted mining capacity on existing collector' if repair else 'Extend owned refinery to 12 furnaces'),
                 'plan': plan, 'network': parent['network'], 'network_anchor': parent['network_anchor'],
-                'repair_of' if repair else 'growth_of': owner, 'maintenance': repair,
-                'reuses_infrastructure': True, 'internal_power': not repair,
+                'repair_of' if repair else 'growth_of': owner, 'line_owner': owner, 'maintenance': repair,
+                'reuses_infrastructure': True, 'internal_power': any(a['entity'] in POLES for a in actions),
                 'next_slot': True,
-                'furnaces': 0 if repair else 6}
+                'furnaces': sum(a['entity'] == 'electric-furnace' for a in actions)}

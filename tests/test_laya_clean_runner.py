@@ -87,6 +87,47 @@ def test_menu_tags_unmet_needs_and_turns_item_shortfalls_into_stock_needs():
     assert need_of({"family": "expand"}) == "coverage" and need_of({"family": "wait"}) is None
 
 
+@pytest.mark.parametrize('entity', ['transport-belt', 'substation', 'pipe'])
+@pytest.mark.parametrize('failure', [None, 'empty', 'item_shortfall:pipe', 'scope'])
+def test_oil_infrastructure_packets_need_new_work_rather_than_a_chemical_plant(entity, failure):
+    from training.laya_saved_world import ghost
+    candidate = {'option_id': 'oil.packet', 'family': 'oil', 'product': 'plastic-bar', 'need_id': 'item:plastic-bar',
+                 'summary': 'Release the next oil construction packet', 'own_power': True,
+                 'network': '1', 'network_anchor': {'x': 0, 'y': 0},
+                 'plan': {'surface': 'nauvis', 'force': 'player', 'atomic': True,
+                          'phases': [{'actions': [ghost(entity, 10.5, 10.5)]}]}}
+    normal = validator()
+    def validate(candidates):
+        result = normal([c for c in candidates if c['family'] != 'oil'])
+        for c in candidates:
+            if c['family'] == 'oil':
+                result[c['option_id']] = ({'reason': failure} if failure not in (None, 'empty')
+                                          else {'bill': {} if failure == 'empty' else {entity: 1}})
+        return result
+    menu = compile_menu(facts(), {'needs': [{'item': 'plastic-bar', 'condition': 'unbuilt'}]}, validate, 1,
+                        oil_offer={'candidates': [candidate]})
+    admitted = [c for c in menu['options'] if c['family'] == 'oil']
+    assert bool(admitted) == (failure is None)
+    if failure == 'empty':
+        assert menu['blocked']['item:plastic-bar']['no_op'] == 1
+
+
+def test_owned_output_repair_remains_available_after_its_product_goal_is_satisfied():
+    from training.laya_saved_world import ghost
+    candidate = {'option_id': 'line.repair', 'family': 'line', 'product': 'iron-plate',
+                 'summary': 'Reconnect the owned terminal', 'maintenance': True, 'repair_of': 'line.json',
+                 'network': '1', 'network_anchor': {'x': 0, 'y': 0},
+                 'plan': {'phases': [{'name': 'repair', 'actions': [ghost('transport-belt', 4.5, 4.5)]}]}}
+    normal = validator()
+    def validate(candidates):
+        result = normal([c for c in candidates if c['family'] != 'line'])
+        result.update({c['option_id']: {'bill': {'transport-belt': 1}} for c in candidates if c['family'] == 'line'})
+        return result
+    menu = compile_menu(facts(), {'needs': [{'item': 'iron-plate', 'condition': 'satisfied'}]}, validate, 1,
+                        lifecycle_candidates=[candidate], managed_products=['steel-plate'])
+    assert any(c['family'] == 'line' for c in menu['options']), menu
+
+
 def test_state_carries_board_mission_guidelines_and_need_tags():
     board = compile_status(facts(), phase("C1")["targets"])
     menu = compile_menu(facts(), board, validator(), seed=2)

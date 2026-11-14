@@ -118,7 +118,7 @@ def test_pending_shared_steel_line_is_reported_before_offering_more_capacity(tmp
     assert result['constructing_products'] == ['steel-plate']
 
 
-def test_growth_reuses_collector_haul_and_provider_without_placing_a_second_line():
+def test_growth_extends_collector_and_moves_collection_to_the_new_terminal():
     from pathlib import Path
     from collections import Counter
     from planners.plan_validation import validate_build_plan
@@ -133,7 +133,13 @@ def test_growth_reuses_collector_haul_and_provider_without_placing_a_second_line
     validate_build_plan(growth['plan'])
     bill = Counter(a['entity'] for p in growth['plan']['phases'] for a in p['actions'])
     assert bill['electric-furnace'] == 6 and bill['electric-mining-drill'] == 6
-    assert bill['passive-provider-chest'] == 0
+    assert bill['passive-provider-chest'] == 1
+    placed = [a for p in growth['plan']['phases'] for a in p['actions']]
+    from planners.smelter_block import refinery_interfaces
+    endpoint = refinery_interfaces(12, origin_x=30, origin_y=20, variant='basic').provider
+    assert next(a['position'] for a in placed if a['entity'] == 'passive-provider-chest') == dict(zip(('x', 'y'), endpoint))
+    assert min(a['position']['x'] for a in placed if a['entity'] == 'electric-mining-drill') < 0
+    assert {r['action']['entity'] for r in growth['line_transition']['retire']} == {'fast-inserter', 'passive-provider-chest'}
     assert growth['growth_of'] == 'line.json' and growth['reuses_infrastructure']
     assert GeometryMaintenance()._growth(rows, {'machines': [], 'poles': [], 'ports': []}, set(), set()) == []
 
@@ -153,7 +159,139 @@ def test_followup_growth_reconciles_previous_extension_before_next_packet():
     rows.append((Path('growth.json'), followup))
     assert m._growth(rows, facts, set(), {'line.json'}) == []
     followup['status'] = 'observed'
-    [second] = m._growth(rows, facts, set(), {'line.json'})
+    assert m._growth(rows, facts, set(), {'line.json', 'growth.json'}, pending={'line.json'}) == []
+    [second] = m._growth(rows, facts, set(), {'line.json', 'growth.json'})
     assert second['target_furnaces'] == 18
     from planners.plan_validation import validate_build_plan
     validate_build_plan(second['plan'])
+
+
+def iron_rows():
+    from pathlib import Path
+    from training.laya_lines import line_units, mine_unit, haul, output_taps
+    mine, head = mine_unit(0, 0, 3)
+    original = mine + haul(head, 'east', 30, 20) + line_units('iron-plate', 1, 30, 20) + output_taps(1, 30, 20, taps=1, inserter='fast-inserter')
+    parent = {'family': 'line', 'product': 'iron-plate', 'furnaces': 6, 'line_origin': [30, 20],
+              'network': '1', 'network_anchor': {'x': 0, 'y': 0}, 'plan': {'phases': [{'actions': original}]}}
+    return [(Path('line.json'), {'status': 'observed', 'candidate': parent, 'submission': {'ok': True}})]
+
+
+def test_no_furnace_expansion_when_a_complete_drill_packet_collides():
+    rows = iron_rows()
+    facts = {'machines': [{'name': 'assembling-machine-1', 'position': {'x': -1.5, 'y': -1.5}}], 'ports': [], 'poles': []}
+    assert GeometryMaintenance()._growth(rows, facts, set(), {'line.json'}) == []
+
+
+@pytest.mark.parametrize('flow', ['east', 'west'])
+def test_shared_collector_extension_preserves_the_haul_head_and_supplies_all_six_drills(flow):
+    from planners.owned_line_extension import paired_collector_extension
+    from training.laya_lines import mine_unit
+    mine, _ = mine_unit(0, 0, 3, flow)
+    drills = [a for a in mine if a['entity'] == 'electric-mining-drill']
+    collector = [a for a in mine if a['entity'] == 'transport-belt']
+    added = paired_collector_extension(drills, collector, 6)
+    new_drills = [a for a in added if a['entity'] == 'electric-mining-drill']
+    belts = [a for a in added + collector if a['entity'] == 'transport-belt']
+    assert len(new_drills) == 6
+    assert all(any(b['position'] == {'x': d['position']['x'], 'y': .5} and b['direction'] == flow for b in belts)
+               for d in new_drills)
+    expected = min if flow == 'east' else max
+    assert expected(d['position']['x'] for d in new_drills) == (-7.5 if flow == 'east' else 16.5)
+    assert (max if flow == 'east' else min)(b['position']['x'] for b in belts) == \
+           (max if flow == 'east' else min)(b['position']['x'] for b in collector)
+
+
+def test_preexisting_eight_drill_twelve_furnace_line_gets_four_drills_and_an_output_repair():
+    from pathlib import Path
+    from planners.smelter_block import generate_refinery_extension_plan
+    from collections import Counter
+    rows = iron_rows()
+    delta = generate_refinery_extension_plan('iron-plate', 6, 12, origin_x=30, origin_y=20, current_variant='basic')
+    added = [a for p in delta['phases'] for a in p['actions']]
+    added += [ghost('electric-mining-drill', 10.5, y, d) for y, d in ((-1.5, 'south'), (2.5, 'north'))]
+    broken = {**rows[0][1]['candidate'], 'growth_of': 'line.json', 'target_furnaces': 12,
+              'plan': {'phases': [{'actions': added}]}}
+    rows.append((Path('broken.json'), {'status': 'observed', 'candidate': broken, 'submission': {'ok': True}}))
+    [repair] = GeometryMaintenance()._growth(rows, {'machines': [], 'poles': [], 'ports': []}, set(), {'line.json', 'broken.json'})
+    bill = Counter(a['entity'] for p in repair['plan']['phases'] for a in p['actions'])
+    assert bill['electric-mining-drill'] == 4 and bill['electric-furnace'] == 0 and bill['passive-provider-chest'] == 1
+    assert repair['maintenance'] and repair['repair_of'] == 'line.json' and repair['target_furnaces'] == 12
+
+
+@pytest.mark.parametrize('flow', ['south', 'west', 'north', 'east'])
+def test_steel_growth_reuses_requester_and_stages_conflicting_output_tiles(flow):
+    from pathlib import Path
+    from planners.smelter_block import generate_requester_smelting_line
+    parent = {'family': 'smelt', 'product': 'steel-plate', 'furnaces': 2, 'shared_feed': True,
+              'network': '1', 'network_anchor': {'x': 0, 'y': 0},
+              'plan': generate_requester_smelting_line('steel-plate', 2, origin_x=-7, origin_y=13, flow=flow)}
+    parent['plan']['phases'][0]['actions'].append(ghost('medium-electric-pole', 50.5, 50.5))
+    rows = [(Path('steel.json'), {'status': 'observed', 'candidate': parent, 'submission': {'ok': True}})]
+    [growth] = GeometryMaintenance()._growth(rows, {'machines': [], 'poles': [], 'ports': []}, set(), {'steel.json'})
+    assert growth['target_furnaces'] == 4
+    additions = [a for p in growth['plan']['phases'] for a in p['actions']]
+    cutover = growth['line_transition']
+    assert 'requester-chest' not in [a['entity'] for a in additions + cutover['finish']]
+    assert sum(a['entity'] == 'electric-furnace' for a in additions + cutover['finish']) == 2
+    assert {r['action']['entity'] for r in cutover['retire']} == {'fast-inserter', 'passive-provider-chest', 'medium-electric-pole'}
+    assert not any(r['action']['position']['x'] == 50.5 for r in cutover['retire'])
+    assert all(a['action_type'] == 'place_ghost' for a in additions + cutover['finish'])
+
+
+def test_cutover_waits_for_stocked_provider_and_observed_bot_removal_across_restart(tmp_path, monkeypatch):
+    from pathlib import Path
+    from planners.smelter_block import generate_requester_smelting_line
+    parent = {'family': 'smelt', 'product': 'steel-plate', 'furnaces': 2, 'shared_feed': True,
+              'network': '1', 'network_anchor': {'x': 0, 'y': 0}, 'plan': generate_requester_smelting_line('steel-plate', 2)}
+    record(tmp_path, 'steel', 'smelt', parent['plan']['phases'][0]['actions'], 100)
+    parent_path = tmp_path / 'evidence/transaction-steel.json'
+    raw = json.loads(parent_path.read_text()); raw['candidate'] = parent; parent_path.write_text(json.dumps(raw))
+    [growth] = GeometryMaintenance()._growth([(parent_path, raw)], {'machines': [], 'poles': [], 'ports': []}, set(), {parent_path.name})
+    record(tmp_path, 'growth', 'line', growth['plan']['phases'][0]['actions'], 200)
+    growth_path = tmp_path / 'evidence/transaction-growth.json'
+    grown = json.loads(growth_path.read_text()); grown['candidate'] = growth; growth_path.write_text(json.dumps(grown))
+    state = {'slots': 5, 'gone': set(), 'changed': False}
+    from training.laya_saved_world import target_key
+    all_targets = raw['construction']['targets'] + grown['construction']['targets']
+    def query(*, inspect):
+        wanted = {target_key(a) for p in inspect['phases'] for a in p['actions']}
+        result = []
+        for t in all_targets:
+            if target_key(t) in wanted:
+                t = dict(t)
+                if t['entity'] == 'passive-provider-chest': t['inventory_slots_used'] = state['slots']
+                if target_key(t) in state['gone']: t['state'] = 'missing'
+                if state['changed'] and t['entity'] == 'fast-inserter': t['unit_number'] = 99999
+                result.append(t)
+        return {'targets': result}
+    adapter = SimpleNamespace(root=tmp_path, query=query, _check_instance=lambda: None,
+                              bridge=object(), surface='nauvis', force='player')
+    ordered = []
+    monkeypatch.setattr('tools.laya_geometry_maintenance.retire_entities_via_bots', lambda *args, **kw: ordered.extend(args[4]['phases'][0]['actions']))
+    facts = {'tick': 100, 'machines': [], 'poles': [], 'ports': []}
+    state['changed'] = True
+    GeometryMaintenance()(adapter, facts)
+    assert not ordered  # Rebuilt occupant cannot be retired under the old receipt.
+    state['changed'] = False
+    result = GeometryMaintenance()(adapter, facts)
+    assert {a['entity'] for a in ordered} == {'fast-inserter', 'medium-electric-pole'}
+    assert not result['candidates'] and result['constructing_products'] == ['steel-plate']
+    state['gone'].update(target_key(a) for a in ordered)
+    state['slots'] = 4
+    result = GeometryMaintenance()(adapter, facts)
+    assert ordered[-1]['entity'] == 'passive-provider-chest' and not result['candidates']
+    result = GeometryMaintenance()(adapter, facts)
+    assert not result['candidates']  # An order is not proof that the chest has been removed.
+    state['gone'].update(target_key(a) for a in ordered)
+    result = GeometryMaintenance()(adapter, facts)
+    [finish] = result['candidates']
+    assert finish['cutover_of'] == growth_path.name and finish['maintenance']
+    assert all(a['action_type'] == 'place_ghost' for p in finish['plan']['phases'] for a in p['actions'])
+    targets = record(tmp_path, 'finish', 'line', finish['plan']['phases'][0]['actions'], 300)
+    finish_path = tmp_path / 'evidence/transaction-finish.json'
+    raw_finish = json.loads(finish_path.read_text()); raw_finish['candidate'] = finish
+    finish_path.write_text(json.dumps(raw_finish))
+    all_targets.extend(targets)
+    result = GeometryMaintenance()(adapter, facts)
+    assert growth_path.name in json.loads((tmp_path / 'evidence/geometry-maintenance.json').read_text())['transitions_done']
+    assert not result['constructing_products']
