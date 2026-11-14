@@ -13,6 +13,7 @@ def test_scheduler_run_arguments_parse_and_unsupported_options_fail_loudly(tmp_p
                   "--max-game-ticks", "540000", "--speed", "2"])
     assert (args.seed, args.max_game_ticks, args.speed) == (7, 540000, 2.0)
     assert parse(["run", "--root", str(tmp_path), "--strict-target", "C9"]).strict_target == "C9"
+    assert parse(['run', '--root', str(tmp_path), '--resume-bundle', str(tmp_path)]).resume_bundle == tmp_path
     with pytest.raises(SystemExit):
         parse(["run", "--root", str(tmp_path), "--research-target", "mining-productivity-4"])
 

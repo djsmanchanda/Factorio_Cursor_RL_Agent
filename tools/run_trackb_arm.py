@@ -45,6 +45,7 @@ def parse(argv):
     parser.add_argument("--rcon-port", type=int)
     parser.add_argument("--mods-source", type=Path)
     parser.add_argument("--source-save", type=Path)
+    parser.add_argument("--resume-bundle", type=Path, help="Hash-verified proxy prefix; strict sidecar keeps its own baseline")
     parser.add_argument("--no-helper", action="store_true")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--max-game-ticks", type=int)
@@ -101,6 +102,8 @@ def run(args) -> int:
                "--variant", str(args.variant)]
     if args.max_game_ticks:
         forward += ["--max-game-ticks", str(args.max_game_ticks)]
+    if args.resume_bundle:
+        forward += ['--resume-bundle', str(args.resume_bundle)]
     child = subprocess.Popen(clean_runner(forward))
     signal.signal(signal.SIGTERM, lambda *_: child.send_signal(signal.SIGTERM))
     while child.poll() is None:

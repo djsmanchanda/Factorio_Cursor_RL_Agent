@@ -12,9 +12,18 @@ from training.laya_saved_world import file_hash, verify_instance
 def load_bundle(path):
     path=Path(path).resolve()
     meta=json.loads((path/'checkpoint.json').read_text())
-    if meta.get('version')!='laya-earned-checkpoint-v1' or meta.get('production_authority') is not False:
+    regression = meta.get('version') == 'laya-regression-prefix-v1'
+    if meta.get('version') not in ('laya-earned-checkpoint-v1', 'laya-regression-prefix-v1') or meta.get('production_authority') is not False:
         raise ValueError('not an earned disposable checkpoint')
-    if meta.get('phases_reached')!=['C0','C1'] or meta.get('extra_items_granted')!=0:
+    if regression:
+        from training.laya_mission import PHASES
+        phases = meta.get('phases_reached')
+        expected = [p['phase_id'] for p in PHASES]
+        if (not isinstance(phases, list) or not phases or phases != expected[:len(phases)]
+                or meta.get('phase_evidence_kind') != 'proxy'
+                or meta.get('comparison_eligible') is not False or meta.get('acceptance_eligible') is not False):
+            raise ValueError('regression prefix requires contiguous proxy phases and no acceptance eligibility')
+    if (not regression and meta.get('phases_reached')!=['C0','C1']) or meta.get('extra_items_granted')!=0:
         raise ValueError('checkpoint must earn C0/C1 without grants')
     for name,digest in meta['files'].items():
         p=(path/name).resolve()
@@ -58,7 +67,9 @@ def restore_context(bundle, root):
     target=Path(root)/'evidence';target.mkdir(exist_ok=True)
     # Preserve construction attribution; never copy the old run's decision journal into the new one.
     for p in (Path(bundle)/'evidence').glob('transaction-*.json'):shutil.copy2(p,target/p.name)
-    p=Path(bundle)/'evidence/site-plan.json'
-    if p.exists():shutil.copy2(p,target/p.name)
+    for name in ('site-plan.json', 'geometry-maintenance.json', 'mall-requests.json', 'opening-oil-intent.json',
+                 'refused-sites.json', 'blocked-footprints.json'):
+        p=Path(bundle)/'evidence'/name
+        if p.exists():shutil.copy2(p,target/p.name)
     (target/'resume-checkpoint.json').write_text(json.dumps(meta,indent=2)+'\n')
     return meta

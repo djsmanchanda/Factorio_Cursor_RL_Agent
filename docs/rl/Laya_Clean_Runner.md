@@ -257,3 +257,12 @@ them. Only after observing actual removal may Laya select the funded ghost
 packet on the cleared tiles. Keep the product constructing through cutover,
 including across restart. Repair/cutover packets may contain only infrastructure
 and remain eligible after the product's phase target is satisfied.
+
+Saved-factory regression continuations may use a hash-verified
+`laya-regression-prefix-v1` bundle through `--resume-bundle`. They carry only
+contiguous recorded proxy phases, exact saved-world identity and lifecycle
+context, with zero grants and both comparison/acceptance eligibility false.
+The original earned-C1 bundle contract remains unchanged. Validate the prepared
+world's source hash before resuming; the strict sidecar always starts its own
+independent baseline. This avoids re-demanding already-completed opening rates
+when full storage has stopped their producers.

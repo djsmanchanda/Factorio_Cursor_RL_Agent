@@ -98,7 +98,7 @@ def main(argv=None) -> int:
                    help="Factorio update-runner threads for this world (engine default when omitted)")
     p.add_argument("--cpu-affinity", help="taskset CPU list for this world (for example 0-3,8)")
     p.add_argument("--nice", type=int, default=0, help="Lower this server's CPU priority by 0..19")
-    p.add_argument("--resume-bundle", type=Path, help="Hash-verified earned C1 checkpoint")
+    p.add_argument("--resume-bundle", type=Path, help="Hash-verified earned C1 checkpoint or regression-only factory prefix")
     p.add_argument("--export-checkpoint", type=Path, help="Save an earned C1 checkpoint after a successful run")
     p.add_argument("--jumpstart", action="store_true",
                    help="Restart a fresh controller on this already-running world after a stall or failure "
@@ -129,6 +129,8 @@ def main(argv=None) -> int:
     if args.action == "stop":
         print(saved_world("stop", root))
         return 0
+    if resume and file_hash(root / 'baseline.zip') != resume['files']['source.zip']:
+        p.error('resume bundle does not match the prepared world source')
     if args.decisions < 0 or not 300 <= args.measure_ticks <= 18000:
         p.error("decisions must be >= 0 (0 = no limit) and measure ticks 300..18000")
     variant = load_variant(args.variant)

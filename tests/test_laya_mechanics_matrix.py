@@ -83,6 +83,34 @@ def test_checkpoint_tampering_is_rejected_and_restore_preserves_only_attribution
     with pytest.raises(ValueError,match='hash/scope'):load_bundle(bundle)
 
 
+@pytest.mark.fast
+@pytest.mark.parametrize('invalid', [None, 'legacy_version', 'gap', 'strict', 'acceptance', 'comparison', 'grants', 'tampered'])
+def test_saved_factory_prefix_carries_proxy_progress_and_lifecycle_without_acceptance(tmp_path, invalid):
+    bundle=tmp_path/'bundle';(bundle/'evidence').mkdir(parents=True)
+    (bundle/'source.zip').write_bytes(b'saved factory')
+    (bundle/'evidence/geometry-maintenance.json').write_text('{"retired": []}')
+    (bundle/'evidence/mall-requests.json').write_text('{"pending": []}')
+    meta={'version':'laya-regression-prefix-v1','production_authority':False,'extra_items_granted':0,
+          'phases_reached':['C0','C1','C2','C3'],'phase_evidence_kind':'proxy',
+          'comparison_eligible':False,'acceptance_eligible':False,
+          'files':{str(p.relative_to(bundle)):file_hash(p) for p in bundle.rglob('*') if p.is_file()}}
+    if invalid=='legacy_version':meta['version']='laya-earned-checkpoint-v1'
+    if invalid=='gap':meta['phases_reached']=['C0','C2']
+    if invalid=='strict':meta['phase_evidence_kind']='strict'
+    if invalid=='acceptance':meta['acceptance_eligible']=True
+    if invalid=='comparison':meta['comparison_eligible']=True
+    if invalid=='grants':meta['extra_items_granted']=1
+    if invalid=='tampered':(bundle/'source.zip').write_bytes(b'other factory')
+    (bundle/'checkpoint.json').write_text(json.dumps(meta))
+    if invalid:
+        with pytest.raises(ValueError):load_bundle(bundle)
+    else:
+        assert load_bundle(bundle)['phases_reached']==['C0','C1','C2','C3']
+        new=tmp_path/'world';new.mkdir();restore_context(bundle,new)
+        assert (new/'evidence/geometry-maintenance.json').read_bytes()==(bundle/'evidence/geometry-maintenance.json').read_bytes()
+        assert (new/'evidence/mall-requests.json').exists()
+
+
 def test_failed_seed_uses_a_distinct_earned_checkpoint_or_stays_blocked(tmp_path):
     for name in ['earned-a','earned-b']:
         p=tmp_path/name;p.mkdir();(p/'checkpoint.json').touch()
