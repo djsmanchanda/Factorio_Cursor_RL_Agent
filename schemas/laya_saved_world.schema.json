@@ -21,6 +21,17 @@
     "researched": {"type": "object", "additionalProperties": {"const": true}},
     "enabled_recipes": {"type": "object", "additionalProperties": {"const": true}},
     "pending_ghosts": {"type": "integer", "minimum": 0},
+    "pending_requests": {"type": "array", "items": {
+      "type": "object", "additionalProperties": false,
+      "required": ["request_id", "source", "network", "item", "quality", "normal_eligible", "requested", "held", "incoming", "missing"],
+      "properties": {
+        "request_id": {"type": "string"}, "source": {"type": "string"},
+        "network": {"type": "string"}, "item": {"type": "string"}, "quality": {"type": "string"},
+        "normal_eligible": {"type": "boolean"},
+        "requested": {"$ref": "#/definitions/count"}, "held": {"$ref": "#/definitions/count"},
+        "incoming": {"$ref": "#/definitions/count"}, "missing": {"$ref": "#/definitions/count"}
+      }
+    }},
     "quad_centers": {"type": "array", "items": {"$ref": "#/definitions/position"}},
     "infrastructure_counts": {"$ref": "#/definitions/stock"},
     "recipe_observations": {
@@ -129,6 +140,6 @@
     "count": {"type": "number", "minimum": 0},
     "stock": {"type": "object", "additionalProperties": {"$ref": "#/definitions/count"}},
     "position": {"type": "object", "additionalProperties": false, "required": ["x", "y"], "properties": {"x": {"type": "number"}, "y": {"type": "number"}}},
-    "network": {"type": "object", "additionalProperties": false, "required": ["items", "reserved", "construction_robots", "available_construction_robots", "logistic_robots"], "properties": {"items": {"$ref": "#/definitions/stock"}, "reserved": {"$ref": "#/definitions/stock"}, "construction_robots": {"type": "integer", "minimum": 0}, "available_construction_robots": {"type": "integer", "minimum": 0}, "logistic_robots": {"type": "integer", "minimum": 0}, "available_logistic_robots": {"type": "integer", "minimum": 0}}}
+    "network": {"type": "object", "additionalProperties": false, "required": ["items", "reserved", "construction_robots", "available_construction_robots", "logistic_robots"], "properties": {"items": {"$ref": "#/definitions/stock"}, "reserved": {"$ref": "#/definitions/stock"}, "logistic_pickups": {"$ref": "#/definitions/stock"}, "construction_robots": {"type": "integer", "minimum": 0}, "available_construction_robots": {"type": "integer", "minimum": 0}, "logistic_robots": {"type": "integer", "minimum": 0}, "available_logistic_robots": {"type": "integer", "minimum": 0}}}
   }
 }

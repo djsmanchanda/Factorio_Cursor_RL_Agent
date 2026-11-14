@@ -1133,3 +1133,58 @@ assert(facts.validations.mixed.reason=='mixed_mining_area')
 assert(facts.validations.empty.reason=='depleted_mining_area')
 assert(facts.validations.pure.reason==nil)
 """)
+
+
+@pytest.mark.lua
+def test_request_survey_uses_compiled_active_filters_inventory_and_incoming_deliveries():
+    _run_survey_lua(setup="""
+local net={network_id=1}
+local point={enabled=true,logistic_network=net,logistic_member_index=0,
+  filters={{name='pipe',quality='normal',count=100},
+    {name='inserter',quality='normal',count=5},
+    {name='iron-plate',count=5},
+    {name='splitter',quality='rare',count=10}},
+  targeted_items_deliver={{name='pipe',quality='normal',count=12}}}
+local chest={name='requester-chest',type='logistic-container',unit_number=42,
+  position={x=0,y=0},prototype={logistic_mode='requester'},
+  get_logistic_point=function() return {point,{enabled=false,filters={{name='stone',count=100}}}} end,
+  get_inventory=function() return {get_contents=function() return {
+    {name='pipe',quality='normal',count=7},{name='inserter',quality='normal',count=5},
+    {name='iron-plate',quality='rare',count=5}} end} end}
+surface.find_entities_filtered=function(filter)
+  if filter.type=='logistic-container' or filter.type==nil then return {chest} end
+  return {}
+end
+surface.find_logistic_network_by_position=function() return net end
+""", assertions="""
+assert(#facts.pending_requests==2)
+local pipe=facts.pending_requests[1]
+assert(pipe.request_id=='42:0:pipe:normal:=')
+assert(pipe.item=='pipe' and pipe.requested==100 and pipe.held==7 and pipe.incoming==12 and pipe.missing==81)
+assert(pipe.normal_eligible and pipe.network=='1')
+assert(facts.pending_requests[2].item=='splitter' and not facts.pending_requests[2].normal_eligible)
+""")
+
+
+@pytest.mark.lua
+def test_request_survey_records_provider_pickups_apart_from_physical_stock():
+    _run_survey_lua(setup="""
+local net={network_id=1,all_construction_robots=0,available_construction_robots=0,all_logistic_robots=2}
+local port={name='roboport',type='roboport',position={x=0,y=0},energy=100,logistic_network=net,
+  prototype={construction_radius=20,logistic_radius=10}}
+local storage={name='passive-provider-chest',type='logistic-container',unit_number=12,
+  prototype={logistic_mode='passive-provider'},position={x=0,y=0},
+  get_logistic_point=function() return {{enabled=true,logistic_network=net,
+    targeted_items_pickup={{name='pipe',quality='normal',count=20}}}} end,
+  get_inventory=function() return {get_contents=function() return {['pipe']=25} end} end}
+surface.find_logistic_network_by_position=function() return net end
+surface.find_entities_filtered=function(filter)
+  if filter.type=='logistic-container' then return {storage} end
+  if filter.type then return {} end
+  return {port,storage}
+end
+""", assertions="""
+assert(facts.networks['1'].items.pipe==25)
+assert(facts.networks['1'].logistic_pickups.pipe==20)
+assert(#facts.pending_requests==0)
+""")

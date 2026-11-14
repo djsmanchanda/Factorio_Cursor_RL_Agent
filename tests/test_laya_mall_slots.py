@@ -353,3 +353,37 @@ def test_pending_pipe_bill_reclaims_underground_slot_and_lifts_gate(tmp_path):
     facts["networks"]["1"]["items"]["pipe"] = 81
     manage(adapter, facts, {"targets": {}, "needs": [], "construction": {"shortfall": {}}}, {}, {})
     assert any(a.get("logistic_condition", {}).get("signal") == "pipe" for a in calls[0])
+
+
+def test_overdue_request_automatically_preempts_recent_lower_priority_slot(tmp_path):
+    from training.laya_mall_slots import manage
+    cell_receipt(tmp_path, "a", 2.5, "electronic-circuit")
+    facts = world((2.5, "electronic-circuit", "working"))
+    facts.update(tick=100, networks={"1": {"items": {"iron-plate": 100, "copper-plate": 100,
+                                                       "copper-cable": 100}, "reserved": {}}},
+                 pending_requests=[{"request_id": "chest:pipe", "item": "pipe", "missing": 81, "network": "1"}])
+    facts["recipes"] = {**RECIPES, "pipe": {"ingredients": [{"name": "iron-plate", "amount": 1}],
+                                              "product_amount": 1, "energy_ticks": 30}}
+    # This machine was switched only 100 ticks ago; ordinary batch settling must not hide overdue work.
+    (tmp_path / "evidence" / "transaction-z.json").write_text(json.dumps({
+        "status": "applied", "before_tick": 100, "candidate": {"family": "retarget", "plan": {"phases": [
+            {"actions": [{"entity": "assembling-machine-1", "position": {"x": 2.5, "y": .5}}]}]}}}))
+    board = {"targets": {}, "needs": [need("electronic-circuit", "under_capacity", 0, required=.1)]}
+    live, applied = FakeLive(tmp_path), {}
+    assert manage(live, facts, board, {}, applied) == []
+    facts["tick"] = 1300
+    moves = manage(live, facts, board, {}, applied)
+    assert [m["to"] for m in moves] == ["pipe"]
+    assert live.configured[-1][-1]["clear_logistic_condition"] is True
+    facts["machines"][0]["recipe"] = "pipe"
+    facts["tick"] += 100
+    assert manage(live, facts, board, {}, applied) == []  # The producer is kept, without duplication.
+
+
+def test_overdue_work_preserves_missing_precursor_and_rejects_nonassembler_work():
+    from training.laya_mall_slots import demand_order
+    recipes = {**RECIPES,
+               "pipe": {"ingredients": [{"name": "iron-plate", "amount": 1}], "product_amount": 1},
+               "pipe-to-ground": {"ingredients": [{"name": "pipe", "amount": 10}], "product_amount": 2}}
+    assert demand_order({"needs": [], "targets": {}}, {"pipe-to-ground": 2, "iron-plate": 81, "plastic-bar": 10},
+                        recipes, {"iron-plate"}, {"iron-plate": 100}, ["pipe-to-ground"]) == ["pipe", "pipe-to-ground"]

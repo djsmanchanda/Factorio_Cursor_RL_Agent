@@ -699,7 +699,7 @@ class SavedWorldAdapter:
             value["validations"].update(refused)
         if candidates is None and inspect is None:
             value["quad_centers"] = centers
-            for key in ("ports", "poles", "machines", "resources"):
+            for key in ("ports", "poles", "machines", "resources", "pending_requests"):
                 if value.get(key) == {}:
                     value[key] = []
             errors = list(FACTS_VALIDATOR.iter_errors(value))

@@ -147,3 +147,9 @@ Geometry selects relevant rules before its count limit. Ops uses catalog order
 and a character budget after its brief; neither is a tokenizer guarantee.
 Changing scopes, weights, rule visibility or representation requires its own
 recorded comparison. See [variant adoption](laya_variants/README.md).
+
+Automatic mall allocation (user clarification, 2026-11-14): continuously unmet logistics item requests
+older than 20 game seconds enter the allocator's production queue without a strategy rule or policy
+choice. Local stock, assigned deliveries, transferable supply and construction reservations are distinct.
+Request fulfillment/removal clears the age. The next runner observation applies the queue; missing
+precursors, legal recipes and available machines constrain actual production. See the clean runner contract.

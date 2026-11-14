@@ -746,3 +746,26 @@ def test_submitted_construction_shortfalls_survive_without_a_build_candidate():
     board["construction"] = {"pending_ghosts": 0, "shortfall": {}}
     settled = compile_menu(world, board, validator(), seed=1)
     assert "pipe" not in settled["shortfalls"]
+
+
+def test_overdue_request_reaches_board_and_automatic_slots_before_policy(tmp_path, monkeypatch):
+    from training import laya_mall_slots
+    adapter = FakeAdapter()
+    adapter.root = tmp_path
+    adapter.configure = lambda actions: {"ok": True}
+    adapter.world["pending_requests"] = [{"request_id": "chest:pipe", "network": "1", "item": "pipe", "missing": 81}]
+    adapter.world["recipes"]["pipe"] = recipe([("iron-plate", 1)], 30)
+    seen = []
+
+    def manage(adapter, facts, board, demand, applied, emit, **kwargs):
+        seen.append((facts["tick"], dict(demand), kwargs["request_snapshot"]))
+        if kwargs["request_snapshot"]["demand"]:
+            assert "pipe" in {n["item"] for n in board["needs"]}
+        return []
+
+    monkeypatch.setattr(laya_mall_slots, "manage", manage)
+    summary = run(adapter, ExplorationPolicy(0), journal=tmp_path / "j.jsonl", decisions=4,
+                  measure_ticks=1200, seed=0, run_id="requests")
+    assert summary["failures"] == 0
+    assert not seen[0][2]["demand"]
+    assert any(snapshot["demand"] == {"pipe": 81} and demand.get("pipe") for _, demand, snapshot in seen)

@@ -134,12 +134,24 @@ User intent, 2026-11-08: Laya decides *what to make and in what quantity*; slott
 rate rises over time with decisions in parallel on different aspects.
 
 - **Slot manager** (`training/laya_mall_slots.manage`, run before each decision): it has the mall's assemblers and
-  maximizes output and working occupancy. Priority: bottleneck chains deepest link first (precursors before
-  consumers), then other unmet board items deepest first, then construction shortfalls. It frees idle, impossible
+  maximizes output and working occupancy. Priority: overdue request work, construction shortfalls,
+  bottleneck chains, then other unmet board items; missing precursors come before their consumers. It frees idle, impossible
   and off-board cells, keeps cells already set to a demanded item, gives each item ceil(gap / machine rate) cells,
   prefers W/E cells for the most urgent items, and applies all switches in one configure. Switches leave
   `retarget` receipts with authority `slot_manager`. Laya gets no retarget options (`mission.rotating-mall` and
   `mission.slot-settle` are inert for this runner).
+- **Automatic pending requests** (2026-11-14): active compiled logistics filters on requester/buffer
+  chests, characters and spidertrons are observed with local inventory and assigned deliveries. The
+  allocator persists each continuous shortage's age in `evidence/mall-requests.json`. At 1,200 game ticks
+  (20 game seconds), an unfilled request becomes production work on the next runner observation,
+  oldest first and with missing precursors first. Transferable stock is allocated once per network,
+  after construction reserves and assigned pickups. Existing producers run ungated; feasible overdue
+  work can displace a recent lower priority batch. Fulfillment/removal clears the age; a world clock
+  rollback starts new ages. Ghost construction shortages retain immediate demand. This is allocator
+  automation, independent of policy selection or strategy weights. Rates, machine availability and
+  recipe legality still limit execution; smelting/fluid inputs remain upstream needs, and unsupported
+  quality requests are reported explicitly. Request ages, quantities and queue status appear in decision
+  records and latest status. No exact 20-second reaction is promised between observations.
 - **Obtainable now** (`laya_factory_status.missing_input`): nothing is offered, slotted or made a stock need
   whose inputs cannot be had now (raw, in stock or measured as produced; the item's own stock never counts).
   Before plastic, chests are blocked facts (`unobtainable:<input>`), not options.

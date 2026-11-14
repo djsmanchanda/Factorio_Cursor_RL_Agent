@@ -1400,6 +1400,10 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
             facts = adapter.query()
             lap("query")
             from training.laya_factory_status import construction_shortfall
+            from training.laya_mall_requests import observe as observe_requests
+            request_snapshot = observe_requests(getattr(adapter, "root", journal.parent), facts)
+            record["mall_requests"] = request_snapshot
+            stock_demand.update({item: settings.stock_rate for item in request_snapshot["demand"]})
             stock_demand.update({item: settings.stock_rate for item in construction_shortfall(facts)})
             lifecycle = maintenance(adapter, facts, emit) if maintenance is not None else {}
             if blocks is not None:
@@ -1452,7 +1456,8 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
             # items before Laya decides; Laya gets no retarget options.
             slot_moves = (mall_slots.manage(adapter, facts, board, stock_demand, gates, emit,
                                             gate_scale=settings.mall_gate_scale,
-                                            buildable_multiplier=settings.mall_buildable_multiplier)
+                                            buildable_multiplier=settings.mall_buildable_multiplier,
+                                            request_snapshot=request_snapshot)
                           if settings.mall_slots and hasattr(adapter, "configure") else [])
             if slot_moves:
                 record["slot_manager"] = slot_moves
@@ -1541,6 +1546,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                                         "menu": {n["need_id"]: [next(o["summary"] for o in menu["options"] if o["option_id"] == i)
                                                                 for i in n["options"]] for n in menu["needs"]},
                                         "choice": {**choice, "summary": chosen["summary"]}, "stock": _stock(facts),
+                                        "mall_requests": request_snapshot,
                                         "guidelines": state["guidelines"], "authority": policy.authority,
                                         "decisions": summary["decisions"], "failures": summary["failures"],
                                         "site_plan": site_plan,

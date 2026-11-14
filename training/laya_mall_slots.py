@@ -96,7 +96,7 @@ def mall_cells(root: Path, facts: Mapping) -> list[dict]:
         candidate = receipt["candidate"]
         if receipt["status"] in ("observed", "applied") and candidate.get("family") == "retarget":
             position = next(a["position"] for a in candidate["plan"]["phases"][0]["actions"] if a["entity"] in ASSEMBLERS)
-            retargeted[(position["x"], position["y"])] = receipt["before_tick"]
+            retargeted[(position["x"], position["y"])] = receipt.get("before_tick", (receipt.get("before") or {}).get("tick"))
             continue
         if receipt.get("status") != "observed" or candidate.get("family") != "assemble":
             continue
@@ -285,7 +285,7 @@ def _side(cell: Mapping) -> str:
 
 
 def demand_order(board: Mapping, stock_demand: Mapping, recipes: Mapping, have: set[str],
-                 stock: Mapping[str, int] | None = None) -> list[str]:
+                 stock: Mapping[str, int] | None = None, priority: Iterable[str] = ()) -> list[str]:
     """Unmet items a mall cell can make now, highest priority first.
 
     Construction shortfalls first, each after its missing precursors: they gate every build, including the
@@ -305,7 +305,7 @@ def demand_order(board: Mapping, stock_demand: Mapping, recipes: Mapping, have: 
                 before += with_precursors(name, path + (item,))
         return before + [item]
 
-    order = [i for item in sorted(stock_demand) for i in with_precursors(item)]
+    order = [i for item in dict.fromkeys([*priority, *sorted(stock_demand)]) for i in with_precursors(item)]
     order += [link.split(":")[0] for chain in bottleneck_chain(board) for link in reversed(chain.split(" <- "))]
     order += [n["item"] for n in sorted((n for n in board["needs"] if n["condition"] != "satisfied"),
                                         key=lambda n: (-n["depth"], n["item"]))]
@@ -318,7 +318,8 @@ def demand_order(board: Mapping, stock_demand: Mapping, recipes: Mapping, have: 
 
 def assign(cells: list[dict], order: list[str], board: Mapping, recipes: Mapping, have: set[str], tick: int,
            recent: Mapping[tuple, str] = {}, stock: Mapping[str, int] | None = None,
-           shortfalls: set[str] | frozenset = frozenset()) -> list[tuple[dict, str]]:
+           shortfalls: set[str] | frozenset = frozenset(),
+           urgent: set[str] | frozenset = frozenset()) -> list[tuple[dict, str]]:
     """(cell, item) switches that put free cells on the most urgent unmet items.
 
     A cell is free when idle (gated, output full, no recipe), making something nothing demands, or making
@@ -335,7 +336,7 @@ def assign(cells: list[dict], order: list[str], board: Mapping, recipes: Mapping
         since = cell.get("retargeted_tick")
         settled = since is None or tick - since >= RECENT_TICKS
         if not settled:
-            return False
+            return bool(urgent) and product not in order
         # An item with its stock target on hand releases its cell unless builds are short of it: the only cell
         # stayed on goal copper cable with 4,262 stocked (eval-fixes-20261109), and on iron-starved gears with 468
         # stocked while every build lacked long-handed inserters (eval-fixes-20261109b s4).
@@ -374,6 +375,7 @@ def assign(cells: list[dict], order: list[str], board: Mapping, recipes: Mapping
                 break
             free.remove(pick)
             moves.append((pick, item))
+    # Overdue request work (and its precursors) may also displace a recent lower-priority batch.
     # Priority pre-emption: a demanded item with no cell takes a settled cell from the lowest-ranked demanded item
     # (eval-fixes-20261109e s0: cells on circuits and inserters waited for cable, and cable - ranked first - had
     # no cell and no free cell to get). Cells on met board items are never taken; a build shortfall's cell yields
@@ -385,7 +387,7 @@ def assign(cells: list[dict], order: list[str], board: Mapping, recipes: Mapping
         if item in served:
             continue
         victims = [c for c in cells if id(c) not in moved and c["product"] in rank_of and rank_of[c["product"]] > rank
-                   and (c.get("retargeted_tick") is None or tick - c["retargeted_tick"] >= RECENT_TICKS)]
+                   and (item in urgent or c.get("retargeted_tick") is None or tick - c["retargeted_tick"] >= RECENT_TICKS)]
         if victims:
             victim = max(victims, key=lambda c: rank_of[c["product"]])
             moved.add(id(victim))
@@ -395,7 +397,8 @@ def assign(cells: list[dict], order: list[str], board: Mapping, recipes: Mapping
 
 
 def manage(adapter, facts: Mapping, board: Mapping, stock_demand: Mapping[str, float], applied: dict,
-           emit=lambda _: None, *, gate_scale: float = 1.0, buildable_multiplier: int = BUILDABLE_MULTIPLIER) -> list[dict]:
+           emit=lambda _: None, *, gate_scale: float = 1.0, buildable_multiplier: int = BUILDABLE_MULTIPLIER,
+           request_snapshot: Mapping | None = None) -> list[dict]:
     """Gates in line with the phase, then every free cell switched to the most urgent item, in one configure.
 
     Each switch leaves a retarget receipt (authority ``slot_manager``) so slot ages and built counts read the
@@ -405,16 +408,22 @@ def manage(adapter, facts: Mapping, board: Mapping, stock_demand: Mapping[str, f
     from training.laya_layout_stream import atomic_json
     cells = mall_cells(adapter.root, facts)
     recipes = facts.get("recipes") or {}
+    if request_snapshot is None:
+        from training.laya_mall_requests import observe
+        request_snapshot = observe(adapter.root, facts)
     # A submitted build can outlive the menu option that requested its items.
     # Its outstanding bill must still drive slot allocation and lift stock gates.
-    stock_demand = {**stock_demand, **(board.get("construction", {}).get("shortfall") or {})}
+    stock_demand = {**stock_demand, **(board.get("construction", {}).get("shortfall") or {}),
+                    **request_snapshot["demand"]}
     from training.laya_factory_status import available_items
     have = available_items(facts, board)
     stock: dict[str, int] = {}
     for network in (facts.get("networks") or {}).values():
         for name, count in (network.get("items") or {}).items():
             stock[name] = stock.get(name, 0) + int(count or 0)
-    order = demand_order(board, stock_demand, recipes, have, stock)
+    order = demand_order(board, stock_demand, recipes, have, stock, request_snapshot["priority"])
+    urgent = set(demand_order({"needs": [], "targets": {}}, request_snapshot["demand"], recipes, have, stock,
+                              request_snapshot["priority"]))
     # Goals (measured rates) and build shortfalls run ungated; everything else, precursors included, stops at
     # its stock target, so a finished batch leaves the cell idle for the next item.
     goal_items = {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
@@ -422,7 +431,7 @@ def manage(adapter, facts: Mapping, board: Mapping, stock_demand: Mapping[str, f
     tick = int(facts.get("tick") or 0)
     recent = {(c["position"]["x"], c["position"]["y"]): c["product"] for c in cells
               if c.get("retargeted_tick") is not None and tick - c["retargeted_tick"] < RECENT_TICKS}
-    moves = assign(cells, order, board, recipes, have, tick, recent, stock, frozenset(stock_demand))
+    moves = assign(cells, order, board, recipes, have, tick, recent, stock, frozenset(stock_demand), urgent)
     switched = {(c["position"]["x"], c["position"]["y"]) for c, _ in moves}
     actions = [a for a in gate_updates(cells, ungated, applied, gate_scale)
                if (a["position"]["x"], a["position"]["y"]) not in switched]

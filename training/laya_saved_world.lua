@@ -16,10 +16,49 @@ end
 local facts = {version="saved-world-v1", tick=game.tick, surface="nauvis", force="player",
   mods=script.active_mods, networks={}, ports={}, poles={}, machines={}, resources={},
   player_stock={}, production={}, consumption={}, researched={}, pending_ghosts=0,
-  infrastructure_counts={}, recipes={}, recipe_observations={}, enabled_recipes={}, fluid_recipes={}}
+  pending_requests={}, infrastructure_counts={}, recipes={}, recipe_observations={}, enabled_recipes={}, fluid_recipes={}}
+-- Compiled point filters already include active sections and their multipliers.
+-- Count requester-local WIP and assigned deliveries separately from provider stock.
+local function pending_requests(e)
+  local inventory_id=({['logistic-container']=defines.inventory.chest,
+    character=defines.inventory.character_main,['spider-vehicle']=defines.inventory.spider_trunk})[e.type]
+  if not inventory_id then return end
+  local inventory=e.get_inventory(inventory_id)
+  if not inventory then return end
+  for _,point in pairs(e.get_logistic_point() or {}) do
+    if point.enabled and point.logistic_network then
+      for _,filter in pairs(point.filters or {}) do
+        if filter.name and (filter.type==nil or filter.type=='item') and filter.count>0 then
+          local quality=filter.quality
+          local any=quality==nil or (quality=='normal' and filter.comparator=='>=')
+          local supported=any or (quality=='normal' and (filter.comparator==nil or filter.comparator=='='))
+          local held,incoming=0,0
+          for key,part in pairs(inventory.get_contents()) do
+            if type(part)=='number' then
+              if key==filter.name and (any or quality=='normal') then held=held+part end
+            elseif part.name==filter.name and (any or part.quality==quality) then held=held+part.count end
+          end
+          for _,part in pairs(point.targeted_items_deliver) do
+            if part.name==filter.name and (any or part.quality==quality) then incoming=incoming+part.count end
+          end
+          local missing=math.max(0,filter.count-held-incoming)
+          if missing>0 then
+            local id=tostring(e.unit_number)..':'..tostring(point.logistic_member_index)..':'..
+              filter.name..':'..(quality or 'any')..':'..(filter.comparator or '=')
+            table.insert(facts.pending_requests,{request_id=id,source=e.name,
+              network=tostring(point.logistic_network.network_id),item=filter.name,
+              quality=quality or 'any',normal_eligible=supported,
+              requested=filter.count,held=held,incoming=incoming,missing=missing})
+          end
+        end
+      end
+    end
+  end
+end
 local generation = {}
 for _, e in pairs(surface.find_entities_filtered{force=force}) do
   facts.infrastructure_counts[e.name]=(facts.infrastructure_counts[e.name] or 0)+1
+  pending_requests(e)
   if e.type == "generator" or e.type == "solar-panel" or e.type == "electric-energy-interface" then
     local ok, id = pcall(function() return e.electric_network_id end)
     if ok and id then generation[tostring(id)] = true end
@@ -75,6 +114,18 @@ for _, e in pairs(surface.find_entities_filtered{type="logistic-container",force
   if entry and (mode=="passive-provider" or mode=="active-provider" or mode=="storage") then
     for name,count in pairs(contents(e.get_inventory(defines.inventory.chest))) do
       entry.items[name]=(entry.items[name] or 0)+count
+    end
+    -- Assigned pickups can still be physically in a provider. They already cover
+    -- an incoming request, so the automatic queue cannot spend them a second time.
+    if e.get_logistic_point then
+      for _,point in pairs(e.get_logistic_point() or {}) do
+        for _,part in pairs(point.targeted_items_pickup or {}) do
+          if part.quality=='normal' then
+            entry.logistic_pickups=entry.logistic_pickups or {}
+            entry.logistic_pickups[part.name]=(entry.logistic_pickups[part.name] or 0)+part.count
+          end
+        end
+      end
     end
   end
 end
