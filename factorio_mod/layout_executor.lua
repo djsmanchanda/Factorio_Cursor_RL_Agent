@@ -106,11 +106,14 @@ local function oriented_collision_area(action, direction)
   local bottom = right_bottom.y or right_bottom[2]
   if not left or not top or not right or not bottom then return nil end
 
-  if direction == defines.direction.east or direction == defines.direction.west then
+  if direction == defines.direction.east then
     left, top, right, bottom = -bottom, left, -top, right
+  elseif direction == defines.direction.south then
+    left, top, right, bottom = -right, -bottom, -left, -top
+  elseif direction == defines.direction.west then
+    left, top, right, bottom = top, -right, bottom, -left
   elseif direction ~= nil
-    and direction ~= defines.direction.north
-    and direction ~= defines.direction.south then
+    and direction ~= defines.direction.north then
     local radius = math.max(
       math.abs(left), math.abs(top), math.abs(right), math.abs(bottom)
     )

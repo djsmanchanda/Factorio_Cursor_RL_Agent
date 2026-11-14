@@ -97,3 +97,13 @@ read-only export. Compile it offline with
 `python tools/survey_electronics_world.py <snapshot.json> --block-bounds -250 -250 250 250 --single-macro-block --output <world.json>`. The explicit bounds acknowledge one self-contained local macro district.
 The compiler fails closed when local source footprints are unavailable; it
 does not create inter-block belts or bot routes.
+## Directional collision validation (15 November 2026)
+
+The executor rotates prototype collision boxes independently for north, east,
+south and west. Atomic replacement and planned-placement overlap checks share
+this calculation; diagonals retain a conservative square and all areas retain
+the existing epsilon. Offline Lua fixtures cover representative asymmetric pump
+boxes with adjacent pipes, terrain refusal, symmetric boxes and protected
+occupied entities. These fixtures establish the transform, not Factorio shoreline
+legality or the cause of every historical merged-pack rejection. Runtime use
+requires deliberate mod synchronization and Factorio reload.

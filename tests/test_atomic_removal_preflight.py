@@ -401,3 +401,93 @@ def test_flying_robot_does_not_block_ghost_placement(tmp_path: Path) -> None:
     script.write_text(_HARNESS + scenario, encoding="utf-8")
     result = subprocess.run(["lua", str(script)], text=True, capture_output=True)
     assert result.returncode == 0, result.stderr or result.stdout
+
+
+@pytest.mark.parametrize(
+    ("direction", "bounds", "box"),
+    [
+        ("north", (-0.999, -1.999, 0.999, 0.499), "{-1, -2}, {1, 0.5}"),
+        ("east", (-0.499, -0.999, 1.999, 0.999), "{-1, -2}, {1, 0.5}"),
+        ("south", (-0.999, -0.499, 0.999, 1.999), "{-1, -2}, {1, 0.5}"),
+        ("west", (-1.999, -0.999, 0.499, 0.999), "{-1, -2}, {1, 0.5}"),
+        ("northeast", (-1.999, -1.999, 1.999, 1.999), "{-1, -2}, {1, 0.5}"),
+        *[(direction, (-0.999, -0.999, 0.999, 0.999), "{-1, -1}, {1, 1}")
+          for direction in ("north", "east", "south", "west")],
+    ],
+)
+def test_asymmetric_removal_preflight_area_and_shoreline(
+    tmp_path: Path, direction: str, bounds: tuple[float, ...], box: str,
+) -> None:
+    expected = ", ".join(str(v) for v in bounds)
+    scenario = f'''
+      defines.direction.northeast = 2
+      prototypes.entity.pump = {{type = "pump", collision_box = {{{box}}},
+        collision_mask = {{layers = {{object = true}}}}}}
+      dofile("{EXECUTOR.as_posix()}")
+      local removal = add_entity("transport-belt", 0, 0)
+      local original_find = surface.find_entities_filtered
+      local queried = nil
+      surface.find_entities_filtered = function(filter)
+        if filter.area and not filter.name and not filter.force then queried = filter.area end
+        return original_find(filter)
+      end
+      surface.can_place_entity = function(_) return false end
+      local water = false
+      surface.get_tile = function(x, y)
+        return {{valid = true, collides_with = function(layer)
+          return water and layer == "object" and x == 0 and y == 0
+        end}}
+      end
+      payload = {{authorization = {{approved_actions = {{"remove_entities", "place_core_infrastructure"}}}},
+        build_plan = {{surface = "planner-sandbox", force = "planner", atomic = true, phases = {{{{
+          name = "replace", actions = {{{{action_type = "remove_entity", entity = "transport-belt", position = {{x=0,y=0}}}},
+          {{action_type = "place_entity", entity = "pump", position = {{x=0,y=0}}, direction = "{direction}"}}}}
+        }}}}}}}}
+      registered.build_layout_plan({{parameter = "ignored"}})
+      assert(captured_report.ok == true, captured_report.error)
+      local expected = {{{expected}}}
+      local actual = {{queried[1][1], queried[1][2], queried[2][1], queried[2][2]}}
+      for i = 1, 4 do assert(math.abs(actual[i] - expected[i]) < 1e-9, i .. ": " .. actual[i]) end
+      removal.valid = true
+      for _, entity in ipairs(entities) do if entity.name == "pump" then entity.valid = false end end
+      water = true
+      registered.build_layout_plan({{parameter = "ignored"}})
+      assert(captured_report.ok == false and captured_report.error == "atomic_footprint_blocked")
+      assert(removal.valid)
+    '''
+    script = tmp_path / "oriented_area.lua"
+    script.write_text(_HARNESS + scenario, encoding="utf-8")
+    result = subprocess.run(["lua", str(script)], text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+@pytest.mark.parametrize("direction,pipe_x,pipe_y,legal", [
+    ("north", 0, 1, True), ("north", 0, -2, False),
+    ("east", -1, 0, True), ("east", 2, 0, False),
+    ("south", 0, -1, True), ("south", 0, 2, False),
+    ("west", 1, 0, True), ("west", -2, 0, False),
+])
+def test_asymmetric_pump_and_adjacent_planned_pipe(
+    tmp_path: Path, direction: str, pipe_x: int, pipe_y: int, legal: bool,
+) -> None:
+    scenario = f'''
+      prototypes.entity["offshore-pump"] = {{type = "offshore-pump", collision_box = {{{{-1, -2}}, {{1, 0.5}}}},
+        collision_mask = {{layers = {{object = true}}}}}}
+      prototypes.entity.pipe = {{type = "pipe", collision_box = {{{{-0.4, -0.4}}, {{0.4, 0.4}}}},
+        collision_mask = {{layers = {{object = true}}}}}}
+      dofile("{EXECUTOR.as_posix()}")
+      payload = {{authorization = {{approved_actions = {{"place_core_infrastructure"}}}},
+        build_plan = {{surface = "planner-sandbox", force = "planner", atomic = true, phases = {{{{
+          name = "pipe", actions = {{{{action_type = "place_entity", entity = "offshore-pump", position = {{x=0,y=0}}, direction = "{direction}"}},
+          {{action_type = "place_entity", entity = "pipe", position = {{x={pipe_x},y={pipe_y}}}, direction = "north"}}}}
+        }}}}}}}}
+      registered.build_layout_plan({{parameter = "ignored"}})
+      assert(captured_report.ok == {str(legal).lower()}, captured_report.error)
+      if not captured_report.ok then assert(captured_report.error == "atomic_footprint_blocked") end
+      assert(count_valid("pipe") == {1 if legal else 0})
+      assert(count_valid("offshore-pump") == {1 if legal else 0})
+    '''
+    script = tmp_path / "pump_pipe.lua"
+    script.write_text(_HARNESS + scenario, encoding="utf-8")
+    result = subprocess.run(["lua", str(script)], text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr or result.stdout
