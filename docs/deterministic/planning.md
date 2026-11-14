@@ -655,3 +655,10 @@ mining areas even when the physical drill footprint covers only the target ore.
 An exhausted owned drill is recovered by bots; its connected collector, haul and
 power remain available for legal replacement/infill. Prefer extending owned
 capacity before spending on another haul, splitter system and provider.
+
+Starter retirement keeps its passive provider available to the logistics network
+while removing the owned production machinery. Deconstruct the provider only
+when fewer than five actual inventory slots are occupied, including partial
+stacks and all qualities. Unknown occupancy retains the chest. Revisit retained
+providers after stock drains and across runner restarts; never empty a full
+provider into storage as part of the machinery teardown.

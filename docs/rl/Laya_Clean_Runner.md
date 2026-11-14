@@ -160,6 +160,10 @@ rate rises over time with decisions in parallel on different aspects.
   dropped once a mall block exists. Laya is offered one slot: W/E of the nearest modules first, then N/S beside a
   built W/E slot.
 - **Line taps**: one topology per line. One fast tap while chests cannot be made; full rate afterwards.
+- **Retired starter providers**: keep each exact owned provider available while its stock drains.
+  Remove the machinery first; bots may recover the chest only below five occupied inventory slots.
+  Partial stacks and all qualities count; unknown occupancy retains the chest. Receipts keep the
+  deferred chest eligible on later observations and after a runner restart.
 - **Cadence** (live play): each decision is submitted without waiting (`construction_pending`; reconcile finishes
   it). A cycle takes up to `parallel_aspects` (4) decisions on distinct aspects (production, smelting, coverage,
   oil, external) whose footprints and bills do not conflict, then advances

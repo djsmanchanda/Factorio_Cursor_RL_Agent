@@ -502,6 +502,27 @@ def _run_survey_lua(extra_recipes=(), assertions="", malformed="", setup=""):
 
 
 @pytest.mark.lua
+def test_provider_inspection_counts_partial_and_quality_stacks_as_occupied_slots():
+    _run_survey_lua(setup="""
+request.inspect={phases={{actions={{entity='passive-provider-chest',position={x=1.5,y=2.5}}}}}}
+local inventory={}
+for slot=1,6 do inventory[slot]={valid_for_read=slot<=5} end
+inventory.get_contents=function() return {{name='copper-plate',count=3,quality='normal'},
+  {name='iron-plate',count=2,quality='rare'}} end
+local chest={type='logistic-container',unit_number=42,position={x=1.5,y=2.5},
+  get_inventory=function() return inventory end}
+surface.find_entities_filtered=function(f)
+  if f.name=='passive-provider-chest' then return {chest} end
+  return {}
+end
+""", assertions="""
+assert(#facts.targets==1 and facts.targets[1].state=='built')
+assert(facts.targets[1].inventory_slots_used==5)
+assert(facts.targets[1].inventory['copper-plate']==3)
+""")
+
+
+@pytest.mark.lua
 def test_fluid_prototype_survey_reports_capability_and_unknowns_without_authorizing():
     _run_survey_lua(setup="""
 prototypes.entity['empty']={type='container',fluidbox_prototypes={}}

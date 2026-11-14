@@ -1,6 +1,7 @@
 # Path: tests/test_laya_geometry_maintenance.py | Purpose: Require delivered replacement output and exact receipt ownership for bot recovery.
 import json
 from types import SimpleNamespace
+import pytest
 
 from tools.laya_geometry_maintenance import GeometryMaintenance
 from training.laya_saved_world import ghost
@@ -29,6 +30,7 @@ def test_starter_recovery_requires_craft_delivery_and_current_unit_identity(tmp_
         positions = {(a['position']['x'], a['position']['y']) for p in inspect['phases'] for a in p['actions']}
         targets = [dict(t) for t in starter + line if (t['position']['x'], t['position']['y']) in positions]
         for t in targets:
+            if t['unit_number'] == 12: t['inventory_slots_used'] = 0
             if t['unit_number'] == 20: t['products_finished'] = state['crafts']
             if t['unit_number'] == 21: t['inventory'] = {'copper-plate': state['delivered']}
             if state['changed'] and t['unit_number'] == 10: t['unit_number'] = 999
@@ -55,6 +57,38 @@ def test_starter_recovery_requires_craft_delivery_and_current_unit_identity(tmp_
     assert len(result['retired']) == 3
     GeometryMaintenance()(adapter, facts)
     assert len(calls) == 1  # Durable ownership ledger survives restart.
+
+
+@pytest.mark.parametrize('slots', [5, 48, None])
+def test_bulk_provider_waits_for_fewer_than_five_slots_across_restart(tmp_path, monkeypatch, slots):
+    starter = record(tmp_path, 'starter', 'starter', [ghost('electric-furnace', 1.5, 1.5),
+                     ghost('passive-provider-chest', 1.5, 4.5)], 10)
+    line = record(tmp_path, 'line', 'line', [ghost('electric-furnace', 21.5, 1.5),
+                  ghost('passive-provider-chest', 21.5, 4.5)], 20)
+    state = {'slots': slots}
+    def query(*, inspect):
+        positions = [a['position'] for p in inspect['phases'] for a in p['actions']]
+        targets = [dict(t) for t in starter + line if t['position'] in positions]
+        for t in targets:
+            if t['unit_number'] == 11: t['inventory_slots_used'] = state['slots']
+            if t['unit_number'] == 20: t['products_finished'] = 2
+            if t['unit_number'] == 21: t['inventory'] = {'copper-plate': 1}
+        return {'targets': targets}
+    adapter = SimpleNamespace(root=tmp_path, query=query, _check_instance=lambda: None,
+                              bridge=object(), surface='nauvis', force='player')
+    calls = []
+    monkeypatch.setattr('tools.laya_geometry_maintenance.retire_entities_via_bots',
+                        lambda *a, **kw: calls.append(a[4]))
+    facts = {'tick': 100, 'machines': [], 'ports': [], 'poles': []}
+    GeometryMaintenance()(adapter, facts)
+    assert [a['entity'] for a in calls[0]['phases'][0]['actions']] == ['electric-furnace']
+    assert len(GeometryMaintenance()(adapter, facts)['retired']) == 0
+    assert len(calls) == 1  # A full or unmeasured chest remains available to logistics.
+    state['slots'] = 4
+    GeometryMaintenance()(adapter, facts)
+    assert [a['entity'] for a in calls[1]['phases'][0]['actions']] == ['passive-provider-chest']
+    GeometryMaintenance()(adapter, facts)
+    assert len(calls) == 2
 
 
 def test_an_exhausted_owned_drill_is_recovered_without_shared_belts(tmp_path, monkeypatch):

@@ -84,6 +84,14 @@ class GeometryMaintenance:
                 # A rebuilt same-name occupant is never the entity this receipt owns.
                 if any(t.get('state') != 'built' or owned.get(target_key(t)) != t.get('unit_number') for t in targets):
                     continue
+                # Keep bulk output available to logistics instead of dumping it into storage.
+                # The receipt remains eligible on later passes, including after a restart.
+                by_key = {target_key(t): t for t in targets}
+                remove = [a for a in remove if a['entity'] != 'passive-provider-chest'
+                          or (type(by_key[target_key(a)].get('inventory_slots_used')) is int
+                              and 0 <= by_key[target_key(a)]['inventory_slots_used'] < 5)]
+                if not remove:
+                    continue
                 plan = {'phases': [{'actions': [{**a, 'action_type': 'remove_entity'} for a in remove]}]}
                 for phase in plan['phases']:
                     phase['actions'] = [{k: a[k] for k in ('action_type', 'entity', 'position')} for a in phase['actions']]

@@ -325,7 +325,15 @@ if request.inspect then
     local target={entity=a.entity,position={x=a.position.x,y=a.position.y}}
     if found then result.built=result.built+1; target.state="built"; target.unit_number=found.unit_number
       if found.type=='furnace' then target.products_finished=found.products_finished end
-      if found.type=='logistic-container' then target.inventory=contents(found.get_inventory(defines.inventory.chest)) end
+      if found.type=='logistic-container' then
+        local inventory=found.get_inventory(defines.inventory.chest)
+        target.inventory=contents(inventory)
+        -- Count actual stacks, including partial stacks and every quality.
+        target.inventory_slots_used=0
+        for slot=1,#inventory do
+          if inventory[slot].valid_for_read then target.inventory_slots_used=target.inventory_slots_used+1 end
+        end
+      end
     else
       local ghost=false
       for _,e in pairs(surface.find_entities_filtered{position=a.position,type="entity-ghost",force=force}) do
