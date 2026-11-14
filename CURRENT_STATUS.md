@@ -581,3 +581,10 @@ C6-v3 candidate derives recovery feed prototypes from the same constructed plan 
 - What: validate contradictory envelopes; reconcile only actual invocation/transaction identities; retain initial and final receipt states, unknown and malformed slots, and duplicate/conflict counts. Runner summaries and collector use one function; controller publications count every immutable planned job and separate inherited/current milestone evidence from earned targets.
 - Evidence: 127 combined focused passes; settled fast1437 passed,3 skipped(two optional-lupa collection modules,one fluid-chain case),exit0. PM invocation/observation wiring and retained stream replay remain open.
 - Lifecycle: future matching frozen runner/controller copies required; no runtime, deployment, service, save or campaign action performed.
+
+
+## [2026-11-15 04:08 IST] Preserve explicit upstream-construction deferrals
+
+- What: classify production_prerequisite_deferred as deferred, retaining cause and exception precedence; unknown codes stay unknown.
+- Evidence:9 shared outcome/reconciliation checks passed. Combined settled PM fast gate1,453passed,3skipped(two optional-Lupa collection modules,one known fluid-chain selected case),exit0,including the separately reviewed invocation patch. Historical replay remains original hashed evidence.
+- Lifecycle: future frozen Python runner required; no runtime action.

@@ -20,3 +20,17 @@ def test_done_requires_explicit_consistent_success():
     assert normalize({"code": "done", "ok": False})["state"] == "unknown"
     assert normalize({"code": "done"})["state"] == "unknown"
     assert normalize({"code": "done", "ok": True})["state"] == "completed"
+
+
+@pytest.mark.fast
+def test_recorded_production_prerequisite_deferral_preserves_cause():
+    # The shared builder emits a planned intended-difficulty signal, rather
+    # than the generic waiting state, while upstream construction is pending.
+    receipt = {"ok": False, "code": "production_prerequisite_deferred",
+               "classification": "intended_difficulty", "state": "planned"}
+    outcome = normalize(receipt, operation="produce")
+    assert outcome["state"] == "deferred"
+    assert outcome["cause"] == "production_prerequisite_deferred"
+    assert outcome["evidence"] == receipt
+    assert normalize({**receipt, "code": "unrecognized_deferred"})["state"] == "unknown"
+    assert normalize({**receipt, "error_type": "ValueError"})["state"] == "fault"

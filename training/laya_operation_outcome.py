@@ -20,7 +20,7 @@ def normalize(receipt, operation=None, transaction_id=None):
         result = "fault"
     elif code == "prerequisite_advanced":
         result = "prerequisite_advanced"
-    elif (code in ("material_shortage", "temporary_mall_batch")
+    elif (code in ("material_shortage", "temporary_mall_batch", "production_prerequisite_deferred")
           or state in ("deferred", "waiting", "supply_wait")
           or r.get("classification") in ("deferred", "supply")):
         result = "deferred"
