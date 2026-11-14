@@ -20,6 +20,8 @@ logs, ledger and helper are shared.  Sequencing lives in the docs, not here.
 
 from __future__ import annotations
 
+from training.laya_operation_outcome import normalize, summarize_records
+
 from orchestrator.operation_observation import economics_observation, item_service_observation
 
 import math
@@ -1002,7 +1004,10 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                           "production_service": summary.get("production_service"),
                           "foundations": getattr(session, "foundation_observations", None)})
         tick = session._history[-1].tick if getattr(session, '_history', None) else None
-        current, evidence = current_predicates(session) if 'error' not in statuses else ({}, {})
+        proxy = {"version": "laya-runner-phase-v1", "reached": list(reached)}
+        current, evidence = (current_predicates(session, proxy_phase=proxy)
+                             if 'error' not in statuses or getattr(session, '_evidence_state', None) is not None
+                             else ({}, {}))
         row = {'event':'strict_current', 'run_id':run_id, 'at':event, 'tick':tick,
                'loaded_tick':summary['loaded_tick'], 'statuses':current, 'predicate_evidence':evidence,
                'decisions':summary['decisions'], 'elapsed_seconds':time.monotonic()-active_started}
@@ -1249,7 +1254,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                   **({'reconciliation_receipt': {
                                       k: result[k] for k in ('attempted', 'configuration_changed', 'observed', 'error')
                                       if k in result}} if chosen['family'] == 'reconcile_mall_loan' else {}),
-                                  "ticks": after["tick"] - facts["tick"], "material_transactions": after_transactions})
+                                  "ticks": after["tick"] - facts["tick"], "material_transactions": after_transactions,
+                                  "typed_outcome": normalize(result, chosen["family"])})
         summary["decisions"] = index + 1
         wall_elapsed = elapsed_before + time.monotonic() - active_started
         game_elapsed = after["tick"] - samples[0][0]
@@ -1353,6 +1359,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     summary["codes"] = dict(Counter(r.get("code") or "error" for r in results if not r.get("ok")))
     summary["classifications"] = dict(Counter(r.get("classification") or "unclassified"
                                                for r in results if not r.get("ok")))
+    summary.update(summarize_records(records))
     _append(journal, {"run_id": run_id, "event": "summary", **summary})
     emit(f"SUMMARY: stop={summary['stop']} decisions={summary['decisions']} failures={summary['failures']} "
          f"phases={','.join(reached) or 'none'} accepted={','.join(summary.get('accepted', [])) or 'none'} "

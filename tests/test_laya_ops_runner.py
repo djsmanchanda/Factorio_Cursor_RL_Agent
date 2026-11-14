@@ -81,6 +81,7 @@ def test_loop_runs_operations_and_records_each_outcome(tmp_path):
     assert summary["decisions"] == 6 and session.calls
     rows = [json.loads(l) for l in (tmp_path / "decision-states.jsonl").read_text().splitlines()]
     assert len(rows) == 6 and all("outcome" in r and "distribution" in r for r in rows)
+    assert all(r["outcome"]["typed_outcome"]["version"] == 1 for r in rows)
 
 
 def test_mall_slots_wait_for_their_plates_and_borrowing_for_slots():

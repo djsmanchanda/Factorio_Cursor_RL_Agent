@@ -575,3 +575,9 @@ C6-v3 candidate derives recovery feed prototypes from the same constructed plan 
 - What: shared session/sidecar evidence separates current predicates, inherited starts, observed transitions, explicit proxy phases and sampled consumer generations. Failed polls invalidate current evidence, exact duplicates share a sampling contract, and version2 restart state preserves evidence while version1 latches keep unknown origin.
 - Evidence: main combined focused127passed; settled PM fast1437passed,3skipped(two optional-lupa collection modules and known fluid-chain case),exit0. Main additionally retained separate generic/PM recipe-generation events and clock-discontinuity boundaries. The gate includes separate uncommitted outcome work; historic C5/C6 predicates are preserved and continuity is not claimed.
 - Lifecycle: future frozen runner/sidecar copies required; no runtime, service, save, deployment or campaign action performed.
+
+## [2026-11-15 03:51 IST] Shared receipt reconciliation and explicit denominators
+
+- What: validate contradictory envelopes; reconcile only actual invocation/transaction identities; retain initial and final receipt states, unknown and malformed slots, and duplicate/conflict counts. Runner summaries and collector use one function; controller publications count every immutable planned job and separate inherited/current milestone evidence from earned targets.
+- Evidence: 127 combined focused passes; settled fast1437 passed,3 skipped(two optional-lupa collection modules,one fluid-chain case),exit0. PM invocation/observation wiring and retained stream replay remain open.
+- Lifecycle: future matching frozen runner/controller copies required; no runtime, deployment, service, save or campaign action performed.
