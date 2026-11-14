@@ -5,11 +5,14 @@ from __future__ import annotations
 
 import json
 import math
+from copy import deepcopy
+from functools import lru_cache
 from dataclasses import dataclass
 from typing import Iterable
 
 from planners.plan_validation import actions as plan_actions
 from planners.plan_validation import validate_build_plan
+from planners import refinery_blueprints
 from planners.refinery_blueprints import template_actions, template_name
 from planners.recipe_data import LINE_RECIPES
 
@@ -417,8 +420,42 @@ def generate_managed_refinery_extension_plan(
     current_variant: str = "standard", target_variant: str | None = None,
     vertical_mirror: bool = False,
 ) -> dict:
-    """Move the planner-owned provider tap with End or variant migration."""
+    """Return an isolated delta; live preflight and plan validation remain per call.
+
+    Only deterministic template composition is reused, never world observations,
+    extraction planning, ownership, reservations, or material decisions.
+    """
     target_variant = target_variant or current_variant
+    # Template definitions are repository data, but include their actual identity
+    # so an in-process replacement cannot reuse geometry from the old catalog.
+    template_identity = (
+        tuple(sorted(refinery_blueprints._SPECS.items())),
+        tuple((variant, tuple(sorted(roles.items()))) for variant, roles in
+              sorted(refinery_blueprints._VARIANT_TEMPLATES.items())),
+        tuple(sorted(refinery_blueprints._DIRECTIONS.items())),
+        tuple(sorted(_SCHEDULED_BLOCK_DIMENSIONS.items())),
+        FURNACES_PER_MODULE, COLUMN_PITCH, MIDDLE_PITCH, START_DEPTH,
+        END_DEPTH, PREFERRED_COLUMNS,
+    )
+    # Integrity checks are hard validation, not part of the reusable result.
+    for variant in {current_variant, target_variant}:
+        for role in ("start", "middle", "end"):
+            refinery_blueprints.decoded_template(template_name(role, variant))
+    plan = deepcopy(_managed_extension_geometry(
+        recipe, current_furnaces, new_furnaces, origin_x, origin_y,
+        current_variant, target_variant, vertical_mirror, template_identity,
+    ))
+    validate_build_plan(plan)
+    return plan
+
+
+@lru_cache(maxsize=16)
+def _managed_extension_geometry(
+    recipe: str, current_furnaces: int, new_furnaces: int,
+    origin_x: float, origin_y: float, current_variant: str,
+    target_variant: str, vertical_mirror: bool, template_identity: tuple,
+) -> dict:
+    """Compose a bounded process-local template delta, without world state."""
     plan = generate_refinery_extension_plan(
         recipe, current_furnaces, new_furnaces,
         origin_x=origin_x, origin_y=origin_y,

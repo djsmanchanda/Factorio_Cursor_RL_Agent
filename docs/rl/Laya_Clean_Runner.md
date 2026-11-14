@@ -391,3 +391,10 @@ record expose `extension_search` as `last_attempt_unrevalidated`, with its
 evidence tick. A later attempt replaces this history. The fact grants no
 current legality conclusion and changes no selection weights. No refusal
 cache or separate new-line/owned-transition operation is implemented yet.
+
+The managed-extension generator now reuses a bounded process-local cache of
+pure template deltas. Keys include template identity and geometry inputs; each
+caller receives an isolated plan. Template and plan validation still run, and
+every shared preflight rereads ownership/occupancy and the current combined
+extraction/material bill. No refusal or extraction plan is cached. This reduces
+template composition only and establishes no measured wall-time improvement.

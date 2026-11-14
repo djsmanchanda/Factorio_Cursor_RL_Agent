@@ -140,3 +140,122 @@ def test_later_success_or_unknown_clears_stale_menu_refusal():
         latest = {**outcome, 'operation': 'extend', 'params': {'recipe': 'iron-plate'}}
         menu = compile_options(BOARD, STARTED + [refusal, latest])
         assert 'extension_search' not in next(o for o in menu['options'] if o['option_id'] == 'op.extend.iron-plate')
+
+
+@pytest.mark.parametrize('origin', [(0, 0), (137, -89)])
+def test_geometry_reuse_keeps_preflight_surveys_and_bills_live(monkeypatch, origin):
+    from planners import smelter_block
+
+    state = refinery(origin)
+    smelter_block._managed_extension_geometry.cache_clear()
+    delta = builder.generate_managed_refinery_extension_plan(
+        'iron-plate', 30, 36, origin_x=origin[0], origin_y=origin[1],
+        current_variant=state.variant, target_variant=state.variant,
+        vertical_mirror=state.vertical_mirror)
+    tile = sorted(builder.planned_footprint_tiles(delta) - builder._planned_removal_tiles(delta))[0]
+    smelter_block._managed_extension_geometry.cache_clear()
+    counts = {'ownership': 0, 'survey': 0}
+    owner = ('medium-electric-pole', tile[0] + .5, tile[1] + .5)
+    owners = {tile: owner}
+    bills = []
+    def ownership(*args):
+        counts['ownership'] += 1
+    def survey(*args):
+        counts['survey'] += 1
+        return owners
+    monkeypatch.setattr(builder, 'assert_refinery_removals_owned', ownership)
+    monkeypatch.setattr(builder, 'live_refinery_placements', lambda *a: set())
+    monkeypatch.setattr(builder.live_base, 'occupied_tile_owners', survey)
+    monkeypatch.setattr(builder.live_base, 'water_tiles', lambda *a: set())
+    monkeypatch.setattr(builder, '_own_service_infrastructure', lambda *a, **k: False)
+    monkeypatch.setattr(builder, 'assert_affordable', lambda *a: bills.append(copy.deepcopy(a[3])))
+    client = SimpleNamespace(command=lambda *a: None)
+    extraction = SimpleNamespace(build_plan=None)
+    def preflight():
+        return builder._assert_atomic_plate_expansion_affordable(
+            client, 'nauvis', 'player', 'iron-plate', extraction, state, 36, lambda *a: None)
+    for _ in range(2):
+        with pytest.raises(builder.StuckError) as error:
+            preflight()
+        assert error.value.details['collision_tiles'] == [list(tile)]
+    assert counts == {'ownership': 2, 'survey': 2}
+    assert smelter_block._managed_extension_geometry.cache_info().misses == 1
+    extraction.build_plan = {'phases': [{'name': 'mine', 'actions': [{
+        'action_type': 'place_ghost', 'entity': owner[0],
+        'position': {'x': owner[1], 'y': owner[2]}}]}]}
+    preflight()  # The current extraction plan now owns the blocker.
+    owners.clear()
+    extraction.build_plan = None
+    preflight()
+    assert counts == {'ownership': 4, 'survey': 4}
+    assert len(bills) == 2 and bills[0] != bills[1]
+    assert smelter_block._managed_extension_geometry.cache_info().misses == 1
+
+
+@pytest.mark.fast
+def test_geometry_cache_keys_and_returned_plans_are_isolated():
+    from planners import smelter_block
+
+    cache = smelter_block._managed_extension_geometry
+    cache.cache_clear()
+    generate = smelter_block.generate_managed_refinery_extension_plan
+    baseline = generate('iron-plate', 6, 12)
+    baseline_copy = copy.deepcopy(baseline)
+    baseline['phases'][0]['actions'].clear()
+    assert generate('iron-plate', 6, 12) == baseline_copy
+    variants = [
+        (('copper-plate', 6, 12), {}),
+        (('iron-plate', 12, 24), {}),
+        (('iron-plate', 6, 24), {}),
+        (('iron-plate', 6, 12), {'origin_x': 100}),
+        (('iron-plate', 6, 12), {'origin_y': -100}),
+        (('iron-plate', 6, 12), {'vertical_mirror': True}),
+        (('iron-plate', 6, 12), {'current_variant': 'basic'}),
+        (('iron-plate', 6, 12), {'target_variant': 'basic'}),
+    ]
+    for args, kwargs in variants:
+        assert generate(*args, **kwargs) == smelter_block._managed_extension_geometry.__wrapped__(
+            *args, kwargs.get('origin_x', 0), kwargs.get('origin_y', 0),
+            kwargs.get('current_variant', 'standard'),
+            kwargs.get('target_variant', kwargs.get('current_variant', 'standard')),
+            kwargs.get('vertical_mirror', False), ())
+    assert cache.cache_info().misses == 1 + len(variants)
+
+
+@pytest.mark.fast
+def test_unknown_survey_is_retried_with_reused_geometry(monkeypatch):
+    from planners import smelter_block
+
+    state = refinery((0, 0))
+    smelter_block._managed_extension_geometry.cache_clear()
+    surveys = []
+    def survey(*args):
+        surveys.append(1)
+        if len(surveys) == 1:
+            raise RuntimeError('survey unavailable')
+        return {}
+    monkeypatch.setattr(builder, 'assert_refinery_removals_owned', lambda *a: None)
+    monkeypatch.setattr(builder, 'live_refinery_placements', lambda *a: set())
+    monkeypatch.setattr(builder.live_base, 'occupied_tile_owners', survey)
+    monkeypatch.setattr(builder.live_base, 'water_tiles', lambda *a: set())
+    monkeypatch.setattr(builder, 'assert_affordable', lambda *a: None)
+    def preflight():
+        return builder._assert_atomic_plate_expansion_affordable(
+            SimpleNamespace(command=lambda *a: None), 'nauvis', 'player',
+            'iron-plate', SimpleNamespace(build_plan=None), state, 36, lambda *a: None)
+    with pytest.raises(RuntimeError, match='survey unavailable'):
+        preflight()
+    assert preflight() is None
+    assert len(surveys) == 2
+    assert smelter_block._managed_extension_geometry.cache_info().misses == 1
+
+
+@pytest.mark.fast
+def test_cached_geometry_still_checks_template_integrity(monkeypatch):
+    from planners import refinery_blueprints, smelter_block
+
+    smelter_block._managed_extension_geometry.cache_clear()
+    smelter_block.generate_managed_refinery_extension_plan('iron-plate', 6, 12)
+    monkeypatch.setattr(refinery_blueprints, '_ALLOWED_ENTITIES', set())
+    with pytest.raises(ValueError):
+        smelter_block.generate_managed_refinery_extension_plan('iron-plate', 6, 12)
