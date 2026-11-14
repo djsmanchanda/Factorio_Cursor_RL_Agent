@@ -453,3 +453,9 @@ Corrected the dashboard scheduler flag from unsupported --cool-temp-limit to --c
 - What: restore the real checkpoint regression CLI/report from repository history, adapting only its unsupported adaptive-workers argument; move this base's deterministic session and economics projection into orchestrator with an identity-preserving training compatibility alias. Keep the import firewall unchanged.
 - Evidence: delegate focused regression155 passed; main independently reviewed exact extraction and reran92 report/session/runner/isolation/protocol/footprint checks, all passed. Reused the unchanged source/environment full fast gate:1,186 passed,one selected known fluid-chain skip plus two optional-lupa collection skips,exit0. Required protocol/footprint Lua tests ran. This clears the prior missing-module and firewall blockers on this branch.
 - Lifecycle: future frozen Python runners must pick up this source; no extra mod deployment or Factorio reload for this boundary patch. No runtime action or full controller/live restart proof.
+
+## [2026-11-15 03:46 IST] Adapter requests execute against offline Lua receipt boundaries
+
+- What: exercise both legacy and correlated GameBridge build submission through executable Lua/API fixtures and their actual receipt collectors.
+- Evidence: delegate focused120passed; unchanged settled fast1188passed,one selected and two optional-lupa collection skips,exit0; main repeated both new boundary cases2passed. These synthetic checks do not establish Track B stream compatibility: pinned B24035734 lacks capability negotiation and needs caller repair. Engine shoreline/placement acceptance remains open.
+- Lifecycle: no action performed; eventual executor use requires deliberate mod synchronization/reload and a matching frozen runner, queued behind active campaigns.
