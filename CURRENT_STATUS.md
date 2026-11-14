@@ -569,3 +569,9 @@ C6-v3 candidate derives recovery feed prototypes from the same constructed plan 
 - What: separate source stock from cell inputs and electrical identity; preserve unknowns and source staging; gate retries require supported readback, advancing ticks and monotonic crafts.
 - Evidence: 308 focused loan/reservation/chemical-boundary tests passed; settled combined PM fast gate 1,420 passed, three skipped (two optional-lupa collection modules, one known fluid-chain case), exit 0. The combined gate includes separate uncommitted RC7 scaffolding. Full loan restart equivalence and live AC-to-PM acceptance remain open.
 - Lifecycle: future affected runners need a matching frozen Python copy; no deployment, server, save or campaign action performed.
+
+## [2026-11-15 03:49 IST] Durable checkpoint provenance and observation gaps
+
+- What: shared session/sidecar evidence separates current predicates, inherited starts, observed transitions, explicit proxy phases and sampled consumer generations. Failed polls invalidate current evidence, exact duplicates share a sampling contract, and version2 restart state preserves evidence while version1 latches keep unknown origin.
+- Evidence: main combined focused127passed; settled PM fast1437passed,3skipped(two optional-lupa collection modules and known fluid-chain case),exit0. Main additionally retained separate generic/PM recipe-generation events and clock-discontinuity boundaries. The gate includes separate uncommitted outcome work; historic C5/C6 predicates are preserved and continuity is not claimed.
+- Lifecycle: future frozen runner/sidecar copies required; no runtime, service, save, deployment or campaign action performed.

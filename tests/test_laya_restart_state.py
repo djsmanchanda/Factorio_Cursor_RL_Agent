@@ -91,7 +91,7 @@ def test_missing_sidecars_are_explicit_and_symlinks_are_rejected(tmp_path):
 def test_invalid_bundle_fails_before_sidecars_are_written(tmp_path, mutation):
     _, bundle = make_bundle(tmp_path)
     bundle = copy.deepcopy(bundle)
-    if mutation == "version": bundle["version"] = 2
+    if mutation == "version": bundle["version"] = 99
     if mutation == "scope": bundle["scope"]["force"] = "other"
     if mutation == "milestones": bundle["milestones"][0]["predicate_version"] = "other"
     if mutation == "reached": bundle["reached"] = ["C99"]
@@ -116,7 +116,7 @@ def test_training_export_import_restores_real_session_boundary(tmp_path):
                                  mod_scope="factorio-2/test-mod-hash")
     assert TrainingRestartState is RestartState
     assert type(state) is RestartState
-    assert bundle["version"] == VERSION == 1
+    assert bundle["version"] == VERSION == 2
     session = DeterministicSession.__new__(DeterministicSession)
     session.episode_id = "laya-original"
     session.script_output = target

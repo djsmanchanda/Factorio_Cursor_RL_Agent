@@ -4,24 +4,29 @@ from __future__ import annotations
 from dataclasses import asdict
 
 from orchestrator.checkpoint_milestones import CheckpointEvaluator
+from orchestrator.checkpoint_evidence import project_evidence, retained_samples, state_projection
 
 
-def current_predicates(session):
+def current_predicates(session, proxy_phase=None):
     """Never use the session's monotonic reached set as end-state evidence."""
     evaluator = CheckpointEvaluator()
     history = list(getattr(session, '_history', ()))
     baseline = getattr(session, '_baseline', None)
     statuses = {m.checkpoint_id: None for m in evaluator.milestones}
     evidence = {}
-    if history and baseline is not None:
+    state = getattr(session, "_evidence_state", None)
+    if history and baseline is not None and (state is None or state["current_available"]):
         # Paused capture/reload may observe the same sample more than once.
-        history = [sample for i, sample in enumerate(history) if i == 0 or sample != history[i - 1]]
+        history = retained_samples(history)
         for milestone in evaluator.milestones:
             result = CheckpointEvaluator().evaluate(milestone.checkpoint_id, history[-1],
                                                    baseline=baseline, history=history)
             statuses[milestone.checkpoint_id] = (True if result.status.value == 'passed' else
                                                 False if result.status.value == 'failed' else None)
             evidence[milestone.checkpoint_id] = asdict(result)
+    evidence["_contract"] = (state_projection(baseline, history, state, proxy_phase) if state is not None
+                             else project_evidence(baseline, history))
+    evidence["_contract"]["proxy_phase"] = proxy_phase
     return statuses, evidence
 
 

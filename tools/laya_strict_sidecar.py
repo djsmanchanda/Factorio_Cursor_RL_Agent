@@ -32,6 +32,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from orchestrator.checkpoint_milestones import DEFAULT_MILESTONES, MILESTONE_IDS, evaluate_milestone  # noqa: E402
+from orchestrator.checkpoint_evidence import project_evidence, retained_samples, new_evidence_state, evidence_success, evidence_failure, state_projection  # noqa: E402
 
 #: Full evidence is kept for the checkpoints a track comparison reads closely; others keep version and status.
 DETAILED = {"C4", "C5", "C6", "C7", "C8", "C9"}
@@ -40,7 +41,8 @@ DETAILED = {"C4", "C5", "C6", "C7", "C8", "C9"}
 def instrument_identity() -> dict[str, str]:
     source = ROOT / "orchestrator" / "checkpoint_milestones.py"
     revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
-    return {"revision": revision or "?", "predicate_sha256": hashlib.sha256(source.read_bytes()).hexdigest()}
+    return {"revision": revision or "?", "predicate_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+            "evidence_sha256": hashlib.sha256((ROOT / "orchestrator" / "checkpoint_evidence.py").read_bytes()).hexdigest()}
 
 
 def disposable_endpoint(world_root: Path) -> tuple[int, str]:
@@ -58,10 +60,15 @@ class Measurement:
         self.identity, self.baseline, self.history = identity, None, []
         self.reached: dict[str, int | None] = {}
         self.rows: list[dict[str, Any]] = []
+        self.evidence_state = new_evidence_state()
 
     def add(self, snapshot) -> dict[str, Any]:
         self.baseline = self.baseline or snapshot
-        self.history = (self.history + [snapshot])[-20:]
+        self.history = retained_samples([*self.history, snapshot])[-20:]
+        # Historical predicates use object identity to decide whether the last
+        # sample is already in history; evaluate the retained representative.
+        snapshot = self.history[-1]
+        evidence_success(self.evidence_state, self.baseline, self.history)
         results = {m.checkpoint_id: evaluate_milestone(m.checkpoint_id, snapshot, baseline=self.baseline,
                                                        history=self.history, milestones=DEFAULT_MILESTONES)
                    for m in DEFAULT_MILESTONES}
@@ -73,15 +80,19 @@ class Measurement:
                "predicate_evidence": {cid: {"predicate_version": r.predicate_version, "status": r.status.value,
                                             **({"evidence": dict(r.evidence)} if cid in DETAILED else {})}
                                       for cid, r in results.items()}}
+        row["predicate_evidence"]["_contract"] = state_projection(self.baseline, self.history, self.evidence_state)
         self.rows.append(row)
         return row
 
+    def failure(self) -> None:
+        evidence_failure(self.evidence_state)
+
     def summary(self, stop: str) -> dict[str, Any]:
-        last = self.rows[-1]["statuses"] if self.rows else {}
+        last = self.rows[-1]["statuses"] if self.rows and self.evidence_state["current_available"] else {}
         return {"instrument": self.identity, "milestones": list(MILESTONE_IDS), "stop": stop,
                 "baseline_tick": None if self.baseline is None else self.baseline.tick,
                 "strict_reached": dict(self.reached), "strict_current_at_end": last,
-                "accepted_ever": sorted(self.reached, key=MILESTONE_IDS.index), "strict_current": self.rows}
+                "accepted_ever": sorted(self.reached, key=MILESTONE_IDS.index), "strict_current": self.rows, "evidence": state_projection(self.baseline, self.history, self.evidence_state)}
 
 
 def run(observe: Callable[[], Any], out: Path, *, interval: float, connect_timeout: float, max_failures: int,
@@ -95,6 +106,8 @@ def run(observe: Callable[[], Any], out: Path, *, interval: float, connect_timeo
             failures = 0
             _write(out, measurement.summary("running"))
         except Exception as error:  # noqa: BLE001 -- an unreachable or busy world is a missed sample, not a result
+            measurement.failure()
+            _write(out, measurement.summary("running"))
             failures += 1
             if measurement.rows and failures >= max_failures:
                 stop = f"world_unreachable: {type(error).__name__}"

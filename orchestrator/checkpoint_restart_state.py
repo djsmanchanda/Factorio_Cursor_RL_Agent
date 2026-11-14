@@ -17,7 +17,7 @@ from typing import Any, Union, get_args, get_origin, get_type_hints
 from orchestrator.checkpoint_milestones import CheckpointEvaluator, FactorySnapshot
 from orchestrator.oil_transaction import OilTransactionStore
 
-VERSION = 1
+VERSION = 2
 MAX_FILES = 256
 MAX_BYTES = 16 * 1024 * 1024
 MAX_HISTORY = 20
@@ -153,11 +153,12 @@ class RestartState:
     baseline: FactorySnapshot
     history: tuple[FactorySnapshot, ...]
     evaluator: CheckpointEvaluator
+    evidence_state: dict
 
 
 def export_restart_state(script_output: Path, episode_id: str, mod_scope: str,
                          baseline: FactorySnapshot, history: list[FactorySnapshot],
-                         evaluator: CheckpointEvaluator) -> dict:
+                         evaluator: CheckpointEvaluator, evidence_state: dict | None = None) -> dict:
     scope = _scope(episode_id, mod_scope)
     if not isinstance(baseline, FactorySnapshot) or not 1 <= len(history) <= MAX_HISTORY:
         raise ValueError("A baseline and bounded, nonempty strict history are required")
@@ -167,7 +168,9 @@ def export_restart_state(script_output: Path, episode_id: str, mod_scope: str,
         raise ValueError("Only the current default strict evaluator is supported")
     if not evaluator.reached <= {item.checkpoint_id for item in evaluator.milestones}:
         raise ValueError("Unknown reached checkpoint")
-    bundle = {"version": VERSION, "scope": scope, "milestones": _milestones(evaluator),
+    from orchestrator.checkpoint_evidence import new_evidence_state, validate_evidence_state
+    evidence_state = validate_evidence_state(evidence_state if evidence_state is not None else new_evidence_state(origin="unknown"))
+    bundle = {"evidence_state": evidence_state, "version": VERSION, "scope": scope, "milestones": _milestones(evaluator),
               "baseline": asdict(baseline), "history": [asdict(sample) for sample in history],
               "reached": sorted(evaluator.reached),
               "sidecars": _read_sidecars(sidecar_registry(script_output, episode_id))}
@@ -193,9 +196,9 @@ def import_restart_state(bundle: dict, script_output: Path, *, episode_id: str, 
         raise ValueError("Restart bundle must be JSON") from error
     if len(encoded.encode()) > MAX_BYTES * 2:
         raise ValueError("Restart bundle exceeds size limit")
-    if not isinstance(bundle, dict) or set(bundle) != {"version", "scope", "milestones", "baseline", "history", "reached", "sidecars"}:
+    if not isinstance(bundle, dict) or set(bundle) != ({"version", "scope", "milestones", "baseline", "history", "reached", "sidecars"} | ({"evidence_state"} if bundle.get("version") == VERSION else set())):
         raise ValueError("Invalid restart bundle shape")
-    if type(bundle["version"]) is not int or bundle["version"] != VERSION or bundle["scope"] != scope:
+    if type(bundle["version"]) is not int or bundle["version"] not in (1, VERSION) or bundle["scope"] != scope:
         raise ValueError("Restart version or scope mismatch")
     evaluator = CheckpointEvaluator()
     current = _milestones(evaluator)
@@ -216,6 +219,8 @@ def import_restart_state(bundle: dict, script_output: Path, *, episode_id: str, 
             or reached != sorted(set(reached)) or not set(reached) <= {m.checkpoint_id for m in evaluator.milestones}):
         raise ValueError("Invalid reached checkpoints")
     evaluator.reached = set(reached)
+    from orchestrator.checkpoint_evidence import new_evidence_state, validate_evidence_state
+    evidence_state = validate_evidence_state(bundle["evidence_state"]) if bundle["version"] == VERSION else new_evidence_state(origin="unknown")
     registry = sidecar_registry(script_output, episode_id)
     sidecars = bundle["sidecars"]
     if not isinstance(sidecars, dict) or set(sidecars) != set(registry):
@@ -254,4 +259,4 @@ def import_restart_state(bundle: dict, script_output: Path, *, episode_id: str, 
         for path in created:
             path.unlink(missing_ok=True)
         raise
-    return RestartState(episode_id, Path(script_output).resolve(), baseline, history, evaluator)
+    return RestartState(episode_id, Path(script_output).resolve(), baseline, history, evaluator, evidence_state)

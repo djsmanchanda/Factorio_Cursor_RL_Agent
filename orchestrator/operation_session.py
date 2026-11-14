@@ -369,8 +369,10 @@ class DeterministicSession:
         from orchestrator.checkpoint_milestones import (CheckpointEvaluator, _foundation_ready, evaluate_milestone,
                                                          starter_blocker)
         from orchestrator.checkpoint_observer import LiveCheckpointObservationAdapter, ObservationUnsupported
+        from orchestrator.checkpoint_evidence import new_evidence_state, evidence_failure, evidence_success
         if not hasattr(self, "_evaluator"):
             self._evaluator, self._baseline, self._history = CheckpointEvaluator(), None, []
+            self._evidence_state = new_evidence_state()
         self.acceptance_checks = None  # never journal an earlier sample's checks beside a new error
         self.acceptance_fresh = None
         self.foundation_observations = None
@@ -379,7 +381,11 @@ class DeterministicSession:
                                                         reference_point=self.reference_point,
                                                         bootstrap_profile=PROFILE).observe().snapshot
         except ObservationUnsupported as error:  # Telemetry failure: unknown, never a failed milestone.
+            evidence_failure(self._evidence_state)
             return {"error": str(error)[:200]}
+        except Exception:
+            evidence_failure(self._evidence_state)
+            raise
         # Persist the exact normalized inputs to readiness, including missing fields.
         self.foundation_observations = {name: {"tick": snapshot.tick,
             "observation": asdict(snapshot.foundations[name]) if name in snapshot.foundations else None,
@@ -400,6 +406,8 @@ class DeterministicSession:
                                                      ("stone-brick", "stone"))}
         if not self._history or snapshot != self._history[-1]:
             self._history = (self._history + [snapshot])[-20:]
+        snapshot = self._history[-1]  # canonical representative for identity-sensitive predicates
+        evidence_success(self._evidence_state, self._baseline, self._history)
         # Fresh: the stateless predicates on this sample. The evaluator's latch answers "passed" forever once
         # reached, so a latched final could not show a regression (review 2026-10-20).
         fresh = {m.checkpoint_id: evaluate_milestone(m.checkpoint_id, snapshot, baseline=self._baseline,
@@ -421,7 +429,7 @@ class DeterministicSession:
         if not hasattr(self, "_evaluator") or self._baseline is None:
             raise ValueError("Strict acceptance baseline has not been observed")
         return export_restart_state(self.script_output, self.episode_id, mod_scope,
-                                    self._baseline, self._history, self._evaluator)
+                                    self._baseline, self._history, self._evaluator, self._evidence_state)
 
     def restore_restart_acceptance(self, state) -> None:
         from orchestrator.checkpoint_restart_state import RestartState
@@ -431,6 +439,7 @@ class DeterministicSession:
         if hasattr(self, "_evaluator"):
             raise ValueError("Cannot replace initialized strict acceptance state")
         self._baseline, self._history, self._evaluator = state.baseline, list(state.history), state.evaluator
+        self._evidence_state = state.evidence_state
 
     def close(self) -> None:
         set_active_material_ledger(None)
