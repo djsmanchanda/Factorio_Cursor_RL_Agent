@@ -796,6 +796,7 @@ class SavedWorldAdapter:
         receipt = {"candidate": candidate, "before": before, "status": "pending",
                    "configuration_protocol": "correlated-v1", "adapter_hashes": getattr(self, "code_hashes", {})}
         receipt_path = self.root / "evidence" / f"transaction-{uuid.uuid4().hex}.json"
+        receipt["transaction_id"] = receipt_path.name
         receipt_path.parent.mkdir(exist_ok=True)
         atomic_json(receipt_path, receipt)
         if candidate.get("plan"):

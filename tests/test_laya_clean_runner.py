@@ -338,6 +338,7 @@ def test_every_decision_is_recorded_for_fine_tuning(tmp_path):
     run(FakeAdapter(fail={2}), GuidedPolicy(0), journal=journal, decisions=3, measure_ticks=300, seed=0, run_id="t")
     rows = [json.loads(l) for l in (tmp_path / "decision-states.jsonl").read_text().splitlines()]
     assert [r["outcome"]["status"] for r in rows] == ["planned", "observed", "failed"]
+    assert [r["outcome"]["typed_outcome"]["state"] for r in rows] == ["unknown", "unknown", "fault"]
     built = rows[1]
     assert built["state"]["options"] and built["distribution"] and built["choice"]["option_id"]
     assert all({"family", "need_id", "plan_hash"} <= set(o) for o in built["options"])

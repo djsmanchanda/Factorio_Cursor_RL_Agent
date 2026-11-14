@@ -18,6 +18,8 @@ says so.
 
 from __future__ import annotations
 
+from training.laya_operation_outcome import normalize, summarize_records
+
 import copy
 import json
 import math
@@ -1239,7 +1241,7 @@ def _plan_decision(facts: Mapping, board: Mapping, phase: Mapping, policy: "Poli
                      phase=phase["phase_id"], authority=policy.authority, state=state,
                      options=[{"option_id": o["option_id"], "family": "plan", "summary": o["summary"],
                                "site_plan": o["site_plan"]} for o in options],
-                     distribution=distribution, choice=choice, outcome={"status": "planned"})
+                     distribution=distribution, choice=choice, outcome={"status": "planned", "typed_outcome": normalize({"status": "planned"}, choice.get("family"))})
     record.update(event="decision", tick=facts["tick"], phase=phase["phase_id"], status="planned", choice=choice,
                   summary=chosen["summary"], menu={"plan:site": [o["option_id"] for o in options]},
                   site_plan=chosen["site_plan"])
@@ -1541,7 +1543,8 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                 if blocks is not None:
                     _journal_events(blocks, journal, run_id)
                 _training_record(records, **training, outcome={"status": "failed", "error_type": type(error).__name__,
-                                                               "error": str(error)[:500]})
+                                                               "error": str(error)[:500],
+                                                               "typed_outcome": normalize({"error_type": type(error).__name__}, chosen["family"])})
                 raise
             lap("execute")
             # This decision's own window (none when deferred); the board uses rolling rates either way.
@@ -1555,7 +1558,8 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
             _append(journal, record)
             _training_record(records, **training, outcome={
                 "status": receipt["status"], "window_ticks": window["window_ticks"],
-                "measured_per_s": record["measured_per_s"], "construction": receipt.get("construction")})
+                "measured_per_s": record["measured_per_s"], "construction": receipt.get("construction"),
+                "transaction_id": receipt.get("transaction_id"), "typed_outcome": normalize(receipt, chosen["family"])})
             emit(f"  OUTCOME: {receipt['status']} over {window['window_ticks']} ticks; produced "
                  + (", ".join(f"{k}={v}/s" for k, v in sorted(record["measured_per_s"].items())) or "nothing"))
             history.append({"decision_id": f"decision.{index}", "tick": facts["tick"],
@@ -1595,7 +1599,10 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                                      land_rejections=menu.get("land_rejections"),
                                      additional_candidate_results=menu["additional_candidate_results"],
                                      distribution=pick_distribution, choice=pick_choice,
-                                     outcome={"status": pick_receipt["status"], "parallel": True})
+                                     outcome={"status": pick_receipt["status"], "parallel": True,
+                                              "transaction_id": pick_receipt.get("transaction_id"),
+                                              "construction": pick_receipt.get("construction"),
+                                              "typed_outcome": normalize(pick_receipt, pick["family"])})
                     history.append({"decision_id": f"decision.{index}", "tick": facts["tick"], "summary": pick["summary"][:120],
                                     "outcome": "pending", "experiment_outcome": {"family": pick["family"],
                                     "product": pick.get("product"), "status": pick_receipt["status"], "produced": {}}})
@@ -1639,6 +1646,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
         summary["optimizer_blocks"] = {"funnel": dict(blocks.registry["funnel"]),
                                        "never_offered_reasons": dict(blocks.registry.get("never_offered_reasons", {})),
                                        "projects": {p["project_id"]: p["state"] for p in blocks.registry["projects"].values()}}
+    summary.update(summarize_records(records))
     _append(journal, {"run_id": run_id, "event": "summary", **summary})
     emit(f"SUMMARY: stop={summary['stop']} decisions={summary['decisions']} failures={summary['failures']} "
          f"phases={','.join(reached) or 'none'}")

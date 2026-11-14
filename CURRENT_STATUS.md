@@ -458,3 +458,9 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - What: derive supported solid operations from the full force survey, preserve recipe/product identity through quad slots and gates, and distinguish disabled, unsupported and unknown recipe evidence. Keep the existing furnace and fluid operation paths.
 - Evidence: 163 focused behavioral checks passed. Final fast gate exit 0: 1,098 passed and one selected skip; five additional modules skipped at collection because optional lupa is absent. The critical recipe Lua tests ran through the available Lua interpreter. Captured recipe fields plus explicit refreshed normal-quality fixture inputs reach candidate material checks; missing historical quality facts remain unknown. No live result established.
 - Lifecycle: freeze/restart affected runners with the Python, query-sent Lua helper and schema together after active campaigns; no installed-mod deployment or Factorio reload required. No runtime action performed.
+
+## [2026-11-15 03:51 IST] Shared receipt reconciliation and explicit denominators
+
+- What: validate contradictory envelopes; reconcile only actual invocation/transaction identities; retain initial and final receipt states, unknown and malformed slots, and duplicate/conflict counts. Runner summaries and collector use one function; controller publications count every immutable planned job and separate inherited/current milestone evidence from earned targets.
+- Evidence: 51 focused passes; settled fast1107 passed,6 skipped(five optional-lupa collection modules,one fluid-chain case),exit0. Track B caller handshake/stream acceptance and retained stream replay remain open.
+- Lifecycle: future matching frozen runner/controller copies required; no runtime, deployment, service, save or campaign action performed.
