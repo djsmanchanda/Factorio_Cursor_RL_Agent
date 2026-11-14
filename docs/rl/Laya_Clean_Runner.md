@@ -380,3 +380,14 @@ manifest rejects startup before session construction and preserves the original;
 a legacy resume without a manifest retains unknown historical provenance.
 Future use requires reviewed frozen Python source and a new runner/sidecar
 start; this contract implies no Lua deployment or campaign restart.
+
+Managed extension refusal evidence (15 November 2026): an infrastructure
+conflict retains the existing prerequisite-deferred outcome and adds a precise
+`refusal_code` and `search_coverage` in details. Coverage describes one delta
+at the standing refinery origin/variant/mirror and current/target furnace
+counts. It does not describe all possible factory sites. When that is the
+latest matching extension attempt, the menu, decision journal and training
+record expose `extension_search` as `last_attempt_unrevalidated`, with its
+evidence tick. A later attempt replaces this history. The fact grants no
+current legality conclusion and changes no selection weights. No refusal
+cache or separate new-line/owned-transition operation is implemented yet.

@@ -868,6 +868,19 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
         key = (option["family"], params.get("recipe") or params.get("item"))
         option["features"].update(history_features(results, key, option["family"]))
         mine = [r for r in results if r["operation"] != "wait" and _key(r) == key]
+        if option["family"] == "extend" and mine:
+            latest = mine[-1]
+            details = latest.get("details") or {}
+            coverage = details.get("search_coverage")
+            if (details.get("refusal_code") == "managed_extension_infrastructure_conflict"
+                    and isinstance(coverage, Mapping)):
+                option["extension_search"] = {
+                    "state": "last_attempt_unrevalidated", "tick": latest.get("tick"),
+                    "refusal_code": details["refusal_code"],
+                    "search_coverage": copy.deepcopy(coverage),
+                    "first_validator_refusal": details.get("first_validator_refusal"),
+                    "collision_tiles": copy.deepcopy(details.get("collision_tiles")),
+                }
         served = [r for r in results if r["operation"] != "wait" and r.get("need_id") == option["need_id"]]
         # Capped like repeat_fails so catalog rules can match exact values; the brief shows the full count.
         option["features"].update(no_progress=min(no_progress(mine), NO_PROGRESS_CAP) if mine else 0,
@@ -1223,7 +1236,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         emit(f"  STATUS: {status}")
         record = {"run_id": run_id, "event": "decision", "index": index, "tick": facts["tick"],
                   "phase": phase["phase_id"], "choice": {k: choice[k] for k in ("option_id", "need_id", "probability")},
-                  "summary": chosen["summary"], "operation_preview": chosen.get("operation_preview")}
+                  "summary": chosen["summary"], "operation_preview": chosen.get("operation_preview"),
+                  "extension_search": chosen.get("extension_search")}
         _append(journal, record)
         # Fresh baseline after selection, immediately before execution; never reuse a rate-window baseline.
         try:
@@ -1264,7 +1278,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
              + (f" -- {result.get('message', '')[:200]}" if not result.get("ok") else ""))
         _training_record(records, run_id=run_id, index=index, tick=facts["tick"], phase=phase["phase_id"],
                          state=state, options=[{k: o.get(k) for k in ("option_id", "family", "need_id", "product",
-                                                                      "params", "features", "bill", "bill_owner", "operation_preview",
+                                                                      "params", "features", "bill", "bill_owner", "operation_preview", "extension_search",
                                                                       "wait_ticks", "base_wait_ticks")} for o in menu["options"]],
                          distribution=choice["distribution"], choice=choice,
                          outcome={**{k: result.get(k) for k in ("ok", "code", "classification", "state", "details", "operation_id",

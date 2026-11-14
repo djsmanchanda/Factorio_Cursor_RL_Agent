@@ -369,6 +369,7 @@ def test_cohesive_target_uses_deployed_origin_not_new_search_site(monkeypatch) -
     assert target == 36
 
 
+@pytest.mark.fast
 def test_plate_expansion_preflight_rejects_real_infrastructure(monkeypatch) -> None:
     plan = {"phases": [{"actions": [{
         "action_type": "place_ghost", "entity": "electric-furnace",
@@ -378,8 +379,11 @@ def test_plate_expansion_preflight_rejects_real_infrastructure(monkeypatch) -> N
     monkeypatch.setattr(builder.live_base, "occupied_tile_owners", lambda *_a, **_k: {(0, 0): ("medium-electric-pole", 50.5, 50.5)})
     monkeypatch.setattr(builder.live_base, "water_tiles", lambda *_a: set())
 
-    with pytest.raises(StuckError, match="intersects real infrastructure"):
+    with pytest.raises(StuckError, match="intersects real infrastructure") as refusal:
         builder._plate_expansion_foundation(client, "nauvis", "player", "iron-plate", plan)
+    assert refusal.value.code == "managed_extension_infrastructure_conflict"
+    assert refusal.value.details == {"first_validator_refusal": "occupied_infrastructure",
+                                      "collision_tiles": [[0, 0]]}
 
 
 def test_plate_expansion_marks_an_obstructing_roboport_for_relocation(monkeypatch) -> None:

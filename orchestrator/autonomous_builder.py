@@ -1683,7 +1683,10 @@ def _plate_expansion_foundation(
     if collision:
         raise StuckError(
             f"{recipe} refinery extension intersects real infrastructure at "
-            f"{collision[:3]}; refusing to expand its mine ahead of that conflict"
+            f"{collision[:3]}; refusing to expand its mine ahead of that conflict",
+            code="managed_extension_infrastructure_conflict",
+            details={"first_validator_refusal": "occupied_infrastructure",
+                     "collision_tiles": [list(tile) for tile in collision[:3]]},
         )
     water = sorted(footprint & live_base.water_tiles(client, surface, minimum, maximum))
     if not water and not relocate_roboports:
@@ -2128,13 +2131,24 @@ def _assert_atomic_plate_expansion_affordable(
                 "target_furnaces": target_machines,
             },
         ) from error
-    foundation = _plate_expansion_foundation(
-        client, surface, force, recipe, smelter_delta,
-        own_action_positions=_planned_entity_positions(
-            smelter_delta,
-            *( [extraction.build_plan] if extraction.build_plan is not None else [] ),
-        ) | live_refinery_placements(client, surface, force, state),
-    )
+    try:
+        foundation = _plate_expansion_foundation(
+            client, surface, force, recipe, smelter_delta,
+            own_action_positions=_planned_entity_positions(
+                smelter_delta,
+                *( [extraction.build_plan] if extraction.build_plan is not None else [] ),
+            ) | live_refinery_placements(client, surface, force, state),
+        )
+    except StuckError as error:
+        if error.code == "managed_extension_infrastructure_conflict":
+            error.details["search_coverage"] = {
+                "scope": "standing_managed_refinery_delta",
+                "origin": list(state.origin), "variant": state.variant,
+                "vertical_mirror": state.vertical_mirror,
+                "current_furnaces": state.furnace_count,
+                "target_furnaces": target_machines, "candidates_tested": 1,
+            }
+        raise
     plans = [smelter_delta]
     if foundation is not None:
         plans.insert(0, foundation)
@@ -3182,9 +3196,12 @@ def build_mining_stage(
                 allow_unfunded_ghosts=earmark_unfunded,
             )
         except StuckError as error:
-            if "refinery extension intersects real infrastructure" not in str(error):
+            if (error.code != "managed_extension_infrastructure_conflict"
+                    and "refinery extension intersects real infrastructure" not in str(error)):
                 raise
-            raise ProductionPrerequisiteDeferred(str(error)) from error
+            raise ProductionPrerequisiteDeferred(
+                str(error), details={**error.details, "refusal_code": error.code},
+            ) from error
     if expand:
         _log_mining_expansion(extraction, emit)
     emit(
