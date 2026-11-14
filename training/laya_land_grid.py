@@ -162,6 +162,7 @@ def grid_plan(facts: Mapping, mall: list[float] | None = None, surveyed: Mapping
         allocate(plan, f"smelt:{plate}", sorted(sources, key=lambda p: abs(p[0] - base_parcel[0]) + abs(p[1] - base_parcel[1]))[:1])
     if mall:
         plan["zones"].append({"zone_id": "mall", "purpose": "mall", "rect": mall})
+    allocate(plan, "smelt:steel-plate", [base_parcel])
     return plan
 
 

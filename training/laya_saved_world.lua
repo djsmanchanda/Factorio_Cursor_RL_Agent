@@ -32,9 +32,12 @@ for _, e in pairs(surface.find_entities_filtered{force=force}) do
     local net = e.logistic_network; local id = tostring(net.network_id)
     if not facts.networks[id] then facts.networks[id] = {items={}, reserved={},
       construction_robots=net.all_construction_robots, available_construction_robots=net.available_construction_robots,
-      logistic_robots=net.all_logistic_robots} end
-    table.insert(facts.ports, {position=e.position, network=id, energy=e.energy,
-      construction_radius=e.prototype.construction_radius, logistic_radius=e.prototype.logistic_radius})
+      logistic_robots=net.all_logistic_robots, available_logistic_robots=net.available_logistic_robots} end
+    local port={position=e.position, network=id, energy=e.energy,
+      construction_radius=e.prototype.construction_radius, logistic_radius=e.prototype.logistic_radius}
+    local capacity_ok,capacity=pcall(function() return e.electric_buffer_size end)
+    if capacity_ok and type(capacity)=='number' and capacity>0 then port.energy_capacity=capacity end
+    table.insert(facts.ports, port)
   elseif e.type == "electric-pole" then
     local q_ok,q = pcall(function() return e.quality.name end)
     local quality = q_ok and type(q)=="string" and q or nil
@@ -48,6 +51,18 @@ for _, e in pairs(surface.find_entities_filtered{force=force}) do
   elseif e.type == "mining-drill" or e.type == "furnace" or e.type == "assembling-machine" then
     local m={name=e.name, position=e.position, energy=e.energy,status=status_names[e.status] or "unknown"}
     if e.type~="mining-drill" then local recipe=e.get_recipe(); m.recipe=recipe and recipe.name end
+    m.unit_number=e.unit_number
+    if e.type=='mining-drill' then
+      local ok,radius=pcall(function() return e.prototype.mining_drill_radius end)
+      if ok and type(radius)=='number' then
+        m.resource_remaining=0
+        for _,ore in pairs(surface.find_entities_filtered{type='resource',
+          area={{e.position.x-radius+.001,e.position.y-radius+.001},
+                {e.position.x+radius-.001,e.position.y+radius-.001}}}) do
+          m.resource_remaining=m.resource_remaining+ore.amount
+        end
+      end
+    end
     table.insert(facts.machines,m)
   end
 end
@@ -258,6 +273,8 @@ if request.inspect then
     end
     local target={entity=a.entity,position={x=a.position.x,y=a.position.y}}
     if found then result.built=result.built+1; target.state="built"; target.unit_number=found.unit_number
+      if found.type=='furnace' then target.products_finished=found.products_finished end
+      if found.type=='logistic-container' then target.inventory=contents(found.get_inventory(defines.inventory.chest)) end
     else
       local ghost=false
       for _,e in pairs(surface.find_entities_filtered{position=a.position,type="entity-ghost",force=force}) do
@@ -630,6 +647,23 @@ local function validate(candidate)
       if not in_network(p,network) then return "construction_coverage" end
       local prototype=prototypes.entity[a.entity]
       if not prototype then return "prototype" end
+      if prototype.type=="mining-drill" then
+        local ok,radius=pcall(function() return prototype.mining_drill_radius end)
+        if not ok or type(radius)~="number" or radius<=0 then return "mining_area_unknown" end
+        local expected=({['iron-plate']='iron-ore',['copper-plate']='copper-ore',
+          ['stone-brick']='stone'})[candidate.product] or candidate.product
+        local first=nil
+        for _,ore in pairs(surface.find_entities_filtered{type='resource',
+          area={{p.x-radius+.001,p.y-radius+.001},{p.x+radius-.001,p.y+radius-.001}}}) do
+          if ore.amount>0 then
+            if first and first~=ore.name then return "mixed_mining_area" end
+            first=ore.name
+          end
+        end
+        if not first then return "depleted_mining_area" end
+        if (expected=='iron-ore' or expected=='copper-ore' or expected=='stone' or expected=='coal')
+          and first~=expected then return "wrong_mining_resource" end
+      end
       if prototype.type=="logistic-container" then
         local serving=surface.find_logistic_network_by_position(p,force)
         if not serving or tostring(serving.network_id)~=network then return "logistic_coverage" end

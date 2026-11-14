@@ -1097,3 +1097,39 @@ def test_recorded_runtime_root_is_passed_on_every_lifecycle_call(tmp_path, monke
     run_laya_saved_world.manager(tmp_path, "start", ["--nice", "5"])
     assert "--runtime-root" not in calls[0]
     assert calls[1][-4:] == ["--runtime-root", "/rt/factorio-2.1.24", "--nice", "5"]
+
+
+@pytest.mark.lua
+def test_drill_validation_rejects_empty_and_mixed_actual_mining_areas():
+    _run_survey_lua(setup="""
+request.bounds={x_min=-32,y_min=-32,x_max_exclusive=32,y_max_exclusive=32}
+local net={network_id=1,all_construction_robots=5,available_construction_robots=5,all_logistic_robots=0}
+local port={name='roboport',type='roboport',position={x=0,y=0},energy=100,logistic_network=net,
+  prototype={construction_radius=30,logistic_radius=20}}
+local storage={prototype={logistic_mode='storage'},position={x=0,y=0},
+  get_inventory=function() return {get_contents=function() return {['electric-mining-drill']=5} end} end}
+surface.find_logistic_network_by_position=function() return net end
+surface.can_place_entity=function() return true end
+surface.find_entities_filtered=function(filter)
+  if filter.type=='resource' and math.abs(filter.area[2][1]-filter.area[1][1]-4.978)<.01 then
+    local x=filter.area[1][1]
+    if x<0 then return {{name='copper-ore',amount=50},{name='stone',amount=5}} end
+    if x<5 then return {} end
+    return {{name='copper-ore',amount=5000}}
+  end
+  if filter.type=='logistic-container' then return {storage} end
+  if filter.type or filter.position then return {} end
+  return {port}
+end
+prototypes.entity['electric-mining-drill']={type='mining-drill',mining_drill_radius=2.49,
+  items_to_place_this={{name='electric-mining-drill',count=1}}}
+local function candidate(id,x)
+ return {option_id=id,product='copper-plate',network_anchor={x=0,y=0},plan={phases={{actions={
+  {action_type='place_ghost',entity='electric-mining-drill',position={x=x,y=.5}}}}}}}
+end
+request.candidates={candidate('mixed',.5),candidate('empty',6.5),candidate('pure',12.5)}
+""", assertions="""
+assert(facts.validations.mixed.reason=='mixed_mining_area')
+assert(facts.validations.empty.reason=='depleted_mining_area')
+assert(facts.validations.pure.reason==nil)
+""")

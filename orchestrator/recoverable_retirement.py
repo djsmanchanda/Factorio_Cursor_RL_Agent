@@ -70,6 +70,7 @@ def retire_entities_via_bots(
     *,
     timeout: float = 120.0,
     poll_seconds: float = 2.0,
+    wait: bool = True,
 ) -> int:
     """Order exact removals and wait until bots have recovered every entity."""
     actions = _remove_actions(plan)
@@ -122,6 +123,8 @@ def retire_entities_via_bots(
             )
         return len(matching)
 
+    if not wait:
+        return len(matching)
     deadline = time.monotonic() + timeout
     while True:
         remaining = _matching_actions(client, surface, force, matching)

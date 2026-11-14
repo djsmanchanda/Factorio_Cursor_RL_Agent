@@ -327,3 +327,29 @@ def test_an_unserved_precursor_preempts_the_lowest_ranked_demanded_cell():
         == [("electronic-circuit", "copper-cable")]
     both = [{**c, "retargeted_tick": 9_000} for c in fresh]
     assert assign(both, order, board, recipes, have, 10_000) == []
+
+
+def test_pending_pipe_bill_reclaims_underground_slot_and_lifts_gate(tmp_path):
+    from training.laya_mall_slots import manage
+    cell_receipt(tmp_path, "pipes", 3.5, "pipe-to-ground")
+    recipes = {**RECIPES,
+               "pipe": {"ingredients": [{"name": "iron-plate", "amount": 1}], "product_amount": 1},
+               "pipe-to-ground": {"ingredients": [{"name": "pipe", "amount": 10},
+                                                   {"name": "iron-plate", "amount": 5}], "product_amount": 2}}
+    facts = {"tick": 20000, "recipes": recipes,
+             "networks": {"1": {"items": {"iron-plate": 500, "pipe-to-ground": 20}, "reserved": {"pipe": 81}}},
+             "machines": [{"name": "assembling-machine-1", "position": {"x": 3.5, "y": 0.5},
+                           "recipe": "pipe-to-ground", "status": "disabled_by_control_behavior"}]}
+    calls = []
+    adapter = type("A", (), {"root": tmp_path, "configure": lambda self, acts: calls.append(acts) or {"ok": True}})()
+    board = {"targets": {}, "needs": [], "construction": {"shortfall": {"pipe": 81}}}
+    made = manage(adapter, facts, board, {}, {})
+    assert [m["to"] for m in made] == ["pipe"]
+    machine = next(a for a in calls[0] if a["entity"] == "assembling-machine-1")
+    assert machine["recipe"] == "pipe" and machine["clear_logistic_condition"]
+    # Once the bill is funded, normal stock gating returns.
+    calls.clear()
+    facts["machines"][0].update(recipe="pipe", status="working")
+    facts["networks"]["1"]["items"]["pipe"] = 81
+    manage(adapter, facts, {"targets": {}, "needs": [], "construction": {"shortfall": {}}}, {}, {})
+    assert any(a.get("logistic_condition", {}).get("signal") == "pipe" for a in calls[0])

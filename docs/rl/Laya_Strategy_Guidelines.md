@@ -45,7 +45,7 @@ unknown; a rule's presence does not prove the runner can observe its inputs.
 | `mission.conserve-scarce` | Prefer actions that preserve scarce construction stock for upcoming useful builds. |
 | `mission.wait-rule` | Wait for relevant work already advancing, or when no useful legal action is available. |
 | `mission.purposeful-coverage` | Extend robot coverage toward resources and sites required by current demand. |
-| `mission.item-blocks` | Reserve expansion space beside each item's inputs and grow from the nearest free edge. |
+| `mission.item-blocks` | Reserve expansion space beside each item's inputs; prefer extending owned mines and furnace lines while reusing their transport and providers. |
 
 ## Geometry profile
 

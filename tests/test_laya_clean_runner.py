@@ -732,3 +732,17 @@ def test_goal_reserve_counts_furnaces_later_smelted_goals_still_need_while_none_
     menu = compile_menu(f, compile_status(f, phase("C2")["targets"]), validator(), seed=1)
     # C2: iron 3.0 and copper 3.0 -> 5 furnaces each at 0.625/s; C3: stone 1.5 -> 3, one already placed.
     assert menu["goal_reserve"]["electric-furnace"] == 5 + 5 + 2
+
+
+def test_submitted_construction_shortfalls_survive_without_a_build_candidate():
+    world = facts()
+    world["recipes"]["pipe"] = {"ingredients": [{"name": "iron-plate", "amount": 1}],
+                                  "product_amount": 1, "energy_ticks": 30}
+    board = compile_status(world, {"iron-plate": 0.1})
+    board["construction"] = {"pending_ghosts": 81, "shortfall": {"pipe": 81}}
+    menu = compile_menu(world, board, validator(), seed=1)
+    assert menu["unit_shortfalls"]["pipe"] == 81
+    assert menu["shortfalls"]["pipe"] >= 1
+    board["construction"] = {"pending_ghosts": 0, "shortfall": {}}
+    settled = compile_menu(world, board, validator(), seed=1)
+    assert "pipe" not in settled["shortfalls"]

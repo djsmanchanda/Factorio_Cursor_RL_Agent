@@ -28,6 +28,7 @@ from collections.abc import Mapping
 
 from orchestrator.laya_operations import sha256_hash
 from planners.resource_layouts import paired_mining_drill_positions
+from planners.mining_site_quality import site_quality
 from planners.plan_validation import validate_build_plan
 from planners.smelter_block import COLUMN_PITCH, END_DEPTH, MIDDLE_PITCH, START_DEPTH, _repeated_actions
 from training.laya_saved_world import ghost
@@ -254,7 +255,14 @@ def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_
                 if port is None:
                     count('outside_construction')
                     continue
-                sites = sorted(samples, key=lambda s: abs(s[1] - (ly + 1.5)) + abs(s[0] - lx))
+                survey = [s for s in facts["resources"] if s["item"] == ore]
+                def mine_quality(site):
+                    ox, oy, mine, *_ = mines[(*site, "east")]
+                    centres = [(a["position"]["x"], a["position"]["y"]) for a in mine
+                               if a["entity"] == "electric-mining-drill"]
+                    coverage, amount = site_quality(centres, survey)
+                    return (-coverage, -amount, abs(site[1] - (ly + 1.5)) + abs(site[0] - lx))
+                sites = sorted(samples, key=mine_quality)
                 furnaces = line_units(plate, rows, lx, ly)
                 if not clear_of(furnaces, obstacles):
                     count('line_body_collision')
@@ -307,14 +315,20 @@ def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_
                                      key=lambda q: (q["x"], q["y"]))
                         digest = sha256_hash({"plan": built, "network_anchor": anchor})
                         rate = round(min(FURNACES_PER_ROW * rows * PLATE_RATE, taps * TAP_RATES[inserter]), 3)
-                        candidates.append({
+                        candidate = {
                             "option_id": f"line.{digest[7:19]}", "family": "line", "product": plate,
                             "summary": f"{FURNACES_PER_ROW * rows}-furnace {plate} line at ({lx},{ly}) fed by "
                                        f"{2 * per_row} drills at ({ox},{oy}); {taps} {inserter} output taps, estimated {rate:g}/s",
                             "plan": built, "network": port["network"], "network_anchor": anchor,
                             "internal_power": True, "furnaces": FURNACES_PER_ROW * rows,
                             "output_taps": taps, "tap_inserter": inserter, "estimated_output_per_s": rate,
-                            "site_distance": round(_site_distance(strip, lx, ly, ores), 1)})
+                            "site_distance": round(_site_distance(strip, lx, ly, ores), 1),
+                            "line_origin": [lx, ly], "mine_origin": [ox, oy], "mine_flow": flow}
+                        if facts.get("poles"):
+                            from training.laya_power import power_variants
+                            if not power_variants(candidate, facts):
+                                continue
+                        candidates.append(candidate)
                         found += 1
                         total += 1
                         count('candidates')

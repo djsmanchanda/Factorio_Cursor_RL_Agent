@@ -160,10 +160,44 @@ rate rises over time with decisions in parallel on different aspects.
 `tools/laya_oil_options.py` adds two option families that follow the "Oil facts" survey above (`Settings.oil_options`, default on). `tools/run_laya_clean.py` injects it as `run(..., oil_options=...)`, because `training/` may not import `orchestrator.stage_*` (`training/isolation.py`). It is an adapter only: it reads the disposable world through the deterministic read-only functions and drives the pure planners `plan_reach_step`, `plan_power_bridge` (`orchestrator/stage_services.py`) and `plan_oil_cell_intent` (`orchestrator/stage_chemical.py`), answering each survey they name, then rerunning them. The families read nothing and the menu is unchanged unless `facts["oil_field"]` is found and plastic, petroleum gas or crude oil is an unmet board need.
 
 - **`reach`** (need: the most upstream unmet item of crude oil, petroleum gas, plastic): while the oil-field centre, then any planned cell action, lies outside construction coverage (Euclidean distance from a powered port, within its construction radius), one candidate is the next `plan_reach_step` hop: its power bridge and roboport as ghosts. It avoids the planned cell footprint. Pending ghosts are blocked as `reach_in_flight`, missing ports as `reach_no_source`, and geometry failures as `reach_plan_failed`.
-- **`oil`** (need: plastic first): once every cell action is covered, the opening plastic cell becomes one atomic plan. Its packets run in order as phases (`<packet>:<phase>`), with one `oil_power_bridge` phase from the first backbone substation inserted after the backbone. Direct placements become funded ghosts, as in the deterministic `_submit`. The family is blocked when no planner-managed belt coal mine exists (`needs:coal_source`) or the mine is incomplete (`coal_source_incomplete`). It is also blocked while the cell is uncovered (`needs:construction_coverage`) and when landfill or other non-ghost actions are needed (`needs_landfill`, `non_ghost_action`, `unsupported_action_field`). Siting and planning failures give `no_cell_site`, `no_plastic_site`, `no_shoreline` and `oil_plan_failed`, and an unpowered grid gives `oil_unpowered`. The cell intent is cached per run, keyed by oil well, cell site and coal source, for 36,000 ticks.
+- **`oil`** (need: plastic first): keep the planner's packet/phase boundaries. Release funded sections as materials appear, with outstanding ghost work bounded by the network's construction robots, their availability, observed roboport charge and logistic-bot availability. Future packet shortages remain mall demand, but do not reserve the entire district bill. Inspect exact entity and ghost positions before each release; persist the opening geometry and power bridge in `evidence/opening-oil-intent.json` across restarts. Keep the complete future footprint reserved for reach planning. Existing missing-source, coverage, landfill, legality, funding and power checks still apply.
 - Each candidate declares `scope_bounds` (action bounds plus 4 tiles) and carries its own power, so it receives no relay variants. The land check reads all phases. A candidate that overlaps a footprint Laya has already submitted is blocked as `already_submitted`. `reach` may cross ore, smelting and oil land like `expand`, and the mall stays reserved. Validation is the usual live check: `item_shortfall`/`missing` become stock needs, so roboports, poles, pumpjacks, refineries, chemical plants, pipes and other short items fund the mall. `pipe-to-ground`, `offshore-pump` and `substation` were added to the clean runner's exported recipes; only enabled recipes appear.
 - **Facts and journal:** `oil_facts` on each option record (reach: target, `hops_left`, `distance_to_oil`, bill; oil: packets, bill, `cell_draw_kw` nominal estimate, `power_capacity_verified: false`, bridge). `menu["oil_options"]` (facts, offered scopes and hops, blocked reasons) is written to the decision record and to `observation_digest.oil_options`. A failed read is blocked as `oil_options_error`, never as a failed decision.
 
 - **`coal-feed`** (November 7, 2026; unit tests with recorded planner outputs and the real mine classifier only; need: the `oil` need it unblocks, plastic first; `product: coal`): while `oil` is blocked `needs:coal_source`, the belt coal mine `ensure_coal_mine` would build is planned by the pure `plan_coal_mine_intent` (`orchestrator/stage_chemical.py`; surveys: one bulk ore-origin read, then bounded `clear`/`drill_ore` probes, at most 128 reads) on the nearest viable coal patch to the cell centre. It is reach-targeted until covered, then offered as one scoped ghost plan with a `coal_power_bridge` phase after its substation. It sits under the plastic need so the guided policy reads it as a goal build (`goal_need`); `goal_blocker` reads only `item_shortfall` reasons, so a `needs:` block never sets it. Blocks: `no_coal_patch`, `coal_plan_failed`, `coal_needs_landfill`, `coal_power_plan_failed`, `coal_unpowered`. It may stand on `ore:coal` land. `find_resource_mine` recognizes mines by layout (drills beside a belt row, ghosts included), so the submitted ghosts read as `coal_source_incomplete` and the built mine as the belt source that unblocks `oil`. Laya reads it with `include_unclassified=False`, so lone drill-to-chest `mine` drills no longer pass for an incomplete belt mine. The declared-scope rule is unchanged: a coal patch off the base-to-oil corridor and outside the outpost area is refused `scope_off_route` by the adapter.
 
 Not verified live: survey cost and RCON command size for the cell plan of about 230 actions, multi-phase atomic submission through the layout executor, coverage at the coal-belt midpoint, and grid capacity for the roughly 2.6 MW cell.
+
+## Geometry capacity lifecycle (2026-11-14)
+
+Pending construction shortfalls remain production demand after their original
+option leaves the menu. They expose recipe dependencies on the status board and
+lift the relevant mall gates until the network can fund the unfinished bill.
+Ordinary pipes used as ingredients and ordinary pipes needed by ghosts must not
+lose their producers when an underground-pipe batch starts.
+
+Reserve steel conversion land in patch and grid plans. Steel expands through
+the existing electric-furnace cell operation, with ordinary coverage, funding,
+power and collision validation.
+
+The CLI injects `GeometryMaintenance` for receipt-owned geometry. It orders bot
+recovery only after matching recorded unit identities: starter recovery requires
+real replacement furnace crafts and items observed in that replacement's exact
+provider; exhausted drill recovery preserves shared belts and poles. Orders and
+delivery evidence persist in `evidence/geometry-maintenance.json`. Recovery
+orders resume bots immediately rather than waiting with the simulation paused.
+
+New line receipts record their shared-template origin. Additive shared refinery
+extensions and drill infill on the connected collector reuse the existing haul
+and provider. Destructive cutovers and unrecorded origins are not inferred.
+Extensions retain a soft preference over independent lines; competing legal
+sites remain available. A line under construction is reconciled before opening
+another line for the same plate. If extension space, power, ore or legality is
+unavailable, a separate line can still be offered.
+
+Mining proposals prefer well-surrounded, resource-rich survey sites. Exact live
+validation rejects an empty mining area or any mining area containing multiple
+resources, using the engine's mining radius rather than the drill's footprint.
+
+Evidence: focused regression tests plus read-only live validation. No production
+improvement or acceptance milestone is established before a fresh frozen cohort.

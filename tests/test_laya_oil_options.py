@@ -34,7 +34,7 @@ def port(x, y, network="1"):
 
 
 def world_facts(ports, oil_field=OIL_FIELD):
-    return {"tick": 1000, "ports": ports, **({"oil_field": oil_field} if oil_field is not None else {})}
+    return {"tick": 1000, "ports": ports, "networks": {"1": {"construction_robots": 50, "available_construction_robots": 50, "items": {"transport-belt": 500, "substation": 20, "medium-electric-pole": 20, "pumpjack": 10, "pipe": 500}, "reserved": {}}}, **({"oil_field": oil_field} if oil_field is not None else {})}
 
 
 class FakeWorld:
@@ -43,6 +43,10 @@ class FakeWorld:
     def __init__(self, coal=(250.0, 40.0), coal_reason=None, coal_patch=COAL_PATCH, machines=None, isolated=()):
         self.coal, self.coal_reason, self.patch, self.reads = coal, coal_reason, coal_patch, []
         self.machines, self.isolated = machines or {}, list(isolated)
+
+    def inspect_plan(self, phases):
+        return [{"entity": a["entity"], "position": a["position"], "state": "missing"}
+                for p in phases for a in p["actions"]]
 
     def outpost_power(self, center):
         self.reads.append("outpost_power")
@@ -189,12 +193,10 @@ def test_oil_cell_is_offered_only_once_construction_coverage_reaches_it(planners
     assert not planners["reach"] and offer["blocked"] == {}
     assert cell["family"] == "oil" and cell["need_id"] == "item:plastic-bar"
     names = [p["name"] for p in cell["plan"]["phases"]]
-    # One atomic plan, packets in order, the grid hookup right after the backbone.
-    assert names == ["chemical_coal_belt:bridge_coal_to_plastic-bar", "chemical_power_backbone:crude_oil_power",
-                     "oil_power_bridge", "chemical_refinery_and_plastic_machines:crude_oil_source",
-                     "chemical_crude_pipeline:fluid_link_crude-oil"]
+    assert names == ["chemical_coal_belt:bridge_coal_to_plastic-bar"]
     assert all(a["action_type"] == "place_ghost" for p in cell["plan"]["phases"] for a in p["actions"])
-    assert cell["oil_facts"]["bill"]["substation"] == 1 and cell["oil_facts"]["power_bridge"] == "bridge"
+    assert cell["oil_facts"]["bill"] == {"transport-belt": 1}
+    assert cell["oil_facts"]["power_bridge"] == "bridge"
     assert planners["bridge"][0].near_position == (300.0, 14.0)
     assert declared_scope_reason(cell, facts) is None
 
@@ -280,14 +282,14 @@ def test_a_built_coal_feed_is_recognized_as_the_oil_cells_belt_source(monkeypatc
     assert world.coal_source(_EAST_REFERENCE) == (None, "needs:coal_source")
 
 
-def test_cell_intent_is_cached_until_its_inputs_or_ttl_change(planners):
+def test_opening_geometry_is_pinned_across_packet_release_and_ttl(planners):
     options, facts = OilOptions(), world_facts([port(0, 0)])
     options.offer(FakeWorld(), facts, BOARD)
     planned = len(planners["oil"])
     options.offer(FakeWorld(), facts, BOARD)
     assert len(planners["oil"]) == planned
     options.offer(FakeWorld(), {**facts, "tick": facts["tick"] + options.plan_ttl_ticks}, BOARD)
-    assert len(planners["oil"]) > planned
+    assert len(planners["oil"]) == planned
 
 
 @pytest.mark.parametrize("oil_field", [None, {**OIL_FIELD, "found": False}])
@@ -485,7 +487,9 @@ def test_a_cell_in_construction_range_but_not_logistic_range_reaches_for_logisti
     planners["plan"] = cell_plan(extra=[ghost("passive-provider-chest", 296.5, 12.5)])
     world, facts = FakeWorld(), world_facts([port(0, 0), port(250, 10)])
     offer = OilOptions().offer(world, facts, BOARD)
-    assert [c["family"] for c in offer["candidates"]] == ["reach"]
+    assert {c["family"] for c in offer["candidates"]} == {"reach", "oil"}
+    partial = next(c for c in offer["candidates"] if c["family"] == "oil")
+    assert not any(a["entity"] == "passive-provider-chest" for p in partial["plan"]["phases"] for a in p["actions"])
     assert planners["reach"][-1].purpose == "logistic"
     assert offer["facts"]["reach_purpose"] == "logistic"
     assert offer["blocked"]["item:plastic-bar"] == {"needs:logistic_coverage": 1}
@@ -498,3 +502,41 @@ def test_a_reserved_block_across_the_line_yields_corner_detours_shortest_first()
     assert len(points) == 4  # only the zone the line crosses
     assert points[0] == (-14.0 + DETOUR_MARGIN, -19.0 - DETOUR_MARGIN) or points[0][1] == -19.0 - DETOUR_MARGIN
     assert detour_waypoints((0.0, 0.0), (-280.0, -91.0), [(100.0, 100.0, 110.0, 110.0)]) == []
+
+
+def test_packet_progress_survives_restart_without_replanning_or_resubmission(tmp_path, planners, monkeypatch):
+    import tools.laya_oil_options as module
+    from types import SimpleNamespace
+    world = FakeWorld()
+    states = {}
+    def inspect(phases):
+        return [{'entity': a['entity'], 'position': a['position'],
+                 'state': states.get((a['entity'], a['position']['x'], a['position']['y']), 'missing')}
+                for phase in phases for a in phase['actions']]
+    world.inspect_plan = inspect
+    monkeypatch.setattr(module, 'World', lambda *args: world)
+    (tmp_path / 'evidence').mkdir()
+    adapter = SimpleNamespace(root=tmp_path, bridge=object(), surface='nauvis', force='player')
+    facts = world_facts([port(0, 0), port(290, 10)])
+    first = OilOptions()(adapter, facts, BOARD)['candidates'][0]
+    for phase in first['plan']['phases']:
+        for a in phase['actions']:
+            states[(a['entity'], a['position']['x'], a['position']['y'])] = 'built'
+    calls = len(planners['oil'])
+    second = OilOptions()(adapter, {**facts, 'tick': facts['tick'] + 100_000}, BOARD)['candidates'][0]
+    assert len(planners['oil']) == calls
+    assert second['plan']['phases'][0]['name'].startswith('chemical_power_backbone')
+    assert first['option_id'] != second['option_id']
+
+
+def test_covered_substructure_releases_while_future_packet_needs_coverage(planners):
+    # Put a future pipe outside today's frontier; the nearby funded coal belt
+    # remains useful work and must not wait for the full district's coverage.
+    plan = cell_plan()
+    plan.intent['packets'][-1][1]['phases'][0]['actions'] = [ghost('pipe', 380.5, 12.5)]
+    planners['plan'] = plan
+    offer = OilOptions().offer(FakeWorld(), world_facts([port(0, 0), port(290, 10)]), BOARD)
+    assert {'reach', 'oil'} <= {c['family'] for c in offer['candidates']}
+    oil = next(c for c in offer['candidates'] if c['family'] == 'oil')
+    assert oil['plan']['phases'][0]['name'].startswith('chemical_coal_belt')
+    assert all(a['position']['x'] < 345 for p in oil['plan']['phases'] for a in p['actions'])

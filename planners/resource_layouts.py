@@ -59,6 +59,18 @@ def mining_drill_positions(origin: tuple[float, float], machine_count: int) -> l
     return [(ox + 1.5 + (3 * index), oy - 1.5) for index in range(machine_count)]
 
 
+def collector_drill_infill(belts: list[dict]) -> list[dict]:
+    """Candidate drill ghosts feeding an existing horizontal collector.
+
+    Callers check ore, collisions, power and ownership against the live world.
+    Each drill emits directly onto its supplied collector tile.
+    """
+    return [{"action_type": "place_ghost", "entity": "electric-mining-drill",
+             "position": {"x": belt["position"]["x"], "y": belt["position"]["y"] + dy},
+             "direction": direction}
+            for belt in belts for dy, direction in ((-2, "south"), (2, "north"))]
+
+
 def paired_mining_drill_positions(origin: tuple[float, float], machine_count: int) -> list[tuple[float, float]]:
     """Three-above/belt/three-below geometry for a complete mine unit."""
     upper = mining_drill_positions(origin, machine_count)

@@ -189,12 +189,14 @@ def main(argv=None) -> int:
                                   should_stop=stop.is_set, status_path=paths["status"], settings=settings,
                                   carried=carried, session=session)
             else:
+                from tools.laya_geometry_maintenance import GeometryMaintenance
                 summary = run(adapter, policy, journal=paths["journal"],
                               decisions=args.decisions or None, measure_ticks=args.measure_ticks, seed=args.seed,
                               run_id=run_id, emit=log, should_stop=stop.is_set, status_path=paths["status"],
                               settings=settings, initial_reached=resume['phases_reached'] if resume else (),
                               candidate_provider=candidate_provider,
-                              oil_options=_oil_options() if settings.oil_options else None)
+                              oil_options=_oil_options() if settings.oil_options else None,
+                              maintenance=GeometryMaintenance())
             if args.export_checkpoint:
                 export_bundle(adapter,args.export_checkpoint,summary)
             if stop.is_set():

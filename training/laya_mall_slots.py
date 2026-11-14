@@ -405,6 +405,9 @@ def manage(adapter, facts: Mapping, board: Mapping, stock_demand: Mapping[str, f
     from training.laya_layout_stream import atomic_json
     cells = mall_cells(adapter.root, facts)
     recipes = facts.get("recipes") or {}
+    # A submitted build can outlive the menu option that requested its items.
+    # Its outstanding bill must still drive slot allocation and lift stock gates.
+    stock_demand = {**stock_demand, **(board.get("construction", {}).get("shortfall") or {})}
     from training.laya_factory_status import available_items
     have = available_items(facts, board)
     stock: dict[str, int] = {}

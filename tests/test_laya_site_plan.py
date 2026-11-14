@@ -208,3 +208,14 @@ def test_a_mall_block_across_the_line_to_the_surveyed_oil_field_is_not_offered()
     assert not crosses_route(Rect(-29, -52, 11, -12), route)   # north: ~1 tile off it (reached C4)
     assert not crosses_route(Rect(-29, 14, 11, 54), route)     # south
     assert oil_route({"oil_field": {"found": False}}) is None
+
+
+def test_steel_has_expandable_reserved_land_outside_the_assembler_mall():
+    from training.laya_site_plan import base_zones, zone_smelt_candidates
+    world = {**facts(), 'ports': [{'position': {'x': 0, 'y': 0}, 'energy': 1, 'network': '1',
+                                  'construction_radius': 55, 'logistic_radius': 25}]}
+    plan = {'zones': base_zones(world)}
+    cells = zone_smelt_candidates(world, plan, {'steel-plate'})
+    assert len(cells) >= 2
+    assert all(reservation_reason(plan, c) is None for c in cells)
+    assert all(any(a['entity'] == 'electric-furnace' for a in c['plan']['phases'][0]['actions']) for c in cells)

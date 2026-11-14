@@ -50,6 +50,9 @@ def starter_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], b
         zones = [z["rect"] for z in plan["zones"] if z["purpose"] == f"ore:{ore}"]
         samples = [(s["position"]["x"], s["position"]["y"]) for s in facts["resources"] if s["item"] == ore
                    and any(r[0] <= s["position"]["x"] <= r[2] and r[1] <= s["position"]["y"] <= r[3] for r in zones)]
+        from planners.mining_site_quality import site_quality
+        survey = [s for s in facts["resources"] if s["item"] == ore]
+        samples.sort(key=lambda p: site_quality([p], survey), reverse=True)
         found = 0
         for x, y in samples:
             port = next((p for p in ports if max(abs(x - p["position"]["x"]), abs(y - p["position"]["y"]))

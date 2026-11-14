@@ -638,3 +638,15 @@ No bootstrap inventory grants and no destroy/recreate requester shortcut are
 allowed. Trash settings unsupported on a bot-built requester remain unsupported;
 removing a real building to force those settings is forbidden. Sandbox/training
 fixture creation remains isolated from the deterministic player-force runtime.
+
+### Incremental construction and mining intent (2026-11-14)
+
+Release independently useful blueprint sections as their materials are produced;
+do not require the whole district bill before starting available substructures.
+Bound outstanding work by observed construction-bot capacity and charging/logistic
+pressure. Missing materials for already submitted ghosts remain active demand.
+For mining, prefer interior, resource-rich drill sites. Reject mixed-resource
+mining areas even when the physical drill footprint covers only the target ore.
+An exhausted owned drill is recovered by bots; its connected collector, haul and
+power remain available for legal replacement/infill. Prefer extending owned
+capacity before spending on another haul, splitter system and provider.

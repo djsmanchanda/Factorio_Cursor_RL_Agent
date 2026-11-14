@@ -44,7 +44,7 @@ from training.laya_guided_policy import load_preferences, matches, option_featur
 from training.laya_power import POLES, power_variants, world_obstacles
 from training.laya_experiment_context import reservation_view
 from training.laya_site_plan import (base_zones, draw_command, load_plan, plan_options, reservation_reason,
-                                    ring_expand_candidates, save_plan)
+                                    ring_expand_candidates, save_plan, zone_smelt_candidates)
 from training.laya_lines import clear_of, line_candidates
 from training.laya_starters import STARTER_ORE, starter_bill, starter_candidates
 from training.laya_saved_world import (SAVED_WORLD_GHOST_FIELDS, SavedWorldAdapter, SavedWorldError,
@@ -343,6 +343,12 @@ def _sample(groups: Mapping[str, list], limit: int, rng: random.Random) -> list:
     for key in sorted(groups):
         items = list(groups[key])
         rng.shuffle(items)
+        reuse = [c for c in items if c.get("reuses_infrastructure")]
+        if reuse and limit > 1:
+            others = [c for c in items if not c.get("reuses_infrastructure")]
+            # Preserve both growth mechanisms in a bounded menu; a large set
+            # of greenfield sites must not sample the sole extension away.
+            items = reuse[:1] + others[:1] + reuse[1:] + others[1:]
         picked.extend(items[:limit])
     return picked
 
@@ -465,7 +471,8 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
                  additional_observations: Mapping | None = None,
                  external_check: Callable[[Mapping, Mapping], tuple[str | None, Mapping | None]] | None = None,
                  external_shortfalls: Mapping[str, int] | None = None,
-                 oil_offer: Mapping | None = None) -> dict:
+                 oil_offer: Mapping | None = None, lifecycle_candidates: Sequence[Mapping] = (),
+                 constructing_products: Sequence[str] = ()) -> dict:
     """Group legal options by the unmet need they serve.
 
     Each sampled build is offered with its power alternatives (training/laya_power.py).
@@ -509,9 +516,14 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     proposed += starter_candidates(facts, site_plan, plates, set(starters), obstacles=obstacles)
     # Mall cells anywhere in the mall block (the shared generator only offers fixed sites per roboport).
     proposed += mall_cell_candidates(facts, site_plan, unmet, obstacles=obstacles)
+    proposed += list(lifecycle_candidates)
+    if site_plan and "steel-plate" in unmet:
+        proposed += [c for c in zone_smelt_candidates(facts, site_plan, {"steel-plate"})
+                     if clear_of(list(actions(c["plan"])), obstacles)]
     # After a plate's starter, more capacity comes from smelting lines (6 or 18 furnaces), added in parallel.
     line_diagnostics = {}
-    proposed += line_candidates(facts, site_plan, {p for p in plates if p in starters}, obstacles=obstacles,diagnostics=line_diagnostics)
+    proposed += line_candidates(facts, site_plan, {p for p in plates if p in starters and p not in constructing_products},
+                                obstacles=obstacles,diagnostics=line_diagnostics)
     proposed += ring_expand_candidates(facts, site_plan)
     # Coverage hops clear placed and refused footprints like every other family; the generators'
     # fixed hops and the ring know no obstacles, so a refused roboport site was offered forever.
@@ -561,7 +573,7 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     for candidate in proposed:
         need = need_of(candidate)
         # A coverage hop that reaches (or closes on) an unmet resource serves it.
-        if need == "coverage" or need in unmet:
+        if need == "coverage" or need in unmet or candidate.get("maintenance"):
             by_need[_need_key(reach_facts, candidate, unmet)].append(candidate)
 
     rejected: Counter = Counter()
@@ -722,6 +734,7 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
         for need in sorted(groups):
             builds = list(groups[need])
             rng.shuffle(builds)
+            builds.sort(key=lambda c: not c.get("reuses_infrastructure"))
             variants = [v for c in builds[:per_need_checked]
                         for v in ([c] if c.get("own_power") else power_variants(c, power_facts))]
             if builds and not variants:
@@ -778,7 +791,11 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
 
     legal = check(by_need)
     # Unfunded external builds (an optimizer block) and stock an oil-family plan lacks (laya_oil_options).
+    # Submission removes a candidate from the menu, not its unfinished bill.
+    # Keep ghost demand alive until the network can fund the remaining build.
     external_shortfalls = {**(external_shortfalls or {})}
+    for item, lacking in (board.get("construction", {}).get("shortfall") or {}).items():
+        external_shortfalls[item] = max(int(external_shortfalls.get(item, 0)), int(lacking))
     for item, lacking in ((oil_offer or {}).get("shortfalls") or {}).items():
         external_shortfalls[item] = max(int(external_shortfalls.get(item, 0)), int(lacking))
     for item, lacking in external_shortfalls.items():
@@ -1172,13 +1189,17 @@ def _submitted_entities(adapter: Any) -> list[dict]:
     footprints the game refused at submission, so those sites are not offered again."""
     root = getattr(adapter, "root", None)
     placed: list[dict] = []
+    retirement = Path(root, "evidence", "geometry-maintenance.json") if root else None
+    retired = {(r.get("owner"), *r["key"]) for r in json.loads(retirement.read_text()).get("retired", ())} \
+        if retirement and retirement.exists() else set()
     blocked = Path(root, "evidence", BLOCKED_FOOTPRINTS) if root else None
     if blocked and blocked.exists():
         placed += json.loads(blocked.read_text())
-    for _, receipt in receipts(root):
+    for receipt_path, receipt in receipts(root):
         if receipt["submission"].get("ok"):
             placed += [{"entity": a["entity"], "position": a["position"], "submitted": True}
-                       for phase in receipt["candidate"]["plan"]["phases"] for a in phase["actions"]]
+                       for phase in receipt["candidate"]["plan"]["phases"] for a in phase["actions"]
+                       if (receipt_path.name, a["entity"], a["position"]["x"], a["position"]["y"]) not in retired]
     return placed
 
 
@@ -1328,7 +1349,8 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
         should_stop: Callable[[], bool] = lambda: False, status_path: Path | None = None,
         settings: Settings = Settings(), initial_reached: Sequence[str] = (),
         candidate_provider: Callable[[Any, Mapping, Mapping], Sequence[Mapping]] | None = None,
-        oil_options: Callable[[Any, Mapping, Mapping], Mapping | None] | None = None) -> dict:
+        oil_options: Callable[[Any, Mapping, Mapping], Mapping | None] | None = None,
+        maintenance: Callable | None = None) -> dict:
     """Observe -> board -> menu -> choose -> execute -> measure, journaling each step.
 
     ``decisions=None`` runs until the mission completes, the safe-stop rule
@@ -1377,6 +1399,9 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
             lap("reconcile")
             facts = adapter.query()
             lap("query")
+            from training.laya_factory_status import construction_shortfall
+            stock_demand.update({item: settings.stock_rate for item in construction_shortfall(facts)})
+            lifecycle = maintenance(adapter, facts, emit) if maintenance is not None else {}
             if blocks is not None:
                 blocks.reconcile(adapter, facts)  # Receipt- and entity-based; never resends.
                 _journal_events(blocks, journal, run_id)
@@ -1469,7 +1494,9 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                                 additional_candidates=external,
                                 observe_unlinked=bool(getattr(candidate_provider, "observe_unlinked", False)),
                                 additional_observations=demand_observations, external_check=external_check,
-                                external_shortfalls=unfunded, oil_offer=oil_offer)
+                                external_shortfalls=unfunded, oil_offer=oil_offer,
+                                lifecycle_candidates=lifecycle.get("candidates", ()),
+                                constructing_products=lifecycle.get("constructing_products", ()))
             lap("menu")
             # Items the checks found short become small demand targets on the next board.
             stock_demand = {item: settings.stock_rate for item in menu["shortfalls"]}

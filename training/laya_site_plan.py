@@ -227,6 +227,14 @@ def base_zones(facts: Mapping, avoid: Sequence[Rect] = ()) -> list[dict]:
     reserve = starter_reserve(facts)
     zones.append({"zone_id": "starter-reserve", "purpose": "corridor",
                   "rect": [reserve.min_x, reserve.min_y, reserve.max_x, reserve.max_y]})
+    # Conversion furnaces need persistent land just as ore-fed foundations do.
+    taken = [_rect(z["rect"]) for z in zones] + list(avoid) + [_base_core(facts)]
+    sites = sorted((Rect(x, y, x + 16, y + 16) for x in range(-120, 105, 8)
+                    for y in range(-120, 105, 8)), key=lambda r: math.dist(r.centre, base))
+    conversion = next((r for r in sites if not any(r.overlaps(t) for t in taken)), None)
+    if conversion is not None:
+        zones.append({"zone_id": "smelt-steel", "purpose": "smelt:steel-plate",
+                      "rect": [conversion.min_x, conversion.min_y, conversion.max_x, conversion.max_y]})
     return zones
 
 
@@ -315,7 +323,8 @@ def plan_options(facts: Mapping) -> list[dict]:
 
 
 # Same furnace cell as the saved-world generator: requester -> inserter -> furnace -> inserter -> provider.
-SMELT_INPUTS = {"iron-plate": ("iron-ore", 20), "copper-plate": ("copper-ore", 20), "stone-brick": ("stone", 40)}
+SMELT_INPUTS = {"iron-plate": ("iron-ore", 20), "copper-plate": ("copper-ore", 20),
+                "stone-brick": ("stone", 40), "steel-plate": ("iron-plate", 100)}
 
 
 def zone_smelt_candidates(facts: Mapping, plan: Mapping, plates: set[str]) -> list[dict]:

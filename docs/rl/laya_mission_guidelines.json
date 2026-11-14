@@ -38,7 +38,7 @@
         "mission.decide"
       ],
       "source": "docs/rl/Laya_Strategy_Guidelines.md",
-      "quote": "Reserve expansion space beside each item's inputs and grow from the nearest free edge.",
+      "quote": "Reserve expansion space beside each item's inputs; prefer extending owned mines and furnace lines while reusing their transport and providers.",
       "prefer": [
         {
           "when": {
@@ -46,7 +46,8 @@
             "next_slot": false
           },
           "weight": 0.2
-        }
+        },
+        {"when": {"reuses_infrastructure": true}, "weight": 8.0}
       ]
     },
     {

@@ -17,6 +17,7 @@ into typed blocked reasons.  It ranks nothing: the policy chooses.
 from __future__ import annotations
 
 import copy
+import json
 import math
 from pathlib import Path
 from collections import Counter
@@ -158,6 +159,12 @@ class World:
     client: Any
     surface: str = "nauvis"
     force: str = "player"
+    inspector: Any = None
+
+    def inspect_plan(self, phases):
+        if self.inspector is None:
+            raise RuntimeError("oil packet release requires exact world inspection")
+        return self.inspector(inspect={"phases": phases})["targets"]
 
     def oil_well(self, center):
         from orchestrator import live_base
@@ -256,6 +263,8 @@ class OilOptions:
     plan_ttl_ticks: int = PLAN_TTL_TICKS
     _cache: dict = field(default_factory=dict)
     shortfalls: dict = field(default_factory=dict)
+    _opening: dict | None = None
+    _opening_center: Any = None
 
     def __call__(self, adapter: Any, facts: Mapping, board: Mapping) -> dict | None:
         """The clean runner's hook: read the adapter's own disposable world and its land plan."""
@@ -263,11 +272,20 @@ class OilOptions:
         plan = load_plan(Path(adapter.root, "evidence", "site-plan.json")) if getattr(adapter, "root", None) else None
         self.reach_avoid_rects = tuple(tuple(z["rect"]) for z in (plan or {}).get("zones") or ()
                                        if z["purpose"] in ("mall", "corridor"))
-        return self.offer(World(adapter.bridge, adapter.surface, adapter.force), facts, board,
-                          reach_avoid=reach_reserved_tiles(plan))
+        intent_path = Path(adapter.root, "evidence", "opening-oil-intent.json")
+        if self._opening is None and intent_path.exists():
+            saved = json.loads(intent_path.read_text())
+            self._opening, self._opening_center = saved["intent"], saved["center"]
+        result = self.offer(World(adapter.bridge, adapter.surface, adapter.force, getattr(adapter, "query", None)), facts, board,
+                            reach_avoid=reach_reserved_tiles(plan))
+        if self._opening is not None:
+            from training.laya_layout_stream import atomic_json
+            atomic_json(intent_path, {"intent": self._opening, "center": self._opening_center})
+        return result
 
     def offer(self, world: World, facts: Mapping, board: Mapping,
               reach_avoid: frozenset[tuple[int, int]] = frozenset()) -> dict | None:
+        self._facts = facts
         self.reach_avoid = reach_avoid
         field_facts = facts.get("oil_field") or {}
         unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"} & FLUID_CHAIN
@@ -306,7 +324,7 @@ class OilOptions:
             hookup = self._hookup(world, ports, power["isolated_substations"], oil_need, block)
             if hookup:
                 result["candidates"].append(hookup)
-        if result["facts"]["cell_built"]:
+        if result["facts"]["cell_built"] and self._opening is None:
             result["blocked"] = {need: dict(counts) for need, counts in result["blocked"].items()}
             return result
         intent, reason, cell_centre = self._intent(world, facts, center)
@@ -363,6 +381,13 @@ class OilOptions:
                 block(option["need_id"], f"{option['family']}_plan_invalid")
             else:
                 result["candidates"].append(option)
+        # Already covered substructures can build while the next coverage hop
+        # advances. The full district footprint remains reserved throughout.
+        if targets and intent:
+            partial = self._oil(world, ports, intent, center, oil_need, block)
+            if partial:
+                validate_build_plan(partial["plan"])
+                result["candidates"].append(partial)
         result["blocked"] = {need: dict(counts) for need, counts in result["blocked"].items()}
         if self.shortfalls:  # Items a plan needs that the base lacks: they become stock needs like any shortfall.
             result["shortfalls"] = dict(self.shortfalls)
@@ -371,6 +396,8 @@ class OilOptions:
     def _intent(self, world: World, facts: Mapping, center) -> tuple[dict | None, str | None, Any]:
         """The frozen opening cell (ghost phases, bill, draw) or the typed reason it cannot be planned,
         plus the cell centre once a cell site is known (the coal mine's reference point)."""
+        if self._opening is not None:
+            return self._opening, None, self._opening_center
         oil = world.oil_well(center)
         if oil is None:
             return None, "oil_well_unreadable", None
@@ -382,6 +409,8 @@ class OilOptions:
         if reason:
             return None, reason, cell_centre
         intent, reason = self._cell(world, facts, oil, cell, cell_centre, coal)
+        if intent is not None:
+            self._opening, self._opening_center = intent, cell_centre
         return intent, reason, cell_centre
 
     def _cell(self, world, facts, oil, cell, cell_centre, coal) -> tuple[dict | None, str | None]:
@@ -422,7 +451,7 @@ class OilOptions:
             return None, reason
         bill = Counter(a["entity"] for phase in phases for a in phase["actions"])
         intent = {"tick": facts["tick"], "phases": phases, "packets": [name for name, _ in plan.packets],
-                  "bill": dict(bill), "footprint": frozenset(plan.footprint_tiles),
+                  "bill": dict(bill), "footprint": sorted(plan.footprint_tiles),
                   "substations": sorted({(a["position"]["x"], a["position"]["y"]) for phase in phases
                                          for a in phase["actions"] if a["entity"] == "substation"}),
                   "draw_kw": round(sum(NOMINAL_DRAW_KW.get(name, 0) * n for name, n in bill.items()), 1)}
@@ -473,8 +502,8 @@ class OilOptions:
         # One hookup from the first substation (the build wires the rest); the
         # deterministic runtime bridges each after the previous is built.
         try:
-            bridge, _surveys = resolve(plan_power_bridge, PowerBridgeFacts(build["substations"][0],
-                                       build["footprint"]), world.read_reach_survey, MissingReachSurvey)
+            bridge, _surveys = resolve(plan_power_bridge, PowerBridgeFacts(tuple(build["substations"][0]),
+                                       frozenset(tuple(t) for t in build["footprint"])), world.read_reach_survey, MissingReachSurvey)
         except (StuckError, SurveyBudgetExceeded):
             block(need, f"{family}_power_plan_failed")
             return None
@@ -534,9 +563,10 @@ class OilOptions:
         # Land the plan keeps from coverage (mall, corridors) is routed around, not hopped into: with the mall
         # between base and oil, the direct hop was rejected reserved:mall every decision (eval-fixes-20261109b,
         # 4/4 C3 seeds stalled before C4).
+        reserved = frozenset(tuple(t) for t in intent["footprint"]) if intent else frozenset()
         reach_facts = ReachFacts(target=target, source=_xy(source["position"]), purpose=purpose,
                                  roboport_ghosts=world.roboport_ghosts(),
-                                 reserved_tiles=frozenset(intent["footprint"] if intent else ()) | getattr(self, "reach_avoid", frozenset()))
+                                 reserved_tiles=reserved | getattr(self, "reach_avoid", frozenset()))
         try:
             step, _surveys = resolve(plan_reach_step, reach_facts, world.read_reach_survey, MissingReachSurvey)
         except (StuckError, SurveyBudgetExceeded):
@@ -568,15 +598,38 @@ class OilOptions:
                                [{"name": "reach_power_and_roboport", "actions": actions}], source, ports, oil_facts)
 
     def _oil(self, world, ports, intent, center, need, block) -> dict | None:
-        phases = copy.deepcopy(intent["phases"])
-        after = next((i + 1 for i, p in enumerate(phases) if p["name"].startswith("chemical_power_backbone")), 0)
-        bridge_facts = self._bridge(world, intent, phases, after, "oil", need, block)
-        if bridge_facts is None:
-            return None
+        from planners.construction_packets import release_packet
         port = min(ports, key=lambda p: math.dist(_xy(p["position"]), center))
+        serving = [p for p in ports if p["network"] == port["network"]]
+        def reachable(action):
+            position = action["position"]
+            def within(key):
+                return any(max(abs(position["x"] - p["position"]["x"]),
+                               abs(position["y"] - p["position"]["y"])) <= p[key] - 2 for p in serving)
+            return within("construction_radius") and (action["entity"] not in LOGISTIC_CHESTS or within("logistic_radius"))
+        if not any(reachable(a) for phase in intent["phases"] for a in phase["actions"]):
+            return None
+        if "release_phases" not in intent:
+            phases = copy.deepcopy(intent["phases"])
+            after = next((i + 1 for i, p in enumerate(phases) if p["name"].startswith("chemical_power_backbone")), 0)
+            bridge_facts = self._bridge(world, intent, phases, after, "oil", need, block)
+            if bridge_facts is None:
+                return None
+            intent.update(release_phases=phases, bridge_facts=bridge_facts)
+        phases, bridge_facts = intent["release_phases"], intent["bridge_facts"]
+        targets = world.inspect_plan(phases)
+        phases = [{**phase, "actions": [a for a in phase["actions"] if reachable(a)]} for phase in phases]
+        network = self._facts.get("networks", {}).get(port["network"], {})
+        charge = min((p["energy"] / p["energy_capacity"] for p in self._facts["ports"]
+                      if p["network"] == port["network"] and p.get("energy_capacity", 0) > 0), default=1.0)
+        phases, short = release_packet(phases, targets, network, charge_fraction=charge)
+        self.shortfalls.update(short)
+        if not phases:
+            block(need, "oil_packets_waiting")
+            return None
         oil_facts = {"kind": "oil", "packets": intent["packets"], "bill": phases_bill(phases),
                      "cell_draw_kw": intent["draw_kw"], "power_capacity_verified": False, **bridge_facts}
-        return self._candidate("oil", need, f"Build the opening oil -> plastic cell ({len(intent['packets'])} packets, "
+        return self._candidate("oil", need, f"Build opening oil packet {phases[0]['name']} ("
                                f"{sum(len(p['actions']) for p in phases)} ghosts, ~{intent['draw_kw'] / 1000:.1f} MW)",
                                phases, port, ports, oil_facts)
 
