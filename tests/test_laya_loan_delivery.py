@@ -117,3 +117,32 @@ def test_delivery_reports_when_no_spot_exists(monkeypatch):
     assert plans == []
     assert any("CELL DELIVERY BLOCKED" in message and "14 tiles" in message
                for message in messages)
+
+
+def test_delivery_moves_when_the_network_holds_stock_far_from_an_empty_requester(monkeypatch):
+    monkeypatch.setitem(builder.LINE_RECIPES, "steel-chest", {
+        "ingredients": ["steel-plate"], "amounts": [8]})
+    monkeypatch.setattr(live_base, "network_item_count", lambda *a, **k: 8)
+    monkeypatch.setattr(live_base, "chest_contents", lambda *a, **k: {})
+    monkeypatch.setattr(live_base, "nearest_container", lambda *a, **k: (41.5, 32.5))
+    moved = []
+    monkeypatch.setattr(live_base, "transfer_stock",
+                        lambda *a, **k: moved.append(a[2]) or 8)
+    messages = []
+    assert builder._deliver_cell_ingredients(
+        object(), object(), "nauvis", "player", "steel-chest", (39.5, 32.5),
+        messages.append, requester_position=(40.5, 32.5)) is True
+    assert moved == ["steel-plate"]
+    assert any("CELL DELIVERY: moved 8 steel-plate" in message for message in messages)
+
+
+def test_delivery_does_not_move_into_a_requester_that_already_holds_enough(monkeypatch):
+    monkeypatch.setitem(builder.LINE_RECIPES, "steel-chest", {
+        "ingredients": ["steel-plate"], "amounts": [8]})
+    monkeypatch.setattr(live_base, "network_item_count", lambda *a, **k: 8)
+    monkeypatch.setattr(live_base, "chest_contents", lambda *a, **k: {"steel-plate": 16})
+    monkeypatch.setattr(live_base, "transfer_stock",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not move")))
+    assert builder._deliver_cell_ingredients(
+        object(), object(), "nauvis", "player", "steel-chest", (39.5, 32.5),
+        lambda *_: None, requester_position=(40.5, 32.5)) is False

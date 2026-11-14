@@ -10551,7 +10551,16 @@ def _deliver_cell_ingredients(
             local = live_base.network_item_count(
                 client, surface, force, chest, ingredient,
             )
-            if local is not None and local >= amount * 2:
+            # Network-wide stock is not requester stock. The 2026-11-14 replay
+            # had the AC requester at 0 with 8 plastic in a provider ~370 tiles
+            # away in the same network: the old skip saw 8 >= 2*2, moved
+            # nothing, and the gate-refresh loop raised mall_loan_gate_mismatch.
+            # Skip only when this chest already holds enough.
+            try:
+                held = live_base.chest_contents(client, surface, chest)
+            except Exception:  # noqa: BLE001 -- delivery is opportunistic
+                held = {}
+            if float(held.get(ingredient, 0)) >= amount * 2:
                 continue
             provider = live_base.nearest_container(
                 client, surface, force, chest,
