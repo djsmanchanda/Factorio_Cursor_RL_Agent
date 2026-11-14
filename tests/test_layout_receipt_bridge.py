@@ -9,6 +9,10 @@ from orchestrator.game_bridge import BridgeError, GameBridge, LAYOUT_REPORT_SUBD
 AUTH = {"approved_actions": []}
 PLAN = {"phases": [{"name": "test", "actions": [
     {"action_type": "place_ghost"}, {"action_type": "place_ghost_no_reconcile"}]}]}
+CAPS = json.dumps({"receipt_protocols": ["layout-submission-receipt-v1", "layout-submission-receipt-v2"],
+                   "correlated_identity": 1, "idempotent_requests": 1, "ownership": "force-surface-v1",
+                   "actions": ["place_ghost", "place_ghost_no_reconcile"],
+                   "tag_protocols": ["optimizer-shared-tags-v1"]})
 
 
 @pytest.fixture
@@ -19,6 +23,8 @@ def bridge(tmp_path, monkeypatch):
 
 def collect(bridge, monkeypatch, mutate=lambda report: None, *, stream_id=None, sequence=None):
     def command(text):
+        if text == "/layout_executor_capabilities":
+            return CAPS
         body = json.loads(text.split(" ", 1)[1])
         canonical = json.dumps({"authorization": body["authorization"], "build_plan": body["build_plan"]},
                                sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
@@ -104,7 +110,7 @@ def test_existing_receipt_is_not_overwritten_or_resubmitted(bridge, monkeypatch)
     directory.mkdir(parents=True)
     receipt = directory / f"layout_{'a' * 32}.json"
     receipt.write_text("{}")
-    monkeypatch.setattr(bridge, "command", lambda _text: pytest.fail("unexpected submission"))
+    monkeypatch.setattr(bridge, "command", lambda text: CAPS if text == "/layout_executor_capabilities" else pytest.fail("unexpected submission"))
     with pytest.raises(BridgeError, match="already exists"):
         bridge.build_layout_correlated({}, {"phases": []}, request_id="a" * 32)
     assert receipt.read_text() == "{}"
@@ -155,6 +161,8 @@ def shared_plan():
 def test_shared_tags_add_protocol_and_keep_ghost_count(bridge, monkeypatch):
     sent = []
     def command(text):
+        if text == "/layout_executor_capabilities":
+            return CAPS
         sent.append(json.loads(text.split(" ", 1)[1]))
         body = sent[-1]
         directory = bridge.script_output / LAYOUT_REPORT_SUBDIR

@@ -612,12 +612,25 @@ class SavedWorldAdapter:
             receipt.update(status="configuration_submitting", configuration_request=request)
             atomic_json(receipt_path, receipt)
         report = submit_layout_stream(self.root, self.bridge, authorization, plan,
-                                      transaction=receipt_path.name, prepared=prepared)
+                                      transaction=receipt_path.name, prepared=prepared, refused=self._store_layout_refusal)
         receipt.update(configuration=report,
                        status="configuration_received" if report["ok"] else "configuration_failed")
         atomic_json(receipt_path, receipt)
         if not report["ok"]:
             raise SavedWorldError("configuration failed")
+
+    def _store_layout_refusal(self, request, refusal):
+        path = self.root / "evidence" / request["transaction"]
+        receipt = load_json(path)
+        for submitting, field, final in (("submitting", "layout_request", "submission_refused"),
+                                         ("configuration_submitting", "configuration_request", "configuration_refused")):
+            if receipt.get(field) == request and receipt.get("status") in (submitting, final):
+                if receipt.get("status") == final and receipt.get("layout_refusal") != refusal:
+                    break
+                receipt.update(status=final, layout_refusal=refusal)
+                atomic_json(path, receipt)
+                return
+        raise SavedWorldError(f"layout stream transaction mismatch: {path.name}")
 
     def quad_centers(self):
         centers = {(p["x"], p["y"]) for p in self.manifest.get("quad_centers", [])}
@@ -867,7 +880,7 @@ class SavedWorldAdapter:
                 receipt.update(status="submitting", layout_request=request)
                 atomic_json(receipt_path, receipt)
             report = submit_layout_stream(self.root, self.bridge, authorization, ghosts,
-                                          transaction=receipt_path.name, prepared=prepared)
+                                          transaction=receipt_path.name, prepared=prepared, refused=self._store_layout_refusal)
             receipt.update(submission=report, status="submission_received" if report["ok"] else "submission_failed")
             atomic_json(receipt_path, receipt)
             if not report["ok"]:
@@ -916,7 +929,7 @@ class SavedWorldAdapter:
             atomic_json(path, receipt)
         if (evidence / "layout-stream.json").exists():
             try:
-                recover_layout_stream(self.root, self.bridge, resolved=store_recovered)
+                recover_layout_stream(self.root, self.bridge, resolved=store_recovered, refused=self._store_layout_refusal)
             except Exception as error:
                 raise SavedWorldError("pending layout submission could not be recovered; outcome is unknown") from error
         from training.laya_receipts import receipts

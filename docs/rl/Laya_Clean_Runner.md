@@ -197,3 +197,16 @@ does not establish the missing historical quality facts or live production.
 The Lua helper is sent by the adapter on each query, rather than installed in
 the mod. Future runners need a frozen copy of the corrected Python/helper/schema
 combination; this change requires no installed-mod deployment or Factorio reload.
+
+Executor contract (15 November 2026; offline adapter/Lua fixtures): correlated
+layout calls negotiate protocol, identity, idempotence, action, ownership and
+configuration-guard capabilities before dispatch. Unsupported guards fail before
+a build; guarded or owned legacy calls require the correlated interface. Caller
+authorization bounds are checked even with executors that ignore scope limits.
+A known pre-dispatch capability refusal is durably published to its transaction
+before clearing the pending request. Recovery never resends an ambiguous request.
+After a known refusal, a fresh stream starts at sequence one because Lua never
+received the refused sequence. Historical refusal evidence and request identity
+are retained. Track B does not yet implement configuration preconditions and
+does not advertise them. Source capability declarations require deliberate mod
+synchronization/reload with a matching frozen runner before runtime use.

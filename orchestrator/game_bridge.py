@@ -58,6 +58,10 @@ class BridgeError(RuntimeError):
     pass
 
 
+class LayoutCapabilityError(BridgeError):
+    """The executor cannot be shown to support this request; no build was sent."""
+
+
 class GameBridge:
     """One live game connection: sends console commands via RCON and
     ingests the JSON files the mod writes into script-output."""
@@ -337,9 +341,34 @@ class GameBridge:
         return self._run_and_collect(f"/seed_water_lakes {body}", WATER_SEED_REPORT_SUBDIR, timeout)
 
     def build_layout(self, authorization: dict, build_plan: dict, timeout: float = 120.0) -> Path:
+        self._validate_layout_scope(authorization, build_plan)
         self._reject_uncorrelated_shared_tags(build_plan)
+        for phase in build_plan.get("phases", []):
+            for action in phase.get("actions", []):
+                if any(field in action for field in ("configuration_preconditions", "optimizer_ownership", "research_lab_ownership")):
+                    raise ValueError("guarded or owned actions require a correlated layout request")
         body = json.dumps({"authorization": authorization, "build_plan": build_plan}, separators=(",", ":"))
         return self._run_and_collect(f"/build_layout_plan {body}", LAYOUT_REPORT_SUBDIR, timeout)
+
+    @staticmethod
+    def _validate_layout_scope(authorization, plan):
+        """Enforce caller bounds even when an older executor ignores them."""
+        limits = authorization.get('scope_limits')
+        if limits is None:
+            return
+        if not isinstance(limits, dict) or set(limits) - {'max_count', 'surface', 'force'}:
+            raise ValueError('invalid layout authorization scope limits')
+        if 'surface' in limits or 'force' in limits:
+            if any(not isinstance(limits.get(k), str) or not limits[k] for k in ('surface', 'force')):
+                raise ValueError('layout authorization requires explicit surface and force')
+            if any(limits[k] != plan.get(k) for k in ('surface', 'force')):
+                raise ValueError('layout scope differs from authorization')
+        if 'max_count' in limits:
+            maximum = limits['max_count']
+            if type(maximum) is not int or maximum < 0:
+                raise ValueError('layout authorization max_count must be a non-negative integer')
+            if sum(len(phase['actions']) for phase in plan['phases']) > maximum:
+                raise ValueError('layout action count exceeds authorization')
 
     @staticmethod
     def _validate_optimizer_tag_bytes(tags):
@@ -375,6 +404,7 @@ class GameBridge:
                 raise ValueError("stream ID, sequence, and derived request ID do not match")
         if not isinstance(authorization, dict) or not isinstance(build_plan, dict):
             raise ValueError("authorization and build_plan must be objects")
+        GameBridge._validate_layout_scope(authorization, build_plan)
         shared_tags = "optimizer_ownership" in build_plan
         if shared_tags:
             from planners.plan_validation import validate_build_plan
@@ -455,12 +485,54 @@ class GameBridge:
         """
         body, digest, expected_placements, validator = self._layout_receipt_request(
             authorization, build_plan, request_id, stream_id=stream_id, sequence=sequence)
+        self._negotiate_layout(build_plan, streamed=stream_id is not None)
         _, report = self._collect_correlated_catalog(
             command="/build_layout_plan " + body, subdir=LAYOUT_REPORT_SUBDIR,
             expected_name=f"layout_{request_id}.json", timeout=timeout, label="Layout receipt",
         )
         return self._validate_layout_receipt(report, request_id, digest, expected_placements, validator,
                                              stream_id=stream_id, sequence=sequence)
+
+    def _negotiate_layout(self, plan, *, streamed):
+        def unique_object(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("duplicate capability field")
+                result[key] = value
+            return result
+
+        def reject_constant(value):
+            raise ValueError("non-finite capability value")
+
+        actions = [action for phase in plan["phases"] for action in phase["actions"]]
+        try:
+            caps = json.loads(self.command("/layout_executor_capabilities"),
+                              object_pairs_hook=unique_object, parse_constant=reject_constant)
+            protocol = "layout-submission-receipt-v2" if streamed else "layout-submission-receipt-v1"
+            if (not isinstance(caps, dict) or not isinstance(caps.get("receipt_protocols"), list)
+                    or protocol not in caps["receipt_protocols"]
+                    or type(caps.get("correlated_identity")) is not int or caps["correlated_identity"] != 1
+                    or type(caps.get("idempotent_requests")) is not int or caps["idempotent_requests"] != 1
+                    or caps.get("ownership") != "force-surface-v1"
+                    or not isinstance(caps.get("actions"), list)
+                    or any(a["action_type"] not in caps["actions"] for a in actions)):
+                raise ValueError("required protocol or action unavailable")
+            if any("configuration_preconditions" in a for a in actions):
+                if (type(caps.get("configuration_preconditions")) is not int
+                        or caps["configuration_preconditions"] != 1
+                        or any("configuration_preconditions" in a and a["action_type"] != "configure_entity" for a in actions)):
+                    raise ValueError("configuration guard unavailable")
+            for field, capability in (("optimizer_ownership", "optimizer-action-tags-v1"),
+                                      ("research_lab_ownership", "research-lab-tags-v1")):
+                if any(field in a for a in actions) and (not isinstance(caps.get("tag_protocols"), list)
+                                                         or capability not in caps["tag_protocols"]):
+                    raise ValueError("action ownership unavailable")
+            if "optimizer_ownership" in plan and (not isinstance(caps.get("tag_protocols"), list)
+                                                   or SHARED_OPTIMIZER_TAG_PROTOCOL not in caps["tag_protocols"]):
+                raise ValueError("shared ownership unavailable")
+        except Exception as error:
+            raise LayoutCapabilityError("Layout executor capabilities unavailable or incompatible; build not sent") from error
 
     def read_layout_receipt(self, authorization: dict, build_plan: dict, *, request_id: str,
                             stream_id: str | None = None, sequence: int | None = None) -> dict:

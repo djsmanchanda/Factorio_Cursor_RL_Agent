@@ -11,7 +11,7 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 
-from orchestrator.game_bridge import GameBridge
+from orchestrator.game_bridge import GameBridge, LayoutCapabilityError
 
 try:
     import fcntl
@@ -107,7 +107,8 @@ def _load(path: Path) -> dict:
     pending = state["pending"]
     if pending is not None:
         if (not isinstance(pending, dict)
-                or set(pending) != {"sequence", "request_id", "authorization", "build_plan", "transaction"}
+                or set(pending) not in ({"sequence", "request_id", "authorization", "build_plan", "transaction"},
+                                        {"sequence", "request_id", "authorization", "build_plan", "transaction", "refusal"})
                 or type(pending["sequence"]) is not int or pending["sequence"] != state["last_sequence"] + 1
                 or pending["sequence"] > 4294967295
                 or pending["request_id"] != f"{state['stream_id']}{pending['sequence']:016x}"
@@ -115,10 +116,29 @@ def _load(path: Path) -> dict:
                 or not isinstance(pending["transaction"], str)
                 or not re.fullmatch(r"transaction-[0-9a-f]{32}\.json", pending["transaction"])):
             raise LayoutStreamError("pending layout submission is malformed")
+        if "refusal" in pending:
+            _, digest, _, _ = GameBridge._layout_receipt_request(
+                pending["authorization"], pending["build_plan"], pending["request_id"],
+                stream_id=state["stream_id"], sequence=pending["sequence"])
+            refusal = pending["refusal"]
+            if (not isinstance(refusal, dict) or set(refusal) != {"kind", "request_digest", "reason"}
+                    or refusal["kind"] != "capability_refused_before_dispatch"
+                    or refusal["request_digest"] != digest or not isinstance(refusal["reason"], str)
+                    or not refusal["reason"]):
+                raise LayoutStreamError("pending layout refusal is malformed")
     return state
 
 
-def submit(root: Path, bridge, authorization: dict, build_plan: dict, *, transaction: str, prepared) -> dict:
+def _finish_refusal(state):
+    # Lua never saw this sequence. Advancing it would create a permanent gap;
+    # begin a fresh stream rather than reuse the refused request identity.
+    fresh = secrets.token_hex(8)
+    if fresh == state['stream_id']:
+        raise LayoutStreamError('fresh layout stream identity unavailable')
+    state.update(stream_id=fresh, last_sequence=0, pending=None)
+
+
+def submit(root: Path, bridge, authorization: dict, build_plan: dict, *, transaction: str, prepared, refused=None) -> dict:
     """Persist a unique stream request, notify its transaction, then submit once."""
     if not isinstance(transaction, str) or not re.fullmatch(r"transaction-[0-9a-f]{32}\.json", transaction):
         raise ValueError("transaction must be a generated transaction filename")
@@ -134,28 +154,49 @@ def submit(root: Path, bridge, authorization: dict, build_plan: dict, *, transac
             raise LayoutStreamError("layout stream sequence exhausted")
         request_id = f"{state['stream_id']}{sequence:016x}"
         # Reject locally malformed requests before creating an ambiguous journal entry.
-        GameBridge._layout_receipt_request(authorization, build_plan, request_id,
+        _, digest, _, _ = GameBridge._layout_receipt_request(authorization, build_plan, request_id,
                                           stream_id=state["stream_id"], sequence=sequence)
         pending = {"sequence": sequence, "request_id": request_id, "authorization": authorization,
                    "build_plan": build_plan, "transaction": transaction}
         state["pending"] = pending
         atomic_json(path, state)
         prepared(copy.deepcopy({"stream_id": state["stream_id"], **pending}))
-        report = bridge.build_layout_correlated(authorization, build_plan, request_id=request_id,
-                                                stream_id=state["stream_id"], sequence=sequence, timeout=30)
+        try:
+            report = bridge.build_layout_correlated(authorization, build_plan, request_id=request_id,
+                                                    stream_id=state["stream_id"], sequence=sequence, timeout=30)
+        except LayoutCapabilityError as error:
+            pending["refusal"] = {"kind": "capability_refused_before_dispatch", "request_digest": digest,
+                                  "reason": str(error)}
+            atomic_json(path, state)
+            if refused is not None:
+                request = copy.deepcopy({"stream_id": state["stream_id"], **pending})
+                refusal = request.pop("refusal")
+                refused(request, refusal)
+                _finish_refusal(state)
+                atomic_json(path, state)
+            raise
         state["last_sequence"] = sequence
         state["pending"] = None
         atomic_json(path, state)
         return report
 
 
-def recover(root: Path, bridge, *, resolved=None) -> tuple[dict, dict] | None:
+def recover(root: Path, bridge, *, resolved=None, refused=None) -> tuple[dict, dict] | None:
     """Resolve a pending stream only from an existing correlated file; never resend."""
     with _locked(root) as path:
         state = _load(path)
         pending = state["pending"]
         if pending is None:
             return None
+        if "refusal" in pending:
+            if refused is None:
+                raise LayoutStreamError("refusal publication requires a transaction callback")
+            request = copy.deepcopy({"stream_id": state["stream_id"], **pending})
+            refusal = request.pop("refusal")
+            refused(request, refusal)
+            _finish_refusal(state)
+            atomic_json(path, state)
+            return request, refusal
         report = bridge.read_layout_receipt(pending["authorization"], pending["build_plan"],
                                             request_id=pending["request_id"], stream_id=state["stream_id"],
                                             sequence=pending["sequence"])

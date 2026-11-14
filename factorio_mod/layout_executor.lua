@@ -1278,6 +1278,10 @@ local function write_layout_report(report, request_id)
   helpers.write_file("factorio_mod/layout_reports/layout_" .. suffix .. ".json", json, false)
 end
 
+commands.add_command("layout_executor_capabilities", "Read executor protocol capabilities.", function()
+  rcon.print('{"receipt_protocols":["layout-submission-receipt-v1","layout-submission-receipt-v2"],"correlated_identity":1,"idempotent_requests":1,"ownership":"force-surface-v1","actions":["place_entity","place_ghost","place_ghost_no_reconcile","place_tile_ghost","configure_entity","configure_entity_if_unit_number","remove_entity"],"tag_protocols":["optimizer-action-tags-v1","optimizer-shared-tags-v1","research-lab-tags-v1"]}')
+end)
+
 commands.add_command("build_layout_plan", "Execute an authorized BuildPlan with explicit positions on planner-sandbox.", function(command)
   local ok, payload = pcall(function()
     return helpers.json_to_table(command.parameter or "")
