@@ -1,0 +1,6 @@
+{
+  "version": "1.0.0",
+  "variant_id": "patience96",
+  "description": "Stall rule waits 96 decisions (baseline 48): C4 on Track B is dominated by run length, so test whether a longer no-progress window converts stalls into completed decisions.",
+  "settings": {"stall_decisions": 96}
+}
