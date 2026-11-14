@@ -189,7 +189,7 @@ def test_new_cohorts_freeze_2x_speed_and_legacy_roots_keep_1x(tmp_path, monkeypa
     spec = scheduler.read(root/'regression.json')
     del spec['game_speed']  # a root frozen before the field existed
     atomic_json(root/'regression.json', spec)
-    atomic_json(root/'job-status.json', {**scheduler.read(root/'job-status.json'), 'last_admit': 0})
+    scheduler._publish(root, lambda status: status.update(last_admit=0))
     freeze = scheduler.read(root/'freeze.json')
     atomic_json(root/'freeze.json', {**freeze, 'spec_sha256': scheduler.sha(root/'regression.json')})
     run = dispatched_run_command(root, registry, monkeypatch)

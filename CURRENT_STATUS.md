@@ -476,3 +476,11 @@ User clarified that A/B must have no periodic schedules. Archived and removed th
 - What: normalize the shared builder production_prerequisite_deferred receipt as deferred, preserving its cause and exception precedence. Unknown codes remain unknown. This repairs the concrete coverage gap found in retained C94 decisions317/318.
 - Evidence:14 focused outcome/reconciliation tests passed; settled controller fast1,227 passed,3 skipped(two optional-lupa collection modules and one known fluid-chain case),exit0. Historical replay counts retain their original source hashes; no new replay or eventual-delivery claim.
 - Lifecycle: future frozen controller and matching runner copies required; no runtime action.
+
+
+## [2026-11-15 04:30 IST] Journal scheduler status before aggregate publication
+
+- What:fsynced versioned baseline/job/metadata events precede aggregate replacement;publication and cleanup recovery restore stale/missing projections. Immutable planned identities bind the journal;missing legacy status remains unknown and blocks dispatch. A bounded validated-state cache avoids full replay on each own write;external file edits invalidate it. Ambiguous JSON,torn sequences and corrupt evidence fail visibly.
+- Evidence:53 focused scheduler/journal/outcome tests passed;settled controller fast1,237passed,3skipped(two optional-Lupa collections,one fluid-chain case),exit0. Main added duplicate/nonfinite/bool-version rejection,cache invalidation/no-reparse checks,and explicit journal fast marker(the delegate gate excluded these tests).
+- Limits:aggregate lock and serialization remain;boot/process/attempt lineage,exact command/exit provenance,independent liveness and full scale tests remain open.
+- Lifecycle:future frozen controller/restart required;no runtime,service,campaign,Factorio,save or mod action.

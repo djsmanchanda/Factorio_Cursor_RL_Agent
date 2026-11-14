@@ -4,6 +4,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import fcntl
+import copy
 import hashlib
 import json
 import os
@@ -18,6 +19,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 
 from tools.checkpoint_catalog import atomic_json
+from tools import laya_status_journal
 from tools.deterministic_fleet_runtime import create_detached_checkout
 from training.laya_restart_checkpoint import load as load_checkpoint
 from training.laya_mission_contract import mission_settings, frozen_capability
@@ -594,7 +596,17 @@ WAITING_OUTCOMES = frozenset({'waiting_for_host_budget', 'waiting_for_admission_
 
 def _publish(root, mutate, min_interval=0.0):
     with lock(root/'status.lock'):
-        status = read(root/'job-status.json')
+        status, seq, plan = laya_status_journal.load(root)
+        projection = root/'job-status.json'
+        try:
+            projected = read(projection)
+        except FileNotFoundError:
+            projected = None
+        except (OSError, ValueError) as exc:
+            raise laya_status_journal.JournalUnavailable(f'status projection unavailable: {exc}') from exc
+        if projected != status:
+            atomic_json(projection, status)
+        previous = copy.deepcopy(status)
         value = mutate(status)
         if (isinstance(value, str) and value in WAITING_OUTCOMES
                 and time.time() - float(status.get('updated') or 0.0) < min_interval):
@@ -602,7 +614,9 @@ def _publish(root, mutate, min_interval=0.0):
         status['updated'] = time.time()
         plan_path = root/'planned-jobs.json'
         if plan_path.is_file():
-            status['accounting'] = planned_job_accounting(read(plan_path)['jobs'], status['jobs'])
+            status['accounting'] = planned_job_accounting(read(plan_path)['jobs'],
+                [job for job in status['jobs'] if not job.get('legacy_status_missing')])
+        laya_status_journal.append(root, previous, status, seq, plan)
         atomic_json(root/'job-status.json', status)
         return value
 
@@ -623,7 +637,8 @@ def coordinator_heartbeat(root):
 
 def recover(root):
     spec = read(root/'regression.json')
-    for job in read(root/'job-status.json')['jobs']:
+    jobs = _publish(root, lambda status: copy.deepcopy(status['jobs']))
+    for job in jobs:
         if job.get('admission_reserved'):
             scoped_stop(root/'arms'/job['arm']/'code', Path(job['world']), spec['python'],
                         Path(spec['factorio_binary']).resolve().parents[2])
@@ -643,6 +658,8 @@ def _reserve_job(root):
     if not predecessors_done(root.parent, spec['after']):
         return 'waiting_for_predecessors'
     def reserve(status):
+        if any(j.get('legacy_status_missing') for j in status['jobs']):
+            raise laya_status_journal.JournalUnavailable('legacy job status missing; dispatch unavailable')
         if time.time() >= datetime.fromisoformat(spec['until']).timestamp():
             for item in status['jobs']:
                 if item['status'] == 'queued':
