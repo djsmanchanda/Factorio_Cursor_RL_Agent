@@ -35,6 +35,10 @@ def rejected_claim(monkeypatch, tmp_path, blocker, *, capacity=True, funded=Fals
     monkeypatch.setattr(ab.live_base, "available_items", lambda *args: stock)
     monkeypatch.setattr(ab.live_base, "find_line", lambda *args: None)
     session = DeterministicSession.__new__(DeterministicSession)
+    from orchestrator.operation_invocations import Invocations
+    from types import SimpleNamespace
+    session.invocations = Invocations(tmp_path, 'test')
+    session.bridge = SimpleNamespace(build_layout=lambda *args: pytest.fail('unexpected build'))
     monkeypatch.setattr(session, "_maintain_mall", lambda: None)
     monkeypatch.setattr(session, "_operations", lambda: {
         "produce": lambda **kwargs: ab._rationed_mall_batch(

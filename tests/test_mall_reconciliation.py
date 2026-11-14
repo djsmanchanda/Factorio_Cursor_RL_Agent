@@ -125,10 +125,14 @@ def test_shared_funding_signal_is_preserved_and_unknown_readback_is_not_success(
     assert result["configuration_changed"] is None
 
 
-def test_session_dispatch_preserves_selected_scope_and_skips_other_loan_upkeep(rig, monkeypatch):
+def test_session_dispatch_preserves_selected_scope_and_skips_other_loan_upkeep(rig, monkeypatch, tmp_path):
     session, loan, active, health, calls = rig
     real = object.__new__(DeterministicSession)
     real.__dict__.update(session.__dict__)
+    from orchestrator.operation_invocations import Invocations
+    from types import SimpleNamespace
+    real.invocations = Invocations(tmp_path, 'test')
+    real.bridge = SimpleNamespace(build_layout=lambda *args: pytest.fail('unexpected build'))
     monkeypatch.setattr(real, "_maintain_mall", lambda: pytest.fail("unselected upkeep"))
     result = real.run("reconcile_mall_loan", item=loan.target_item, expected=reconciliation.identity(loan))
     assert result["ok"] and result["operation"] == "reconcile_mall_loan"

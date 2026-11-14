@@ -11,3 +11,15 @@ The version 1 envelope describes an operation: unknown, deferred, prerequisite a
 Every scheduler publication with an immutable planned-job file includes `all_planned_jobs` accounting. Cancelled, failed, undispatched and missing status rows remain in the denominator; absent attempt or objective evidence stays unknown. New milestone-contract rows use observed transition provenance for earned targets and expose inherited eligibility; legacy current-pass scoring remains explicitly labelled. Neither unknown historical identity nor a missing final observation becomes a fault or a success.
 
 Runner and collector summaries use the same reconciliation function. New asynchronous PM observations must carry the actual selected invocation ID and measured postcondition; construction of a prerequisite cannot complete its caller's economic objective. Track B receipts keep their actual transaction identity. This contract establishes source/fixture evidence only. Future use requires matching frozen runner/controller copies; no live result or policy adoption follows from the counters.
+
+PM sessions persist a unique selected invocation and each submitted plan, scope,
+authorization and returned receipt path under the episode's script-output
+invocation directory. The record is written before dispatch; an interrupted
+dispatch remains uncertain. Read-only surveys cover only recorded, valid,
+placement-only plans with matching surface and force. Unsupported or unreadable
+plans stay unknown; ghosts remain pending. Maintenance runs outside the selected
+recording window. The runner journals later observations by invocation ID; a
+construction delivery is not an economic postcondition. Pending records are
+reopened from the same episode storage without replay. Transfer of these records
+through a controller checkpoint or to different episode storage is not established
+and must be treated as unknown (RC12). This is source evidence, not a live result.

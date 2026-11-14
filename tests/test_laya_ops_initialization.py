@@ -32,7 +32,7 @@ def world(tmp_path, monkeypatch):
     def unexpected(*args, **kwargs):
         pytest.fail("Session initialization chose work or accessed an unexpected live command")
 
-    bridge = SimpleNamespace(export_recipe_catalog=export)
+    bridge = SimpleNamespace(export_recipe_catalog=export, build_layout=unexpected)
     monkeypatch.setattr(laya_ops, "GameBridge", lambda **kwargs: bridge)
     monkeypatch.setattr(laya_ops, "RconClient", lambda *args: SimpleNamespace(command=unexpected))
     for name in ("_BOOTSTRAP_DISTRICT_LEDGER", "_MATERIAL_RESERVATION_LEDGER", "_BOOTSTRAP_WORK_LEDGER"):

@@ -588,3 +588,11 @@ C6-v3 candidate derives recovery feed prototypes from the same constructed plan 
 - What: classify production_prerequisite_deferred as deferred, retaining cause and exception precedence; unknown codes stay unknown.
 - Evidence:9 shared outcome/reconciliation checks passed. Combined settled PM fast gate1,453passed,3skipped(two optional-Lupa collection modules,one known fluid-chain selected case),exit0,including the separately reviewed invocation patch. Historical replay remains original hashed evidence.
 - Lifecycle: future frozen Python runner required; no runtime action.
+
+
+## [2026-11-15 04:08 IST] Persist selected invocations and reconcile observed construction
+
+- What: selected-operation identities and exact submitted plans are flushed before dispatch; maintenance is outside the recorder. Reopened episode storage is surveyed without resubmission. The runner emits correlated construction observations; prerequisite delivery is not economic completion. Retirement requires a submitted released lifecycle. Unsupported configuration and ambiguous dispatch remain unresolved.
+- Evidence:main23focused tests passed, covering maintenance isolation, unavailable/inconsistent telemetry, configuration-only/mixed plans, pending prerequisite construction, reopen/no resend, failed persistence, and actual runner emission/shared summaries. New invocation tests explicitly enter the fast tier; settled gate1,453passed,3skipped(two optional-Lupa collection modules,one known fluid chain),exit0. Delegate149focused result predates main hardening.
+- Limits:readback establishes current matching placements rather than build provenance. Cross-storage checkpoint transfer, mixed plan configuration evidence and live acceptance remain open.
+- Lifecycle:future matching frozen Python runner required; no runtime,Factorio,service,mod,save or campaign action.

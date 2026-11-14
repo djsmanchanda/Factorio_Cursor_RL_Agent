@@ -1088,6 +1088,10 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             packs = ((reports.get("research") or {}).get("technology") or {}).get("science_packs", {})
             adapter.extra_recipes = (*adapter.extra_recipes, *packs, "lab")
         facts = adapter.query()
+        if hasattr(session, "observe_invocations"):
+            for operation_id, observation in session.observe_invocations():
+                _append(journal.parent / "clean-decisions.jsonl", {"event": "operation_observation", "run_id": run_id,
+                        "operation_id": operation_id, "tick": facts["tick"], "outcome": observation})
         if objective:
             research = research_observation(reports, tick=facts["tick"], surface="nauvis", force="player", requested=settings.research_target)
             support_board = compile_status(facts, objective.targets(research), measurement) if objective.targets(research) else None
@@ -1221,11 +1225,15 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                 result["params"]["base_ticks"] = chosen["base_wait_ticks"]
         else:
             try:
+                if hasattr(session, "last_operation_id"):
+                    session.last_operation_id = None
                 result = session.run(chosen["family"], **chosen["params"])
             except Exception as error:  # A tooling bug is recorded and the run continues; three in a row stop it.
                 result = {"ok": False, "operation": chosen["family"], "params": chosen["params"],
                           "code": "tool_error", "classification": "bug", "state": "failed",
                           "message": f"{type(error).__name__}: {error}"[:400]}
+                if getattr(session, "last_operation_id", None):
+                    result["operation_id"] = session.last_operation_id
                 summary["failures"] += 1
         result["tick"] = facts["tick"]
         result["need_id"] = chosen["need_id"]  # per-need no-progress facts
@@ -1245,7 +1253,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                                                       "params", "features", "bill", "bill_owner",
                                                                       "wait_ticks", "base_wait_ticks")} for o in menu["options"]],
                          distribution=choice["distribution"], choice=choice,
-                         outcome={**{k: result.get(k) for k in ("ok", "code", "classification", "state", "details",
+                         outcome={**{k: result.get(k) for k in ("ok", "code", "classification", "state", "details", "operation_id",
                                                                  "message", "result")},
                                   **({'configuration_receipt': {
                                       k: result[k] for k in ('submitted', 'submission_attempted', 'verified',

@@ -139,8 +139,12 @@ def test_submission_is_not_verified_effect(apply, unknown):
     assert world.floors[('nauvis', 'player', ITEM)] == 132
 
 
-def test_configuration_operation_never_runs_hidden_upkeep(monkeypatch):
+def test_configuration_operation_never_runs_hidden_upkeep(monkeypatch, tmp_path):
     session = DeterministicSession.__new__(DeterministicSession)
+    from orchestrator.operation_invocations import Invocations
+    from types import SimpleNamespace
+    session.invocations = Invocations(tmp_path, 'test')
+    session.bridge = SimpleNamespace(build_layout=lambda *args: pytest.fail('unexpected build'))
     monkeypatch.setattr(session, '_operations', lambda: {'raise_stock_gate': lambda **kw: {
         'ok': False, 'code': 'stock_gate_snapshot_changed', 'submitted': False, 'verified': False}})
     monkeypatch.setattr(session, '_maintain_mall', lambda: pytest.fail('unrelated mutation'))
@@ -317,6 +321,10 @@ def test_session_uses_shared_validated_bridge_submission_without_ledger_mutation
     world = World()
     selected = control.raise_options(world.observe())[0]['preview']
     session = DeterministicSession.__new__(DeterministicSession)
+    from orchestrator.operation_invocations import Invocations
+    from types import SimpleNamespace
+    session.invocations = Invocations(tmp_path, 'test')
+    session.bridge = SimpleNamespace(build_layout=lambda *args: pytest.fail('unexpected build'))
     calls = []
     import json
     report = tmp_path / 'report.json'

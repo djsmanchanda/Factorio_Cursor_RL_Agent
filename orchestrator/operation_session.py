@@ -34,6 +34,7 @@ from planners.plan_validation import validate_build_plan
 from orchestrator.material_reservations import MaterialReservationLedger, set_active_material_ledger
 from orchestrator.parts_mall import MaterialShortage
 from orchestrator.work_state import WorkStateSignal
+from orchestrator.operation_invocations import Invocations
 from tools.rcon_client import RconClient
 
 SURFACE, FORCE = "nauvis", "player"
@@ -58,8 +59,12 @@ def receipt(operation: str, params: dict, result: object) -> dict:
     """A normal return as a typed receipt: ``ok`` only when the operation's own postcondition holds."""
     if operation in {"raise_stock_gate", "reserve_steel_seed", "research_select", "research_labs", "reconcile_mall_loan"}:
         return {"operation": operation, "params": params, **result}
+    if operation == "retire_starter":
+        done = isinstance(result, dict) and result.get("submitted") is True and result.get("lifecycle") == "released"
+        return {"ok": done, "operation": operation, "params": params,
+                "code": "done" if done else "retirement_pending", "result": _receipt_result(result)}
     if operation in PRODUCING_OPERATIONS:
-        code = "producing" if result is not None else "prerequisite_advanced"
+        code = "producing" if result is not None and result is not False else "prerequisite_advanced"
     elif operation in SUBMITTING_OPERATIONS:
         code = "submitted"
     else:
@@ -93,6 +98,7 @@ class DeterministicSession:
         password = (server / "rcon-password").read_text().strip()
         self.script_output = server / "script-output"
         self.episode_id = origin_episode_id or logical_episode_id or f"laya-{root.name}"
+        self.invocations = Invocations(self.script_output, self.episode_id)
         self.reference_point = reference_point
         self.emit = emit
         self.stock_networks = lambda: None
@@ -208,18 +214,34 @@ class DeterministicSession:
 
     def run(self, operation: str, **params) -> dict:
         """Run one operation; the tooling's own signals become a typed result."""
+        record = self.invocations.begin(operation, params)
+        self.last_operation_id = record["operation_id"]
+        original = self.bridge.build_layout
+        self.bridge.build_layout = lambda authorization, plan, *args, **kwargs: self.invocations.submit(
+            record, original, authorization, plan, *args, **kwargs)
         try:
-            result = self._operations()[operation](**params)
-        except WorkStateSignal as signal:
-            outcome = {"ok": False, "operation": operation, "params": params, "code": getattr(signal, "code", None),
-                       "classification": getattr(signal, "classification", None),
-                       "state": getattr(signal, "state", None), "details": getattr(signal, "details", None),
-                       "message": str(signal)[:500]}
-        else:
-            outcome = receipt(operation, params, result)
+            try:
+                result = self._operations()[operation](**params)
+            except WorkStateSignal as signal:
+                outcome = {"ok": False, "operation": operation, "params": params, "code": getattr(signal, "code", None),
+                           "classification": getattr(signal, "classification", None),
+                           "state": getattr(signal, "state", None), "details": getattr(signal, "details", None),
+                           "message": str(signal)[:500]}
+            else:
+                outcome = receipt(operation, params, result)
+            record["finished"] = True
+            record["outcome"] = outcome
+            self.invocations.save(record)
+        finally:
+            self.bridge.build_layout = original
+        outcome["operation_id"] = record["operation_id"]
         if operation not in {"raise_stock_gate", "reconcile_mall_loan"}:
             self._maintain_mall()
         return outcome
+
+    def observe_invocations(self):
+        """Reopen recorded selected plans without issuing any build."""
+        return self.invocations.observe(self.client)
 
     def _maintain_mall(self) -> None:
         """After every operation: cap standing gear/cable cells, hand back cells whose loan is already stocked,
