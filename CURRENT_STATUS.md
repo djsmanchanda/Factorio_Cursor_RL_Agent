@@ -557,3 +557,9 @@ C6-v3 candidate derives recovery feed prototypes from the same constructed plan 
 - What: advertise the mixed runner's versioned mission interface; validate mode/target before session creation; persist effective settings and initial level-aware eligibility so unknown/inherited starts cannot earn completion. Exact recovery retains eligibility and rejects mode changes.
 - Evidence: 108 combined mission/research/runner/checkpoint/restart/isolation checks passed. Final settled PM fast gate: 1,394 passed, three skipped (two optional-lupa collection skips and one known fluid-chain case), exit 0. No full episode, live pack consumption or research completion was tested.
 - Lifecycle: integrate the companion controller mission check and freeze/restart future runners after campaigns. No mod or Factorio reload and no runtime action performed.
+
+
+## [2026-11-15 03:16 IST] Bounded alternate second-collector row/link search
+- What: after a refused link, try a bounded set of nonoverlapping row candidates using the existing site and route validators. Refusal evidence records the eight-row and300-probe per-survey limits; bounded exhaustion leaves other layouts unexplored.
+- Evidence: main14 focused composed-plan tests passed,including translated recorded copper geometry,owned haul continuity,reservation/occupancy protection and no mutation on refusal. Delegate fast gate1399 passed,one selected skip; other workers changed the shared source during that run,so a final settled combined gate remains required. Exact historical stone,physical provider delivery and cutover were not replayed.
+- Lifecycle: use a newly frozen future Python runner and separately authorized disposable acceptance after campaigns; no installed-mod change or runtime action performed.

@@ -156,6 +156,8 @@ def route_budget_failure(
             f"the {budget.max_material_items}-item route budget"
         )
     return None
+NEW_MINE_MAX_CANDIDATES = 300
+SECOND_COLLECTOR_MAX_ROWS = 8
 RESERVED_ADDITIONAL_DRILLS = 20
 RESERVED_PAIR_COLUMNS = extraction_state.RESERVED_PAIR_COLUMNS
 REFINERY_SITE_CLEARANCE_TILES = 10.0
@@ -399,7 +401,7 @@ def choose_mining_origin_with_reserve(
     area_is_clear: Callable[[Point, Point], bool],
     footprint_has_resource: Callable[[list[Point]], bool],
     *,
-    max_candidates: int = 300,
+    max_candidates: int = NEW_MINE_MAX_CANDIDATES,
     excluded_box: Callable[[Point, Point], bool] | None = None,
 ) -> tuple[Point, int] | None:
     """Choose the nearest row with the largest supported future reserve.
@@ -648,7 +650,7 @@ def _second_collector(
     def unbuildable(cause: str, reason: str, **extra: object) -> DistrictExpansionUnbuildable:
         return DistrictExpansionUnbuildable(
             f"The owned {ore} resource district at {owned.output} has no "
-            "buildable straight, parallel or second collector for the next "
+            "buildable straight, parallel or second collector in the attempted search for the next "
             f"six-drill checkpoint: {reason}",
             cause=cause,
             details={"causes": {**causes, "second": cause}, **extra},
@@ -667,38 +669,50 @@ def _second_collector(
         round((patch.minimum[0] + patch.maximum[0]) / 2),
         round((patch.minimum[1] + patch.maximum[1]) / 2),
     )
-    try:
-        origin, drill_count, plan, head = _cached_new_direct_mine(
-            client, surface, ore, patch.nearest, patch.minimum, patch.maximum,
-            max(1, requested // 2), belt_type, inserter_type, belt_stock,
-            blocked_tiles=blocked, preferred=centre,
-        )
-    except (PendingSystemDeferred, ValueError) as error:
-        raise unbuildable("no_second_site", str(error)) from error
-    if drill_count < requested:
-        raise unbuildable(
-            "no_second_site",
-            f"the best second row holds {drill_count} of {requested} drills",
-        )
     tail = (owned.output[0] - 1, owned.shared_belt_y)
-    # The owned corridor is dead once this runs, so the link may use it; the
-    # new row, its verified corridor and every other reservation may not.
-    avoid = (
-        (frozenset(reserved_tiles) - owned_tiles)
-        | frozenset(tuple(tile) for tile in plan.get("reserved_tiles", ()))
-        | frozenset(_plan_tiles(plan))
-    )
-    route = link_route(head, tail, avoid)
-    if isinstance(route, str):
-        raise unbuildable(
-            "link_unroutable", route, second_site=origin, link_from=head, link_to=tail,
+    refusals: list[dict[str, object]] = []
+    search_blocked = blocked
+    for _ in range(SECOND_COLLECTOR_MAX_ROWS):
+        try:
+            origin, drill_count, plan, head = _cached_new_direct_mine(
+                client, surface, ore, patch.nearest, patch.minimum, patch.maximum,
+                max(1, requested // 2), belt_type, inserter_type, belt_stock,
+                blocked_tiles=search_blocked, preferred=centre,
+            )
+        except (PendingSystemDeferred, ValueError) as error:
+            refusals.append({"stage": "row", "reason": str(error)})
+            break
+        if drill_count < requested:
+            refusals.append({"stage": "row", "site": origin, "reason":
+                             f"row holds {drill_count} of {requested} drills"})
+            break
+        # Exclude this row's footprint from subsequent site surveys. This also
+        # excludes overlapping rows; the limit is a bounded search, not proof
+        # that every possible layout has been considered.
+        search_blocked = search_blocked | frozenset(_plan_tiles(plan))
+        avoid = (
+            (frozenset(reserved_tiles) - owned_tiles)
+            | frozenset(tuple(tile) for tile in plan.get("reserved_tiles", ()))
+            | frozenset(_plan_tiles(plan))
         )
-    plan = deepcopy(plan)
-    plan["phases"].append({"name": "second_collector_link", "actions": list(route)})
-    plan["second_collector"] = {
-        "owned_tail": tail, "collector_head": head, "owned_head": owned.haul_head,
-    }
-    return origin, drill_count, plan, owned.haul_head, origin[1] + 0.5
+        route = link_route(head, tail, avoid)
+        if isinstance(route, str):
+            refusals.append({"stage": "link", "site": origin, "link_from": head,
+                             "link_to": tail, "reason": route})
+            continue
+        plan = deepcopy(plan)
+        plan["phases"].append({"name": "second_collector_link", "actions": list(route)})
+        plan["second_collector"] = {
+            "owned_tail": tail, "collector_head": head, "owned_head": owned.haul_head,
+        }
+        return origin, drill_count, plan, owned.haul_head, origin[1] + 0.5
+    cause = "link_unroutable" if any(r["stage"] == "link" for r in refusals) else "no_second_site"
+    raise unbuildable(
+        cause, f"bounded second-collector search exhausted (row limit {SECOND_COLLECTOR_MAX_ROWS}); "
+        "overlapping rows and layouts beyond the site survey limit may remain unexplored",
+        row_limit=SECOND_COLLECTOR_MAX_ROWS, site_probe_limit=NEW_MINE_MAX_CANDIDATES,
+        attempts=refusals,
+    )
 
 
 def _plan_tiles(plan: dict) -> set[tuple[int, int]]:

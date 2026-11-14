@@ -256,3 +256,57 @@ def test_live_link_claims_pass_the_real_occupancy_survey_and_stay_blocked(monkey
     assert isinstance(route, tuple) and route
     used = {(math.floor(a["position"]["x"]), math.floor(a["position"]["y"])) for a in route}
     assert not used & wall
+
+
+@pytest.mark.fast
+@pytest.mark.parametrize("offset", [(0, 0), (120, 80)])
+def test_composed_second_collector_retries_a_blocked_link(world, monkeypatch, offset) -> None:
+    # Translated recorded geometry is a synthetic equivalent, not another replay.
+    dx, dy = offset
+    world.ore = {(x + dx, y + dy): ore for (x, y), ore in world.ore.items()}
+    world.entities = {(x + dx, y + dy) for x, y in world.entities}
+    world.reserved = frozenset((x + dx, y + dy) for x, y in world.reserved)
+    world.occupied = world.entities | set(world.reserved)
+    shift = lambda p: (p[0] + dx, p[1] + dy)
+    world.patch = resource_patches.ResourcePatch(
+        shift(world.patch.nearest), shift(world.patch.minimum), shift(world.patch.maximum), 500_000,
+    )
+    owned = ResourceMine(
+        output=shift(OWNED.output), drill_count=OWNED.drill_count, row_capacity=OWNED.row_capacity,
+        belt_y=OWNED.belt_y + dy, first_column_x=OWNED.first_column_x + dx,
+        haul_head=shift(OWNED.haul_head), growth_direction=-1,
+    )
+    monkeypatch.setattr(extraction_state, "find_resource_mines", lambda *_a: [owned])
+    attempts = []
+    def link(source, destination, avoid):
+        attempts.append((source, destination))
+        return "synthetic first link obstruction" if len(attempts) == 1 else world.link(source, destination, avoid)
+
+    before = (world.occupied.copy(), world.reserved)
+    planned = _plan(object(), world, reserved_tiles=world.reserved, link_route=link)
+    assert len(attempts) >= 2 and attempts[0][0] != attempts[-1][0]
+    assert planned.ore_output == owned.haul_head
+    assert planned.build_plan["second_collector"]["owned_tail"] == (owned.output[0] - 1, owned.shared_belt_y)
+    assert len([a for a in actions(planned.build_plan) if a["entity"] == "electric-mining-drill"]) == 6
+    for action in actions(planned.build_plan):
+        assert not _footprint(action["position"]["x"], action["position"]["y"],
+                              ENTITY_FOOTPRINTS.get(action["entity"], 1)) & world.occupied
+    assert (world.occupied, world.reserved) == before
+
+
+@pytest.mark.fast
+def test_composed_second_collector_reports_bounded_refusals_without_mutation(world) -> None:
+    before = (world.occupied.copy(), world.reserved, dict(world.ore))
+    attempts = []
+    def refuse(source, destination, avoid):
+        attempts.append((source, destination))
+        return "blocked by test infrastructure"
+    with pytest.raises(stage_extraction.DistrictExpansionUnbuildable) as raised:
+        _plan(object(), world, reserved_tiles=world.reserved, link_route=refuse)
+    details = raised.value.details
+    assert details["row_limit"] == stage_extraction.SECOND_COLLECTOR_MAX_ROWS
+    links = [entry for entry in details["attempts"] if entry["stage"] == "link"]
+    assert len(links) == len(attempts) >= 1
+    assert all(entry["reason"] == "blocked by test infrastructure" for entry in links)
+    assert "bounded" in str(raised.value) and "unexplored" in str(raised.value)
+    assert (world.occupied, world.reserved, world.ore) == before
