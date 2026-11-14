@@ -908,12 +908,14 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         status_path: Path | None = None, settings: Settings = Settings(), session: Any = None,
         carried: list[dict] = (), recovery: dict | None = None,
         checkpoint_dir: Path | None = None, checkpoint_ticks: int = 54000,
-        recovery_wall_seconds: float = 0, initial_reached=(), strict_target=None, checkpoint_callback=None, loaded_tick=None) -> dict:
+        recovery_wall_seconds: float = 0, initial_reached=(), strict_target=None, checkpoint_callback=None, loaded_tick=None, objective_mode=None) -> dict:
     """Observe -> board -> operations -> choose -> run one -> record, until the mission ends or stalls.
 
     ``carried`` seeds the history with an earlier segment's lifecycle receipts when a fresh controller is
     restarted on the same world; everything else starts fresh.
     """
+    from training.laya_mission_capabilities import ELIGIBILITY_VERSION, FAMILIES, observe_start_and_research, validate_mode
+    validate_mode(objective_mode, settings.research_target)
     from training.laya_ops import DeterministicSession
     journal.parent.mkdir(parents=True, exist_ok=True)
     active_started = time.monotonic()
@@ -921,6 +923,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         recovery = copy.deepcopy(recovery)
     if recovery and carried:
         raise ValueError("exact ops recovery cannot be mixed with jumpstart receipts")
+    if recovery and recovery.get("objective_mode") != objective_mode:
+        raise ValueError("ops recovery objective mode differs")
     if checkpoint_ticks < 300:
         raise ValueError("checkpoint interval must be >=300 ticks")
     if checkpoint_dir is not None and (not settings.max_game_ticks or not settings.max_wall_seconds
@@ -951,6 +955,16 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     objective = (ResearchObjective(settings.research_target, progressive=settings.research_progressive,
                                   sustain_ticks=settings.research_sustain_ticks,
                                   state=recovery.get("research") if recovery else None) if settings.research_target else None)
+    effective_mission = {"objective_mode": objective_mode or "legacy_unspecified",
+                         "eligibility_version": ELIGIBILITY_VERSION,
+                         "research_target": settings.research_target,
+                         "operation_families": FAMILIES if settings.research_target else []}
+    summary["effective_mission"] = effective_mission
+    if not objective and objective_mode:
+        _append(journal, {"run_id": run_id, "event": "mission_start", **summary["effective_mission"],
+                          "initial_eligibility": None})
+    if objective and recovery and "initial_eligibility" not in objective.state:
+        objective.state["initial_eligibility"] = {"state": "unknown", "target": settings.research_target}
     research = {}
     summary["laya_acceptance"] = {"C6": c6.snapshot()}
 
@@ -1028,6 +1042,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         last_checkpoint = recovery["checkpoint_tick"]
         _append(journal, {"run_id": run_id, "event": "ops_recovery", "index": index,
                           "cumulative_wall_seconds": elapsed_before})
+        summary["effective_mission"] = effective_mission
 
     def save_checkpoint(tick, *, final=False):
         nonlocal last_checkpoint
@@ -1035,6 +1050,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             return
         from training.laya_ops_checkpoint import capture
         controller = {"run_id": run_id, "seed": seed, "settings": dataclasses.asdict(settings), "decision_limit": decisions, "reached": reached,
+                      "objective_mode": objective_mode,
                       "results": results, "samples": samples, "measurement": measurement, "summary": summary,
                       "stall": stall, "c6": c6.snapshot(), "previous_service_facts": previous_service_facts,
                       "research": objective.snapshot() if objective else None,
@@ -1072,8 +1088,13 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             support_board = compile_status(facts, objective.targets(research), measurement) if objective.targets(research) else None
             service_ok = bool(support_board and all(n["condition"] == "satisfied" for n in support_board["needs"]
                                                    if n["item"] in SUPPORT))
-            evidence = objective.observe(research, facts, service_ok=service_ok,
-                                         clean=not results or results[-1].get("classification") not in {"bug", "safety"})
+            first, eligibility, evidence = observe_start_and_research(
+                objective, research, facts, target=settings.research_target, service_ok=service_ok,
+                clean=not results or results[-1].get("classification") not in {"bug", "safety"})
+            if first:
+                _append(journal, {"run_id": run_id, "event": "mission_start", **summary["effective_mission"],
+                                  "initial_eligibility": eligibility})
+            summary["effective_mission"]["initial_eligibility"] = eligibility
             summary["research_acceptance"] = evidence
             if evidence["earned"]:
                 if "R1" not in reached:

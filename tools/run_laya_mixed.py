@@ -77,6 +77,7 @@ def main(argv=None) -> int:
     p.add_argument("--variant", type=Path, help="Variant JSON (docs/rl/laya_variants/); default: the current workflow")
     p.add_argument("--until-phase", help="Experiment window: stop once this phase is reached")
     p.add_argument("--max-game-ticks", type=int, help="Experiment window: stop after this many game ticks")
+    p.add_argument("--objective-mode", choices=["measurement_only", "research_completion"])
     p.add_argument("--research-target", help="Opt-in level-aware research objective")
     p.add_argument("--fixed-science-target", action="store_true", help="Keep the initial research science target")
     p.add_argument("--research-sustain-ticks", type=int, default=18000)
@@ -98,6 +99,11 @@ def main(argv=None) -> int:
                    help="Restart a fresh controller on this already-running world after a stall or failure "
                         "(experiment): carry only earlier segments' lifecycle receipts")
     args = p.parse_args(argv)
+    import re
+    if args.objective_mode == "research_completion" and (not args.research_target or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,127}", args.research_target) or args.actions != "deterministic"):
+        p.error("research_completion requires a target and deterministic actions")
+    if args.objective_mode == "measurement_only" and args.research_target:
+        p.error("measurement_only cannot activate research")
     root = owned_root(args.root)
     migration = json.loads(args.mod_migration_contract.read_text()) if args.mod_migration_contract else None
     if args.validate_reload_only and not args.restart_checkpoint:
@@ -141,6 +147,8 @@ def main(argv=None) -> int:
     settings, policy_options, runtime = apply_variant(variant)
     settings = dataclasses.replace(settings, until_phase=args.until_phase or settings.until_phase,
                                    max_game_ticks=args.max_game_ticks or settings.max_game_ticks)
+    if args.objective_mode == "measurement_only":
+        settings = dataclasses.replace(settings, research_target=None)
     if args.research_target:
         fields = {field.name for field in dataclasses.fields(settings)}
         required = {'research_target', 'research_progressive', 'research_sustain_ticks'}
@@ -252,7 +260,7 @@ def main(argv=None) -> int:
                 summary = run_ops(adapter, policy, journal=paths["journal"], decisions=args.decisions or None,
                                   measure_ticks=args.measure_ticks, seed=args.seed, run_id=run_id, emit=log,
                                   should_stop=stop.is_set, status_path=paths["status"], settings=settings,
-                                  carried=carried, session=session,
+                                  carried=carried, session=session, objective_mode=args.objective_mode,
                                   initial_reached=tuple(context.get("phases_reached", ())),
                                   strict_target=args.strict_target,
                                   loaded_tick=(restart_meta['capture_tick'] if restart_meta else

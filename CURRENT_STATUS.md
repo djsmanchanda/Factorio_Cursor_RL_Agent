@@ -551,3 +551,9 @@ C6-v3 candidate derives recovery feed prototypes from the same constructed plan 
 - What: move strict restart state to orchestrator with explicit training compatibility exports, preserve schema/class identity, and decode typing.Optional alongside PEP 604 unions. Session methods use the shared implementation.
 - Evidence: 32 focused restart/isolation checks passed. Final settled PM source gate (including the reviewed mission patch): 1,394 passed, three skipped (two optional-lupa collection skips and one known fluid-chain case), exit 0. Critical restart tests are included in fast. This verifies tested state/ownership continuity, not full controller or live restart equivalence.
 - Lifecycle: future frozen Python runners need this source; no mod deployment or Factorio reload. No runtime action performed.
+
+
+## [2026-11-15 03:03 IST] Explicit research mission and initial eligibility
+- What: advertise the mixed runner's versioned mission interface; validate mode/target before session creation; persist effective settings and initial level-aware eligibility so unknown/inherited starts cannot earn completion. Exact recovery retains eligibility and rejects mode changes.
+- Evidence: 108 combined mission/research/runner/checkpoint/restart/isolation checks passed. Final settled PM fast gate: 1,394 passed, three skipped (two optional-lupa collection skips and one known fluid-chain case), exit 0. No full episode, live pack consumption or research completion was tested.
+- Lifecycle: integrate the companion controller mission check and freeze/restart future runners after campaigns. No mod or Factorio reload and no runtime action performed.

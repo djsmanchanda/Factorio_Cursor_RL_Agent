@@ -336,3 +336,23 @@ nominal/effective waits and typed reconciliation receipts; current status and
 summary expose actual decision rates and an instantaneous assembler status
 sample with explicit known denominators. These are separate experimental factors,
 not adopted defaults or measured time utilization.
+
+
+## Explicit mission capability and initial eligibility (15 November 2026)
+
+The mixed runner advertises its implemented mission modes and research operation
+families through training/laya_mission_capabilities.py. The scheduler validates
+this interface from the selected frozen runner, then forwards --objective-mode
+and the effective target. research_completion requires a target and deterministic
+actions. measurement_only clears variant research targets. Undeclared historical
+missions keep their legacy meaning.
+
+The first fresh, scoped, level-aware research observation latches eligible,
+inherited or unknown. Later observations cannot turn an unknown/inherited start
+into earned completion. The additional initial-research-eligibility-v1 contract
+is reported alongside laya-research-consumption-v1; it survives exact recovery.
+Recovery rejects a changed explicit objective mode. Existing supply, consumption
+and research progress evidence is still required for completion. These contracts
+have offline boundary coverage; no new live pack consumption or completion has
+been established. Future use needs newly frozen runners after active campaigns;
+no installed mod change is required for this Python patch.
