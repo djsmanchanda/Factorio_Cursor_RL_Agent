@@ -134,3 +134,18 @@ Freeze/live mirror: `data/laya-orchestration/starship-line-oil-prefix-20261114/`
 Previous original and C0-restarted verification runners were gracefully
 signalled as superseded; their worlds/freezes/logs remain preserved. Gemini
 observer remains stopped; no unattended provider substitution.
+
+## 2026-11-14 19:25 IST — Fresh original-input Starship verification
+
+User requested a new run. Active service `laya-starship-capacity-fresh-20261114.service`,
+frozen4b4c70d0, original B-home save9763436071d2ad138e2844a81c7bbd6891218f612c9bf69dc5bede6517c6d5bb.
+Experiment: `/home/djsm/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/starship-capacity-fresh-20261114`;
+world `code/data/laya-saved-world/starship-capacity-fresh-s84218`.
+Seed84218, patience96, engine2.1.24,2×, game/RCON34345/27345; deadline
+**2026-11-15 05:23 IST** plus3,600,000ticks. Starts from C0 with no inherited phases/grants.
+Decision5/tick264887 reported0failures. GUI connected as spectator at tick268555
+(unit `laya-starship-capacity-fresh-gui-20261114.service`);42 matching mod files.
+Prior saved-factory continuation gracefully signalled as superseded, preserving
+its world and evidence. No code/mod changes or new tests; previous verification
+reused for unchanged implementation. Local freeze/viewer mirror under
+`data/laya-orchestration/starship-capacity-fresh-20261114/`.
