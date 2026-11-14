@@ -66,3 +66,29 @@ def test_report_requires_new_current_observations(tmp_path):
     assert group['strict_reach']['C3']['ticks_from_load'] == [10]
     assert group['held_at_end']['C2'] == {'true': 1, 'false': 0, 'unknown': 1}
     assert group['classifications']['right_censored_timeout'] == 1
+
+
+def test_report_cli_retains_terminal_and_unknown_jobs(tmp_path):
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = tmp_path / 'cohort'
+    root.mkdir()
+    jobs = [
+        {'origin': 'C1', 'arm': 'a', 'status': 'completed', 'successor_passed': True},
+        {'origin': 'C1', 'arm': 'a', 'status': 'timeout'},
+        {'origin': 'C1', 'arm': 'a', 'status': 'queued'},
+        {'origin': 'C1', 'arm': 'a', 'status': 'infrastructure_failure'},
+    ]
+    (root / 'job-status.json').write_text(json.dumps({'name': 'fixture', 'jobs': jobs}))
+    (root / 'regression.json').write_text('{}')
+    script = Path(__file__).resolve().parents[1] / 'tools/laya_checkpoint_regression.py'
+    result = subprocess.run([sys.executable, str(script), 'report', '--registry', str(tmp_path),
+                             '--root', str(root)], check=True, capture_output=True, text=True)
+    report_data = json.loads(result.stdout)
+    group = report_data['groups'][0]
+    assert report_data['planned'] == group['planned'] == 4
+    assert group['terminal'] == 3 and group['unknown'] == 3
+    assert group['classifications']['right_censored_timeout'] == 1
+    assert group['held_at_end']['C2']['unknown'] == 4

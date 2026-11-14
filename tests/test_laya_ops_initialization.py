@@ -218,3 +218,20 @@ def test_reopening_restores_district_space_and_reconciles_only_measured_work(wor
 
     assert builder._REFINERY_SITE_RESERVATIONS[("nauvis", "player", "iron-plate")] == ((20, 30), (22, 31))
     assert builder._BOOTSTRAP_WORK_LEDGER.edges == {"steel-plate": {"copper-plate": "still missing"}}
+
+
+def test_session_compatibility_identity_and_typed_operation(world, monkeypatch):
+    from orchestrator import laya_session
+    from training.laya_ops import DeterministicSession, receipt
+
+    assert laya_ops is laya_session
+    assert DeterministicSession is laya_session.DeterministicSession
+    assert receipt is laya_session.receipt
+    calls = []
+    monkeypatch.setattr(builder, 'produce_to_demand', lambda *args, **kwargs: calls.append(args) or (1, 2))
+    session = open_session(world)
+    assert session.run('produce', item='iron-gear-wheel')['code'] == 'producing'
+    assert calls and calls[0][4] == 'iron-gear-wheel'
+    monkeypatch.setattr(builder, '_transferable_or_available_stock', lambda *args: {})
+    refusal = session.run('reserve_steel_seed')
+    assert refusal['ok'] is False and refusal['code'] == 'material_shortage'

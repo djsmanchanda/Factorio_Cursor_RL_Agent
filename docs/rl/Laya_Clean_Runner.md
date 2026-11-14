@@ -17,7 +17,7 @@ status board, guided policy, journals and console, but expose different choices.
 | Path | Current choices | Remaining limits |
 | --- | --- | --- |
 | `--actions geometry` (default), `training/laya_clean_runner.py` | Land plan, funded starter/mine/smelting/assembly alternatives, mall retargets, coverage and waits. | Bounded site/scale menus; general fluid, research, upgrade and repair choice coverage remains incomplete. Component fixtures are separate evidence. |
-| `--actions deterministic`, `training/laya_ops_runner.py` | Plate starter/foundation/extension/retirement, baseline mall item, shortage batch, steel fence/seed, guarded existing-cell stock-gate raises and waits. | `training/laya_ops.py` still calls strategic builder wrappers that choose prerequisites, lender, site, scale, transport and recovery. Coverage can occur inside a request rather than as a separate offered choice. |
+| `--actions deterministic`, `training/laya_ops_runner.py` | Plate starter/foundation/extension/retirement, baseline mall item, shortage batch, steel fence/seed, guarded existing-cell stock-gate raises and waits. | `orchestrator/laya_session.py` still calls strategic builder wrappers that choose prerequisites, lender, site, scale, transport and recovery. Coverage can occur inside a request rather than as a separate offered choice. |
 
 The target split is **preview legal alternatives → Laya chooses → execute the
 selected transaction → reconcile measured outcome**. Current wrapper choices
@@ -36,6 +36,10 @@ Reuse observations from `GameBridge`/`live_base`, planner realizers, material an
 collision validators, bot construction/configuration, and measured counters.
 Reuse choosing wrappers only behind an explicitly documented migration boundary;
 extract their alternatives rather than adding another hidden priority branch.
+
+The active ops session is owned by `orchestrator/laya_session.py`;
+`training/laya_ops.py` aliases that module for existing imports and patches.
+The shared economics projection lives in `orchestrator/laya_economics.py`.
 
 Ops session startup clears run-local caches, loads live recipe/prototype facts,
 validates the goal and restores persisted work. It does not run the deterministic
