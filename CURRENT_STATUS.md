@@ -596,3 +596,11 @@ C6-v3 candidate derives recovery feed prototypes from the same constructed plan 
 - Evidence:main23focused tests passed, covering maintenance isolation, unavailable/inconsistent telemetry, configuration-only/mixed plans, pending prerequisite construction, reopen/no resend, failed persistence, and actual runner emission/shared summaries. New invocation tests explicitly enter the fast tier; settled gate1,453passed,3skipped(two optional-Lupa collection modules,one known fluid chain),exit0. Delegate149focused result predates main hardening.
 - Limits:readback establishes current matching placements rather than build provenance. Cross-storage checkpoint transfer, mixed plan configuration evidence and live acceptance remain open.
 - Lifecycle:future matching frozen Python runner required; no runtime,Factorio,service,mod,save or campaign action.
+
+
+## [2026-11-15 04:21 IST] Share conditional loan-step forecasts without acquiring holds
+
+- What:observed loans expose identity,lender,progress,grounded dependency edges,and a conditional before-admission recipe/ingredient proposal in menu and decision records. Execution and observation share the same pure credit/target/persisted-step calculation. A read-only allocation projection runs the real allocator against copied state rather than rebalancing the live ledger. An inferred claimant is not a confirmed reservation owner.
+- Evidence:141 focused preview/bootstrap/reservation/reconciliation tests passed,including two products through actual shared configuration boundary,scarce competing holds,repeated no-mutation projection,unknown progress and regressing clock. Settled PM fast1,461passed,3skipped(two optional-Lupa collections,one known fluid chain),exit0.
+- Limits:gross recipe ingredients exclude requester headroom and are not construction cost,delivered inputs or new reservation. Actual admission/release/preemption,full cycle escape and durable mid-loan restart remain open;observations span a sampled tick interval. No live result.
+- Lifecycle:future matching frozen Python runner required;no mod or Factorio reload;no runtime or campaign action.

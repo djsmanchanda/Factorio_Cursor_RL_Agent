@@ -1168,6 +1168,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             menu = add_cable_capacity_option(menu, board, phase, facts, results, stock)
         if objective:
             menu = add_research_options(menu, board, research, facts, objective)
+        if hasattr(session, "preview_options"):
+            menu = session.preview_options(menu, economics)
         from training.laya_decision_pacing import apply_waits, multiplier
         elapsed_game_ticks = facts["tick"] - samples[0][0]
         menu = apply_waits(menu, settings, elapsed_game_ticks)
@@ -1209,7 +1211,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         emit(f"  STATUS: {status}")
         record = {"run_id": run_id, "event": "decision", "index": index, "tick": facts["tick"],
                   "phase": phase["phase_id"], "choice": {k: choice[k] for k in ("option_id", "need_id", "probability")},
-                  "summary": chosen["summary"]}
+                  "summary": chosen["summary"], "operation_preview": chosen.get("operation_preview")}
         _append(journal, record)
         # Fresh baseline after selection, immediately before execution; never reuse a rate-window baseline.
         try:
@@ -1250,7 +1252,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
              + (f" -- {result.get('message', '')[:200]}" if not result.get("ok") else ""))
         _training_record(records, run_id=run_id, index=index, tick=facts["tick"], phase=phase["phase_id"],
                          state=state, options=[{k: o.get(k) for k in ("option_id", "family", "need_id", "product",
-                                                                      "params", "features", "bill", "bill_owner",
+                                                                      "params", "features", "bill", "bill_owner", "operation_preview",
                                                                       "wait_ticks", "base_wait_ticks")} for o in menu["options"]],
                          distribution=choice["distribution"], choice=choice,
                          outcome={**{k: result.get(k) for k in ("ok", "code", "classification", "state", "details", "operation_id",

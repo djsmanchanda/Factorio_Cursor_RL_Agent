@@ -273,6 +273,15 @@ class DeterministicSession:
         except Exception:  # noqa: BLE001 -- an unreadable survey is no evidence of progress
             return None
 
+    def preview_options(self, menu: dict, economics: dict | None) -> dict:
+        """Attach projections from already observed facts; never query or reserve."""
+        from orchestrator.operation_preview import preview_operation
+        for option in menu["options"]:
+            preview = preview_operation(option["family"], option.get("params", {}), economics)
+            if preview is not None:
+                option["operation_preview"] = preview
+        return menu
+
     def economics(self) -> dict:
         """Read-only mall facts; failed components stay null, independently of other surveys."""
         ledger = ab._MATERIAL_RESERVATION_LEDGER
@@ -310,7 +319,7 @@ class DeterministicSession:
             pass
         try:
             from orchestrator.mall_reconciliation import observe_loans
-            loans = observe_loans(self.client, SURFACE, FORCE)
+            loans = observe_loans(self.client, SURFACE, FORCE, include_planning=True)
         except Exception:
             loans = None
         try:

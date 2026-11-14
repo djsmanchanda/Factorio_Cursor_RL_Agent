@@ -83,6 +83,7 @@ from orchestrator.mall_bootstrap import (
     bootstrap_loan_facts,
     bootstrap_loan_plan,
     next_bootstrap_step,
+    preserve_bootstrap_step,
     promote_bootstrap_loan_plan,
     release_bootstrap_loan_plan,
     restore_bootstrap_loan_plan,
@@ -6388,6 +6389,52 @@ def _emit_loan_cell_telemetry(
         emit(f"  LOAN CELL TELEMETRY skipped: {error}")
 
 
+def _bootstrap_loan_step_decision(loan, actual, usable, products_finished):
+    """Pure proposed step before live preemption, admission and release guards.
+
+    Execution and previews share the same stock/credit/persisted-step calculation.
+    The result grants no allocation, configuration or release authority.
+    """
+    minimum_fulfilled = _bootstrap_loan_minimum_fulfilled(
+        loan, actual, products_finished,
+    )
+    completed_prerequisite = bool(
+        loan.step_recipe is not None
+        and loan.step_recipe != loan.target_item
+        and (
+            (
+                loan.step_baseline_finished is not None
+                and loan.step_required_crafts is not None
+                and products_finished is not None
+                and products_finished - loan.step_baseline_finished
+                >= loan.step_required_crafts
+            )
+            or (
+                loan.step_target_count is not None
+                and int(actual.get(loan.step_recipe, 0)) >= loan.step_target_count
+            )
+        )
+    )
+    if completed_prerequisite:
+        persisted = _bootstrap_loan_persisted_step(loan, actual)
+        assert persisted is not None
+        loan = loan.credit_completed_step(
+            persisted.recipe, persisted.target_count,
+        )
+    planning_actual, planning_usable = _bootstrap_loan_credited_stock(
+        loan, actual, usable,
+    )
+    planning_target = (
+        loan.production_target if minimum_fulfilled else loan.target_count
+    )
+    step = next_bootstrap_step(
+        loan.target_item, planning_target, planning_usable, planning_actual,
+    )
+    persisted = _bootstrap_loan_persisted_step(loan, actual) if loan.step_recipe is not None else None
+    step = preserve_bootstrap_step(step, persisted, completed=completed_prerequisite)
+    return loan, minimum_fulfilled, completed_prerequisite, planning_target, step
+
+
 def _submit_bootstrap_loan(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     loan: MallBootstrapLoan, emit: Callable[[str], None], *,
@@ -6449,32 +6496,12 @@ def _submit_bootstrap_loan(
         _bootstrap_loan_products_finished(client, surface, loan)
         if loan.step_recipe is not None else None
     )
-    minimum_fulfilled = _bootstrap_loan_minimum_fulfilled(
-        loan, actual, products_finished,
-    )
-    completed_prerequisite = bool(
-        loan.step_recipe is not None
-        and loan.step_recipe != loan.target_item
-        and (
-            (
-                loan.step_baseline_finished is not None
-                and loan.step_required_crafts is not None
-                and products_finished is not None
-                and products_finished - loan.step_baseline_finished
-                >= loan.step_required_crafts
-            )
-            or (
-                loan.step_target_count is not None
-                and int(actual.get(loan.step_recipe, 0)) >= loan.step_target_count
-            )
-        )
+    loan, minimum_fulfilled, completed_prerequisite, planning_target, step = _bootstrap_loan_step_decision(
+        loan, actual, usable, products_finished,
     )
     if completed_prerequisite:
         persisted = _bootstrap_loan_persisted_step(loan, actual)
         assert persisted is not None
-        loan = loan.credit_completed_step(
-            persisted.recipe, persisted.target_count,
-        )
         crafts_done = (
             products_finished - loan.step_baseline_finished
             if products_finished is not None and loan.step_baseline_finished is not None
@@ -6485,23 +6512,6 @@ def _submit_bootstrap_loan(
             f"target {persisted.target_count} reached ({crafts_done} crafted); "
             "advancing the durable loan"
         )
-    planning_actual, planning_usable = _bootstrap_loan_credited_stock(
-        loan, actual, usable,
-    )
-    planning_target = (
-        loan.production_target if minimum_fulfilled else loan.target_count
-    )
-    step = next_bootstrap_step(
-        loan.target_item, planning_target, planning_usable, planning_actual,
-    )
-    if not completed_prerequisite and loan.step_recipe is not None:
-        persisted = _bootstrap_loan_persisted_step(loan, actual)
-        if (
-            persisted is not None
-            and step is not None
-            and step.recipe != loan.step_recipe
-        ):
-            step = persisted
     if step is not None and products_finished is None:
         products_finished = _bootstrap_loan_products_finished(
             client, surface, loan,

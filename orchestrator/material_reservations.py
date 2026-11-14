@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import copy
+
 import json
 import os
 from collections import Counter
@@ -367,6 +369,12 @@ class MaterialReservationLedger:
             for item, required in project.required.items()
             if project.reserved.get(item, 0) < required
         }
+
+    def preview_allocatable_stock(self, stock: Mapping[str, int], *, claimant: str | None = None) -> dict[str, int]:
+        """Use the execution allocator on an isolated projection without acquiring holds."""
+        projected = copy.copy(self)
+        projected.projects = dict(self.projects)
+        return projected.allocatable_stock(stock, claimant=claimant)
 
     def allocatable_stock(
         self, stock: Mapping[str, int], *, claimant: str | None = None,
