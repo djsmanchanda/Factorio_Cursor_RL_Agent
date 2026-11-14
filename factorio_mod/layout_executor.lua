@@ -813,6 +813,87 @@ local function ensure_pole_wiring(surface, force, area)
   return connected
 end
 
+local function configuration_precondition_error(surface, force, action)
+  if action.configuration_preconditions == nil then return nil end
+  local function check()
+    if action.action_type ~= "configure_entity" then return "wrong_action_kind" end
+    local expected = action.configuration_preconditions
+    local function exact_keys(value, keys)
+      if type(value) ~= "table" then return false end
+      for key in pairs(value) do if not keys[key] then return false end end
+      for key in pairs(keys) do if value[key] == nil then return false end end
+      return true
+    end
+    local function positive_integer(value)
+      return type(value) == "number" and value > 0 and value < math.huge and value == math.floor(value)
+    end
+    local comparators = { ["<"]=true, [">"]=true, ["="]=true, ["≥"]=true,
+      ["≤"]=true, ["≠"]=true, [">="]=true, ["<="]=true, ["!="]=true }
+    if not exact_keys(expected, {unit_number=true, recipe=true, logistic_condition=true,
+      circuit_enabled=true, requester=true}) then return "invalid_shape" end
+    local gate, requester = expected.logistic_condition, expected.requester
+    if not positive_integer(expected.unit_number) or type(expected.recipe) ~= "string"
+      or type(expected.circuit_enabled) ~= "boolean"
+      or not exact_keys(gate, {signal=true, comparator=true, constant=true})
+      or type(gate.signal) ~= "string" or gate.signal == "" or not comparators[gate.comparator]
+      or type(gate.constant) ~= "number" or math.abs(gate.constant) == math.huge
+      or gate.constant ~= math.floor(gate.constant)
+      or not exact_keys(requester, {entity=true, position=true, unit_number=true, groups=true})
+      or requester.entity ~= "requester-chest" or not positive_integer(requester.unit_number)
+      or not exact_keys(requester.position, {x=true, y=true})
+      or type(requester.position.x) ~= "number" or type(requester.position.y) ~= "number"
+      or type(requester.groups) ~= "table" then return "invalid_shape" end
+    local previous, group_count = nil, 0
+    for index, group in pairs(requester.groups) do
+      if not positive_integer(index) or index > #requester.groups
+        or type(group) ~= "string" or group == "" then return "invalid_groups" end
+      group_count = group_count + 1
+    end
+    if group_count ~= #requester.groups then return "invalid_groups" end
+    for _, group in ipairs(requester.groups) do
+      if previous and previous > group then return "invalid_groups" end
+      previous = group
+    end
+    local entity = find_exact_entity(surface, force, action.entity, action.position)
+    if not entity or not entity.valid then return "target_missing" end
+    if entity.unit_number ~= expected.unit_number then return "unit_number_mismatch" end
+    local recipe = entity.get_recipe()
+    if not recipe or recipe.name ~= expected.recipe then return "recipe_mismatch" end
+    local behavior = entity.get_control_behavior()
+    if not behavior or behavior.connect_to_logistic_network ~= true then return "logistic_disabled" end
+    if behavior.circuit_enable_disable ~= expected.circuit_enabled then return "circuit_enabled_mismatch" end
+    local condition = behavior.logistic_condition
+    condition = condition and (condition.condition or condition)
+    local signal = condition and condition.first_signal
+    -- Factorio 2.1 reads item signals back without `type` (SignalID defaults to item).
+    if not signal or (signal.type ~= nil and signal.type ~= "item") or signal.name ~= gate.signal
+      or (signal.quality ~= nil and signal.quality ~= "normal")
+      or condition.second_signal ~= nil or condition.comparator ~= gate.comparator
+      or condition.constant ~= gate.constant then return "logistic_condition_mismatch" end
+    local chest = find_exact_entity(surface, force, requester.entity, requester.position)
+    if not chest or not chest.valid or chest.unit_number ~= requester.unit_number then
+      return "requester_mismatch"
+    end
+    local sections = chest.get_logistic_sections()
+    if not sections or not sections.sections then return "requester_groups_unknown" end
+    local groups = {}
+    for _, section in pairs(sections.sections) do
+      if not section.valid or type(section.group) ~= "string" then return "requester_groups_unknown" end
+      if section.group ~= "" then groups[#groups + 1] = section.group end
+    end
+    table.sort(groups)
+    if #groups ~= #requester.groups then return "requester_groups_mismatch" end
+    for index, group in ipairs(groups) do
+      if group ~= requester.groups[index] then return "requester_groups_mismatch" end
+    end
+    return nil
+  end
+  local ok, detail = pcall(check)
+  if not ok then detail = "read_failed" end
+  if detail then return "configuration_precondition_failed:" .. detail end
+  return nil
+end
+
 local function execute_build_plan(authorization, build_plan)
   local approved = {}
   for _, action in ipairs(authorization.approved_actions or {}) do
@@ -948,6 +1029,24 @@ local function execute_build_plan(authorization, build_plan)
       position = { x = action.position.x, y = action.position.y },
       reason = reason
     })
+  end
+
+  -- Reject the entire submission before mutation when any guarded snapshot is stale.
+  for _, phase in ipairs(build_plan.phases) do
+    for _, action in ipairs(phase.actions or {}) do
+      local failure = configuration_precondition_error(surface, force, action)
+      if failure then
+        counts.attempted_entities = counts.attempted_entities + 1
+        record_failure(phase, action, failure)
+      end
+    end
+  end
+  if #placement_failures > 0 then
+    counts.failed_entities = #placement_failures
+    counts.failed_placements = #placement_failures
+    counts.placement_failures = placement_failures
+    counts.error = "configuration_precondition_failed"
+    return counts
   end
 
   -- Optimizer tags must originate on the newly created ghost. An existing
@@ -1279,7 +1378,7 @@ local function write_layout_report(report, request_id)
 end
 
 commands.add_command("layout_executor_capabilities", "Read executor protocol capabilities.", function()
-  rcon.print('{"receipt_protocols":["layout-submission-receipt-v1","layout-submission-receipt-v2"],"correlated_identity":1,"idempotent_requests":1,"ownership":"force-surface-v1","actions":["place_entity","place_ghost","place_ghost_no_reconcile","place_tile_ghost","configure_entity","configure_entity_if_unit_number","remove_entity"],"tag_protocols":["optimizer-action-tags-v1","optimizer-shared-tags-v1","research-lab-tags-v1"]}')
+  rcon.print('{"configuration_preconditions":1,"receipt_protocols":["layout-submission-receipt-v1","layout-submission-receipt-v2"],"correlated_identity":1,"idempotent_requests":1,"ownership":"force-surface-v1","actions":["place_entity","place_ghost","place_ghost_no_reconcile","place_tile_ghost","configure_entity","configure_entity_if_unit_number","remove_entity"],"tag_protocols":["optimizer-action-tags-v1","optimizer-shared-tags-v1","research-lab-tags-v1"]}')
 end)
 
 commands.add_command("build_layout_plan", "Execute an authorized BuildPlan with explicit positions on planner-sandbox.", function(command)

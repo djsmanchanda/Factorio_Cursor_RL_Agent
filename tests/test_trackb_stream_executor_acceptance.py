@@ -29,7 +29,7 @@ def lua_value(value):
     return str(value).lower()
 
 
-def executable_bridge(tmp_path, reference, *, outcome="normal", mutations=1, setup=""):
+def executable_bridge(tmp_path, reference, *, outcome="normal", mutations=1, setup="", mutation_name="create:transport-belt"):
     executor = Path(__file__).parent / "fixtures/rc9_reference_69a2accc/layout_executor.lua" if reference else EXECUTOR
     bridge = GameBridge.__new__(GameBridge)
     bridge.script_output = tmp_path
@@ -65,7 +65,7 @@ def executable_bridge(tmp_path, reference, *, outcome="normal", mutations=1, set
               registered.build_layout_plan({{parameter={lua_value(raw)}}})
               registered.build_layout_plan({{parameter={lua_value(raw)}}})
               assert(#mutation_log == {mutations}, 'unexpected mutation count: ' .. #mutation_log)
-              if {mutations} == 1 then assert(mutation_log[1] == 'create:transport-belt') end
+              if {mutations} == 1 then assert(mutation_log[1] == {lua_value(mutation_name)}) end
             '''
         result = subprocess.run(['lua', '-'], input=script, text=True, capture_output=True)
         assert result.returncode == 0, result.stderr
@@ -135,7 +135,6 @@ def test_capability_refusal_keeps_pending_and_never_builds(tmp_path, response):
     assert json.loads((tmp_path / "evidence/layout-stream.json").read_text())["pending"] is not None
 
 @pytest.mark.parametrize('reference,action', [
-    (False, {'action_type': 'configure_entity', 'configuration_preconditions': {}}),
     (True, {'action_type': 'place_ghost_no_reconcile'}),
 ])
 def test_real_executor_advertisement_refuses_unsupported_plan(tmp_path, reference, action):
@@ -171,6 +170,16 @@ def test_refusal_publication_recovers_transaction_then_allows_new_request(tmp_pa
         raise RuntimeError('interrupted publication')
     action = ({'action_type': 'place_ghost_no_reconcile'} if reference else
               {'action_type': 'configure_entity', 'configuration_preconditions': {}})
+    if not reference:
+        original_command = bridge.command
+        def missing_capability(command):
+            response = original_command(command)
+            if command == '/layout_executor_capabilities':
+                caps = json.loads(response)
+                caps.pop('configuration_preconditions')
+                return json.dumps(caps)
+            return response
+        bridge.command = missing_capability
     plan = {'phases': [{'actions': [action]}]}
     with pytest.raises(RuntimeError, match='interrupted'):
         submit(tmp_path, bridge, {}, plan, transaction=transaction, prepared=prepared, refused=interrupted)
@@ -178,6 +187,8 @@ def test_refusal_publication_recovers_transaction_then_allows_new_request(tmp_pa
     assert path.exists() and json.loads(path.read_text())['layout_refusal'] == refusal
     assert refusal['request_digest'] and request['sequence'] == 1
     assert events == ['/layout_executor_capabilities']
+    if not reference:
+        bridge.command = original_command
     # Lua never saw the refused sequence, so the next request starts a fresh
     # stream at one and completes a real Lua build rather than skipping a number.
     legal = {'surface': 'planner-sandbox', 'force': 'planner', 'phases': [{'name': 'one', 'actions': [
@@ -226,7 +237,7 @@ def test_stream_ownership_and_guards_reject_without_mutation(tmp_path, reference
         with pytest.raises(ValueError, match='scope differs'):
             call()
         assert events == []
-    elif (guard == 'configuration' and not reference) or (guard == 'optimizer_ownership' and reference):
+    elif guard == 'optimizer_ownership' and reference:
         with pytest.raises(LayoutCapabilityError):
             call()
         assert refusals and events == ['/layout_executor_capabilities']
@@ -252,3 +263,88 @@ def test_authorization_bounds_fail_before_any_executor_command(limits, correlate
             bridge.build_layout_correlated(authorization, plan, request_id='a' * 32)
         else:
             bridge.build_layout(authorization, plan)
+
+
+@pytest.mark.parametrize('reference', [False, True])
+@pytest.mark.parametrize('case', ['valid', 'stale', 'missing', 'missing_target', 'malformed', 'unsupported', 'wrong_force', 'mixed_stale'])
+def test_configuration_snapshot_guard_through_adapter(tmp_path, reference, case):
+    from training.laya_saved_world import SavedWorldAdapter, SavedWorldError
+    guard = {'unit_number': 11, 'recipe': 'iron-gear-wheel',
+             'logistic_condition': {'signal': 'iron-plate', 'comparator': '<', 'constant': 50},
+             'circuit_enabled': True, 'requester': {'entity': 'requester-chest',
+             'position': {'x': 2, 'y': 0}, 'unit_number': 12, 'groups': ['gears']}}
+    if case in ('stale', 'mixed_stale'): guard['recipe'] = 'stale'
+    if case == 'malformed': guard['requester']['groups'] = ['z', 'a']
+    if case == 'unsupported': guard['unexpected'] = True
+    setup = """
+      local machine = add_entity('assembling-machine-2', 0, 0%s)
+      machine.unit_number = 11
+      machine.get_recipe = function() return {name='iron-gear-wheel'} end
+      local state = {circuit_enable_disable=true, connect_to_logistic_network=true,
+        logistic_condition={first_signal={name='iron-plate'}, comparator='<', constant=50}}
+      local behavior = setmetatable({}, {__index=state, __newindex=function(_, k, v)
+        mutation_log[#mutation_log+1]='configure'; state[k]=v end})
+      machine.get_control_behavior = function() return behavior end
+      machine.get_or_create_control_behavior = function() return behavior end
+      local chest = add_entity('requester-chest', 2, 0)
+      chest.unit_number = 12
+      chest.get_logistic_sections = function() return {sections={{valid=true, group='gears'}}} end
+    """ % (", {name='other'}" if case == 'wrong_force' else '')
+    if case == 'missing': setup = setup.replace("local chest = add_entity('requester-chest', 2, 0)", "local chest = add_entity('requester-chest', 3, 0)")
+    if case == 'missing_target': setup = setup.replace("add_entity('assembling-machine-2', 0, 0)", "add_entity('assembling-machine-2', 5, 0)")
+    bridge, _ = executable_bridge(tmp_path, reference, mutations=int(case == 'valid'), setup=setup, mutation_name='configure')
+    adapter = SavedWorldAdapter.__new__(SavedWorldAdapter)
+    adapter.root, adapter.bridge = tmp_path, bridge
+    adapter.surface, adapter.force = 'planner-sandbox', 'planner'
+    path = tmp_path / 'evidence' / ('transaction-' + 'c' * 32 + '.json')
+    path.parent.mkdir()
+    receipt = {}
+    action = {'action_type': 'configure_entity', 'entity': 'assembling-machine-2', 'position': {'x': 0, 'y': 0},
+              'clear_chest_gate': True, 'configuration_preconditions': guard}
+    configs = [action]
+    if case == 'mixed_stale':
+        configs.insert(0, {'action_type': 'place_entity', 'entity': 'transport-belt',
+                           'position': {'x': 20, 'y': 20}})
+    if case == 'valid':
+        adapter._submit_configuration(configs, receipt, path, phase='configure')
+        assert receipt['configuration']['ok'] is True
+    else:
+        with pytest.raises(SavedWorldError, match='configuration failed'):
+            adapter._submit_configuration(configs, receipt, path, phase='configure')
+        assert receipt['configuration']['error'] == 'configuration_precondition_failed'
+
+
+def test_adapter_produced_identity_guard_through_executor(tmp_path):
+    from training.laya_saved_world import SavedWorldAdapter, SavedWorldError
+    spec = importlib.util.spec_from_file_location('guard_fixture', Path(__file__).with_name('test_guarded_configuration.py'))
+    source = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(source)
+    evidence = source.report()
+    evidence.update(version='optimizer-build-evidence-v3', surface='planner-sandbox', force='planner')
+    baseline = {**evidence, 'entities': [], 'tick': 9}
+    setup = """
+      local machine = add_entity('assembling-machine-2', 1.5, 2.5)
+      machine.unit_number = 42
+      machine.surface = surface
+      machine.bounding_box = {left_top={x=0, y=1}, right_bottom={x=3, y=4}}
+      local recipe = nil
+      machine.get_recipe = function() return recipe end
+      machine.set_recipe = function(name)
+        mutation_log[#mutation_log+1]='recipe:'..name
+        recipe={name=name}
+      end
+    """
+    bridge, _ = executable_bridge(tmp_path, False, mutations=1, setup=setup, mutation_name='recipe:processing-unit')
+    bridge.optimizer_build_evidence = lambda **kwargs: evidence
+    adapter = SavedWorldAdapter.__new__(SavedWorldAdapter)
+    adapter.root, adapter.bridge = tmp_path, bridge
+    adapter.surface, adapter.force = 'planner-sandbox', 'planner'
+    plan = {'phases': [{'actions': [source.ACTION]}]}
+    guarded = adapter._guarded_configuration(plan, source.TAGS, 10, baseline)
+    assert guarded[0]['action_type'] == 'configure_entity_if_unit_number'
+    assert guarded[0]['expected_unit_number'] == 42
+    path = tmp_path / 'evidence' / ('transaction-' + 'd' * 32 + '.json')
+    path.parent.mkdir()
+    receipt = {}
+    adapter._submit_configuration(guarded, receipt, path, phase='configure')
+    assert receipt['configuration']['ok'] is True

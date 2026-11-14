@@ -207,6 +207,12 @@ A known pre-dispatch capability refusal is durably published to its transaction
 before clearing the pending request. Recovery never resends an ambiguous request.
 After a known refusal, a fresh stream starts at sequence one because Lua never
 received the refused sequence. Historical refusal evidence and request identity
-are retained. Track B does not yet implement configuration preconditions and
-does not advertise them. Source capability declarations require deliberate mod
-synchronization/reload with a matching frozen runner before runtime use.
+are retained. Track B now supports and advertises version-1 configuration
+snapshots. A supplied snapshot checks machine identity, recipe, logistic gate,
+circuit state and requester identity/groups before any action mutates the plan.
+The existing robot-build adapter continues to use its separate unit-number guard
+for initial configuration; this is not a standing-machine snapshot producer.
+Offline tests cover both shapes, actual recipe mutation and duplicate replay,
+and a stale snapshot blocking a mixed placement/configuration plan. Source
+capabilities require deliberate mod synchronization/reload with a matching
+frozen runner before runtime use; no live efficacy is established.
