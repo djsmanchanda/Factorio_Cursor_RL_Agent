@@ -67,3 +67,25 @@ Antigravity Gemini 4 Hydrogen helper requested for the full run. Logs and termin
 result belong to this experiment, independent of active Miniship cohorts.
 This checks wiring and live behavior of cumulative capacity fixes; no adoption or
 paired improvement claim. See the dated geometry-capacity handoff.
+
+## 2026-11-14 17:34 IST — Routing continuation live
+
+The original run could not expand copper because its fixed ore haul crossed an
+existing medium pole. Frozen `aed6615b` now runs separately on Starship as
+`laya-starship-route-fix-20261114.service`, experiment
+`data/laya-experiments/starship-route-fix-20261114`, owned world
+`code/data/laya-saved-world/starship-route-fix-s84218`. Native-save continuation
+from source observation tick613376/decision144; restored ownership and request
+ages, proxy C0/C1, no grants, comparison/acceptance ineligible. Engine2.1.24,
+seed84218, patience96,2×; loopback game/RCON34341/27341. Deadline
+**2026-11-15 03:30 IST**, plus3,600,000-game-tick window. Strict sidecar starts a
+new baseline; its initial observation reached onlyC0.
+
+At tick632518 the selected copper line had all162 targets built, all6 electric
+furnaces crafted and443 plates in its provider. Decision5 measured3.721/s;
+the original pole remains powered. GUI now views this continuation as spectator
+(`laya-starship-route-gui-20261114.service`). Original run/source unchanged.
+The requested Gemini observer is stopped because the remote link still denies
+full-access delegation. Latest user requirement: steel capacity expansion must
+use a proper shared line, conserving requester/provider chests; implement in
+the development checkout for a subsequent freeze, never hot-edit this run.
