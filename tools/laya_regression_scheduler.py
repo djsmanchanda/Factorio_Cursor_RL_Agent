@@ -13,13 +13,14 @@ import socket
 import shutil
 import signal
 import subprocess
+import sys
 import time
 import uuid
 import re
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 
 from tools.checkpoint_catalog import atomic_json
-from tools import laya_status_journal
+from tools import laya_status_journal, runner_process
 from tools.deterministic_fleet_runtime import create_detached_checkout
 from training.laya_restart_checkpoint import load as load_checkpoint
 from training.laya_mission_contract import mission_settings, frozen_capability
@@ -640,6 +641,19 @@ def recover(root):
     jobs = _publish(root, lambda status: copy.deepcopy(status['jobs']))
     for job in jobs:
         if job.get('admission_reserved'):
+            def interrupted(status):
+                row = next(j for j in status['jobs'] if j['id'] == job['id'])
+                if row.get('status') not in TERMINAL:
+                    row.update(status='infrastructure_failure', termination_cause='coordinator_interrupted_attempt',
+                               cleanup_completed=False)
+                if row.get('attempts'):
+                    attempt = row['attempts'][-1]
+                    attempt['outcome'] = attempt.get('outcome') or {'kind':'unknown', 'reason':'coordinator_interrupted'}
+                    for invocation in attempt['invocations']:
+                        if invocation.get('outcome') is None:
+                            invocation['outcome'] = {'kind':'unknown', 'reason':'coordinator_interrupted'}
+                            invocation['recovered_at'] = time.time()
+            _publish(root, interrupted)
             scoped_stop(root/'arms'/job['arm']/'code', Path(job['world']), spec['python'],
                         Path(spec['factorio_binary']).resolve().parents[2])
             updates = {'admission_reserved':False, 'cleanup_completed':True,
@@ -702,7 +716,25 @@ def _execute_job(root, executor, spec, freeze, job):
     identity = next(a for a in freeze['arms'] if a['id'] == job['arm'])
     deadline = time.monotonic()+min(spec['trial_wall_seconds'], datetime.fromisoformat(spec['until']).timestamp()-time.time())
     result = {}
+    attempt_id = uuid.uuid4().hex
     try:
+        try:
+            boot_id = Path('/proc/sys/kernel/random/boot_id').read_text().strip() or None
+        except OSError:
+            boot_id = None
+        attempt = {'version':1, 'id':attempt_id, 'started':time.time(),
+                   'boot_id':boot_id, 'coordinator':{'pid':os.getpid(),
+                   'creation_token':runner_process._process_creation_token(os.getpid())},
+                   'child_identity':None, 'runner_identity':None,
+                   'frozen_identity':{'arm':identity, 'source_sha256':freeze.get('source_sha256'),
+                       'mods_sha256':freeze.get('mods_sha256'), 'engine_sha256':freeze.get('engine_sha256'),
+                       'spec_sha256':freeze.get('spec_sha256'), 'bundle_sha256':job.get('bundle_sha256')},
+                   'mission':mission_settings(spec, job['arm']), 'invocations':[], 'outcome':None}
+        def begin(status):
+            row = next(j for j in status['jobs'] if j['id'] == job['id'])
+            row.setdefault('attempts', []).append(attempt)
+            row['cleanup_completed'] = False
+        _publish(root, begin)
         if (tracked_hash(code) != identity['code_sha256'] or sha(spec['source_save']) != freeze['source_sha256']
                 or tree_hash(Path(spec['mods_source'])) != freeze['mods_sha256']
                 or sha(spec['factorio_binary']) != freeze['engine_sha256']):
@@ -725,10 +757,59 @@ def _execute_job(root, executor, spec, freeze, job):
                 if identity.get('runner') != selected_runner or identity.get('mission_capability') != capability:
                     raise ValueError('Frozen mission capability changed')
                 effective = mission_settings(spec, job['arm'], capability=capability)
+            def set_mission(status):
+                row = next(j for j in status['jobs'] if j['id'] == job['id'])
+                next(a for a in row['attempts'] if a['id'] == attempt_id)['mission'] = effective
+            _publish(root, set_mission)
             def execute(arguments):
-                return executor(base+arguments, cwd=code, check=True, stdout=log, stderr=subprocess.STDOUT,
+                command = base + arguments
+                receipt = {'phase':arguments[0], 'argv':command, 'cwd':str(code),
+                           'started':time.time(), 'child_identity':None, 'runner_identity':None, 'outcome':None}
+                def add(status):
+                    row = next(j for j in status['jobs'] if j['id'] == job['id'])
+                    next(a for a in row['attempts'] if a['id'] == attempt_id)['invocations'].append(receipt)
+                _publish(root, add)
+                try:
+                    completed = executor(command, cwd=code, check=True, stdout=log, stderr=subprocess.STDOUT,
                                 env={**os.environ, 'LAYA_CHECKPOINT_RUNTIME_ROOT':str(Path(spec['factorio_binary']).resolve().parents[2])},
                                 timeout=max(.1, deadline-time.monotonic()))
+                except BaseException as error:
+                    if isinstance(error, subprocess.CalledProcessError):
+                        outcome = ({'kind':'signal', 'signal':-error.returncode} if error.returncode < 0
+                                   else {'kind':'exit', 'code':error.returncode})
+                    elif isinstance(error, subprocess.TimeoutExpired):
+                        outcome = {'kind':'timeout'}
+                    elif isinstance(error, Exception):
+                        outcome = {'kind':'exception', 'type':type(error).__name__}
+                    else:
+                        outcome = {'kind':'interruption', 'type':type(error).__name__}
+                    def finish_error(status):
+                        row = next(j for j in status['jobs'] if j['id'] == job['id'])
+                        next(a for a in row['attempts'] if a['id'] == attempt_id)['invocations'][-1].update(
+                            outcome=outcome, finished=time.time())
+                    try:
+                        _publish(root, finish_error)
+                    except BaseException as publication_error:
+                        if not isinstance(error, (KeyboardInterrupt, SystemExit)):
+                            raise
+                        error.add_note(f'Invocation evidence publication failed: {type(publication_error).__name__}')
+                    raise
+                code_returned = getattr(completed, 'returncode', None)
+                if type(code_returned) is not int:
+                    outcome = {'kind':'unknown', 'reason':'returncode_unavailable'}
+                else:
+                    outcome = ({'kind':'signal', 'signal':-code_returned} if code_returned < 0
+                               else {'kind':'exit', 'code':code_returned})
+                def finish(status):
+                    row = next(j for j in status['jobs'] if j['id'] == job['id'])
+                    next(a for a in row['attempts'] if a['id'] == attempt_id)['invocations'][-1].update(
+                        outcome=outcome, finished=time.time())
+                _publish(root, finish)
+                if type(code_returned) is not int:
+                    raise RuntimeError('Executor return code is unavailable')
+                if code_returned != 0:
+                    raise subprocess.CalledProcessError(code_returned, command)
+                return completed
             restart = ['--restart-checkpoint', job['bundle']] if job['bundle'] else []
             common = ['--root',str(world),'--actions','deterministic']
             execute(['prepare',*common,'--game-port',str(job['game_port']), '--rcon-port',str(job['rcon_port']),
@@ -769,13 +850,31 @@ def _execute_job(root, executor, spec, freeze, job):
     except Exception as error:
         result = {'status':'infrastructure_failure', **collect_result(world,job),
                   'termination_cause':f'{type(error).__name__}: {error}', 'stop_classification':'infrastructure_failure'}
+    except BaseException as error:
+        result = {'status':'infrastructure_failure', 'termination_cause':f'interrupted: {type(error).__name__}',
+                  'stop_classification':'unknown'}
+        raise
     finally:
         # Publish terminal evidence before cleanup; retain the reservation if
         # physical cleanup fails, so the host cannot over-admit.
-        _update_job(root, job['id'], result)
-        scoped_stop(code, world, spec['python'], Path(spec['factorio_binary']).resolve().parents[2])
-        _update_job(root, job['id'], {'admission_reserved':False,'cleanup_completed':True,
-            'runner_exited':time.time(), 'server_seconds':time.time()-job['preparation_started']})
+        def terminal(status):
+            row = next(j for j in status['jobs'] if j['id'] == job['id'])
+            row.update(result or {'status':'infrastructure_failure', 'termination_cause':'unknown_attempt_outcome'})
+            row['cleanup_completed'] = False
+            for item in row.get('attempts', []):
+                if item['id'] == attempt_id:
+                    item['outcome'] = {'kind':row['status'], 'termination_cause':row.get('termination_cause')}
+                    item['finished'] = time.time()
+        pending = sys.exception()
+        try:
+            _publish(root, terminal)
+            scoped_stop(code, world, spec['python'], Path(spec['factorio_binary']).resolve().parents[2])
+            _update_job(root, job['id'], {'admission_reserved':False,'cleanup_completed':True,
+                'runner_exited':time.time(), 'server_seconds':time.time()-job['preparation_started']})
+        except BaseException as cleanup_error:
+            if not isinstance(pending, (KeyboardInterrupt, SystemExit)):
+                raise
+            pending.add_note(f'Publication or cleanup failed: {type(cleanup_error).__name__}; reservation retained if not durably released')
     return result['status']
 
 

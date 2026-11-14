@@ -197,3 +197,17 @@ orchestrator/laya_session.py and orchestrator/laya_economics.py. The historical
 training/laya_ops.py import aliases the active module so existing classes,
 functions and dependency patches retain identity. This source move preserves
 this controller branch's operations; it does not import later PM features.
+
+Scheduler attempt evidence (15 November 2026): each attempted frozen job retains
+a versioned attempt ID across retries, effective mission and frozen input
+identity, boot/coordinator identity where observable, and exact prepare/run argv
+and cwd. An invocation is durably journaled before dispatch and records a known
+exit, signal, timeout, exception or interruption after it returns. Missing or
+malformed return codes remain unknown and stop further dispatch; no environment
+or credentials are copied into receipts. Unobserved child and runner lineage
+remains unknown. Terminal evidence is published before scoped cleanup; admission
+is retained until cleanup succeeds. KeyboardInterrupt/SystemExit still reach
+the caller. Recovery marks unfinished invocation evidence unknown without
+erasing an already-published terminal result. Planned-job accounting remains
+independent of attempts, and legacy histories are not reconstructed. This
+does not provide independent heartbeat/game-progress monitoring or a lock redesign.

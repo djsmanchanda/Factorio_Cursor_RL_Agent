@@ -177,6 +177,7 @@ def dispatched_run_command(root, registry, monkeypatch):
         calls.append(command)
         if command[2] == 'run':
             raise subprocess.CalledProcessError(7,command)
+        return subprocess.CompletedProcess(command, 0)
     scheduler.run_one(root, executor=record)
     return calls[-1]
 
