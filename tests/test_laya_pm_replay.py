@@ -14,6 +14,11 @@ class FakeSession:
         self.outcomes = list(outcomes)
         self.cells_at = cells_at
         self.calls = []
+        self._tick = 0
+
+    def tick(self):
+        self._tick += 1
+        return self._tick
 
     def run(self, operation, **params):
         self.calls.append((operation, params))

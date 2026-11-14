@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # Path: tools/laya_pm_replay.py | Purpose: Validate C4 replay provenance and distinguish actual PM consumption from generic C6 passes.
-"""Read-only gates for the C4-to-PM diagnostic fixture; never launches a world."""
+"""Validate C4-to-PM evidence and run an explicitly requested disposable replay."""
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import json
 from pathlib import Path
 import sys
@@ -69,6 +70,19 @@ def consumption(world: Path) -> dict:
             'placement_receipt_required': True, 'automatic_adoption': False}
 
 
+def replay_summary(world: Path):
+    journal = world / "evidence/pm-replay.jsonl"
+    if not journal.is_file():
+        return None
+    result = None
+    with journal.open() as stream:
+        for line in stream:
+            row = json.loads(line)
+            if row.get("event") == "pm_replay_summary":
+                result = row
+    return result
+
+
 def replay_report(world: Path) -> dict:
     """One summary for the controller: provenance, placement and PM consumption."""
     provenance = json.loads((world / "provenance.json").read_text()) if (world / "provenance.json").is_file() else None
@@ -85,6 +99,7 @@ def replay_report(world: Path) -> dict:
             "provenance": provenance, "reload": reload_info,
             "reload_verified": bool(reload_info and reload_info.get("reload_verified")),
             "placement": placement, "consumption": use,
+            "replay_summary": replay_summary(world),
             "pm_evidence_complete": complete,
             "evidence_scope": "diagnostic_replay_only", "automatic_adoption": False}
 
@@ -104,7 +119,7 @@ def main(argv=None):
     replay.add_argument('--mods-source', type=Path, required=True)
     replay.add_argument('--game-port', type=int, required=True)
     replay.add_argument('--rcon-port', type=int, required=True)
-    replay.add_argument('--deadline', type=float, required=True, help='epoch seconds; the world stops by then')
+    replay.add_argument('--deadline', type=float, required=True, help='epoch seconds; checked between synchronous operations and during clock waits')
     replay.add_argument('--max-steps', type=int, default=40)
     replay.add_argument('--engine-binary', type=Path,
                         default=Path('/home/miniship/.local/share/factorio-rl/runtime/factorio-2.1.24/bin/x64/factorio'))
@@ -165,44 +180,43 @@ def main(argv=None):
     revision = _sp.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     provenance = provenance_receipt(plan, args.bank/'generations'/args.generation,
                                     args.mods_source, engine, revision, planned=1)
-    prepared = materialize(args.bank/'generations'/args.generation, args.root,
-                           mods_source=args.mods_source, game_port=args.game_port,
-                           rcon_port=args.rcon_port, provenance=provenance,
-                           runtime_root=args.engine_binary.resolve().parents[2])
-    reload_info = reload_receipt(args.root, int(plan['capture_tick']))
-    if not reload_info['reload_verified']:
-        print(json.dumps({**reload_info, 'prepared': prepared}, indent=2))
-        return 3
-    # Persist the reload leg now: it reads live state and cannot be recomputed
-    # after the disposable server is closed.
-    (args.root/'provenance-reload.json').write_text(
-        json.dumps({**reload_info, 'prepared': prepared}, indent=2) + "\n")
-    from orchestrator.operation_session import DeterministicSession
-    trail: list[str] = []
+    with replay_world(args.bank/'generations'/args.generation, args.root,
+                      mods_source=args.mods_source, game_port=args.game_port,
+                      rcon_port=args.rcon_port, provenance=provenance,
+                      runtime_root=args.engine_binary.resolve().parents[2]) as prepared:
+        reload_info = reload_receipt(args.root, int(plan['capture_tick']))
+        if not reload_info['reload_verified']:
+            print(json.dumps({**reload_info, 'prepared': prepared}, indent=2))
+            return 3
+        # Persist the reload leg now: it reads live state and cannot be recomputed
+        # after the disposable server is closed.
+        (args.root/'provenance-reload.json').write_text(
+            json.dumps({**reload_info, 'prepared': prepared}, indent=2) + "\n")
+        from orchestrator.operation_session import DeterministicSession
+        trail: list[str] = []
 
-    def _emit(line):
-        print(line, flush=True)
-        trail.append(line)
+        def _emit(line):
+            print(line, flush=True)
+            trail.append(line)
 
-    def _read_trail():
-        lines = list(trail)
-        trail.clear()
-        return lines
+        def _read_trail():
+            lines = list(trail)
+            trail.clear()
+            return lines
 
-    session = DeterministicSession(args.root, emit=_emit)
-    evidence = args.root/'evidence/pm-replay.jsonl'
-    try:
-        summary = drive(session, evidence, max_steps=max(1, args.max_steps),
-                        deadline=args.deadline,
-                        stock_reader=lambda s: ((s.economics() or {}).get('stock') or {}).get('network') or {},
-                        message_reader=_read_trail,
-                        consumption_probe=lambda: sample_consumption(
-                            args.root, args.root/'evidence/strict.json'))
-    finally:
-        session.close()
-    print(json.dumps({**summary, 'prepared': prepared, 'reload': reload_info,
-                      'capacity': capacity}, indent=2))
-    return 0 if summary['pm_evidence_complete'] else 4
+        from training.laya_clean_runner import LiveWorld
+        summary = run_live_replay(
+            reload_info, lambda: LiveWorld(args.root),
+            lambda: DeterministicSession(args.root, emit=_emit),
+            args.root/'evidence/pm-replay.jsonl', max_steps=max(1, args.max_steps),
+            deadline=args.deadline,
+            stock_reader=lambda s: ((s.economics() or {}).get('stock') or {}).get('network') or {},
+            message_reader=_read_trail,
+            consumption_probe=lambda: sample_consumption(
+                args.root, args.root/'evidence/strict.json'))
+        print(json.dumps({**summary, 'prepared': prepared, 'reload': reload_info,
+                          'capacity': capacity}, indent=2))
+        return 0 if summary['pm_evidence_complete'] else 4
 
 
 
@@ -253,9 +267,31 @@ def _journal_messages(stream, index: int, lines: list[str]) -> None:
         stream.flush()
 
 
+def run_live_replay(reload_info, adapter_factory, session_factory, evidence_path, **kwargs):
+    """Start live play only after the paused reload has been verified."""
+    if not reload_info.get("reload_verified"):
+        raise ReplayError("paused reload was not verified")
+    adapter = adapter_factory()
+    try:
+        session = session_factory()
+        try:
+            start_tick = adapter.tick()
+            if start_tick != reload_info["observed_tick"]:
+                raise ReplayError("paused reload tick changed before live startup")
+            adapter.go_live()
+            return drive(session, evidence_path, tick_reader=adapter.tick,
+                         initial_tick=start_tick, **kwargs)
+        finally:
+            session.close()
+    finally:
+        adapter.close()
+
+
 def drive(session, evidence_path: Path, *, max_steps: int = 40,
           stock_reader=lambda session: {}, consumption_probe=None,
-          deadline: float | None = None, clock=None, message_reader=None) -> dict:
+          deadline: float | None = None, clock=None, message_reader=None,
+          tick_reader=None, initial_tick=None, max_game_ticks: int = 108000,
+          stall_seconds: float = 10.0, monotonic=None, sleep=None) -> dict:
     """Run the existing production_service operation until PM places and consumes.
 
     ``session`` is the real DeterministicSession in live replay, or a fake with
@@ -269,78 +305,106 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
     """
     import time as _time
     clock = _time.time if clock is None else clock
+    monotonic = _time.monotonic if monotonic is None else monotonic
+    sleep = _time.sleep if sleep is None else sleep
+    tick_reader = session.tick if tick_reader is None else tick_reader
+    initial_tick = tick_reader() if initial_tick is None else initial_tick
+    last_tick = initial_tick
     evidence_path.parent.mkdir(parents=True, exist_ok=True)
-    stream = evidence_path.open("a")
-    steps = []
-    placed = False
-    consumed = False
-    deadline_reached = False
-    for index in range(1, max_steps + 1):
-        if deadline is not None and clock() >= deadline:
-            deadline_reached = True
-            break
-        before = dict(stock_reader(session) or {})
-        try:
-            outcome = session.run("production_service", item=PM_ITEM, stock_target=1,
-                                  minimum_machines=1, upgrade_bootstrap=True,
-                                  allow_promotion=False, machine_cap=1)
-        except BaseException:
-            _journal_messages(stream, index, _drain_messages(message_reader))
-            stream.close()
-            raise
-        trail = _drain_messages(message_reader)
-        _journal_messages(stream, index, trail)
-        after = dict(stock_reader(session) or {})
-        cells = pm_cells(session.economics())
-        step = {"step": index, "operation": "production_service", "item": PM_ITEM,
-                "outcome": outcome.get("code"), "ok": outcome.get("ok"),
-                "classification": outcome.get("classification"),
-                "state": outcome.get("state"),
-                "details": outcome.get("details"),
-                "message": outcome.get("message"), "bill": pm_bill(outcome),
-                "stock_delta": stock_delta(before, after), "messages": len(trail),
-                "pm_cells": len(cells),
-                "pm_machines": sum(int(cell.get("machines") or 0) for cell in cells)}
-        steps.append(step)
-        stream.write(json.dumps({"event": "pm_replay_step", **step}) + "\n")
-        stream.flush()
-        if cells and not placed:
-            placed = True
-            receipt_path = evidence_path.parent / "pm-placement.json"
-            receipt_path.parent.mkdir(parents=True, exist_ok=True)
-            receipt_path.write_text(json.dumps({
-                "kind": "laya-pm-placement-v1", "step": index,
-                "pm_item": PM_ITEM,
-                "cells": [{"recipe": cell.get("recipe"), "machines": cell.get("machines"),
-                           "network": cell.get("network"), "position": cell.get("position")}
-                          for cell in cells],
-                "machines": sum(int(cell.get("machines") or 0) for cell in cells),
-                "stock_delta": step["stock_delta"], "bill": step["bill"],
-                "evidence_scope": "diagnostic_replay_only",
-                "placement_receipt": True}, indent=2) + "\n")
-            step["placement_receipt"] = str(receipt_path)
-        if placed and consumption_probe is not None:
-            probe = consumption_probe() or {}
-            consumed = bool(probe.get("pm_consumption_verified"))
-            step["pm_consumption"] = probe.get("samples") or []
-            if consumed:
+    with evidence_path.open("a") as stream:
+        steps = []
+        placed = False
+        consumed = False
+        deadline_reached = False
+        stop_reason = "attempt_budget_exhausted"
+        for index in range(1, max_steps + 1):
+            if deadline is not None and clock() >= deadline:
+                deadline_reached = True
+                stop_reason = "deadline_reached"
                 break
-        if not placed and outcome.get("code") == "production_prerequisite_deferred":
-            # A deferral is not progress by itself; keep the bounded budget and
-            # let the next step re-observe. The journal records every attempt.
-            continue
-    summary = {"kind": "laya-pm-replay-v1", "steps": steps,
-               "deadline_reached": deadline_reached,
-               "pm_placed": placed, "pm_consumption_verified": consumed,
-               "placement_receipt": str(evidence_path.parent / "pm-placement.json") if placed else None,
-               "pm_evidence_complete": bool(placed and consumed),
-               "evidence_scope": "diagnostic_replay_only", "automatic_adoption": False}
-    try:
+            wait_started = monotonic()
+            while True:
+                if deadline is not None and clock() >= deadline:
+                    deadline_reached = True
+                    stop_reason = "deadline_reached"
+                    break
+                tick = tick_reader()
+                if tick < last_tick:
+                    stop_reason = "clock_not_advancing"
+                    break
+                if tick - initial_tick >= max_game_ticks:
+                    stop_reason = "game_tick_budget_exhausted"
+                    break
+                if tick > last_tick:
+                    last_tick = tick
+                    break
+                if monotonic() - wait_started >= stall_seconds:
+                    stop_reason = "clock_not_advancing"
+                    break
+                sleep(min(0.1, stall_seconds))
+            if stop_reason != "attempt_budget_exhausted":
+                break
+            before = dict(stock_reader(session) or {})
+            try:
+                outcome = session.run("production_service", item=PM_ITEM, stock_target=1,
+                                      minimum_machines=1, upgrade_bootstrap=True,
+                                      allow_promotion=False, machine_cap=1)
+            except BaseException:
+                _journal_messages(stream, index, _drain_messages(message_reader))
+                raise
+            trail = _drain_messages(message_reader)
+            _journal_messages(stream, index, trail)
+            after = dict(stock_reader(session) or {})
+            cells = pm_cells(session.economics())
+            step = {"step": index, "tick": last_tick, "operation": "production_service", "item": PM_ITEM,
+                    "outcome": outcome.get("code"), "ok": outcome.get("ok"),
+                    "classification": outcome.get("classification"),
+                    "state": outcome.get("state"),
+                    "details": outcome.get("details"),
+                    "message": outcome.get("message"), "bill": pm_bill(outcome),
+                    "stock_delta": stock_delta(before, after), "messages": len(trail),
+                    "pm_cells": len(cells),
+                    "pm_machines": sum(int(cell.get("machines") or 0) for cell in cells)}
+            steps.append(step)
+            stream.write(json.dumps({"event": "pm_replay_step", **step}) + "\n")
+            stream.flush()
+            if cells and not placed:
+                placed = True
+                receipt_path = evidence_path.parent / "pm-placement.json"
+                receipt_path.parent.mkdir(parents=True, exist_ok=True)
+                receipt_path.write_text(json.dumps({
+                    "kind": "laya-pm-placement-v1", "step": index,
+                    "pm_item": PM_ITEM,
+                    "cells": [{"recipe": cell.get("recipe"), "machines": cell.get("machines"),
+                               "network": cell.get("network"), "position": cell.get("position")}
+                              for cell in cells],
+                    "machines": sum(int(cell.get("machines") or 0) for cell in cells),
+                    "stock_delta": step["stock_delta"], "bill": step["bill"],
+                    "evidence_scope": "diagnostic_replay_only",
+                    "placement_receipt": True}, indent=2) + "\n")
+                step["placement_receipt"] = str(receipt_path)
+            if placed and consumption_probe is not None:
+                probe = consumption_probe() or {}
+                consumed = bool(probe.get("pm_consumption_verified"))
+                step["pm_consumption"] = probe.get("samples") or []
+                if consumed:
+                    stop_reason = "pm_evidence_complete"
+                    break
+            if not placed and outcome.get("code") == "production_prerequisite_deferred":
+                # A deferral is not progress by itself; keep the bounded budget and
+                # let the next step re-observe. The journal records every attempt.
+                continue
+        summary = {"kind": "laya-pm-replay-v1", "steps": steps,
+                   "deadline_reached": deadline_reached, "outcome": stop_reason,
+                   "clock": {"initial_tick": initial_tick, "last_advanced_tick": last_tick,
+                             "max_game_ticks": max_game_ticks, "stall_seconds": stall_seconds},
+                   "pm_placed": placed, "pm_consumption_verified": consumed,
+                   "placement_receipt": str(evidence_path.parent / "pm-placement.json") if placed else None,
+                   "pm_evidence_complete": bool(placed and consumed),
+                   "evidence_scope": "diagnostic_replay_only", "automatic_adoption": False}
         stream.write(json.dumps({"event": "pm_replay_summary", **{k: v for k, v in summary.items()
                                                                   if k != "steps"}}) + "\n")
-    finally:
-        stream.close()
-    return summary
+        return summary
 
 
 def check_mods(bundle: Path, mods_source: Path) -> dict:
@@ -571,6 +635,25 @@ def provenance_receipt(plan: dict, bundle: Path, mods_source: Path, engine: dict
             "engine": engine, "code_revision": code_revision,
             "game_port": plan.get("game_port"), "rcon_port": plan.get("rcon_port"),
             "deadline": plan.get("deadline"), "planned_attempts": planned}
+
+
+@contextmanager
+def replay_world(bundle: Path, root: Path, **kwargs):
+    """Stop only the fresh disposable world this invocation prepares."""
+    import os
+    import subprocess
+    if root.exists():
+        raise ReplayError("replay root must be fresh; existing worlds are preserved")
+    try:
+        yield materialize(bundle, root, **kwargs)
+    finally:
+        if (root / "manifest.json").is_file():
+            env = dict(os.environ)
+            if kwargs.get("runtime_root") is not None:
+                env["LAYA_CHECKPOINT_RUNTIME_ROOT"] = str(kwargs["runtime_root"])
+            subprocess.run([sys.executable, str(ROOT / "tools/run_laya_saved_world.py"),
+                            "stop", "--root", str(root)], cwd=ROOT, env=env,
+                           check=True, capture_output=True, text=True, timeout=60)
 
 
 def materialize(bundle: Path, root: Path, *, mods_source: Path, game_port: int, rcon_port: int,

@@ -540,3 +540,8 @@ Set shared new-cohort default7200 and updated generators; longer15000-second res
 ## 2026-11-13 02:52 IST — PM feed-contract repair and diagnostic gates
 
 C6-v3 candidate derives recovery feed prototypes from the same constructed plan used at build time, accepting declared steel belt feeds while still rejecting mismatched endpoints. Added read-only C4 bank preflight and PM-specific consumption gate: generic bulk-inserter C6 cannot qualify. Target-line focused tests: 12 passed; fast gate: 1,355 passed, one skipped, one pre-existing import-firewall failure (unchanged operation_session/training boundaries). Real local C4 bundle hashes and one reload receipt verified; source remains diagnostic-only (acceptance_eligible false). No PM placement/consumption demonstrated and no speculative funding rule added: inspected C95b LH supply advances; PM waits on chemical capability. Lifecycle: candidate runner/replay only after active-headline terminal cleanup; no installed mod or live freeze changed. See docs/rl/Laya_PM_Replay.md.
+
+## [2026-11-15 02:30 IST] PM replay clock lifecycle repaired
+- What: verify the paused capture before live startup, require new observed ticks per production attempt, report clock stalls separately, close evidence/resources and stop the owned disposable server on exit.
+- Evidence: 39 focused offline checks pass. Final fast gate: 1,366 passed, one skipped, one pre-existing import-firewall failure in unchanged operation_session restart imports; gate remains red. No live craft, PM placement or consumption was tested.
+- Lifecycle: use a new frozen disposable replay when authorized; no deployed mod, service or existing campaign was changed.

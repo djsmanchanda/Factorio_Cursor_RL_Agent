@@ -43,3 +43,18 @@ authority. Its success verifies PM operation only; the placement receipt and
 fresh reload remain separate requirements. No cohort, adoption or production
 authority follows automatically. Do not assume every C4-reaching C0 run
 captured a reusable saved checkpoint.
+
+## Clock lifecycle (15 November 2026)
+
+Reload validation observes the captured tick while paused. Only after that check
+does the replay enter live mode through the existing adapter. Each production
+attempt requires a strictly newer observed tick. A stalled or regressing clock
+returns `clock_not_advancing`; advancing supply waits retain their operation
+cause. The journal records attempt ticks, clock limits and the terminal outcome.
+
+The driver checks its wall deadline and 108,000-tick limit between synchronous
+operations and while waiting for advancement. It cannot preempt an operation
+already executing. Its newly prepared disposable server is stopped on normal
+exit, failed reload or replay error; existing world roots are refused. No retained
+paused replay establishes AC crafting, PM placement or PM consumption. Those
+require a separately authorized fresh disposable replay using the corrected code.
