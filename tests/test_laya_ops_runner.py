@@ -79,6 +79,11 @@ def test_loop_runs_operations_and_records_each_outcome(tmp_path):
     summary = run(FakeWorld(), GuidedPolicy(3), journal=tmp_path / "journal.jsonl", decisions=6, measure_ticks=600,
                   seed=3, run_id="t", session=session)
     assert summary["decisions"] == 6 and session.calls
+    ref = summary["runtime_components"]
+    assert ref["state"] == "known"
+    journal_rows = [json.loads(line) for line in (tmp_path / "journal.jsonl").read_text().splitlines()]
+    assert journal_rows[0]["runtime_components"] == ref
+    assert journal_rows[-1]["runtime_components"] == ref
     rows = [json.loads(l) for l in (tmp_path / "decision-states.jsonl").read_text().splitlines()]
     assert len(rows) == 6 and all("outcome" in r and "distribution" in r for r in rows)
     assert all(r["outcome"]["typed_outcome"]["version"] == 1 for r in rows)

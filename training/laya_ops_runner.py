@@ -935,9 +935,6 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     if recovery and (recovery["settings"] != dataclasses.asdict(settings) or recovery["run_id"] != run_id
                      or recovery["decision_limit"] != decisions):
         raise ValueError("ops recovery settings/logical run mismatch")
-    session = session or DeterministicSession(adapter.root, emit=lambda line: emit(f"  TOOL {line}"),
-                                              logical_episode_id=recovery["session"]["episode_id"] if recovery else None)
-    session.stock_networks = lambda: adapter.query().get("networks")
     records = journal.parent / "decision-states.jsonl"
     reached: list[str] = list(initial_reached)
     results: list[dict] = list(carried)
@@ -962,6 +959,20 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                          "research_target": settings.research_target,
                          "operation_families": FAMILIES if settings.research_target else []}
     summary["effective_mission"] = effective_mission
+    from orchestrator.runtime_component_manifest import build_manifest, install_manifest
+    from training.laya_ops_checkpoint import VERSION as OPS_RESTART_VERSION
+    from training.laya_operation_outcome import VERSION as OUTCOME_VERSION
+    manifest_ref = install_manifest(
+        journal.with_name(journal.name + ".components.json"),
+        build_manifest(entrypoint="training.laya_ops_runner.run", mission={**effective_mission, "objective_version": summary["objective_version"]},
+                       world_root=getattr(adapter, "root", None), episode={"run_id": run_id, "seed": seed},
+                       runner_contracts={"ops_restart": OPS_RESTART_VERSION, "typed_operation_outcome": OUTCOME_VERSION}),
+        legacy=bool(recovery) or (journal.exists() and journal.stat().st_size > 0))
+    summary["runtime_components"] = manifest_ref
+    session = session or DeterministicSession(adapter.root, emit=lambda line: emit(f"  TOOL {line}"),
+                                              logical_episode_id=recovery["session"]["episode_id"] if recovery else None)
+    session.stock_networks = lambda: adapter.query().get("networks")
+    _append(journal, {"run_id": run_id, "event": "runtime_components", "runtime_components": manifest_ref})
     if not objective and objective_mode:
         _append(journal, {"run_id": run_id, "event": "mission_start", **summary["effective_mission"],
                           "initial_eligibility": None})
@@ -1048,6 +1059,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         _append(journal, {"run_id": run_id, "event": "ops_recovery", "index": index,
                           "cumulative_wall_seconds": elapsed_before})
         summary["effective_mission"] = effective_mission
+        summary["runtime_components"] = manifest_ref
 
     def save_checkpoint(tick, *, final=False):
         nonlocal last_checkpoint

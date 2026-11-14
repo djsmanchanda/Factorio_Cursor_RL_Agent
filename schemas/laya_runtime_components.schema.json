@@ -1,0 +1,240 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$comment": "Path: schemas/laya_runtime_components.schema.json | Purpose: Define startup source and declared runtime component evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "source",
+    "execution",
+    "contracts",
+    "runtime"
+  ],
+  "properties": {
+    "version": {
+      "const": "laya-runtime-components-v1"
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "branch",
+        "commit",
+        "tracked_dirty",
+        "tracked_diff_sha256",
+        "untracked_provenance",
+        "files_sha256"
+      ],
+      "properties": {
+        "branch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tracked_dirty": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "tracked_diff_sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "untracked_provenance": {
+          "type": "string"
+        },
+        "files_sha256": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entrypoint",
+        "python_executable",
+        "python_version",
+        "invoked_program",
+        "mission",
+        "episode"
+      ],
+      "properties": {
+        "entrypoint": {
+          "type": "string"
+        },
+        "python_executable": {
+          "type": "string"
+        },
+        "python_version": {
+          "type": "string"
+        },
+        "invoked_program": {
+          "type": "string"
+        },
+        "mission": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "episode": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      }
+    },
+    "contracts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "predicate_schema",
+        "predicates",
+        "sampling",
+        "evidence",
+        "evidence_restart",
+        "ops_restart",
+        "typed_operation_outcome"
+      ],
+      "properties": {
+        "predicate_schema": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "predicates": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "sampling": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "string"
+        },
+        "evidence_restart": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "ops_restart": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "typed_operation_outcome": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "declared_world",
+        "loaded_engine",
+        "loaded_mods"
+      ],
+      "properties": {
+        "declared_world": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "cause"
+              ],
+              "properties": {
+                "state": {
+                  "const": "unknown"
+                },
+                "cause": {
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "artifact_sha256",
+                "identity",
+                "missing_cause"
+              ],
+              "properties": {
+                "state": {
+                  "const": "declared"
+                },
+                "artifact_sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "identity": {
+                  "type": "object"
+                },
+                "missing_cause": {
+                  "type": "string"
+                }
+              }
+            }
+          ]
+        },
+        "loaded_engine": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "cause"
+          ],
+          "properties": {
+            "state": {
+              "const": "unknown"
+            },
+            "cause": {
+              "type": "string"
+            }
+          }
+        },
+        "loaded_mods": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "cause"
+          ],
+          "properties": {
+            "state": {
+              "const": "unknown"
+            },
+            "cause": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

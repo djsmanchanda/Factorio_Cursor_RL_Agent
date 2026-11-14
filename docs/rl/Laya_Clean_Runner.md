@@ -365,3 +365,18 @@ and research progress evidence is still required for completion. These contracts
 have offline boundary coverage; no new live pack consumption or completion has
 been established. Future use needs newly frozen runners after active campaigns;
 no installed mod change is required for this Python patch.
+
+Startup component evidence (15 November 2026): the ops runner writes
+`journal.jsonl.components.json`; the strict sidecar writes its own components
+artifact next to its summary. Journal and summary references name and hash the
+immutable artifact. It records source file hashes, the source checkout identity
+when available, interpreter, effective mission, episode and predicate/contract
+versions. Runner-owned versions come from the runner; the sidecar leaves those
+unknown. A source copy nested in another repository does not inherit that
+repository's Git identity. World identity is declared evidence; loaded engine
+and mod versions remain unknown. These artifacts do not bind controller jobs
+or attest installed code. Publication is durable and exclusive. A changed
+manifest rejects startup before session construction and preserves the original;
+a legacy resume without a manifest retains unknown historical provenance.
+Future use requires reviewed frozen Python source and a new runner/sidecar
+start; this contract implies no Lua deployment or campaign restart.

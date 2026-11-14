@@ -89,7 +89,7 @@ class Measurement:
 
     def summary(self, stop: str) -> dict[str, Any]:
         last = self.rows[-1]["statuses"] if self.rows and self.evidence_state["current_available"] else {}
-        return {"instrument": self.identity, "milestones": list(MILESTONE_IDS), "stop": stop,
+        return {"instrument": self.identity, "runtime_components": getattr(self, "runtime_components", {"state": "unknown", "cause": "legacy measurement"}), "milestones": list(MILESTONE_IDS), "stop": stop,
                 "baseline_tick": None if self.baseline is None else self.baseline.tick,
                 "strict_reached": dict(self.reached), "strict_current_at_end": last,
                 "accepted_ever": sorted(self.reached, key=MILESTONE_IDS.index), "strict_current": self.rows, "evidence": state_projection(self.baseline, self.history, self.evidence_state)}
@@ -97,9 +97,14 @@ class Measurement:
 
 def run(observe: Callable[[], Any], out: Path, *, interval: float, connect_timeout: float, max_failures: int,
         stopped: Callable[[], bool], sleep: Callable[[float], None] = time.sleep,
-        identity: dict[str, str] | None = None) -> dict[str, Any]:
+        identity: dict[str, str] | None = None, world_root: Path | None = None) -> dict[str, Any]:
     """Sample until stopped or the world goes away; rewrite ``out`` atomically after every sample."""
+    from orchestrator.runtime_component_manifest import build_manifest, install_manifest
+    ref = install_manifest(out.with_name(out.name + ".components.json"),
+                           build_manifest(entrypoint="tools.laya_strict_sidecar.run", world_root=world_root),
+                           legacy=out.exists())
     measurement, failures, waited, stop = Measurement(identity or instrument_identity()), 0, 0.0, "stopped"
+    measurement.runtime_components = ref
     while not stopped():
         try:
             measurement.add(observe())
@@ -150,7 +155,7 @@ def main(argv=None) -> int:
             client.close()
 
     summary = run(observe, args.out, interval=args.interval, connect_timeout=args.connect_timeout,
-                  max_failures=args.max_failures, stopped=lambda: stop["flag"])
+                  max_failures=args.max_failures, stopped=lambda: stop["flag"], world_root=args.world_root)
     print(json.dumps({"stop": summary["stop"], "samples": len(summary["strict_current"]),
                       "strict_reached": summary["strict_reached"]}))
     return 0
