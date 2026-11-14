@@ -89,3 +89,25 @@ The requested Gemini observer is stopped because the remote link still denies
 full-access delegation. Latest user requirement: steel capacity expansion must
 use a proper shared line, conserving requester/provider chests; implement in
 the development checkout for a subsequent freeze, never hot-edit this run.
+
+## 2026-11-14 17:57 IST — Current Starship steel/provider verification
+
+Latest standalone run is **8648f9b3**, unit
+`laya-starship-steel-retirement-20261114.service`, Starship experiment
+`data/laya-experiments/starship-steel-retirement-20261114`; world
+`code/data/laya-saved-world/starship-steel-retirement-s84218` below it.
+Fresh original immutable input97634360…, own mods, engine2.1.24, seed84218,
+patience96,2×, loopback game/RCON34342/27342. Deadline
+**2026-11-15 03:55 IST**, plus3,600,000-game-tick budget. At decision4/tick262952,
+0 failures; compact shared steel-line candidates reached funding checks, missing
+fast inserters. Startup strict C0 only. GUI spectator connected at tick263919;
+unit `laya-starship-steel-gui-20261114.service`. Provider-slot observation and
+retirement guard are active; their delayed-recovery outcome and steel production
+have not yet been observed. No acceptance/adoption claim. Observer remains
+stopped because the remote access ceiling denies unattended Gemini delegation.
+
+Both earlier standalone runs ended before this launch. Original29cbf166 stalled
+with214 decisions/0 failures. Routingaed6615b produced copper and reached proxyC3,
+then safe-stopped on coal ghost-placement transaction233cec9a2c3145f48e02ccd1868b7506
+(one submission fault followed by two pending-review errors). Preserve those
+worlds/reports; no manual coal repair or fix for that separate fault is claimed.
