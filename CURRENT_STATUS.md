@@ -545,3 +545,9 @@ C6-v3 candidate derives recovery feed prototypes from the same constructed plan 
 - What: verify the paused capture before live startup, require new observed ticks per production attempt, report clock stalls separately, close evidence/resources and stop the owned disposable server on exit.
 - Evidence: 39 focused offline checks pass. Final fast gate: 1,366 passed, one skipped, one pre-existing import-firewall failure in unchanged operation_session restart imports; gate remains red. No live craft, PM placement or consumption was tested.
 - Lifecycle: use a new frozen disposable replay when authorized; no deployed mod, service or existing campaign was changed.
+
+
+## [2026-11-15 03:02 IST] Restart serializer owned by the active runtime
+- What: move strict restart state to orchestrator with explicit training compatibility exports, preserve schema/class identity, and decode typing.Optional alongside PEP 604 unions. Session methods use the shared implementation.
+- Evidence: 32 focused restart/isolation checks passed. Final settled PM source gate (including the reviewed mission patch): 1,394 passed, three skipped (two optional-lupa collection skips and one known fluid-chain case), exit 0. Critical restart tests are included in fast. This verifies tested state/ownership continuity, not full controller or live restart equivalence.
+- Lifecycle: future frozen Python runners need this source; no mod deployment or Factorio reload. No runtime action performed.

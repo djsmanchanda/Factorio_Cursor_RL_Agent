@@ -417,20 +417,20 @@ class DeterministicSession:
         return {cid: "passed" if cid in self._evaluator.reached else r.status.value for cid, r in fresh.items()}
 
     def export_restart_state(self, *, mod_scope: str) -> dict:
-            from training.laya_restart_state import export_restart_state
-            if not hasattr(self, "_evaluator") or self._baseline is None:
-                raise ValueError("Strict acceptance baseline has not been observed")
-            return export_restart_state(self.script_output, self.episode_id, mod_scope,
-                                        self._baseline, self._history, self._evaluator)
+        from orchestrator.checkpoint_restart_state import export_restart_state
+        if not hasattr(self, "_evaluator") or self._baseline is None:
+            raise ValueError("Strict acceptance baseline has not been observed")
+        return export_restart_state(self.script_output, self.episode_id, mod_scope,
+                                    self._baseline, self._history, self._evaluator)
 
     def restore_restart_acceptance(self, state) -> None:
-            from training.laya_restart_state import RestartState
-            if (not isinstance(state, RestartState) or state.episode_id != self.episode_id
-                    or state.script_output != self.script_output.resolve()):
-                raise ValueError("Restart state does not match session identity")
-            if hasattr(self, "_evaluator"):
-                raise ValueError("Cannot replace initialized strict acceptance state")
-            self._baseline, self._history, self._evaluator = state.baseline, list(state.history), state.evaluator
+        from orchestrator.checkpoint_restart_state import RestartState
+        if (not isinstance(state, RestartState) or state.episode_id != self.episode_id
+                or state.script_output != self.script_output.resolve()):
+            raise ValueError("Restart state does not match session identity")
+        if hasattr(self, "_evaluator"):
+            raise ValueError("Cannot replace initialized strict acceptance state")
+        self._baseline, self._history, self._evaluator = state.baseline, list(state.history), state.evaluator
 
     def close(self) -> None:
         set_active_material_ledger(None)
