@@ -2,6 +2,15 @@
 
 # Laya current evidence index
 
+**2026-11-14 19:39 IST audit safe point:** use
+[`audit/laya-capacity-20261114` and the audit brief](2026-11-14-capacity-audit.md).
+The fresh Starship run is saved at tick322797 and stopped (wrapper exit0);
+proxy C0/C1, independent strict C0 only, 0failures/0pending ghosts. Its latest
+native save and final evidence are mirrored in the local audit packet.
+Companion controller, PM and Track B commits are pinned separately; the
+Miniship stone-first cohort and PM replay remain active. This entry supersedes
+the earlier Starship “active” descriptions below. No new runtime start is required.
+
 Host concurrency: [shared scheduler and migration](Laya_Host_Scheduler.md)
 records the 2026-10-21 audit, fixed admission protocol, timed drain controls and
 Miniship's 24 start / 30 performance / 26 balanced / 20 cool ceilings. The audited
