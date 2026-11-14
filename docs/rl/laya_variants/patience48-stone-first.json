@@ -1,0 +1,16 @@
+{
+  "version": "1.0.0",
+  "variant_id": "patience48-stone-first",
+  "description": "patience48 plus a stone priority when stone is the deepest bottleneck: stone-brick is the terminal bottleneck in 16/27 non-C4 B-home runs and all are stone:short with coverage/roboport reservations. Test whether outranking the other bottleneck options with the stone chain converts those runs.",
+  "settings": {"stall_decisions": 48},
+  "catalog_patch": {
+    "mission.serve-bottleneck": {
+      "prefer": [
+        {"when": {"in_bottleneck": true}, "weight": 2.0},
+        {"when": {"deepest_bottleneck": true}, "weight": 2.0},
+        {"when": {"family": ["mine", "smelt", "assemble"], "deepest_bottleneck": true}, "weight": 2.0},
+        {"when": {"need": "item:stone", "deepest_bottleneck": true}, "weight": 4.0}
+      ]
+    }
+  }
+}
