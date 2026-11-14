@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import re
 import time
 import uuid
 from pathlib import Path
@@ -307,9 +309,130 @@ class GameBridge:
         body = json.dumps(payload, separators=(",", ":"))
         return self._run_and_collect(f"/seed_water_lakes {body}", WATER_SEED_REPORT_SUBDIR, timeout)
 
+    def _layout_preflight(self, build_plan: dict, protocol: str) -> int:
+        from orchestrator.configuration_preconditions import _unique_object, _reject_constant
+
+        if not isinstance(build_plan, dict) or not isinstance(build_plan.get("phases"), list):
+            raise ValueError("build plan phases must be an array")
+        if "optimizer_ownership" in build_plan:
+            raise BridgeError("executor does not support optimizer ownership")
+        actions = []
+        for phase in build_plan["phases"]:
+            if not isinstance(phase, dict) or not isinstance(phase.get("actions"), list):
+                raise ValueError("phase actions must be an array")
+            for action in phase["actions"]:
+                if not isinstance(action, dict) or not isinstance(action.get("action_type"), str):
+                    raise ValueError("invalid layout action")
+                if "optimizer_ownership" in action:
+                    raise BridgeError("executor does not support optimizer ownership")
+                if action["action_type"] not in {"place_entity", "place_ghost", "place_tile_ghost", "configure_entity", "remove_entity"}:
+                    raise BridgeError("unsupported layout action")
+                actions.append(action)
+        guarded = any("configuration_preconditions" in action for action in actions)
+        if any("configuration_preconditions" in a and a["action_type"] != "configure_entity" for a in actions):
+            raise BridgeError("configuration guards require configure_entity")
+        # Existing unguarded legacy callers retain their original path. Guarded
+        # and correlated operations require explicit, current capabilities.
+        if protocol != "legacy-tick-v1" or guarded:
+            try:
+                caps = json.loads(self.command("/layout_executor_capabilities"),
+                                  object_pairs_hook=_unique_object, parse_constant=_reject_constant)
+                if not isinstance(caps, dict):
+                    raise ValueError("invalid capabilities")
+                if guarded and (type(caps.get("configuration_preconditions")) is not int
+                                or caps["configuration_preconditions"] != 1):
+                    raise ValueError("configuration guards unavailable")
+                if protocol != "legacy-tick-v1":
+                    advertised = caps.get("actions")
+                    if (not isinstance(caps.get("receipt_protocols"), list)
+                            or protocol not in caps["receipt_protocols"]
+                            or type(caps.get("correlated_identity")) is not int or caps["correlated_identity"] != 1
+                            or type(caps.get("idempotent_requests")) is not int or caps["idempotent_requests"] != 1
+                            or caps.get("ownership") != "force-surface-v1"
+                            or not isinstance(advertised, list)
+                            or any(a["action_type"] not in advertised for a in actions)):
+                        raise ValueError("required executor capability unavailable")
+            except Exception as error:
+                raise BridgeError("layout executor capabilities unknown or incompatible") from error
+        return sum(a["action_type"] != "remove_entity" for a in actions)
+
     def build_layout(self, authorization: dict, build_plan: dict, timeout: float = 120.0) -> Path:
+        self._layout_preflight(build_plan, "legacy-tick-v1")
         body = json.dumps({"authorization": authorization, "build_plan": build_plan}, separators=(",", ":"))
         return self._run_and_collect(f"/build_layout_plan {body}", LAYOUT_REPORT_SUBDIR, timeout)
+
+    @staticmethod
+    def _layout_request(authorization, build_plan, request_id, stream_id, sequence):
+        if not isinstance(request_id, str) or not re.fullmatch(r"[0-9a-f]{32}", request_id):
+            raise ValueError("invalid request id")
+        streamed = stream_id is not None or sequence is not None
+        if streamed and (not isinstance(stream_id, str) or not re.fullmatch(r"[0-9a-f]{16}", stream_id)
+                         or type(sequence) is not int or not 1 <= sequence <= 4294967295
+                         or request_id != f"{stream_id}{sequence:016x}"):
+            raise ValueError("stream identity mismatch")
+        if not isinstance(authorization, dict):
+            raise ValueError("authorization must be an object")
+        canonical = json.dumps({"authorization": authorization, "build_plan": build_plan},
+                               sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+        digest = hashlib.sha256(canonical.encode("ascii")).hexdigest()
+        payload = {"authorization": authorization, "build_plan": build_plan,
+                   "request_id": request_id, "request_digest": digest}
+        if streamed:
+            payload.update(stream_id=stream_id, sequence=sequence)
+        body = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+        if len(body) > 262144:
+            raise ValueError("layout request exceeds executor limit")
+        return body, digest, "layout-submission-receipt-v2" if streamed else "layout-submission-receipt-v1"
+
+    @staticmethod
+    def _validate_layout_receipt(report, request_id, digest, protocol, count, stream_id, sequence):
+        if (not isinstance(report, dict) or report.get("request_id") != request_id
+                or report.get("request_digest") != digest or report.get("receipt_version") != protocol
+                or (stream_id is not None and (report.get("stream_id") != stream_id
+                    or type(report.get("sequence")) is not int or report["sequence"] != sequence))
+                or (stream_id is None and ("stream_id" in report or "sequence" in report))
+                or type(report.get("tick")) is not int or report["tick"] < 0
+                or type(report.get("ok")) is not bool):
+            raise BridgeError("layout receipt failed correlation or validation")
+        if report["ok"]:
+            keys = ("attempted_placements", "succeeded_placements", "already_present_placements", "failed_placements")
+            if (any(type(report.get(k)) is not int or report[k] < 0 for k in keys)
+                    or report["attempted_placements"] != count or report["failed_placements"] != 0
+                    or report["attempted_placements"] != report["succeeded_placements"] + report["already_present_placements"]
+                    or report.get("placement_failures") != []):
+                raise BridgeError("layout receipt has invalid placement counts")
+        elif not isinstance(report.get("error"), str) or not report["error"]:
+            raise BridgeError("layout receipt lacks failure reason")
+        return report
+
+    def build_layout_correlated(self, authorization: dict, build_plan: dict, *, request_id: str,
+                                timeout: float = 120.0, stream_id: str | None = None,
+                                sequence: int | None = None) -> dict:
+        body, digest, protocol = self._layout_request(authorization, build_plan, request_id, stream_id, sequence)
+        count = self._layout_preflight(build_plan, protocol)
+        path = self._run_and_collect("/build_layout_plan " + body, LAYOUT_REPORT_SUBDIR, timeout,
+                                     expected_name=f"layout_{request_id}.json")
+        from orchestrator.configuration_preconditions import _unique_object, _reject_constant
+        try:
+            with path.open(encoding="utf-8") as handle:
+                report = json.load(handle, object_pairs_hook=_unique_object, parse_constant=_reject_constant)
+        except (OSError, ValueError) as error:
+            raise BridgeError("invalid layout receipt; outcome unknown") from error
+        return self._validate_layout_receipt(report, request_id, digest, protocol, count, stream_id, sequence)
+
+    def read_layout_receipt(self, authorization: dict, build_plan: dict, *, request_id: str,
+                            stream_id: str | None = None, sequence: int | None = None) -> dict:
+        body, digest, protocol = self._layout_request(authorization, build_plan, request_id, stream_id, sequence)
+        del body
+        count = sum(a["action_type"] != "remove_entity" for p in build_plan["phases"] for a in p["actions"])
+        from orchestrator.configuration_preconditions import _unique_object, _reject_constant
+        try:
+            path = self.script_output / LAYOUT_REPORT_SUBDIR / f"layout_{request_id}.json"
+            with path.open(encoding="utf-8") as handle:
+                report = json.load(handle, object_pairs_hook=_unique_object, parse_constant=_reject_constant)
+        except (OSError, ValueError) as error:
+            raise BridgeError("layout receipt unavailable; outcome unknown") from error
+        return self._validate_layout_receipt(report, request_id, digest, protocol, count, stream_id, sequence)
 
     def verify_electronics_execution(self, timeout: float = 120.0) -> Path:
         return self._run_and_collect(

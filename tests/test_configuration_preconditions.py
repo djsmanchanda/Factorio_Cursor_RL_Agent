@@ -275,7 +275,7 @@ assert(mutations == 0 and machine.valid)
 def test_capability_command_is_read_only(tmp_path):
     run_lua(tmp_path, '''
 registered.layout_executor_capabilities({})
-assert(printed == '{"configuration_preconditions":1}')
+assert(printed:find('"configuration_preconditions":1', 1, true))
 assert(mutations == 0 and report == nil)
 ''')
 
@@ -299,4 +299,19 @@ execute()
 assert(report.ok == false)
 assert(report.placement_failures[1].reason == 'configuration_precondition_failed:requester_groups_mismatch')
 assert(mutations == 0)
+''')
+
+
+def test_correlated_duplicate_replays_without_second_mutation(tmp_path):
+    run_lua(tmp_path, '''
+storage={}
+payload.request_id=string.rep('a',16)..'0000000000000001'
+payload.request_digest=string.rep('b',64)
+payload.stream_id=string.rep('a',16)
+payload.sequence=1
+execute()
+assert(report.ok == true and mutations > 0)
+local first=mutations
+execute()
+assert(report.ok == true and mutations == first)
 ''')

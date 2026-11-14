@@ -55,3 +55,25 @@ the existing configuration semantics.
 Repository tests exercise the Lua command with mocked Factorio objects. Activation
 requires a separately authorized mod deployment and Factorio reload; repository
 validation alone does not establish deployed support.
+
+## Layout receipt negotiation
+
+`GameBridge.build_layout_correlated` probes `/layout_executor_capabilities` before
+submission. It requires the exact requested receipt protocol, correlated identity,
+idempotent requests, force/surface ownership and every action in the plan; guarded
+configuration additionally requires precondition version 1. Missing, malformed or
+incompatible responses fail before the build command. The current executor declares
+legacy tick reports and correlated receipt versions 1 and 2, and only its five
+implemented action kinds. Optimizer ownership tags and Track B-only action kinds are
+not supported and are rejected. The legacy `build_layout` path retains tick reports;
+guarded legacy plans still require the guard handshake.
+
+Correlated callers persist a 32-character lowercase hexadecimal request ID. Version 2
+also requires a 16-character stream ID and sequence 1 through 4294967295; the request
+ID is the stream ID followed by the sequence as 16 hexadecimal digits. Receipts include
+the request digest and identity and are validated before return. A duplicate request
+with identical bytes replays its journaled receipt, while conflicts, stale or skipped
+sequences and pending outcomes are rejected. The journal is bounded and persists only
+with the Factorio save: crashes, rollback, or a missing receipt leave an unknown outcome,
+not permission to retry on an unverified runtime. This handshake does not prove runtime
+identity, authorization, construction completion, or deployed/live compatibility.

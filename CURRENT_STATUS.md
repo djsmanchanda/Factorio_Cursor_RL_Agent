@@ -441,3 +441,9 @@ Corrected the dashboard scheduler flag from unsupported --cool-temp-limit to --c
 - What: correct south/west prototype-box transforms while preserving the shared preflight paths, diagonal fallback, masks and epsilon.
 - Evidence: 26 focused Lua checks pass after main review, including representative offshore-pump/pipe legal and overlapping plans. Full fast gate is blocked by two unchanged imports of missing tools.laya_checkpoint_regression; the filtered run has 1152 passed, one skip and the unchanged training import-firewall failure.
 - Lifecycle: no live action; authorized mod synchronization and Factorio reload are required before runtime use.
+
+
+## [2026-11-15 03:08 IST] Negotiate correlated layout receipt capabilities
+- What: advertise executor receipt/action/ownership/guard capabilities; preflight correlated or guarded calls; bind receipts to request/digest/stream identity; journal duplicate requests without repeating mutation. Receipt recovery uses the same strict JSON parser as submission. Legacy unguarded tick reports remain supported.
+- Evidence: 118 focused Python/Lua checks passed, including four-direction footprints, duplicate configuration mutation and malformed recovery receipts. Final full fast gate is blocked by two unchanged missing-tools.laya_checkpoint_regression collection errors (exit 2; two optional-lupa collection skips). Earlier delegate filtered diagnostic was red on unchanged training/laya_ops import firewall; it is not a full passing gate. Cross-pack cohort compatibility remains unestablished.
+- Lifecycle: deliberate installed-mod synchronization and Factorio reload plus matching frozen runner restart after active campaigns. No deployment, runtime, save or campaign action performed.

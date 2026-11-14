@@ -1199,8 +1199,17 @@ local function execute_build_plan(authorization, build_plan)
   return counts
 end
 commands.add_command("layout_executor_capabilities", "Read executor protocol capabilities.", function()
-  rcon.print('{"configuration_preconditions":1}')
+  rcon.print('{"configuration_preconditions":1,"receipt_protocols":["legacy-tick-v1","layout-submission-receipt-v1","layout-submission-receipt-v2"],"correlated_identity":1,"idempotent_requests":1,"ownership":"force-surface-v1","actions":["place_entity","place_ghost","place_tile_ghost","configure_entity","remove_entity"]}')
 end)
+
+local function write_layout_report(report, request_id)
+  local json = helpers.table_to_json(report)
+  if report.placement_failures and #report.placement_failures == 0 then
+    json = json:gsub('"placement_failures":{}', '"placement_failures":[]')
+  end
+  local suffix = request_id or tostring(game.tick)
+  helpers.write_file("factorio_mod/layout_reports/layout_" .. suffix .. ".json", json, false)
+end
 
 commands.add_command("build_layout_plan", "Execute an authorized BuildPlan with explicit positions on planner-sandbox.", function(command)
   local ok, payload = pcall(function()
@@ -1209,6 +1218,121 @@ commands.add_command("build_layout_plan", "Execute an authorized BuildPlan with 
   if not ok or type(payload) ~= "table" or type(payload.authorization) ~= "table" or type(payload.build_plan) ~= "table" then
     game.print("BuildPlan error: payload must include authorization and build_plan")
     return
+  end
+
+  -- Correlated calls keep the exact submitted bytes. A duplicate can replay
+  -- the receipt but never the world mutation. Save rollback or a crash before
+  -- the journal is saved can still lose this memory, so a missing receipt is
+  -- not permission to retry against an unverified runtime.
+  local request_id, digest, entry = payload.request_id, payload.request_digest, nil
+  local stream_id, sequence = payload.stream_id, payload.sequence
+  local streamed = stream_id ~= nil or sequence ~= nil
+  local correlated = request_id ~= nil or digest ~= nil or streamed
+  -- Ownership tags are not implemented by this executor; never ignore them.
+  if payload.build_plan.optimizer_ownership ~= nil or payload.optimizer_tag_protocol ~= nil then
+    game.print("BuildPlan error: optimizer ownership is unsupported"); return
+  end
+  for _, phase in ipairs(payload.build_plan.phases or {}) do
+    for _, action in ipairs(phase.actions or {}) do
+      if action.optimizer_ownership ~= nil then
+        game.print("BuildPlan error: optimizer ownership is unsupported"); return
+      end
+    end
+  end
+  if correlated then
+    local valid = type(request_id) == "string" and #request_id == 32 and request_id:match("^[0-9a-f]+$")
+      and type(digest) == "string" and #digest == 64 and digest:match("^[0-9a-f]+$")
+      and type(command.parameter) == "string" and #command.parameter <= 262144
+    for key in pairs(payload) do
+      if key ~= "request_id" and key ~= "request_digest" and key ~= "authorization" and key ~= "build_plan"
+        and key ~= "stream_id" and key ~= "sequence" then
+        valid = false
+      end
+    end
+    if streamed then
+      valid = valid and type(stream_id) == "string" and #stream_id == 16 and stream_id:match("^[0-9a-f]+$")
+        and type(sequence) == "number" and sequence >= 1 and sequence <= 4294967295 and sequence % 1 == 0
+      if valid then valid = request_id == stream_id .. string.format("%016x", sequence) end
+    end
+    if not valid then game.print("BuildPlan error: invalid correlated request"); return end
+    if streamed then
+      -- One stream retains only its latest request. Older sequence numbers are
+      -- rejected, so bounded retention cannot turn an old retry into a new build.
+      if storage.layout_submission_streams == nil then
+        storage.layout_submission_streams = {count=0, entries={}}
+      end
+      local state = storage.layout_submission_streams
+      if type(state) ~= "table" or type(state.entries) ~= "table" or type(state.count) ~= "number"
+        or state.count < 0 or state.count % 1 ~= 0 then
+        game.print("BuildPlan error: invalid stream journal"); return
+      end
+      local legacy = storage.layout_submission_receipts
+      if legacy ~= nil and (type(legacy) ~= "table" or type(legacy.entries) ~= "table") then
+        game.print("BuildPlan error: invalid receipt journal"); return
+      end
+      if legacy and legacy.entries[request_id] ~= nil then
+        game.print("BuildPlan error: request id belongs to legacy journal"); return
+      end
+      entry = state.entries[stream_id]
+      if entry == nil then
+        if sequence ~= 1 then game.print("BuildPlan error: stream must begin at sequence 1"); return end
+        if state.count >= 128 then game.print("BuildPlan error: stream journal capacity exceeded"); return end
+        entry = {sequence=0, status="completed"}
+        state.entries[stream_id] = entry
+        state.count = state.count + 1
+      elseif type(entry) ~= "table" or type(entry.sequence) ~= "number" or entry.sequence < 1
+        or entry.sequence % 1 ~= 0 then
+        game.print("BuildPlan error: invalid stream entry"); return
+      end
+      if sequence == entry.sequence then
+        if entry.payload ~= command.parameter then
+          game.print("BuildPlan error: stream request conflicts with stored payload"); return
+        end
+        if entry.status ~= "completed" or type(entry.report) ~= "table" then
+          game.print("BuildPlan error: prior submission outcome unknown"); return
+        end
+        write_layout_report(entry.report, request_id)
+        return
+      end
+      if sequence ~= entry.sequence + 1 or entry.status ~= "completed" then
+        game.print("BuildPlan error: stream sequence is stale, skipped, or pending"); return
+      end
+      entry.sequence = sequence
+      entry.payload = command.parameter
+      entry.status = "pending"
+      entry.report = nil
+    else
+    if storage.layout_submission_receipts == nil then
+      storage.layout_submission_receipts = {count=0, entries={}}
+    end
+    local state = storage.layout_submission_receipts
+    if type(state) ~= "table" or type(state.entries) ~= "table" or type(state.count) ~= "number"
+      or state.count < 0 or state.count % 1 ~= 0 then
+      game.print("BuildPlan error: invalid receipt journal"); return
+    end
+    local streams = storage.layout_submission_streams
+    if streams ~= nil and (type(streams) ~= "table" or type(streams.entries) ~= "table") then
+      game.print("BuildPlan error: invalid stream journal"); return
+    end
+    if streams and streams.entries[string.sub(request_id, 1, 16)] ~= nil then
+      game.print("BuildPlan error: request id belongs to a stream"); return
+    end
+    entry = state.entries[request_id]
+    if entry ~= nil then
+      if type(entry) ~= "table" or entry.payload ~= command.parameter then
+        game.print("BuildPlan error: request id conflicts with stored payload"); return
+      end
+      if entry.status ~= "completed" or type(entry.report) ~= "table" then
+        game.print("BuildPlan error: prior submission outcome unknown"); return
+      end
+      write_layout_report(entry.report, request_id)
+      return
+    end
+    if state.count >= 128 then game.print("BuildPlan error: receipt journal capacity exceeded"); return end
+    entry = {payload=command.parameter, status="pending"}
+    state.entries[request_id] = entry
+    state.count = state.count + 1
+    end
   end
 
   local run_ok, result = pcall(function()
@@ -1227,10 +1351,13 @@ commands.add_command("build_layout_plan", "Execute an authorized BuildPlan with 
   else
     report.error = tostring(result)
   end
-
-  local json = helpers.table_to_json(report)
-  if run_ok and #result.placement_failures == 0 then
-    json = json:gsub('"placement_failures":{}', '"placement_failures":[]')
+  if correlated then
+    report.request_id = request_id
+    report.request_digest = digest
+    report.receipt_version = streamed and "layout-submission-receipt-v2" or "layout-submission-receipt-v1"
+    if streamed then report.stream_id, report.sequence = stream_id, sequence end
+    entry.report = report
+    entry.status = "completed"
   end
-  helpers.write_file("factorio_mod/layout_reports/layout_" .. game.tick .. ".json", json, false)
+  write_layout_report(report, request_id)
 end)
