@@ -111,3 +111,26 @@ with214 decisions/0 failures. Routingaed6615b produced copper and reached proxyC
 then safe-stopped on coal ghost-placement transaction233cec9a2c3145f48e02ccd1868b7506
 (one submission fault followed by two pending-review errors). Preserve those
 worlds/reports; no manual coal repair or fix for that separate fault is claimed.
+
+## 2026-11-14 19:07 IST — Starship line/oil continuation
+
+Active verification: `laya-starship-line-oil-prefix-20261114.service`, frozen
+`c1be3824` (line/oil fix `b3282fd5`), experiment on Starship
+`/home/djsm/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/starship-line-oil-prefix-20261114`.
+World: `code/data/laya-saved-world/starship-line-oil-prefix-s84218`; game/RCON
+34344/27344,2×, engine2.1.24, seed84218, patience96. Preserves saved factory
+tick650767 and recorded proxyC0–C3; zero grants. Regression only; strict
+sidecar has its own baseline. Deadline **2026-11-15 05:04 IST** plus
+3,600,000ticks. GUI `laya-starship-line-oil-prefix-gui-20261114.service`,
+LeonidasUIP connected as spectator.
+
+At tick661400, all90 targets in four oil belt packets were built, zero
+missing/ghosts; decision3 reported0failures. Oil infrastructure no longer
+rejected as `no_op`; plastic production remains unverified. Four-drill iron
+repair plus terminal provider is engine-legal but awaits the chest reserved
+for plastic. Steel line extension/cutover remains unit/replay evidence.
+Tests:151focused/2skipped for expansion;17prefix-focused; final fast1110passed/6skipped.
+Freeze/live mirror: `data/laya-orchestration/starship-line-oil-prefix-20261114/`.
+Previous original and C0-restarted verification runners were gracefully
+signalled as superseded; their worlds/freezes/logs remain preserved. Gemini
+observer remains stopped; no unattended provider substitution.
