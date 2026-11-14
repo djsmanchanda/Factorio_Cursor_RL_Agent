@@ -10560,17 +10560,40 @@ def _deliver_cell_ingredients(
             if provider is not None and math.dist(provider, chest) <= 10.0:
                 destination = provider
             else:
-                spots = live_base.chained_clear_spots(
-                    client, surface,
-                    [("passive-provider-chest", 1), ("medium-electric-pole", 1)],
-                    chest,
-                )
+                # The borrowed cell can sit inside a dense belt cluster where a
+                # six-tile search finds nothing. Widen the search before giving
+                # up, and use the clear pole spot instead of a fixed offset. A
+                # silent skip here was the 2026-11-14 replay's first hard
+                # failure: the requester was fed and outside any network, the
+                # delivery moved nothing, and the gate-refresh loop then raised
+                # mall_loan_gate_mismatch as if the gate were wrong.
+                spots = []
+                for radius in (6.0, 10.0, 14.0):
+                    spots = live_base.chained_clear_spots(
+                        client, surface,
+                        [("passive-provider-chest", 1), ("medium-electric-pole", 1)],
+                        chest, step_radius=radius,
+                    )
+                    if len(spots) >= 2:
+                        break
                 spot = next(
                     (s for s in spots if s[0] == "passive-provider-chest"), None,
                 )
                 if spot is None:
+                    emit(
+                        f"  CELL DELIVERY BLOCKED: no clear provider/pole spot "
+                        f"within 14 tiles of the {item} requester at {chest}; "
+                        "cannot feed an unreachable cell"
+                    )
                     continue
                 destination = (spot[1], spot[2])
+                pole = next(
+                    (s for s in spots if s[0] == "medium-electric-pole"), None,
+                )
+                pole_position = (
+                    (pole[1], pole[2]) if pole is not None
+                    else (destination[0] + 2.0, destination[1])
+                )
                 plan = {"phases": [{
                     "name": f"deliver_{ingredient}",
                     "actions": [
@@ -10579,7 +10602,7 @@ def _deliver_cell_ingredients(
                          "position": {"x": destination[0], "y": destination[1]}},
                         {"action_type": "place_entity",
                          "entity": "medium-electric-pole",
-                         "position": {"x": destination[0] + 2.0, "y": destination[1]}},
+                         "position": {"x": pole_position[0], "y": pole_position[1]}},
                     ],
                 }]}
                 plan["surface"], plan["force"] = surface, force

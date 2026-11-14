@@ -73,3 +73,47 @@ def test_a_failed_delivery_keeps_the_refresh_path(monkeypatch):
     monkeypatch.setattr(builder, "_deliver_cell_ingredients", lambda *_a, **_k: False)
     builder._submit_bootstrap_loan(object(), object(), "nauvis", "player", loan, lambda *_: None)
     assert list(builder._LOAN_GATE_REFRESH_ATTEMPTS.values()) == [1]
+
+
+def _delivery_env(monkeypatch, *, radii, moves=5):
+    monkeypatch.setitem(builder.LINE_RECIPES, "steel-chest", {
+        "ingredients": ["steel-plate"], "amounts": [8]})
+    monkeypatch.setattr(live_base, "network_item_count", lambda *a, **k: 0)
+    monkeypatch.setattr(live_base, "nearest_container", lambda *a, **k: None)
+    seen = []
+
+    def spots(client, surface, placements, start, *, step_radius=6.0):
+        seen.append(step_radius)
+        return radii.get(step_radius, [])
+
+    monkeypatch.setattr(live_base, "chained_clear_spots", spots)
+    plans = []
+    monkeypatch.setattr(builder, "_submit",
+                        lambda client, bridge, surface, plan, name, emit: plans.append(plan))
+    monkeypatch.setattr(live_base, "transfer_stock", lambda *a, **k: moves)
+    messages = []
+    ok = builder._deliver_cell_ingredients(
+        object(), object(), "nauvis", "player", "steel-chest", (39.5, 32.5),
+        messages.append, requester_position=(40.5, 32.5))
+    return ok, seen, plans, messages
+
+
+def test_delivery_widens_the_search_and_uses_the_clear_pole_spot(monkeypatch):
+    ok, seen, plans, messages = _delivery_env(monkeypatch, radii={
+        10.0: [("passive-provider-chest", 48.5, 30.5),
+               ("medium-electric-pole", 50.5, 31.5)]})
+    assert ok is True
+    assert seen == [6.0, 10.0]
+    pole = next(action for action in plans[0]["phases"][0]["actions"]
+                if action["entity"] == "medium-electric-pole")
+    assert pole["position"] == {"x": 50.5, "y": 31.5}
+    assert any("CELL DELIVERY: moved 5 steel-plate" in message for message in messages)
+
+
+def test_delivery_reports_when_no_spot_exists(monkeypatch):
+    ok, seen, plans, messages = _delivery_env(monkeypatch, radii={})
+    assert ok is False
+    assert seen == [6.0, 10.0, 14.0]
+    assert plans == []
+    assert any("CELL DELIVERY BLOCKED" in message and "14 tiles" in message
+               for message in messages)
