@@ -457,3 +457,9 @@ User clarified that A/B must have no periodic schedules. Archived and removed th
 - What: require declared modes for new calibrations/research missions; read the selected frozen runner's versioned capability manifest; persist mission/runner/command evidence and forward the validated mode and effective target. Unknown capability cannot authorize explicit measurement or research completion. Preserve undeclared frozen legacy missions.
 - Evidence: 38 focused controller/scheduler checks passed. Final fast gate remains red: 1,208 passed, three skipped and one unchanged import-firewall failure in training/laya_ops.py. No live dispatch or research completion was exercised.
 - Lifecycle: integrate with PM runner commit 4275f690, freeze future runners and restart the affected controller after active campaigns; no service, campaign, mod or Factorio action performed.
+
+
+## [2026-11-15 03:16 IST] Restore active session ownership without a firewall exception
+- What: extract this branch's unchanged deterministic session and economics projection into orchestrator; retain the training module as an identity-preserving compatibility alias. The import firewall is unchanged.
+- Evidence: 50 focused initialization/runner/isolation checks passed; final combined controller fast gate1,215 passed,three skipped (two optional-lupa collection modules and one known fluid-chain case),exit0. The combined tree includes the uncommitted RC7 outcome work, which remains under separate review; this entry verifies the dependency repair only.
+- Lifecycle: future frozen Python runners/controllers need the source; no mod deployment or Factorio reload. No runtime action or full controller restart-equivalence proof.

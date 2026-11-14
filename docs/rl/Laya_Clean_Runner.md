@@ -190,3 +190,10 @@ clear a cohort target; dispatch uses that validated effective value. A full-orig
 interpretation. Frozen historical specifications are not rewritten. Initial target
 eligibility and earned research must be observed by the capable runner; manifest
 support alone proves neither pack consumption nor completion.
+
+
+The deterministic session and shared economics projection live under
+orchestrator/laya_session.py and orchestrator/laya_economics.py. The historical
+training/laya_ops.py import aliases the active module so existing classes,
+functions and dependency patches retain identity. This source move preserves
+this controller branch's operations; it does not import later PM features.
