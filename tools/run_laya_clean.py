@@ -25,6 +25,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,12 +36,16 @@ from tools.laya_helper_agent import RUN_INDEX, launch as launch_helper
 from core.local_time import local_stamp
 from tools.run_ledger import LEDGER, record_laya_run
 from tools.runner_process import runner_pid_record
-from training.laya_clean_runner import ExplorationPolicy, LiveWorld, run
+from training.laya_clean_runner import DECISION_RECORD_VERSION, ExplorationPolicy, LiveWorld, Settings, run
 from training.laya_guided_policy import GuidedPolicy, load_preferences
 from training.laya_variants import apply as apply_variant, load_variant, variant_hash
 from training.laya_run_log import RunLog
 from training.laya_saved_world import SavedWorldAdapter, file_hash, owned_root
 from training.laya_checkpoint import load_bundle, export_bundle, restore_context
+from training.laya_mission import MISSION_ID
+from training.laya_runtime_components import build_manifest, install_manifest
+from training.laya_operation_outcome import VERSION as OUTCOME_SOURCE_VERSION
+from orchestrator.checkpoint_milestones import DEFAULT_MILESTONES, PREDICATE_SCHEMA_VERSION
 
 
 def _oil_options():
@@ -139,11 +144,41 @@ def main(argv=None) -> int:
     tag = {"variant_id": variant["variant_id"], "variant_hash": variant_hash(variant), "experiment": args.experiment}
     paths = runner_paths(root)
     paths["journal"].parent.mkdir(exist_ok=True)
+    # A shared journal represents one episode; each invocation records its own run ID.
+    evidence = paths["journal"].parent
+    component_path = evidence / "runtime-components.json"
+    legacy = any(p.is_file() and p.stat().st_size for p in evidence.rglob("*")
+                 if p != component_path)
+    guidance_catalog = settings.catalog
+    if args.actions == "deterministic" and settings.catalog == Settings().catalog:
+        from training.laya_ops_runner import OPS_CATALOG
+        guidance_catalog = OPS_CATALOG
+    components = build_manifest(
+        entrypoint="tools/run_laya_clean.py", world_root=root,
+        mission={"id": MISSION_ID, "action_path": args.actions, "variant": tag,
+                 "settings": dataclasses.asdict(settings), "policy": args.policy,
+                 "catalogs": {"policy": settings.catalog, "guidance": guidance_catalog},
+                 "policy_options": policy_options, "seed": args.seed,
+                 "stepped": args.stepped, "speed": speed,
+                 "measure_ticks": args.measure_ticks, "decisions": args.decisions,
+                 "jumpstart": args.jumpstart, "optimizer_blocks": args.optimizer_blocks,
+                 "optimizer_candidate_sha256": file_hash(args.optimizer_candidate) if args.optimizer_candidate else None},
+        episode={"root": str(root.resolve())},
+        runner_contracts={"decision_record": DECISION_RECORD_VERSION,
+                          "operation_outcome_source": OUTCOME_SOURCE_VERSION,
+                          "strict_predicate_source": {
+                              "schema": PREDICATE_SCHEMA_VERSION,
+                              "versions": {m.checkpoint_id: m.predicate_version for m in DEFAULT_MILESTONES},
+                              "evaluation": "not_attested_by_clean_cli"}})
+    component_ref = install_manifest(component_path, components, legacy=legacy)
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     source_hash = file_hash(SOURCE_SAVE)
-    run_id = f"{root.name}-s{args.seed}-{int(time.time())}"
+    run_id = f"{root.name}-s{args.seed}-{int(time.time())}-{uuid.uuid4().hex[:12]}"
+    with paths["journal"].open("a") as journal_out:
+        journal_out.write(json.dumps({"run_id": run_id, "event": "runtime_components",
+                                      "runtime_components": component_ref}) + "\n")
     mode = "stepped" if args.stepped else "live"
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
     started = local_stamp()
@@ -195,6 +230,7 @@ def main(argv=None) -> int:
                               settings=settings, initial_reached=resume['phases_reached'] if resume else (),
                               candidate_provider=candidate_provider,
                               oil_options=_oil_options() if settings.oil_options else None)
+            summary["runtime_components"] = component_ref
             if args.export_checkpoint:
                 export_bundle(adapter,args.export_checkpoint,summary)
             if stop.is_set():

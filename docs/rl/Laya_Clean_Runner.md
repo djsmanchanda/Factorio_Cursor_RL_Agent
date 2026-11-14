@@ -216,3 +216,20 @@ Offline tests cover both shapes, actual recipe mutation and duplicate replay,
 and a stale snapshot blocking a mixed placement/configuration plan. Source
 capabilities require deliberate mod synchronization/reload with a matching
 frozen runner before runtime use; no live efficacy is established.
+
+## Source component identity (15 November 2026)
+
+The clean CLI publishes an immutable episode source-component artifact before
+constructing the world adapter. Each invocation journals a unique run ID and artifact
+reference and includes the reference in its summary. The artifact hashes the
+policy and guidance catalogs and their quoted source documents, including the
+deterministic path's alternate guidance catalog. Contract versions come from
+Track B's own modules; strict predicate versions describe available source,
+with runtime evaluation explicitly unattested. A changed identity is
+refused before adapter construction; existing evidence without an artifact
+remains unknown. Geometry checkpoint restoration copies historical context, so
+it also remains unknown when no original component artifact exists. Declared
+world identity is separate from loaded engine and mod identity, which remain
+unknown without runtime attestation. This is source provenance, not proof of a
+controller job or loaded runtime. Offline tests alone do not establish live
+behavior.

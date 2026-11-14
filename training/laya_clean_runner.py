@@ -58,6 +58,7 @@ from training.laya_mall_block import mall_cell_candidates
 
 ROOT = Path(__file__).resolve().parents[1]
 MISSION_CATALOG = "docs/rl/laya_mission_guidelines.json"
+DECISION_RECORD_VERSION = "laya-decision-record-v1"
 
 
 @dataclass(frozen=True)
@@ -1039,7 +1040,7 @@ def _option_record(option: Mapping) -> dict:
 
 def _training_record(path: Path, **fields: Any) -> None:
     """One self-contained line per decision: model input, options, policy distribution, outcome."""
-    _append(path, {"version": "laya-decision-record-v1", "recorded_at": local_stamp(), **fields})
+    _append(path, {"version": DECISION_RECORD_VERSION, "recorded_at": local_stamp(), **fields})
 
 
 def _append(path: Path, record: Mapping) -> None:
