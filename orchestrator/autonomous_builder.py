@@ -5795,6 +5795,7 @@ _BOOTSTRAP_LOAN_CONFIGURATION_REVISION = 0
 #: repeated refreshes raises mall_loan_gate_mismatch.
 _LOAN_GATE_REFRESH_ATTEMPTS: dict[tuple[str, str, int], int] = {}
 _LOAN_GATE_REFRESH_LIMIT = 3
+_LOAN_GATE_REFRESH_TICKS: dict[tuple[str, str, int], int] = {}
 _BOOTSTRAP_SHARED_PROVIDER_ITEMS: set[str] = set()
 _MALL_REFRESH_SIGNATURES: set[tuple[object, ...]] = set()
 _MALL_PROVIDER_CAPACITY_FLOORS: dict[tuple[str, str, str, Point], int] = {}
@@ -5929,56 +5930,79 @@ def _bootstrap_loan_stock(
     return actual, usable
 
 
-def _loan_step_cell_fed(
-    client: RconClient, surface: str, force: str,
-    loan: MallBootstrapLoan, step,
-) -> bool:
-    """Whether the stalled loan cell could run one craft right now.
+@dataclass(frozen=True)
+class LoanInputEvidence:
+    """Independent observations; None means the API did not establish a fact."""
 
-    A disabled gate with deliverable ingredients is configuration drift (or
-    a genuine stall); a disabled gate with nothing deliverable is supply
-    starvation, and re-applying the gate cannot help (2026-09-11: an AM2
-    loan's e-circuit step sat disabled through 3 refreshes with cable net
-    4, requester 0, crafts 0/2, on the same cell/shape as the 2026-09-03
-    and 2026-09-04 gate_mismatch terminals). Spendable transferable stock
-    plus what already sits in the cell's requester is the honest scope:
-    available stock includes requester/buffer WIP locked inside other
-    consumers. Unknown telemetry fails open to the legacy counting path
-    so dry harnesses keep their behavior.
-    """
+    global_stock: Mapping[str, int] | None
+    allocatable_stock: Mapping[str, int] | None
+    requester: Mapping[str, int] | None
+    local_inputs: Mapping[str, int] | None
+    incoming: Mapping[str, int] | None
+    electrical_network_id: int | None
+    logistic_network_id: int | None
+    power: bool | None
+    recipe: str | None
+    gate: Mapping[str, object] | None
+    crafts: int | None
+    fed: bool | None
+
+
+def _loan_input_evidence(
+    client, surface, force, loan, step, crafts=None,
+) -> LoanInputEvidence:
     try:
-        spec = LINE_RECIPES.get(step.recipe, {})
-        needs = [
-            (str(item), float(amount))
-            for item, amount in zip(
-                spec.get("ingredients", ()), spec.get("amounts", ()),
-                strict=True,
-            )
-        ]
-    except Exception:
-        return True
-    if not needs:
-        return True
+        spec = LINE_RECIPES[step.recipe]
+        needs = dict(zip(spec["ingredients"], spec["amounts"], strict=True))
+        if not needs:
+            needs = None
+    except (KeyError, TypeError, ValueError):
+        needs = None
     try:
-        spendable = live_base.transferable_items(client, surface, force)
+        global_stock, allocatable = _bootstrap_loan_stock(client, surface, force, loan.target_item)
     except Exception:
-        return True
+        global_stock = allocatable = None
     try:
-        held = live_base.chest_contents(
-            client, surface, loan.requester_position,
-        )
+        requester = live_base.chest_contents(client, surface, loan.requester_position)
     except Exception:
-        held = {}
-    for item, amount in needs:
-        try:
-            if (
-                float(spendable.get(item, 0)) + float(held.get(item, 0))
-                < float(amount)
-            ):
-                return False
-        except Exception:
-            return True
-    return True
+        requester = None
+    try:
+        local = {item: live_base.loan_cell_item_count(
+            client, surface, loan.requester_position, loan.machine_position, item,
+        ) for item in needs} if needs else None
+    except Exception:
+        local = None
+    try:
+        electrical = live_base.pole_network_id(client, surface, loan.requester_position)
+    except Exception:
+        electrical = None
+    try:
+        rows = live_base.mall_gate_survey(client, surface, force)
+        row = next(row for row in rows if tuple(row.get("position", ())) == tuple(loan.machine_position))
+        recipe = row.get("recipe")
+        gate = row.get("gate") if row.get("circuit_enabled") is False else None
+    except Exception:
+        recipe = gate = None
+    fed = (all(local.get(item, 0) >= amount for item, amount in needs.items())
+           if local is not None and needs else None)
+    return LoanInputEvidence(global_stock, allocatable, requester, local, None,
+                             electrical, None, None, recipe, gate, crafts, fed)
+
+
+def _loan_step_cell_fed(client, surface, force, loan, step) -> bool | None:
+    """Whether one craft is physically in the cell, independently of source stock."""
+    return _loan_input_evidence(client, surface, force, loan, step).fed
+
+
+def _loan_machine_status(client, surface, position) -> str | None:
+    """Keep failed or unsupported status reads distinct from a resumed cell."""
+    try:
+        status = live_base.entity_status_name(client, surface, position)
+    except Exception:
+        return None
+    if not isinstance(status, str) or not status or status.startswith("unknown_status_"):
+        return None
+    return status
 
 
 def _loan_step_requester_unreachable(
@@ -6329,14 +6353,8 @@ def _emit_loan_cell_telemetry(
             f"@({holder.machine_position[0]:.1f},{holder.machine_position[1]:.1f})"
             for holder in loans
         ) or "-"
-        # Run 3 (2026-09-18) froze 100 passes with transferable=18 circuits
-        # beside a loan whose requester held 0: the verdict telemetry named
-        # the item but could not say whether the units were reachable in the
-        # requester's own logistic network or live beyond a coverage gap --
-        # the two live mechanisms that both end in bots never delivering.
-        # Counting the same ingredient network-wide AT the requester turns
-        # that ambiguity into one number: network>0 means a bot-delivery
-        # fault, network==0 means a coverage/segmentation fault.
+        # Reachable item counts and electrical identity are distinct facts;
+        # neither identifies assigned cargo or proves requester receipt.
         far = "?"
         near_network = "?"
         if probe != "-":
@@ -6346,17 +6364,14 @@ def _emit_loan_cell_telemetry(
                 )
             except Exception:  # noqa: BLE001 -- diagnostic only
                 network_count = None
-            # A None reading means no network covers the requester, which is the
-            # strongest coverage fault, not a missing observation. Hide it and
-            # the split biases toward delivery.
-            far = f"{probe}=none" if network_count is None else f"{probe}={network_count}"
+            far = f"{probe}=?" if network_count is None else f"{probe}={network_count}"
             try:
                 network_id = live_base.pole_network_id(
                     client, surface, loan.requester_position,
                 )
             except Exception:  # noqa: BLE001 -- diagnostic only
                 network_id = None
-            near_network = "none" if network_id is None else str(network_id)
+            near_network = "unknown" if network_id is None else str(network_id)
         emit(
             f"  LOAN CELL TELEMETRY: {step.recipe} at {loan.machine_position} "
             f"bill {int(actual.get(loan.target_item, 0))}/{loan.target_count}"
@@ -6367,7 +6382,7 @@ def _emit_loan_cell_telemetry(
             f"| pool {pool} free | loans {table}"
             + (f" | starved {starved}" if missing == "-" and starved != "-" else "")
             + (f" | reachable {far}" if far != "?" else "")
-            + (f" | network {near_network}" if near_network != "?" else "")
+            + (f" | electrical_network {near_network}" if near_network != "?" else "")
         )
     except Exception as error:
         emit(f"  LOAN CELL TELEMETRY skipped: {error}")
@@ -6727,13 +6742,8 @@ def _submit_bootstrap_loan(
     # time, while the loan's ambition advances to the spare ceiling without
     # reconfiguring (2026-09-03 drill stall: gate stayed at the bill of 6
     # while the step grew to 8, so the machine disabled at 6 and the loan
-    # died on gate_mismatch). A drifted gate is configuration, not progress:
-    # resubmit so the gate follows the step.
-    gate_refresh_needed = bool(
-        step is not None
-        and loan.step_target_count is not None
-        and step.target_count != loan.step_target_count
-    )
+    # died on gate_mismatch). A changed target alone does not prove drift;
+    # below, observe a disabled, fed cell's gate before spending a refresh.
     if (
         loan.current_recipe != step.recipe
         or loan.step_recipe != step.recipe
@@ -6741,7 +6751,6 @@ def _submit_bootstrap_loan(
         or loan.step_required_crafts is None
         or starting_spare_phase
         or completed_prerequisite
-        or gate_refresh_needed
     ):
         if products_finished is None:
             raise StuckError(
@@ -6796,18 +6805,28 @@ def _submit_bootstrap_loan(
             loan.machine_position, emit,
             loan.requester_position,
         )
+        try:
+            before_tick = live_base.game_tick(client)
+        except Exception:
+            before_tick = None
         consume_wait(f"bootstrap_loan_{loan.target_item}")
         time.sleep(_BOOTSTRAP_LOAN_POLL_SECONDS)
         after = _bootstrap_loan_products_finished(client, surface, loan)
         if after is not None and products_finished is not None and after > products_finished:
+            progress_key = (live_loan_group, step.recipe, step.target_count)
+            _LOAN_GATE_REFRESH_ATTEMPTS.pop(progress_key, None)
+            _LOAN_GATE_REFRESH_TICKS.pop(progress_key, None)
             _BOOTSTRAP_LOAN_PROGRESS_REVISION += 1
             emit(
                 f"  MALL BOOTSTRAP LOAN PROGRESS: {step.recipe} craft count "
                 f"advanced {products_finished} -> {after}"
             )
-        elif live_base.entity_status_name(
+        elif (status := _loan_machine_status(
             client, surface, loan.machine_position,
-        ) == "disabled_by_control_behavior":
+        )) is None:
+            emit(f"  MALL BOOTSTRAP LOAN OBSERVATION WAIT: {step.recipe} status unknown")
+            return f"borrowed {loan.original_recipe} cell waits for {step.recipe} observation"
+        elif status == "disabled_by_control_behavior":
             # Re-read after the bounded poll. The machine may have reached its
             # gate during the sleep, and prerequisite steps gate their own
             # recipe rather than the loan's final target item.
@@ -6820,23 +6839,19 @@ def _submit_bootstrap_loan(
                 # the batch, so a stale disabled reading must not end the run
                 # on its own: re-read once, and only fail a still-disabled
                 # machine that is still short.
-                try:
-                    still_disabled = (
-                        live_base.entity_status_name(
-                            client, surface, loan.machine_position,
-                        ) == "disabled_by_control_behavior"
-                    )
-                except Exception:
-                    still_disabled = True
-                if not still_disabled:
+                confirmed_status = _loan_machine_status(client, surface, loan.machine_position)
+                if confirmed_status is None:
+                    emit(f"  MALL BOOTSTRAP LOAN OBSERVATION WAIT: {step.recipe} status unknown")
+                    return f"borrowed {loan.original_recipe} cell waits for {step.recipe} observation"
+                if confirmed_status != "disabled_by_control_behavior":
                     emit(
-                        f"  MALL BOOTSTRAP LOAN RESUMED: {step.recipe} at "
-                        f"{loan.machine_position} re-enabled after stock "
-                        f"moved; continuing toward {step.target_count}"
+                        f"  MALL BOOTSTRAP LOAN STATUS CHANGED: {step.recipe} at "
+                        f"{loan.machine_position} is {confirmed_status}; "
+                        f"waiting for crafts toward {step.target_count}"
                     )
                     return (
-                        f"borrowed {loan.original_recipe} cell is producing "
-                        f"temporary {step.recipe} for the {loan.target_item} seed"
+                        f"borrowed {loan.original_recipe} cell waits for "
+                        f"{step.recipe} production for the {loan.target_item} seed"
                     )
                 # A bill-frozen gate is configuration drift, not a bug: the
                 # step target advanced but the machine still carries the old
@@ -6853,41 +6868,37 @@ def _submit_bootstrap_loan(
                 # requester 0, crafts 0/2). Wait for supply without consuming
                 # refresh budget; only a fed cell that ignores refreshes is
                 # genuinely stuck.
-                if not _loan_step_cell_fed(client, surface, force, loan, step):
-                    emit(
-                        f"  MALL BOOTSTRAP LOAN SUPPLY WAIT: {step.recipe} "
-                        f"at {loan.machine_position} is disabled below "
-                        f"{step.target_count} with no deliverable "
-                        "ingredients; yielding to mall production without "
-                        "consuming gate-refresh budget"
-                    )
-                    return (
-                        f"borrowed {loan.original_recipe} cell waits for "
-                        f"{step.recipe} ingredients for the "
-                        f"{loan.target_item} seed"
-                    )
-                if _loan_step_requester_unreachable(client, surface, force, loan, step):
-                    try:
-                        delivered = _deliver_cell_ingredients(
-                            client, bridge, surface, force, step.recipe,
-                            loan.requester_position, emit,
-                            requester_position=loan.requester_position,
-                        )
-                    except Exception:  # noqa: BLE001 -- delivery is opportunistic
-                        delivered = False
-                    if delivered:
-                        emit(
-                            f"  MALL BOOTSTRAP LOAN CELL DELIVERY: {step.recipe} "
-                            f"at {loan.requester_position} was empty outside any "
-                            "network; moved stock into its requester"
-                        )
-                        return (
-                            f"borrowed {loan.original_recipe} cell waits for "
-                            f"{step.recipe} delivery into its requester"
-                        )
-                refresh_key = (
-                    live_loan_group, step.recipe, step.target_count,
-                )
+                evidence = _loan_input_evidence(client, surface, force, loan, step, after)
+                try:
+                    after_tick = live_base.game_tick(client)
+                except Exception:
+                    after_tick = None
+                # A source transfer is only a possible route, not delivery. A
+                # delayed or unobservable cell must retain its obligation.
+                if evidence.fed is not True:
+                    emit(f"  MALL BOOTSTRAP LOAN SUPPLY WAIT: {step.recipe} "
+                         f"local inputs {'short' if evidence.fed is False else 'unknown'}")
+                    return (f"borrowed {loan.original_recipe} cell waits for "
+                            f"{step.recipe} ingredients for the {loan.target_item} seed")
+                refresh_key = (live_loan_group, step.recipe, step.target_count)
+                gate = evidence.gate
+                constant = gate.get("constant") if isinstance(gate, Mapping) else None
+                mismatch = (evidence.recipe == step.recipe and isinstance(gate, Mapping)
+                            and gate.get("signal") == step.recipe
+                            and gate.get("comparator") == "<"
+                            and type(constant) in (int, float)
+                            and -(2 ** 31) <= constant < 2 ** 31
+                            and constant == int(constant)
+                            and constant != step.target_count)
+                last_tick = _LOAN_GATE_REFRESH_TICKS.get(refresh_key)
+                if (before_tick is None or after_tick is None or after_tick <= before_tick
+                        or (last_tick is not None and after_tick <= last_tick)
+                        or after is None or products_finished is None
+                        or after < products_finished or not mismatch):
+                    emit(f"  MALL BOOTSTRAP LOAN OBSERVATION WAIT: {step.recipe} "
+                         "requires advancing time, monotonic crafts and known mismatched control readback")
+                    return f"borrowed {loan.original_recipe} cell waits for {step.recipe} observation"
+                _LOAN_GATE_REFRESH_TICKS[refresh_key] = after_tick
                 attempts = _LOAN_GATE_REFRESH_ATTEMPTS.get(refresh_key, 0) + 1
                 _LOAN_GATE_REFRESH_ATTEMPTS[refresh_key] = attempts
                 if attempts > _LOAN_GATE_REFRESH_LIMIT:
@@ -13439,6 +13450,7 @@ def initialize_operation_runtime(
     _STARTUP_MALL_LIMITS_FALLBACK_PROBED = False
     _BOOTSTRAP_LOAN_PROGRESS_REVISION = 0
     _LOAN_GATE_REFRESH_ATTEMPTS.clear()
+    _LOAN_GATE_REFRESH_TICKS.clear()
     _CRAFT_PROOF_CONSUMED.clear()
     _POST_STARTER_TRANSITION_ANNOUNCED = False
     catalog = load_json(bridge.export_recipe_catalog(force=force))

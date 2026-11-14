@@ -2400,8 +2400,9 @@ def loan_cell_item_count(
     lua = (
         "local s=game.surfaces['" + surface + "'];local n=0;"
         "local c=" + at(requester_position, "logistic-container") + ";"
-        "if c then n=n+c.get_inventory(defines.inventory.chest).get_item_count('" + item + "') end;"
         "local m=" + at(machine_position, "assembling-machine") + ";"
+        "if not c or not m then rcon.print('UNKNOWN') return end;"
+        "n=n+c.get_inventory(defines.inventory.chest).get_item_count('" + item + "');"
         "if m then local inv=m.get_inventory(defines.inventory.crafter_input or defines.inventory.assembling_machine_input);"
         "if inv then n=n+inv.get_item_count('" + item + "') end;"
         "for _,i in pairs(s.find_entities_filtered{position=m.position,radius=4,type='inserter'}) do "

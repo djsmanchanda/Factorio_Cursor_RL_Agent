@@ -62,6 +62,15 @@ Receipts must retain transaction identity, selected parameters, typed cause,
 ownership, resource use and observed postconditions. A successful return is not
 by itself proof of delivered output or a standing producer.
 
+Borrowed-cell recovery distinguishes global and allocatable stock from inputs
+physically at the cell. Provider staging is not requester delivery. Missing
+inputs, status or supported gate readback remain unknown. A control refresh
+requires local inputs, advancing game ticks, a nonregressing craft counter and
+an observed mismatched simple logistic gate; circuit-controlled gates wait.
+Electrical-network diagnostics do not identify logistic networks. Local counts
+still combine requester, machine inputs and feeding inserter hands; cargo,
+power and full request-setting observations remain incomplete.
+
 Shared service failures now distinguish `infrastructure_collision` (plan and
 observed occupant evidence) from `power_route_unavailable` (endpoints, pole,
 blocked tile count and route reason). Both remain failed bug outcomes; typing

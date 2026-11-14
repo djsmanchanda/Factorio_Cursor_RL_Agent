@@ -2399,6 +2399,14 @@ def _stalled_gate_loan(monkeypatch):
     )
     stock = {"electronic-circuit": 11, "copper-cable": 60, "iron-plate": 100}
     monkeypatch.setattr(builder, "_LOAN_GATE_REFRESH_ATTEMPTS", {})
+    monkeypatch.setattr(builder, "_LOAN_GATE_REFRESH_TICKS", {})
+    ticks = iter(range(100, 1000))
+    monkeypatch.setattr(builder.live_base, "game_tick", lambda *_a: next(ticks))
+    monkeypatch.setattr(builder.live_base, "loan_cell_item_count", lambda *_a: 100)
+    monkeypatch.setattr(builder.live_base, "mall_gate_survey", lambda *_a: [{
+        "position": (36.5, 32.5), "recipe": "electronic-circuit", "circuit_enabled": False,
+        "gate": {"signal": "electronic-circuit", "comparator": "<", "constant": 11},
+    }])
     monkeypatch.setattr(
         builder, "_bootstrap_loan_stock", lambda *_a: (dict(stock), dict(stock)),
     )
@@ -4603,6 +4611,7 @@ def test_rationed_parent_finishes_its_durable_prerequisite_before_reclaiming(
     }
     stock[prerequisite] = 0
     client = SimpleNamespace(command=lambda *_a: pytest.fail("unexpected RCON"))
+    monkeypatch.setattr(builder.live_base, "game_tick", lambda *_a: 100)
     finished = [101]
     loans = [builder.MallBootstrapLoan(
         original_recipe="underground-belt", target_item=item,

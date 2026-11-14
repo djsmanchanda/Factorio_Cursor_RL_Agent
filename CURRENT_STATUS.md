@@ -563,3 +563,9 @@ C6-v3 candidate derives recovery feed prototypes from the same constructed plan 
 - What: after a refused link, try a bounded set of nonoverlapping row candidates using the existing site and route validators. Refusal evidence records the eight-row and300-probe per-survey limits; bounded exhaustion leaves other layouts unexplored.
 - Evidence: main14 focused composed-plan tests passed,including translated recorded copper geometry,owned haul continuity,reservation/occupancy protection and no mutation on refusal. Delegate fast gate1399 passed,one selected skip; other workers changed the shared source during that run,so a final settled combined gate remains required. Exact historical stone,physical provider delivery and cutover were not replayed.
 - Lifecycle: use a newly frozen future Python runner and separately authorized disposable acceptance after campaigns; no installed-mod change or runtime action performed.
+
+## [2026-11-15 03:25 IST] Loan recovery uses local and advancing evidence
+
+- What: separate source stock from cell inputs and electrical identity; preserve unknowns and source staging; gate retries require supported readback, advancing ticks and monotonic crafts.
+- Evidence: 308 focused loan/reservation/chemical-boundary tests passed; settled combined PM fast gate 1,420 passed, three skipped (two optional-lupa collection modules, one known fluid-chain case), exit 0. The combined gate includes separate uncommitted RC7 scaffolding. Full loan restart equivalence and live AC-to-PM acceptance remain open.
+- Lifecycle: future affected runners need a matching frozen Python copy; no deployment, server, save or campaign action performed.
