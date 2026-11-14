@@ -451,3 +451,9 @@ Added coordinator-side, nonblocking reservation before worker submission and an 
 ## 2026-11-14 — supervisor-driven controller wakes
 
 User clarified that A/B must have no periodic schedules. Archived and removed the two remaining disabled controller schedules; only the existing 90-minute supervisor remains enabled. Its prompt now wakes owners after terminal accounting/cleanup and also wakes A when B completion releases the host for its queued PM replay, with deduplicated dependent notifications. Removed the obsolete hourly-continuation requirement from the controller contract. Evidence: scheduled-task inventory and updated supervisor prompt checked; documentation only, no test/runtime code change. Lifecycle: schedule configuration is effective immediately; no campaign/runner/mod restart.
+
+
+## [2026-11-15 03:04 IST] Validate mission against the selected frozen runner
+- What: require declared modes for new calibrations/research missions; read the selected frozen runner's versioned capability manifest; persist mission/runner/command evidence and forward the validated mode and effective target. Unknown capability cannot authorize explicit measurement or research completion. Preserve undeclared frozen legacy missions.
+- Evidence: 38 focused controller/scheduler checks passed. Final fast gate remains red: 1,208 passed, three skipped and one unchanged import-firewall failure in training/laya_ops.py. No live dispatch or research completion was exercised.
+- Lifecycle: integrate with PM runner commit 4275f690, freeze future runners and restart the affected controller after active campaigns; no service, campaign, mod or Factorio action performed.

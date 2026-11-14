@@ -177,3 +177,16 @@ Next reusable work: truthful receipts/economic facts, the partial-foundation
 steel cycle, explicit loan alternatives, faithful measured labels and a
 compatible learned policy; then missing goal actions and matched acceptance.
 Coordinate shared mall/adapter files through their latest ownership handoff.
+
+## Research mission admission
+
+Explicit `research_completion` requires a valid target and a version 1 capability
+manifest from the selected frozen arm's runner, declaring deterministic research
+selection, lab and production scaling operations. The freeze records the runner,
+capability and effective mission; dispatch verifies the same frozen identity and
+forwards the mode and target. `measurement_only` requires advertised support for enforcing that mode and
+labels calibration without an effective research target. An arm may explicitly
+clear a cohort target; dispatch uses that validated effective value. A full-origin mission with no declaration keeps its legacy
+interpretation. Frozen historical specifications are not rewritten. Initial target
+eligibility and earned research must be observed by the capable runner; manifest
+support alone proves neither pack consumption nor completion.

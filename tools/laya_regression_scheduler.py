@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from tools.checkpoint_catalog import atomic_json
 from tools.deterministic_fleet_runtime import create_detached_checkout
 from training.laya_restart_checkpoint import load as load_checkpoint
+from training.laya_mission_contract import mission_settings, frozen_capability
 
 # 2026-10-30 latest user directives (supersede the same-day 3-day scale
 # request): mixed cohorts are 120-150 jobs — the cohort owner picks the exact
@@ -169,6 +170,8 @@ def enqueue(repo, registry, spec):
     name = spec['name']
     if not name or Path(name).name != name or name.startswith(('.', '_')):
         raise ValueError('Invalid suite name')
+    for arm in spec.get('arms', {}):
+        mission_settings(spec, arm, new=True)
     setup = spec.get('purpose') == 'disposable_source_setup'
     mixed = spec.get('design') == 'mixed-start-v1'
     # Full-origin/checkpoint cohorts may run a control plus several one-factor
@@ -335,7 +338,13 @@ def enqueue(repo, registry, spec):
                 variant.relative_to(code.resolve())
                 if not variant.is_file():
                     raise ValueError('Variant must be tracked inside the frozen arm')
-            freeze['arms'].append({'id': arm, 'revision': revision, 'code_sha256': tracked_hash(code),
+            runner = config.get('runner') or spec.get('runner', 'tools/run_laya_clean.py')
+            mission = mission_settings(spec, arm)
+            capability = frozen_capability(code, runner, spec['python']) if mission['objective_mode'] != 'legacy_unspecified' else None
+            mission = mission_settings(spec, arm, capability=capability)
+            freeze['arms'].append({'id': arm, 'revision': revision, 'runner': runner,
+                                   'mission_capability_version': 1 if capability else None,
+                                   'mission_capability': capability, 'effective_mission': mission, 'code_sha256': tracked_hash(code),
                                    'predicate_sha256': current, 'common_interface':interface})
         freeze['source_sha256'] = sha(spec['source_save'])
         if mixed and len({a['code_sha256'] for a in freeze['arms']}) != 1:
@@ -649,6 +658,14 @@ def _execute_job(root, executor, spec, freeze, job):
             # per arm, falling back to the cohort-wide runner.
             arm_runner = ((spec.get('arms') or {}).get(job.get('arm')) or {}).get('runner')
             base = [spec['python'], str(code/(arm_runner or spec.get('runner', 'tools/run_laya_clean.py')))]
+            effective = mission_settings(spec, job['arm'])
+            capability = {}
+            if effective['objective_mode'] != 'legacy_unspecified':
+                selected_runner = arm_runner or spec.get('runner', 'tools/run_laya_clean.py')
+                capability = frozen_capability(code, selected_runner, spec['python'])
+                if identity.get('runner') != selected_runner or identity.get('mission_capability') != capability:
+                    raise ValueError('Frozen mission capability changed')
+                effective = mission_settings(spec, job['arm'], capability=capability)
             def execute(arguments):
                 return executor(base+arguments, cwd=code, check=True, stdout=log, stderr=subprocess.STDOUT,
                                 env={**os.environ, 'LAYA_CHECKPOINT_RUNTIME_ROOT':str(Path(spec['factorio_binary']).resolve().parents[2])},
@@ -665,8 +682,10 @@ def _execute_job(root, executor, spec, freeze, job):
             if job.get('strict_target'):
                 run += ['--strict-target',job['strict_target']]
             arm_research = ((spec.get('arms') or {}).get(job.get('arm')) or {}).get('research_target')
-            if arm_research or spec.get('research_target'):
-                run += ['--research-target', arm_research or spec['research_target']]
+            target = (effective['research_target'] if effective['objective_mode'] != 'legacy_unspecified'
+                      else arm_research or spec.get('research_target'))
+            if target:
+                run += ['--research-target', target]
             if spec.get('checkpoint_catalog'):
                 run += ['--checkpoint-catalog',spec['checkpoint_catalog']]
             if spec.get('capture_checkpoints'):
@@ -678,6 +697,9 @@ def _execute_job(root, executor, spec, freeze, job):
             variant = spec['arms'][job['arm']].get('variant')
             if variant:
                 run += ['--variant',str(code/variant)]
+            if effective['objective_mode'] != 'legacy_unspecified':
+                run += ['--objective-mode', effective['objective_mode']]
+                _update_job(root, job['id'], {'effective_mission': effective, 'run_command': base + run})
             execute(run)
             if tracked_hash(code) != identity['code_sha256']:
                 raise ValueError('Frozen code changed during attempt')
