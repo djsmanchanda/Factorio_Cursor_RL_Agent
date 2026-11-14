@@ -51,3 +51,19 @@ decision is pending. C36 and the host scheduler remain active. Existing frozen
 harnesses were preserved; no deploy or restart was performed. Corpus copies
 and available best/median worlds were verified before remaining archives were
 removed. Historical full-world losses and recovery refs are listed in the report.
+
+## 2026-11-14 16:39 IST — Starship capacity/request verification
+
+User-authorized standalone disposable C0 run: Starship unit
+`laya-starship-capacity-requests-20261114.service`, frozen `29cbf166`, seed 84218,
+patience96, 2× game speed, engine 2.1.24 build 87808. Experiment root on Starship:
+`/home/djsm/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/starship-capacity-requests-20261114`.
+Owned world: `code/data/laya-saved-world/starship-capacity-requests-s84218` below it;
+loopback game/RCON 34340/27340. Freeze records source/mod hashes and a 10-hour
+wall deadline (2026-11-15 02:36 IST); runner also has a 3,600,000-tick window and
+natural stall/mission stops. Strict sidecar runs alongside it. Latest launch
+verification: index 3 at tick 260360, no failures, strict C0 only. Read-only
+Antigravity Gemini 4 Hydrogen helper requested for the full run. Logs and terminal
+result belong to this experiment, independent of active Miniship cohorts.
+This checks wiring and live behavior of cumulative capacity fixes; no adoption or
+paired improvement claim. See the dated geometry-capacity handoff.
