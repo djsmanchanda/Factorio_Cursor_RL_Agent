@@ -106,6 +106,18 @@ def test_an_exhausted_owned_drill_is_recovered_without_shared_belts(tmp_path, mo
     assert [a['entity'] for a in calls[0]['phases'][0]['actions']] == ['electric-mining-drill']
 
 
+def test_pending_shared_steel_line_is_reported_before_offering_more_capacity(tmp_path):
+    record(tmp_path, 'steel', 'smelt', [ghost('electric-furnace', 1.5, 1.5)], 10)
+    path = tmp_path / 'evidence/transaction-steel.json'
+    receipt = json.loads(path.read_text())
+    receipt.update(status='construction_pending')
+    receipt['candidate'].update(product='steel-plate', shared_feed=True)
+    path.write_text(json.dumps(receipt))
+    adapter = SimpleNamespace(root=tmp_path)
+    result = GeometryMaintenance()(adapter, {'tick': 100, 'machines': [], 'ports': [], 'poles': []})
+    assert result['constructing_products'] == ['steel-plate']
+
+
 def test_growth_reuses_collector_haul_and_provider_without_placing_a_second_line():
     from pathlib import Path
     from collections import Counter

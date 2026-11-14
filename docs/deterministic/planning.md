@@ -662,3 +662,10 @@ when fewer than five actual inventory slots are occupied, including partial
 stacks and all qualities. Unknown occupancy retains the chest. Revisit retained
 providers after stock drains and across runner restarts; never empty a full
 provider into storage as part of the machinery teardown.
+
+Steel expansion uses a shared electric-furnace line, with one requester feeding
+the input belt and one provider collecting from the output belt. Offer compact
+two-, four- and six-furnace scales instead of another single-furnace chest pair.
+Partial feeding is acceptable; scarce initial logistic chests are shared across
+the line. Reconcile an in-flight line before adding capacity. Existing capacity
+waiting for iron supply is an input shortage, not a need for more furnaces.

@@ -45,6 +45,32 @@ def validator(shortfall_for=()):
     return validate
 
 
+def test_steel_expansion_offers_shared_lines_and_waits_for_inflight_or_input_supply():
+    world = facts()
+    world['resources'] = []
+    world['machines'] = [{'name': 'electric-furnace', 'recipe': 'steel-plate', 'speed': 2,
+                          'position': {'x': -10.5, 'y': -10.5}}]
+    world['networks']['1']['items'].update({'iron-plate': 1000, 'requester-chest': 2, 'passive-provider-chest': 2,
+                                          'electric-furnace': 30})
+    plan = {'zones': [{'zone_id': 'steel', 'purpose': 'smelt:steel-plate', 'rect': [-12, -8, 12, 16]}]}
+    board = {'needs': [{'item': 'steel-plate', 'condition': 'under_capacity', 'capacity': .125, 'required': .25}]}
+    seen = []
+    def validate(candidates):
+        seen.extend(c for c in candidates if c.get('product') == 'steel-plate')
+        return {c['option_id']: {'bill': {'electric-furnace': c.get('furnaces', 1)}} for c in candidates}
+    menu = compile_menu(world, board, validate, 1, site_plan=plan)
+    assert seen
+    assert any(n['need_id'] == 'item:steel-plate' for n in menu['needs'])
+    assert all(sum(a['entity'] == 'electric-furnace' for p in c['plan']['phases'] for a in p['actions']) in (2, 4, 6)
+               for c in seen)
+    seen.clear()
+    compile_menu(world, board, validate, 1, site_plan=plan, constructing_products=['steel-plate'])
+    assert not seen
+    supplied_capacity = {'needs': [{**board['needs'][0], 'condition': 'short', 'capacity': .75}]}
+    compile_menu(world, supplied_capacity, validate, 1, site_plan=plan)
+    assert not seen  # A short iron feed is not missing furnace capacity.
+
+
 def test_menu_tags_unmet_needs_and_turns_item_shortfalls_into_stock_needs():
     board = compile_status(facts(), phase("C1")["targets"])
     menu = compile_menu(facts(), board, validator(shortfall_for={"iron-gear-wheel"}), seed=1)

@@ -218,4 +218,30 @@ def test_steel_has_expandable_reserved_land_outside_the_assembler_mall():
     cells = zone_smelt_candidates(world, plan, {'steel-plate'})
     assert len(cells) >= 2
     assert all(reservation_reason(plan, c) is None for c in cells)
-    assert all(any(a['entity'] == 'electric-furnace' for a in c['plan']['phases'][0]['actions']) for c in cells)
+    for c in cells:
+        from collections import Counter
+        from planners.plan_validation import validate_build_plan
+        from training.laya_power import power_variants
+        bill = Counter(a['entity'] for a in c['plan']['phases'][0]['actions'])
+        assert bill['electric-furnace'] in (2, 4, 6)
+        assert bill['requester-chest'] == bill['passive-provider-chest'] == 1
+        validate_build_plan(c['plan'])
+        powered = {**world, 'machines': [], 'poles': [{'name': 'substation', 'position': {'x': 0, 'y': 0},
+                   'generated': True, 'wire': 18, 'supply': 9, 'grid': '1'}]}
+        assert power_variants(c, powered)
+
+
+def test_steel_line_rotates_to_fit_partial_logistic_coverage():
+    from planners.plan_validation import entity_footprint_tiles
+    from training.laya_site_plan import zone_smelt_candidates
+    world = {'ports': [{'position': {'x': 3, 'y': -1}, 'energy': 1, 'network': '1',
+                        'construction_radius': 55, 'logistic_radius': 25}]}
+    plan = {'zones': [{'zone_id': 'steel', 'purpose': 'smelt:steel-plate', 'rect': [-8, 16, 8, 32]}]}
+    candidates = zone_smelt_candidates(world, plan, {'steel-plate'})
+    assert candidates
+    for c in candidates:
+        acts = c['plan']['phases'][0]['actions']
+        assert all(-8 <= x < 8 and 16 <= y < 32 for a in acts for x,y in entity_footprint_tiles(a))
+        chests = [a for a in acts if a['entity'] in ('requester-chest','passive-provider-chest')]
+        assert all(max(abs(a['position']['x']-3),abs(a['position']['y']+1)) <= 24 for a in chests)
+        assert len({a['position']['y'] for a in acts if a['entity']=='electric-furnace'}) == 1

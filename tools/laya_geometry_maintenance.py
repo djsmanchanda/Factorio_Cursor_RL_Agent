@@ -34,7 +34,8 @@ class GeometryMaintenance:
         path = Path(adapter.root, 'evidence', 'geometry-maintenance.json')
         ledger = json.loads(path.read_text()) if path.exists() else {'retired': [], 'delivered': {}}
         rows = [(p, r) for p, r in receipts(adapter.root)
-                if r['candidate'].get('family') in ('starter', 'line') and r['submission'].get('ok')]
+                if (r['candidate'].get('family') in ('starter', 'line') or r['candidate'].get('shared_feed'))
+                and r['submission'].get('ok')]
         retired = {tuple(r['key']) for r in ledger['retired']}
         raw = {}
         for p, slim in rows:
@@ -107,7 +108,8 @@ class GeometryMaintenance:
         proposals = self._growth(rows, facts, retired, {p.name for p, r in raw.items() if owned_targets(r)})
         return {'candidates': proposals, 'retired': recovered,
                 'constructing_products': sorted({r['candidate']['product'] for _, r in rows
-                                                if r['candidate']['family'] == 'line' and r['status'] != 'observed'})}
+                                                if (r['candidate']['family'] == 'line' or r['candidate'].get('shared_feed'))
+                                                and r['status'] != 'observed'})}
 
     def _growth(self, rows, facts, retired, owners):
         proposals = []

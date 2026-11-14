@@ -160,6 +160,10 @@ rate rises over time with decisions in parallel on different aspects.
   dropped once a mall block exists. Laya is offered one slot: W/E of the nearest modules first, then N/S beside a
   built W/E slot.
 - **Line taps**: one topology per line. One fast tap while chests cannot be made; full rate afterwards.
+- **Steel expansion**: the shared deterministic conversion-line planner offers two, four or six
+  electric furnaces on common input/output belts, with one requester and one provider per line.
+  No additional single-furnace chest cells are offered. Pending lines reconcile before another
+  capacity offer; sufficient installed capacity waiting for iron does not trigger furnace growth.
 - **Retired starter providers**: keep each exact owned provider available while its stock drains.
   Remove the machinery first; bots may recover the chest only below five occupied inventory slots.
   Partial stacks and all qualities count; unknown occupancy retains the chest. Receipts keep the

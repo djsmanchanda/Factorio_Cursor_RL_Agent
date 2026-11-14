@@ -229,7 +229,7 @@ def base_zones(facts: Mapping, avoid: Sequence[Rect] = ()) -> list[dict]:
                   "rect": [reserve.min_x, reserve.min_y, reserve.max_x, reserve.max_y]})
     # Conversion furnaces need persistent land just as ore-fed foundations do.
     taken = [_rect(z["rect"]) for z in zones] + list(avoid) + [_base_core(facts)]
-    sites = sorted((Rect(x, y, x + 16, y + 16) for x in range(-120, 105, 8)
+    sites = sorted((Rect(x, y, x + 24, y + 24) for x in range(-120, 105, 8)
                     for y in range(-120, 105, 8)), key=lambda r: math.dist(r.centre, base))
     conversion = next((r for r in sites if not any(r.overlaps(t) for t in taken)), None)
     if conversion is not None:
@@ -341,6 +341,40 @@ def zone_smelt_candidates(facts: Mapping, plan: Mapping, plates: set[str]) -> li
             continue
         x1, y1, x2, y2 = zone["rect"]
         ore, count = SMELT_INPUTS[plate]
+        if plate == 'steel-plate':
+            from planners.plan_validation import actions as plan_actions, entity_footprint_tiles
+            from planners.smelter_block import generate_requester_smelting_line
+            # Shared deterministic geometry; policy chooses scale and legal site.
+            for furnaces in (2, 4, 6):
+                for flow in ('south', 'east', 'north', 'west'):
+                    shape = list(plan_actions(generate_requester_smelting_line(plate, furnaces, request_count=count, flow=flow)))
+                    tiles = [t for a in shape for t in entity_footprint_tiles(a)]
+                    min_x, max_x = min(x for x, y in tiles), max(x for x, y in tiles)
+                    min_y, max_y = min(y for x, y in tiles), max(y for x, y in tiles)
+                    for ox in range(math.ceil(x1 - min_x), math.floor(x2 - 1 - max_x) + 1, 4):
+                        for oy in range(math.ceil(y1 - min_y), math.floor(y2 - 1 - max_y) + 1, 4):
+                            actions = [{**a, 'position': {'x': a['position']['x'] + ox, 'y': a['position']['y'] + oy}}
+                                       for a in shape]
+                            for port in ports:
+                                px, py = port['position']['x'], port['position']['y']
+                                chests = [a for a in actions if a['entity'] in ('requester-chest', 'passive-provider-chest')]
+                                if any(max(abs(a['position']['x'] - px), abs(a['position']['y'] - py))
+                                       > port['construction_radius'] - 2 for a in actions):
+                                    continue
+                                if any(max(abs(a['position']['x'] - px), abs(a['position']['y'] - py))
+                                       > port['logistic_radius'] - 1 for a in chests):
+                                    continue
+                                anchor = min((p['position'] for p in ports if p['network'] == port['network']),
+                                             key=lambda q: (q['x'], q['y']))
+                                build = {'surface': 'nauvis', 'force': 'player', 'atomic': True,
+                                         'phases': [{'name': 'shared-steel-line', 'actions': actions}]}
+                                digest = sha256_hash({'plan': build, 'network_anchor': anchor})
+                                candidates.append({'option_id': f'smelt.z{digest[7:19]}', 'family': 'smelt', 'product': plate,
+                                                   'furnaces': furnaces, 'shared_feed': True, 'internal_power': True,
+                                                   'summary': f'{furnaces}-furnace electric steel line at ({ox},{oy}); one requester and one provider',
+                                                   'plan': build, 'network': port['network'], 'network_anchor': anchor})
+                                break
+            continue
         for cx in range(math.ceil(x1 + 3.5), math.floor(x2 - 3.5) + 1, 8):
             for cy in range(math.ceil(y1 + 1.5), math.floor(y2 - 1.5) + 1, 4):
                 x, y = cx + .5, cy + .5

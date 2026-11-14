@@ -14,6 +14,7 @@ from planners.smelter_block import (  # noqa: E402
     block_shape,
     generate_managed_refinery_extension_plan,
     generate_managed_refinery_plan,
+    generate_requester_smelting_line,
     generate_refinery_extension_plan,
     generate_refinery_plan,
     refinery_interfaces,
@@ -46,6 +47,21 @@ def test_the_smallest_refinery_is_start_plus_end_with_six_furnaces() -> None:
         "refinery_start_iron-plate", "refinery_end_iron-plate",
     ]
     assert sum(action["entity"] == "electric-furnace" for action in _placements(plan)) == 6
+
+
+def test_requester_steel_refinery_shares_chests_and_real_iron_input() -> None:
+    for furnaces in (2, 4, 6):
+        plan = generate_requester_smelting_line('steel-plate', furnaces)
+        placed = _placements(plan)
+        assert sum(a['entity'] == 'electric-furnace' for a in placed) == furnaces
+        assert sum(a['entity'] == 'requester-chest' for a in placed) == 1
+        assert sum(a['entity'] == 'passive-provider-chest' for a in placed) == 1
+        [requester] = [a for a in placed if a['entity'] == 'requester-chest']
+        assert requester['logistic_requests'] == [{'name': 'iron-plate', 'count': 100}]
+        assert not any(a['entity'] in ('stone-furnace', 'steel-furnace', 'electric-mining-drill') for a in placed)
+        assert not any(a.get('recipe') for a in placed)  # Furnaces infer steel from iron input.
+        assert _at(plan, -2.5, -.5)[0]['entity'] == 'transport-belt'
+        assert _at(plan, -2.5, -1.5)[0]['direction'] == 'north'
 
 
 def test_the_180_furnace_example_is_five_columns_and_five_middle_rows() -> None:

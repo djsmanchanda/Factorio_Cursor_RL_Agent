@@ -508,7 +508,7 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     proposed = [c for c in proposed if not off_lattice(c)]
     # Iron, copper and stone start with direct starters (drills feeding furnaces); the
     # generator's single-drill-into-chest mines and requester-fed furnaces are not offered.
-    proposed = [c for c in proposed if not ((c["family"] == "smelt" and c.get("product") in STARTER_ORE)
+    proposed = [c for c in proposed if not ((c["family"] == "smelt" and c.get("product") in {*STARTER_ORE, 'steel-plate'})
                                             or (c["family"] == "mine" and c.get("product") in STARTER_ORE.values()))]
     plates = {plate for plate, ore in STARTER_ORE.items() if plate in unmet or ore in unmet}
     # Sites must clear what is already placed: machines, poles, ports, and Laya's own submitted builds.
@@ -517,7 +517,9 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     # Mall cells anywhere in the mall block (the shared generator only offers fixed sites per roboport).
     proposed += mall_cell_candidates(facts, site_plan, unmet, obstacles=obstacles)
     proposed += list(lifecycle_candidates)
-    if site_plan and "steel-plate" in unmet:
+    steel = next((n for n in board['needs'] if n['item'] == 'steel-plate'), None)
+    if site_plan and "steel-plate" in unmet and 'steel-plate' not in constructing_products and steel \
+            and (steel.get('capacity') is None or steel['capacity'] < steel['required']):
         proposed += [c for c in zone_smelt_candidates(facts, site_plan, {"steel-plate"})
                      if clear_of(list(actions(c["plan"])), obstacles)]
     # After a plate's starter, more capacity comes from smelting lines (6 or 18 furnaces), added in parallel.

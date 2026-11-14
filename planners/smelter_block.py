@@ -411,6 +411,58 @@ def generate_managed_refinery_plan(
     return plan
 
 
+def generate_requester_smelting_line(
+    recipe: str, furnaces: int, *, origin_x: float = 0, origin_y: float = 0,
+    request_count: int = 100, flow: str = 'south',
+) -> dict:
+    """A compact electric conversion line sharing one requester and one provider.
+
+    Input and output belts serve the whole row. The shared feeder may leave
+    furnaces partly starved without consuming another chest pair per furnace.
+    """
+    data = LINE_RECIPES[recipe]
+    if data['machine'] != 'electric-furnace' or len(data['ingredients']) != 1:
+        raise ValueError('smelting line requires a single-input electric-furnace recipe')
+    if type(furnaces) is not int or furnaces < 2:
+        raise ValueError('a shared smelting line needs at least two furnaces')
+    if type(request_count) is not int or request_count < 1:
+        raise ValueError('request_count must be a positive integer')
+    turns = {'south': 0, 'west': 1, 'north': 2, 'east': 3}[flow]
+    def place(entity, x, y, **extra):
+        for _ in range(turns):
+            x, y = -y, x
+        if 'direction' in extra:
+            headings = ('north', 'east', 'south', 'west')
+            extra['direction'] = headings[(headings.index(extra['direction']) + turns) % 4]
+        return {'action_type': 'place_ghost', 'entity': entity,
+                'position': {'x': origin_x + x, 'y': origin_y + y}, **extra}
+    last_y = .5 + 3 * (furnaces - 1)
+    actions = [
+        place('requester-chest', -2.5, -2.5,
+              logistic_requests=[{'name': data['ingredients'][0], 'count': request_count}]),
+        place('fast-inserter', -2.5, -1.5, direction='north'),
+    ]
+    actions += [place('transport-belt', -2.5, y + .5, direction='south')
+                for y in range(-1, int(last_y) + 1)]
+    actions += [place('transport-belt', 3.5, y + .5, direction='south')
+                for y in range(int(last_y) + 2)]
+    for row in range(furnaces):
+        y = .5 + 3 * row
+        actions += [place('inserter', -1.5, y, direction='west'),
+                    place('electric-furnace', .5, y),
+                    place('inserter', 2.5, y, direction='west')]
+        # Between furnace rows, clear of the belts and both inserters.
+        if row % 2 == 0:
+            actions += [place('medium-electric-pole', -1.5, y + 1),
+                        place('medium-electric-pole', 2.5, y + 1)]
+    actions += [place('fast-inserter', 3.5, last_y + 2, direction='north'),
+                place('passive-provider-chest', 3.5, last_y + 3),
+                place('medium-electric-pole', 1.5, last_y + 3)]
+    plan = {'phases': [_phase(f'shared_smelting_{recipe}', actions)]}
+    validate_build_plan(plan)
+    return plan
+
+
 def generate_managed_refinery_extension_plan(
     recipe: str, current_furnaces: int, new_furnaces: int, *,
     origin_x: float = 0, origin_y: float = 0,
