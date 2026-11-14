@@ -469,3 +469,10 @@ User clarified that A/B must have no periodic schedules. Archived and removed th
 - What: validate contradictory envelopes; reconcile only actual invocation/transaction identities; retain initial and final receipt states, unknown and malformed slots, and duplicate/conflict counts. Runner summaries and collector use one function; controller publications count every immutable planned job and separate inherited/current milestone evidence from earned targets.
 - Evidence: 43 focused passes before the final narrow latency projection adjustment, also covered by the fast gate; settled fast1226 passed,3 skipped(two optional-lupa collection modules,one fluid-chain case),exit0. PM observation emission and retained stream replay remain open; no cohort adoption is claimed.
 - Lifecycle: future matching frozen runner/controller copies required; no runtime, deployment, service, save or campaign action performed.
+
+
+## [2026-11-15 04:02 IST] Preserve explicit upstream-construction deferrals
+
+- What: normalize the shared builder production_prerequisite_deferred receipt as deferred, preserving its cause and exception precedence. Unknown codes remain unknown. This repairs the concrete coverage gap found in retained C94 decisions317/318.
+- Evidence:14 focused outcome/reconciliation tests passed; settled controller fast1,227 passed,3 skipped(two optional-lupa collection modules and one known fluid-chain case),exit0. Historical replay counts retain their original source hashes; no new replay or eventual-delivery claim.
+- Lifecycle: future frozen controller and matching runner copies required; no runtime action.

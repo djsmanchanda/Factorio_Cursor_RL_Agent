@@ -97,3 +97,17 @@ def test_status_publication_counts_every_frozen_planned_job(tmp_path):
     result = json.loads((tmp_path / 'job-status.json').read_text())['accounting']
     assert result['planned_jobs'] == 2 and result['missing_status_jobs'] == ['missing']
     assert sum(result['process_states'].values()) == 2
+
+
+@pytest.mark.fast
+def test_recorded_production_prerequisite_deferral_preserves_cause():
+    # The shared builder emits a planned intended-difficulty signal, rather
+    # than the generic waiting state, while upstream construction is pending.
+    receipt = {"ok": False, "code": "production_prerequisite_deferred",
+               "classification": "intended_difficulty", "state": "planned"}
+    outcome = normalize(receipt, operation="produce")
+    assert outcome["state"] == "deferred"
+    assert outcome["cause"] == "production_prerequisite_deferred"
+    assert outcome["evidence"] == receipt
+    assert normalize({**receipt, "code": "unrecognized_deferred"})["state"] == "unknown"
+    assert normalize({**receipt, "error_type": "ValueError"})["state"] == "fault"
