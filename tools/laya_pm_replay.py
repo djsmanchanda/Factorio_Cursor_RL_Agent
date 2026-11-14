@@ -108,8 +108,10 @@ def main(argv=None):
     replay.add_argument('--max-steps', type=int, default=40)
     replay.add_argument('--engine-binary', type=Path,
                         default=Path('/home/miniship/.local/share/factorio-rl/runtime/factorio-2.1.24/bin/x64/factorio'))
-    replay.add_argument('--allow-busy-host', action='store_true',
-                        help='skip the host-idle gate (diagnostics only)')
+    replay.add_argument('--require-idle-host', action='store_true',
+                        help='also require that no Laya cohort unit is active (strict mode)')
+    replay.add_argument('--min-available-gb', type=float, default=REPLAY_MIN_AVAILABLE_GB,
+                        help='refuse to boot below this much free memory')
     replay.add_argument('--execute', action='store_true',
                         help='boot the disposable world; without it the plan is validated only')
     report = commands.add_parser('report')
@@ -145,12 +147,18 @@ def main(argv=None):
     if not args.execute:
         print(json.dumps({**plan, 'mode': 'dry_run', 'world_touched': False}, indent=2))
         return 0
-    if not getattr(args, "allow_busy_host", False):
+    if getattr(args, "require_idle_host", False):
         try:
             check_host_idle()
         except ReplayError as error:
             print(json.dumps({"kind": "laya-pm-replay-blocked-v1", "blocker": str(error)}, indent=2))
             return 2
+    try:
+        capacity = check_replay_capacity(game_port=args.game_port, rcon_port=args.rcon_port,
+                                         min_available_gb=args.min_available_gb)
+    except ReplayError as error:
+        print(json.dumps({"kind": "laya-pm-replay-blocked-v1", "blocker": str(error)}, indent=2))
+        return 2
     import subprocess as _sp
     engine = engine_receipt(Path(args.engine_binary) if getattr(args, "engine_binary", None)
                             else ROOT/"factorio_bin_placeholder")
@@ -192,7 +200,8 @@ def main(argv=None):
                             args.root, args.root/'evidence/strict.json'))
     finally:
         session.close()
-    print(json.dumps({**summary, 'prepared': prepared, 'reload': reload_info}, indent=2))
+    print(json.dumps({**summary, 'prepared': prepared, 'reload': reload_info,
+                      'capacity': capacity}, indent=2))
     return 0 if summary['pm_evidence_complete'] else 4
 
 
@@ -493,6 +502,47 @@ def check_host_idle(run=None) -> list[str]:
     if busy:
         raise ReplayError("host is not idle for a disposable replay: " + ", ".join(busy))
     return []
+
+
+REPLAY_MIN_AVAILABLE_GB = 8.0
+
+
+def available_memory_gb(path: Path = Path("/proc/meminfo")) -> float | None:
+    """MemAvailable in GiB, or None when the host does not expose it."""
+    try:
+        lines = path.read_text().splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        if line.startswith("MemAvailable:"):
+            try:
+                return int(line.split()[1]) / 1024 / 1024
+            except (IndexError, ValueError):
+                return None
+    return None
+
+
+def check_replay_capacity(*, game_port: int | None = None, rcon_port: int | None = None,
+                          min_available_gb: float = REPLAY_MIN_AVAILABLE_GB,
+                          memory_reader=available_memory_gb,
+                          port_probe=port_is_free) -> dict:
+    """Refuse a replay only for reasons that actually break it.
+
+    Requiring the whole host to be idle meant the fixture could rarely start:
+    the cohort queue keeps a unit resident almost continuously. A disposable
+    replay needs its own ports free and enough memory for one more server; a
+    resident cohort is not a blocker. Strict mode stays available via
+    ``check_host_idle``.
+    """
+    if game_port is not None and not port_probe(game_port, "game"):
+        raise ReplayError(f"game port {game_port} is already in use")
+    if rcon_port is not None and not port_probe(rcon_port, "rcon"):
+        raise ReplayError(f"rcon port {rcon_port} is already in use")
+    available = memory_reader()
+    if available is not None and available < min_available_gb:
+        raise ReplayError(f"only {available:.1f} GiB memory available; "
+                          f"a replay needs {min_available_gb:.1f} GiB")
+    return {"available_gb": available, "min_available_gb": min_available_gb}
 
 
 def engine_receipt(binary: Path) -> dict:

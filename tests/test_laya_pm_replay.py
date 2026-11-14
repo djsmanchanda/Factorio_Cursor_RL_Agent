@@ -398,3 +398,25 @@ def test_the_session_trace_is_journaled_even_when_a_step_raises(tmp_path):
     assert traced == [(1, "  CELL DELIVERY: moved 8 plastic-bar"), (2, "  gate refresh")]
     step_row = next(row for row in rows if row["event"] == "pm_replay_step")
     assert step_row["step"] == 1 and step_row["messages"] == 1
+
+
+def test_capacity_gate_allows_a_busy_host_when_ports_and_memory_are_free():
+    capacity = replay.check_replay_capacity(
+        game_port=64800, rcon_port=64900, min_available_gb=8.0,
+        memory_reader=lambda: 14.7, port_probe=lambda port, kind: True)
+    assert capacity["available_gb"] == 14.7
+
+
+def test_capacity_gate_blocks_low_memory():
+    with pytest.raises(replay.ReplayError, match="memory available"):
+        replay.check_replay_capacity(game_port=64800, rcon_port=64900, min_available_gb=8.0,
+                                     memory_reader=lambda: 2.5,
+                                     port_probe=lambda port, kind: True)
+
+
+def test_capacity_gate_blocks_an_occupied_port():
+    with pytest.raises(replay.ReplayError, match="game port 64800 is already in use"):
+        replay.check_replay_capacity(
+            game_port=64800, rcon_port=64900, min_available_gb=8.0,
+            memory_reader=lambda: 14.7,
+            port_probe=lambda port, kind: kind != "game")

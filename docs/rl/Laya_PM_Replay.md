@@ -21,9 +21,13 @@ code/mods. The known local diagnostic candidate is generation
 `laya-f33dd24b9c04408797c719d31213b70a` in the mixed-checkpoint-after-c46-20261028
 bank: C4 at tick 514525, one validated receipt, acceptance_eligible false.
 
-After the active campaign's terminal accounting and physical cleanup, prepare
-one disposable copy with the existing saved-world/restart interface and an
-independent deadline. Verify the target mod/engine identity and C4 reload.
+The host resident cohorts are not a blocker by themselves: a replay boots when
+its own game/rcon ports are free (distinct from every cohort base) and at least
+`--min-available-gb` (default 8 GiB) of memory is available. `--require-idle-host`
+restores the older whole-host gate for strict runs. This exists because the
+cohort queue keeps a unit resident almost continuously, so an idle-only gate
+would rarely open. Prepare one disposable copy with the existing
+saved-world/restart interface and an independent deadline. Verify the target mod/engine identity and C4 reload.
 Exercise the existing PM service operation, recording its exact selected
 operation, outcomes, bills and changed stock. Fix the first demonstrated hard
 failure; do not add a priority rule from an unfunded-bill label alone. The C95b
