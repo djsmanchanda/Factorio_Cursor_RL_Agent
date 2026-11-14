@@ -21,6 +21,7 @@ from tools.checkpoint_catalog import atomic_json
 from tools.deterministic_fleet_runtime import create_detached_checkout
 from training.laya_restart_checkpoint import load as load_checkpoint
 from training.laya_mission_contract import mission_settings, frozen_capability
+from training.laya_operation_outcome import read_records, summarize_records, planned_job_accounting
 
 # 2026-10-30 latest user directives (supersede the same-day 3-day scale
 # request): mixed cohorts are 120-150 jobs — the cohort owner picks the exact
@@ -486,6 +487,9 @@ def collect_result(world, job):
             except ValueError:
                 errors.append('malformed_acceptance_journal')
                 continue
+            if not isinstance(row, dict):
+                errors.append('malformed_acceptance_journal')
+                continue
             if row.get('event') == 'strict_current':
                 observations.append(row)
             elif row.get('event') == 'summary':
@@ -494,17 +498,22 @@ def collect_result(world, job):
                 research = row
             elif row.get('event') == 'acceptance':
                 statuses = row.get('statuses') or {}
+                if not isinstance(statuses, dict):
+                    errors.append('malformed_acceptance_statuses')
+                    final = None
+                    continue
                 final = None if 'error' in statuses else [k for k,v in statuses.items() if v == 'passed']
                 for key in final or []:
                     latches.setdefault(key, row.get('tick'))
-    outcomes = []
     records = world/'evidence/decision-states.jsonl'
-    if records.exists():
-        for line in records.read_text().splitlines():
-            try:
-                outcomes.append(json.loads(line).get('outcome') or {})
-            except ValueError:
-                errors.append('malformed_decision_journal')
+    rows = read_records(records)
+    outcomes = [(r.get('outcome') if isinstance(r.get('outcome'), dict) else {}, r.get('typed_outcome'))
+                for r in rows]
+    errors.extend('malformed_decision_journal' for r in rows if r.get('evidence_error'))
+    updates = []
+    if journal.exists():
+        updates = [r for r in read_records(journal) if r.get('event') == 'operation_observation']
+    accounting = summarize_records(records, observations=updates)
     loaded = summary.get('loaded_tick')
     if type(loaded) is not int:
         loaded = next((r['loaded_tick'] for r in observations if type(r.get('loaded_tick')) is int), None)
@@ -512,13 +521,41 @@ def collect_result(world, job):
     for row in observations:
         if type(loaded) is not int or type(row.get('tick')) is not int or row['tick'] <= loaded:
             continue
-        for stage, passed in row.get('statuses', {}).items():
+        statuses = row.get('statuses')
+        for stage, passed in (statuses.items() if isinstance(statuses, dict) else ()):
             if passed is True and stage not in reached:
                 reached[stage] = row['tick']
                 latency[stage] = {'ticks':row['tick']-loaded, 'time_seconds':row.get('elapsed_seconds'),
                                   'decisions':row.get('decisions')}
     target = job.get('strict_target')
-    passed = True if target in reached else False if target and observations else None
+    known_target = [(r.get('statuses') or {}).get(target) for r in observations
+                    if isinstance(r.get('statuses'), dict) and type(r.get('tick')) is int
+                    and type(loaded) is int and r['tick'] > loaded]
+    legacy_reached = dict(reached)
+    contracts = [(r.get('predicate_evidence') or {}).get('_contract') for r in observations
+                 if isinstance(r.get('predicate_evidence'), dict)]
+    contract = next((c for c in reversed(contracts) if isinstance(c, dict)), None)
+    basis, eligible = 'legacy_current_pass_after_load', None
+    if contract is not None:
+        basis = 'observed_predicate_transitions'
+        reached = {}
+        for event in contract.get('observed_events') or ():
+            if (isinstance(event, dict) and event.get('kind') == 'predicate_transition'
+                    and isinstance(event.get('checkpoint'), str) and type(event.get('tick')) is int
+                    and type(loaded) is int and event['tick'] > loaded):
+                reached.setdefault(event['checkpoint'], event['tick'])
+        inherited = contract.get('inherited_start')
+        initial = (inherited.get('predicates') or {}).get(target) if isinstance(inherited, dict) else None
+        if isinstance(initial, dict) and initial.get('status') in ('passed', 'failed'):
+            eligible = initial['status'] == 'failed'
+    if contract is not None:
+        samples_by_tick = {r.get('tick'): r for r in observations if type(r.get('tick')) is int}
+        latency = {stage: {'ticks': tick-loaded,
+                          'time_seconds': samples_by_tick.get(tick, {}).get('elapsed_seconds'),
+                          'decisions': samples_by_tick.get(tick, {}).get('decisions')}
+                   for stage, tick in reached.items()}
+    passed = (True if target in reached and eligible is not False else False if any(v is False for v in known_target)
+              and (contract is None or eligible is True) else None)
     # Geometry receipts use status rather than ok. A missing field is unknown,
     # not a failed tool call; an explicitly empty summary is authoritative too.
     faults = summary.get('faults')
@@ -526,15 +563,17 @@ def collect_result(world, job):
         faults = dict(__import__('collections').Counter(
             str(r.get('code') or ('runner_error:' + str(r.get('error_type') or 'unknown')
                                   if r.get('status') == 'failed' else 'tool_error'))
-            for r in outcomes if r.get('ok') is False or r.get('status') == 'failed'))
+            for r, _ in outcomes if r.get('ok') is False or r.get('status') == 'failed'))
     classification = summary.get('stop_classification')
     if classification is None:
         classification = 'genuine_failure' if summary.get('stop') == 'stalled' else 'unknown'
     relevant = [stage for stage in reached if stage > job.get('origin', job.get('checkpoint', 'C0'))]
     first = min(relevant, key=lambda stage: reached[stage]) if relevant else None
-    return {'faults':faults, 'accepted_ever':sorted(latches), 'accepted_final':final,
+    return {**accounting, 'legacy_counter_meanings': {'failures':'runner caught exceptions', 'faults':'historical summary or legacy fallback'}, 'faults':faults, 'accepted_ever':sorted(latches), 'accepted_final':final,
             'legacy_latch_reached':latches, 'strict_reached':reached, 'loaded_tick':loaded,
-            'strict_current':observations[-STRICT_CURRENT_KEEP:], 'strict_current_at_end':observations[-1]['statuses'] if observations else None,
+            'strict_reached_basis':basis, 'legacy_current_pass_reached':legacy_reached,
+            'objective_eligible':eligible, 'milestone_evidence':contract,
+            'strict_current':observations[-STRICT_CURRENT_KEEP:], 'strict_current_at_end':observations[-1].get('statuses') if observations else None,
             'stage_latency':latency, 'progress_latency':latency.get(first, {}),
             'runner_stop':summary.get('stop'), 'stop_classification':classification,
             'research_acceptance':summary.get('research_acceptance') or research,
@@ -561,6 +600,9 @@ def _publish(root, mutate, min_interval=0.0):
                 and time.time() - float(status.get('updated') or 0.0) < min_interval):
             return value
         status['updated'] = time.time()
+        plan_path = root/'planned-jobs.json'
+        if plan_path.is_file():
+            status['accounting'] = planned_job_accounting(read(plan_path)['jobs'], status['jobs'])
         atomic_json(root/'job-status.json', status)
         return value
 

@@ -463,3 +463,9 @@ User clarified that A/B must have no periodic schedules. Archived and removed th
 - What: extract this branch's unchanged deterministic session and economics projection into orchestrator; retain the training module as an identity-preserving compatibility alias. The import firewall is unchanged.
 - Evidence: 50 focused initialization/runner/isolation checks passed; final combined controller fast gate1,215 passed,three skipped (two optional-lupa collection modules and one known fluid-chain case),exit0. The combined tree includes the uncommitted RC7 outcome work, which remains under separate review; this entry verifies the dependency repair only.
 - Lifecycle: future frozen Python runners/controllers need the source; no mod deployment or Factorio reload. No runtime action or full controller restart-equivalence proof.
+
+## [2026-11-15 03:51 IST] Shared receipt reconciliation and explicit denominators
+
+- What: validate contradictory envelopes; reconcile only actual invocation/transaction identities; retain initial and final receipt states, unknown and malformed slots, and duplicate/conflict counts. Runner summaries and collector use one function; controller publications count every immutable planned job and separate inherited/current milestone evidence from earned targets.
+- Evidence: 43 focused passes before the final narrow latency projection adjustment, also covered by the fast gate; settled fast1226 passed,3 skipped(two optional-lupa collection modules,one fluid-chain case),exit0. PM observation emission and retained stream replay remain open; no cohort adoption is claimed.
+- Lifecycle: future matching frozen runner/controller copies required; no runtime, deployment, service, save or campaign action performed.
