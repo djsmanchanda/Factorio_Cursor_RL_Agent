@@ -327,3 +327,26 @@ def test_an_unserved_precursor_preempts_the_lowest_ranked_demanded_cell():
         == [("electronic-circuit", "copper-cable")]
     both = [{**c, "retargeted_tick": 9_000} for c in fresh]
     assert assign(both, order, board, recipes, have, 10_000) == []
+
+
+@pytest.mark.fast
+def test_alias_identity_survives_live_cell_gates_retargets_and_shared_slot_geometry(tmp_path):
+    from planners.laya_quad_cell import generate_quad_slot
+    from training.laya_mall_slots import retarget_plan
+
+    cell_receipt(tmp_path, 'alias', 2.5, 'alias-recipe')
+    facts = world((2.5, 'alias-recipe', 'working'))
+    spec = {'recipe': 'alias-recipe', 'ingredients': [{'name': 'iron-plate', 'amount': 1}],
+            'product_amount': 2, 'energy_ticks': 30}
+    facts['recipes'] = {**facts['recipes'], 'alias-product': spec}
+    [cell] = mall_cells(tmp_path, facts)
+    assert cell['product'] == 'alias-product' and cell['recipe'] == 'alias-recipe'
+    [gate] = gate_updates([cell], set(), {})
+    assert gate['recipe'] == 'alias-recipe'
+    assert gate['logistic_condition']['signal'] == 'alias-product'
+    applied = {(2.5, .5): ('alias-recipe', True, gate['logistic_condition']['constant'])}
+    assert gate_updates([cell], set(), applied) == []
+    plan = retarget_plan(cell, 'alias-product', facts['recipes'], gated=False)
+    assert plan['phases'][0]['actions'][-1]['recipe'] == 'alias-recipe'
+    placements = generate_quad_slot('alias-product', spec, (0, 0), 'west')
+    assert next(a for a in placements if a['entity'] == 'assembling-machine-1')['recipe'] == 'alias-recipe'

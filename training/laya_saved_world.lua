@@ -16,7 +16,7 @@ end
 local facts = {version="saved-world-v1", tick=game.tick, surface="nauvis", force="player",
   mods=script.active_mods, networks={}, ports={}, poles={}, machines={}, resources={},
   player_stock={}, production={}, consumption={}, researched={}, pending_ghosts=0,
-  infrastructure_counts={}, recipes={}, recipe_observations={}, enabled_recipes={}, fluid_recipes={}}
+  infrastructure_counts={}, recipes={}, recipe_observations={}, recipe_product_index={version="1",products={}}, enabled_recipes={}, fluid_recipes={}}
 local generation = {}
 for _, e in pairs(surface.find_entities_filtered{force=force}) do
   facts.infrastructure_counts[e.name]=(facts.infrastructure_counts[e.name] or 0)+1
@@ -114,18 +114,40 @@ for machine,p in pairs(prototypes.entity) do
     end
   end
 end
+local unlocks={}
+for tech_name,tech in pairs(force.technologies) do
+  for _,effect in pairs(tech.effects or {}) do
+    if effect.type=="unlock-recipe" and effect.recipe then
+      unlocks[effect.recipe]=unlocks[effect.recipe] or {}
+      table.insert(unlocks[effect.recipe],tech_name)
+    end
+  end
+end
 local observation_count=0
 local unsupported_categories=0
 for name,r in pairs(force.recipes) do
   local ingredients={}; local products={}
+  local quality_state="normal"
+  local function check_quality(part)
+    -- Recipe bounds/changes are not item-stack quality. Non-default bounds
+    -- require quality-aware planning, which this normal-quality operation lacks.
+    if (part.quality_min~=nil and part.quality_min~="normal")
+      or (part.quality_max~=nil and part.quality_max~="normal") or (part.quality_change or 0)~=0 then
+      quality_state="unsupported"
+    end
+  end
   for _,part in pairs(r.ingredients or {}) do
-    table.insert(ingredients,{name=part.name,type=part.type,amount=part.amount})
+    check_quality(part)
+    table.insert(ingredients,{name=part.name,type=part.type,amount=part.amount,
+      quality_min=part.quality_min,quality_max=part.quality_max,quality_change=part.quality_change})
   end
   for _,part in pairs(r.products or {}) do
+    check_quality(part)
     table.insert(products,{name=part.name,type=part.type,amount=part.amount,
       amount_min=part.amount_min,amount_max=part.amount_max,probability=part.probability,
       independent_probability=part.independent_probability,shared_probability=part.shared_probability,
       extra_count_fraction=part.extra_count_fraction,
+      quality_min=part.quality_min,quality_max=part.quality_max,quality_change=part.quality_change,
       ignored_by_productivity=part.ignored_by_productivity})
     -- Item counters include science packs and every other item product.
     -- Fluid counters stay out of item production and provider inventory.
@@ -151,10 +173,17 @@ for name,r in pairs(force.recipes) do
   end
   local energy=(r.energy or .5)*60
   local observation={enabled=r.enabled,ingredients=ingredients,products=products,
-    categories=category_list,machine_speeds=speeds,
+    categories=category_list,machine_speeds=speeds,quality_state=quality_state,
     energy_ticks=math.max(1/60,energy),productivity_bonus=r.productivity_bonus}
   if category_list[1] then observation.category=category_list[1] end
+  if unlocks[name] then table.sort(unlocks[name]); observation.unlock_technologies=unlocks[name] end
   facts.recipe_observations[name]=observation
+  for _,part in ipairs(products) do
+    local key=part.type .. ":" .. part.name
+    local entries=facts.recipe_product_index.products[key] or {}
+    entries[#entries+1]=name
+    facts.recipe_product_index.products[key]=entries
+  end
   if r.enabled then facts.enabled_recipes[name]=true end
   -- Enabled recipes touching a fluid get their own typed key; facts.recipes
   -- (Laya's solid build menu) never sees them. Products carry their expected
@@ -175,6 +204,7 @@ for name,r in pairs(force.recipes) do
   end
   observation_count=observation_count+1
 end
+for _,entries in pairs(facts.recipe_product_index.products) do table.sort(entries) end
 -- The count covers exactly force.recipes at this tick, enabled or not. Other
 -- forces and prototype-only recipes are outside this survey's declared scope.
 -- This envelope is survey-local, not the /export_recipe_catalog document. It
@@ -184,39 +214,44 @@ facts.recipe_catalog={version="1.2.0",force=force.name,tick=game.tick,surface="n
   recipe_count=observation_count,source="force.recipes",complete=unsupported_categories==0,
   document="saved-world-recipe-survey",metadata_only=true,
   category_metadata_unsupported=unsupported_categories}
--- The solid operation catalog stays the fixed list plus explicitly demanded
--- recipes. Only requested extras expand through item ingredients, so a normal
--- survey does not silently grow Laya's build menu.
-local seen={}
-for _,name in ipairs(recipe_names) do seen[name]=true end
-local function include(name)
-  if type(name)=="string" and name~="" and not seen[name] then
-    seen[name]=true; table.insert(recipe_names,name)
-  end
-end
-local base_count=#recipe_names
-for _,name in ipairs(request.extra_recipes or {}) do include(name) end
-local index=1
-while index<=#recipe_names do
-  local name=recipe_names[index]
-  -- Index this entry before processing it; incrementing first made the last
-  -- fixed recipe look like an extra and silently widened the baseline menu.
-  local is_extra=index>base_count
-  index=index+1
+-- Build the solid operation view from the complete force survey. The current
+-- Single-output solid assembly operations use observed recipe identity.
+-- Other outputs remain in the product index and observation facts.
+local names={}
+-- These are the existing automatic-recipe furnace operations, not discovery
+-- limits: every force recipe still appears in the typed product index above.
+local furnace_operations={["iron-plate"]=true,["copper-plate"]=true,
+  ["stone-brick"]=true,["steel-plate"]=true}
+for name in pairs(force.recipes) do names[#names+1]=name end
+table.sort(names)
+for _,name in ipairs(names) do
   local r=force.recipes[name]
-  if r and r.enabled then
-    local ingredients={}; local solid=true
-    for _, part in pairs(r.ingredients or {}) do
-      if part.type=="fluid" then solid=false end
-      if is_extra and part.type=="item" then include(part.name) end
-      table.insert(ingredients,{name=part.name,amount=part.amount})
-    end
-    if solid then
-      local amount=0
-      for _,part in pairs(r.products or {}) do if part.name==name then amount=part.amount or 0 end end
-      if amount>0 then facts.recipes[name]={ingredients=ingredients,product_amount=amount,
-        energy_ticks=math.max(1,math.floor((r.energy or .5)*60+.5))} end
-    end
+  local obs=facts.recipe_observations[name]
+  local product=obs.products[1]
+  local machine=obs.machine_speeds["assembling-machine-1"] and "assembling-machine-1"
+    or (product and furnace_operations[product.name] and obs.machine_speeds["electric-furnace"] and "electric-furnace")
+  local cause=nil
+  if obs.quality_state~="normal" then cause="quality_unsupported"
+  elseif #obs.products~=1 then cause="multiple_outputs"
+  elseif product.type~="item" then cause="fluid_operation"
+  elseif not obs.categories[1] then cause="category_unknown"
+  elseif not machine then cause="category_unsupported"
+  elseif type(product.amount)~="number" or product.amount<=0 then cause="nondeterministic_output"
+  elseif (product.probability~=nil and product.probability~=1)
+    or (product.independent_probability~=nil and product.independent_probability~=1)
+    or (product.shared_probability~=nil and (product.shared_probability.min~=0 or product.shared_probability.max~=1))
+    or (product.extra_count_fraction~=nil and product.extra_count_fraction~=0)
+    or product.amount_min~=nil or product.amount_max~=nil then cause="nondeterministic_output" end
+  for _,part in ipairs(obs.ingredients) do
+    if part.type~="item" then cause="fluid_operation"
+    elseif type(part.amount)~="number" or part.amount<=0 then cause=cause or "ingredient_unsupported" end
+  end
+  obs.solid_classification={version="1",supported=cause==nil,cause=cause,machine=machine or nil}
+  local solid=r.enabled and cause==nil and facts.recipes[product.name]==nil
+
+  if solid then
+    facts.recipes[product.name]={recipe=name,ingredients=obs.ingredients,product_amount=product.amount,
+      energy_ticks=math.max(1,math.floor(obs.energy_ticks+.5)),machine_speeds=obs.machine_speeds}
   end
 end
 for _, name in ipairs({"iron-ore","copper-ore","coal","stone"}) do

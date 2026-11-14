@@ -126,7 +126,7 @@ steel cycle, explicit loan alternatives, faithful measured labels and a
 compatible learned policy; then missing goal actions and matched acceptance.
 Coordinate shared mall/adapter files through their latest ownership handoff.
 
-Oil facts (November 7, 2026; unit and Lua-fixture tests only): the saved-world survey exports enabled recipes with a fluid ingredient or product as typed `facts["fluid_recipes"]` (ingredients/products with type and amount, energy ticks, category, compatible machine speeds); `facts["recipes"]`, the solid build menu, is unchanged. The status board expands fluid goals through them (`production_recipes`): per product, the shortest chain to raw resources, ties to a recipe already running, then fewer ingredients. Plastic at 0.5/s reads as one chemical plant, 5 petroleum gas/s from one oil refinery (basic oil processing) and about 11 crude/s; crude oil and water are raw. A read-only `facts["oil_field"]` survey (512 tiles of generated terrain around the lowest roboport, else spawn) reports the nearest crude-oil patch (centre, distance, wells, total amount, yield, crude/s with one pumpjack per well) and the nearest water tile; its compact form is `observation_digest.oil_field`. No oil operation exists yet, so fluid needs stay in the menu's `blocked` as `no_candidate`. Fluid flow is not measured, so crude oil and petroleum gas never read as satisfied from counters. A candidate may declare its own `scope_bounds` (unit and Lua-fixture tests only); the Lua validator then checks that candidate's actions against it instead of the global ±128 bounds. The adapter refuses a declared scope before Lua (`scope_malformed`, `scope_unsurveyed`, `scope_excludes_actions`, `scope_too_wide`, `scope_out_of_reach`, `scope_off_route`) unless it tightly contains the candidate's actions, lies within the oil search radius of the survey anchor, and touches the outpost (128 tiles around the surveyed oil field, for the cell and its coal mine), the global bounds or a 64-tile corridor along the base-to-oil line (reach hops); the option's state `scope` shows it. Candidates without one are unchanged.
+Oil facts (November 7, 2026; unit and Lua-fixture tests only): the saved-world survey exports enabled recipes with a fluid ingredient or product as typed `facts["fluid_recipes"]` (ingredients/products with type and amount, energy ticks, category, compatible machine speeds); `facts["recipes"]` is the separate solid build menu. The status board expands fluid goals through them (`production_recipes`): per product, the shortest chain to raw resources, ties to a recipe already running, then fewer ingredients. Plastic at 0.5/s reads as one chemical plant, 5 petroleum gas/s from one oil refinery (basic oil processing) and about 11 crude/s; crude oil and water are raw. A read-only `facts["oil_field"]` survey (512 tiles of generated terrain around the lowest roboport, else spawn) reports the nearest crude-oil patch (centre, distance, wells, total amount, yield, crude/s with one pumpjack per well) and the nearest water tile; its compact form is `observation_digest.oil_field`. No oil operation exists yet, so fluid needs stay in the menu's `blocked` as `no_candidate`. Fluid flow is not measured, so crude oil and petroleum gas never read as satisfied from counters. A candidate may declare its own `scope_bounds` (unit and Lua-fixture tests only); the Lua validator then checks that candidate's actions against it instead of the global ±128 bounds. The adapter refuses a declared scope before Lua (`scope_malformed`, `scope_unsurveyed`, `scope_excludes_actions`, `scope_too_wide`, `scope_out_of_reach`, `scope_off_route`) unless it tightly contains the candidate's actions, lies within the oil search radius of the survey anchor, and touches the outpost (128 tiles around the surveyed oil field, for the cell and its coal mine), the global bounds or a 64-tile corridor along the base-to-oil line (reach hops); the option's state `scope` shows it. Candidates without one are unchanged.
 
 ## Automated mall slots and decision cadence (November 8, 2026; unit tests, replay and a live smoke)
 
@@ -167,3 +167,33 @@ rate rises over time with decisions in parallel on different aspects.
 - **`coal-feed`** (November 7, 2026; unit tests with recorded planner outputs and the real mine classifier only; need: the `oil` need it unblocks, plastic first; `product: coal`): while `oil` is blocked `needs:coal_source`, the belt coal mine `ensure_coal_mine` would build is planned by the pure `plan_coal_mine_intent` (`orchestrator/stage_chemical.py`; surveys: one bulk ore-origin read, then bounded `clear`/`drill_ore` probes, at most 128 reads) on the nearest viable coal patch to the cell centre. It is reach-targeted until covered, then offered as one scoped ghost plan with a `coal_power_bridge` phase after its substation. It sits under the plastic need so the guided policy reads it as a goal build (`goal_need`); `goal_blocker` reads only `item_shortfall` reasons, so a `needs:` block never sets it. Blocks: `no_coal_patch`, `coal_plan_failed`, `coal_needs_landfill`, `coal_power_plan_failed`, `coal_unpowered`. It may stand on `ore:coal` land. `find_resource_mine` recognizes mines by layout (drills beside a belt row, ghosts included), so the submitted ghosts read as `coal_source_incomplete` and the built mine as the belt source that unblocks `oil`. Laya reads it with `include_unclassified=False`, so lone drill-to-chest `mine` drills no longer pass for an incomplete belt mine. The declared-scope rule is unchanged: a coal patch off the base-to-oil corridor and outside the outpost area is refused `scope_off_route` by the adapter.
 
 Not verified live: survey cost and RCON command size for the cell plan of about 230 actions, multi-phase atomic submission through the layout executor, coverage at the coal-belt midpoint, and grid capacity for the roughly 2.6 MW cell.
+
+## Recipe discovery and executable support (15 November 2026)
+
+The saved-world survey indexes every force recipe by typed product, including
+disabled and unsupported recipes. Its solid operation catalog includes enabled,
+deterministic single-item recipes compatible with the existing assembler
+operation or the four existing furnace operations. Recipe identity travels
+separately from product identity through shared slot geometry, live cell
+readback, retargeting and stock gates. Fluid recipes retain their typed path.
+
+Version 1 `solid_classification` records the surveyed operation machine and
+reason for refusal. The board and menu keep absent telemetry/incomplete surveys,
+known product absence, disabled recipes with observed unlocks, and unsupported
+operations distinct. Multi-output, probabilistic and nonnormal recipe-quality
+constraints remain observable without authorizing an unsupported operation.
+[ItemProduct](https://lua-api.factorio.com/2.1.24/concepts/ItemProduct.html),
+[Ingredient](https://lua-api.factorio.com/2.1.24/concepts/Ingredient.html) and
+[SharedProbabilityDefinition](https://lua-api.factorio.com/2.1.24/concepts/SharedProbabilityDefinition.html)
+describe the 2.1.24 fields: independent probability 1 and shared range 0–1
+accept every roll; recipe quality bounds differ from inventory/entity quality.
+
+The retained C0-b-s84004 snapshot omitted quality bounds and operation
+classification. Those historical facts remain unknown. An offline fixture
+preserves its recipe fields and source hash; a separately specified refreshed
+normal-quality survey reaches candidate construction-material checks. This
+does not establish the missing historical quality facts or live production.
+
+The Lua helper is sent by the adapter on each query, rather than installed in
+the mod. Future runners need a frozen copy of the corrected Python/helper/schema
+combination; this change requires no installed-mod deployment or Factorio reload.

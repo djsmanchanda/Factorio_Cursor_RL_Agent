@@ -245,6 +245,63 @@ def _upgrade_fact(machines: Sequence[Mapping], item: str, recipe: Mapping | None
             "target_in_stock": int(stock.get(target, 0)), "target_recipe_enabled": target in recipes}
 
 
+def recipe_evidence(facts: Mapping, item: str) -> dict:
+    """Explain product discovery separately from supported assembly operations."""
+    observations = facts.get("recipe_observations")
+    catalog = facts.get("recipe_catalog")
+    if not isinstance(observations, Mapping) or not isinstance(catalog, Mapping):
+        return {"condition": "recipe_unknown", "cause": "telemetry_missing", "recipes": []}
+    matches = [(name, spec) for name, spec in observations.items() if isinstance(spec, Mapping)
+               and any(isinstance(part, Mapping) and part.get("name") == item and part.get("type") == "item"
+                       for part in spec.get("products", ()))]
+    if not matches:
+        return {"condition": "recipe_unavailable" if catalog.get("complete") is True else "recipe_unknown",
+                "cause": "product_absent" if catalog.get("complete") is True else "survey_incomplete", "recipes": []}
+    names = sorted(name for name, _ in matches)
+    enabled = [(name, spec) for name, spec in sorted(matches) if spec.get("enabled") is True]
+    if enabled:
+        # New surveys publish the classification used to build facts.recipes.
+        # Older observations retain only a subset of the prototype fields.
+        for name, spec in enabled:
+            classification = spec.get("solid_classification")
+            if isinstance(classification, Mapping) and classification.get("version") == "1":
+                if classification.get("supported") is True:
+                    return {"condition": "recipe_unknown", "cause": "operation_view_missing", "recipes": names}
+                cause = classification.get("cause", "operation_unsupported")
+            else:
+                products, ingredients = spec.get("products", ()), spec.get("ingredients", ())
+                shared = products[0].get("shared_probability") if len(products) == 1 else None
+                if not spec.get("categories"):
+                    cause = "category_unknown"
+                elif "assembling-machine-1" not in spec.get("machine_speeds", {}):
+                    cause = "category_unsupported"
+                elif len(products) != 1:
+                    cause = "multiple_outputs"
+                elif any(p.get("type") == "fluid" for p in (*products, *ingredients)):
+                    cause = "fluid_operation"
+                elif (products[0].get("probability", 1) != 1 or products[0].get("independent_probability", 1) != 1
+                      or (shared is not None and shared != {"min": 0, "max": 1})
+                      or products[0].get("amount_min") is not None or products[0].get("amount_max") is not None
+                      or products[0].get("extra_count_fraction", 0) != 0):
+                    cause = "nondeterministic_output"
+                elif spec.get("quality_state") != "normal":
+                    cause = "quality_unsupported" if spec.get("quality_state") == "unsupported" else "quality_unknown"
+                else:
+                    cause = "operation_view_missing"
+            if cause in ("operation_view_missing", "quality_unknown", "category_unknown"):
+                return {"condition": "recipe_unknown", "cause": cause, "recipes": names}
+        return {"condition": "recipe_unsupported", "cause": cause, "recipes": names}
+
+    if all(spec.get("enabled") is False for _, spec in matches):
+        return {"condition": "recipe_disabled", "cause": "disabled", "recipes": names,
+                "unlock_technologies": sorted({tech for _, spec in matches for tech in spec.get("unlock_technologies", ())})}
+    return {"condition": "recipe_unknown", "cause": "enabled_unknown", "recipes": names}
+
+
+def recipe_availability(facts: Mapping, item: str) -> str:
+    return recipe_evidence(facts, item)["condition"]
+
+
 def _diagnose(item: str, recipe: Mapping | None, buckets: Mapping[str, int], machine_count: int,
               required: float, capacity: float | None, measured: float | None, stock: int = 0,
               goal: bool = False, consumed: float | None = None) -> str:
@@ -331,6 +388,8 @@ def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Ma
         condition = _diagnose(item, recipe, buckets, len(machines), required, capacity, measured,
                               int(stock.get(item, 0)), goal=item in targets,
                               consumed=_measured(measurement, "consumption", item))
+        if condition == "recipe_unavailable":
+            condition = recipe_availability(facts, item)
         if condition == "unbuilt" and built.get(item, 0) > 0:
             condition = "built_idle"  # Built by the runner but never ran (usually starved of input).
         needs.append({
@@ -343,6 +402,7 @@ def compile_status(facts: Mapping, targets: Mapping[str, float], measurement: Ma
             "machines_needed": machines_needed, "stock": int(stock.get(item, 0)),
             "upgrade": None if recipe is None else _upgrade_fact(machines, item, recipe, recipes, stock),
             "condition": condition,
+            "recipe_evidence": recipe_evidence(facts, item) if condition.startswith("recipe_") else None,
         })
     conditions = {n["item"]: n["condition"] for n in needs}
     for need in needs:

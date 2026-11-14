@@ -67,7 +67,7 @@ def test_board_separates_starved_undersized_blocked_unpowered_and_locked_needs()
     assert needs["copper-cable"]["machines_needed"]["assembling-machine-1"] == 2
     assert needs["copper-plate"]["condition"] == "output_blocked"
     assert needs["iron-plate"]["condition"] == "power_limited"
-    assert needs["plastic-bar"]["condition"] == "recipe_unavailable"
+    assert needs["plastic-bar"]["condition"] == "recipe_unknown"
     assert needs["iron-ore"]["condition"] == "unmeasured" and needs["iron-ore"]["gap_per_s"] is None
     # Goal items come first; order is goal-tree depth, never gap size.
     assert [n["depth"] for n in board["needs"]] == sorted(n["depth"] for n in board["needs"])
@@ -75,7 +75,7 @@ def test_board_separates_starved_undersized_blocked_unpowered_and_locked_needs()
     assert upgrade["to"] == "assembling-machine-2" and upgrade["target_recipe_enabled"]
     assert upgrade["gain_per_machine_per_s"] == pytest.approx(1.0)
     assert bottleneck_chain(board)[0].startswith("electronic-circuit:input_starved <- copper-cable:under_capacity")
-    assert bottleneck_chain(board)[1] == "plastic-bar:recipe_unavailable"  # One chain per unmet goal.
+    assert bottleneck_chain(board)[1] == "plastic-bar:recipe_unknown"  # One chain per unmet goal.
 
 
 def test_unbuilt_and_satisfied_needs_and_unknown_measurement_stays_unknown():
@@ -217,7 +217,7 @@ def test_plastic_goal_expands_to_petroleum_gas_crude_and_coal_with_machine_count
 
 
 def test_without_fluid_facts_plastic_stays_unavailable_and_solid_boards_are_unchanged():
-    assert next(n for n in compile_status(world([]), {"plastic-bar": 0.5})["needs"])["condition"] == "recipe_unavailable"
+    assert next(n for n in compile_status(world([]), {"plastic-bar": 0.5})["needs"])["condition"] == "recipe_unknown"
     solid = compile_status(world([]), {"electronic-circuit": 1.0})
     assert compile_status({**world([]), "fluid_recipes": FLUID_RECIPES}, {"electronic-circuit": 1.0}) == solid
 
@@ -246,3 +246,20 @@ def test_a_rate_met_but_drained_plate_is_under_capacity():
     assert _diagnose(*args, stock=3, consumed=1.24) == "under_capacity"
     assert _diagnose(*args, stock=3, consumed=0.6) == "satisfied"      # surplus building up
     assert _diagnose(*args, stock=900, consumed=1.24) == "satisfied"   # a buffer on hand
+
+
+@pytest.mark.fast
+def test_survey_explains_missing_recipe_without_assuming_technology_or_telemetry():
+    def observed(enabled, product):
+        return {"enabled": enabled, "products": [{"name": product, "type": "item"}]}
+    base = {**world([]), "recipe_catalog": {"complete": True}, "recipe_observations": {
+        "locked-recipe": observed(False, "locked-product"),
+        "unusable-recipe": observed(True, "unusable-product"),
+        "uncertain-recipe": observed(None, "uncertain-product")}}
+    for product, expected in (("locked-product", "recipe_disabled"),
+                              ("unusable-product", "recipe_unknown"),
+                              ("uncertain-product", "recipe_unknown"),
+                              ("missing-product", "recipe_unavailable")):
+        assert compile_status(base, {product: 1})["needs"][0]["condition"] == expected
+    incomplete = {**base, "recipe_catalog": {"complete": False}}
+    assert compile_status(incomplete, {"missing-product": 1})["needs"][0]["condition"] == "recipe_unknown"

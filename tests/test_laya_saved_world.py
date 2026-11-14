@@ -453,10 +453,10 @@ request={extra_recipes=__EXTRA_RECIPES__, bounds={x_min=0,x_max_exclusive=0,y_mi
 local recipes={
   ['iron-plate']=recipe('iron-plate',{item('iron-ore',1)},{item('iron-plate',1)}),
   ['electric-furnace']=recipe('electric-furnace',{item('advanced-circuit',1),item('steel-plate',1)},{item('electric-furnace',1)}),
-  ['advanced-circuit']=recipe('advanced-circuit',{item('plastic-bar',2),item('electronic-circuit',1)},{item('advanced-circuit',1)}),
+  ['advanced-circuit']=recipe('advanced-circuit',{item('plastic-bar',2),item('copper-cable',4),item('electronic-circuit',2)},{item('advanced-circuit',1)}),
   ['electronic-circuit']=recipe('electronic-circuit',{item('iron-plate',1)},{item('electronic-circuit',1)}),
   ['plastic-bar']=recipe('plastic-bar',{fluid('petroleum-gas',20),item('coal',1)},{item('plastic-bar',2)}),
-  ['automation-science-pack']=recipe('automation-science-pack',{item('iron-plate',1),item('copper-plate',1)},{item('automation-science-pack',1)}),
+  ['automation-science-pack']=recipe('automation-science-pack',{item('iron-gear-wheel',1),item('copper-plate',1)},{item('automation-science-pack',1)}),
   ['disabled-thing']=recipe('disabled-thing',{item('iron-plate',1)},{item('disabled-thing',1)},{enabled=false}),
   ['pumpjack']=recipe('pumpjack',{item('steel-plate',1),item('automation-science-pack',1)},{item('pumpjack',1)}),
 __MALFORMED_RECIPES__
@@ -478,7 +478,7 @@ prototypes={
     ['plastic-bar']={},['electronic-circuit']={},['coal']={},['automation-science-pack']={},
     ['copper-plate']={},['disabled-thing']={},['electric-furnace']={},['pumpjack']={}},
   entity={
-    ['assembling-machine-1']={type='assembling-machine',ingredient_count=2,
+    ['assembling-machine-1']={type='assembling-machine',ingredient_count=3,
       crafting_categories={crafting=true},get_crafting_speed=function() return .5 end},
     ['electric-furnace']={type='furnace',ingredient_count=2,
       crafting_categories={crafting=true},get_crafting_speed=function() return 2 end},
@@ -499,6 +499,7 @@ def _run_survey_lua(extra_recipes=(), assertions="", malformed="", setup=""):
     body = fixture + "\n" + setup + "\nlocal facts=(function()\n" + source + "\nend)()\n" + assertions
     result = subprocess.run([lua, "-"], input=body, text=True, capture_output=True)
     assert result.returncode == 0, result.stderr
+    return result.stdout
 
 
 @pytest.mark.lua
@@ -704,19 +705,20 @@ assert(facts.consumption['automation-science-pack'] == 7)
 assert(facts.production['plastic-bar'] == 9 and facts.consumption['plastic-bar'] == 2)
 assert(facts.recipes['iron-plate'])
 assert(facts.recipes['plastic-bar'] == nil)
-assert(facts.recipes['advanced-circuit'] == nil)
+assert(facts.recipes['advanced-circuit'])
 """)
 
 
 @pytest.mark.lua
-def test_no_extra_recipes_leaves_the_baseline_menu_unchanged():
+@pytest.mark.fast
+def test_complete_solid_recipes_do_not_require_explicit_extras():
     _run_survey_lua(assertions="""
 local menu={}
 for name in pairs(facts.recipes) do menu[#menu+1]=name end
 table.sort(menu)
-assert(table.concat(menu, ',') == 'electric-furnace,electronic-circuit,iron-plate,pumpjack')
-assert(facts.recipes['automation-science-pack'] == nil)
-assert(facts.recipes['advanced-circuit'] == nil)
+assert(table.concat(menu, ',') == 'advanced-circuit,automation-science-pack,electric-furnace,electronic-circuit,iron-plate,pumpjack')
+assert(facts.recipes['automation-science-pack'])
+assert(facts.recipes['advanced-circuit'])
 assert(facts.recipes['plastic-bar'] == nil)
 """)
 
@@ -744,14 +746,14 @@ assert(facts.recipe_observations['iron-plate'].machine_speeds['assembling-machin
 
 
 @pytest.mark.lua
-def test_extra_recipes_only_widen_observation_and_keep_fluid_recipes_out_of_the_build_menu():
+def test_extra_recipes_keep_fluid_recipes_out_of_the_build_menu():
     _run_survey_lua(extra_recipes=("advanced-circuit",), assertions="""
 assert(facts.recipes['advanced-circuit'])
 assert(facts.recipes['pumpjack'])
 assert(facts.enabled_recipes['plastic-bar'] == true)
 assert(facts.recipes['plastic-bar'] == nil)
 assert(facts.recipes['disabled-thing'] == nil)
-assert(facts.recipes['automation-science-pack'] == nil)
+assert(facts.recipes['automation-science-pack'])
 assert(facts.production['plastic-bar'] == 9)
 """)
 
@@ -1046,7 +1048,7 @@ assert(fluid['sulfuric-acid']==nil and fluid['iron-plate']==nil)
 local menu={}
 for name in pairs(facts.recipes) do menu[#menu+1]=name end
 table.sort(menu)
-assert(table.concat(menu, ',') == 'electric-furnace,electronic-circuit,iron-plate,pumpjack')
+assert(table.concat(menu, ',') == 'advanced-circuit,automation-science-pack,electric-furnace,electronic-circuit,iron-plate,pumpjack')
 assert(facts.oil_field==nil)
 """)
 
@@ -1097,3 +1099,149 @@ def test_recorded_runtime_root_is_passed_on_every_lifecycle_call(tmp_path, monke
     run_laya_saved_world.manager(tmp_path, "start", ["--nice", "5"])
     assert "--runtime-root" not in calls[0]
     assert calls[1][-4:] == ["--runtime-root", "/rt/factorio-2.1.24", "--nice", "5"]
+
+
+def test_complete_solid_catalog_reaches_candidate_compilation():
+    from training.laya_clean_runner import _compile
+    recipe = {"ingredients": [{"name": "electronic-circuit", "amount": 2},
+                              {"name": "plastic-bar", "amount": 2},
+                              {"name": "copper-cable", "amount": 4}],
+              "product_amount": 1, "energy_ticks": 360}
+    world = {**facts(), "recipes": {"advanced-circuit": recipe, "automation-science-pack": {"ingredients": [{"name": "copper-plate", "amount": 1}, {"name": "iron-gear-wheel", "amount": 1}], "product_amount": 1, "energy_ticks": 300}}}
+    for product in world["recipes"]:
+        assert any(c.get("product") == product for c in _compile(world, {product}, 0))
+
+
+@pytest.mark.lua
+@pytest.mark.fast
+def test_survey_indexes_aliases_disabled_and_unsupported_products():
+    _run_survey_lua(malformed="""
+ ['alias-recipe']=recipe('alias-recipe',{item('iron-plate',1)},{item('alias-product',2)}),
+ ['multi-recipe']=recipe('multi-recipe',{item('iron-plate',1)},{item('first',1),item('second',1)}),
+""", setup="""
+game.forces.player.technologies['unlock-test']={researched=false,effects={{type='unlock-recipe',recipe='disabled-thing'}}}
+""", assertions="""
+assert(facts.recipe_product_index.products['item:alias-product'][1]=='alias-recipe')
+assert(facts.recipe_product_index.products['item:first'][1]=='multi-recipe')
+assert(facts.recipe_product_index.products['item:second'][1]=='multi-recipe')
+assert(facts.recipes['alias-product'].recipe=='alias-recipe')
+assert(facts.recipes['first']==nil)
+assert(facts.recipe_observations['disabled-thing'].unlock_technologies[1]=='unlock-test')
+""")
+
+
+@pytest.mark.fast
+def test_alias_candidate_places_and_recognizes_actual_recipe():
+    from training.laya_clean_runner import _compile
+    from planners.plan_validation import actions
+    world = facts()
+    world['recipes'] = {'alias-product': {'recipe': 'alias-recipe', 'ingredients': [{'name': 'iron-plate', 'amount': 1}], 'product_amount': 2, 'energy_ticks': 30}}
+    candidates = [c for c in _compile(world, {'alias-product'}, 0) if c.get('product') == 'alias-product']
+    assert candidates
+    machine = next(a for a in actions(candidates[0]['plan']) if a['entity'] == 'assembling-machine-1')
+    assert machine['recipe'] == 'alias-recipe'
+    world['machines'] = [{'position': machine['position'], 'recipe': 'alias-recipe'}]
+    remaining = _compile(world, {'alias-product'}, 0)
+    assert not any(a['entity'] == 'assembling-machine-1' and a['position'] == machine['position'] for c in remaining if c.get('product') == 'alias-product' for a in actions(c['plan']))
+
+
+@pytest.mark.lua
+@pytest.mark.fast
+def test_classified_alternatives_probability_and_quality():
+    _run_survey_lua(malformed="""
+ ['a-bad']=recipe('a-bad',{item('iron-plate',1)},{item('choice',1)}),
+ ['b-good']=recipe('b-good',{item('iron-plate',1)},{item('choice',1)}),
+ ['quality-recipe']=recipe('quality-recipe',{item('iron-plate',1)},{item('quality-product',1)}),
+""", setup="""
+local recipes=game.forces.player.recipes
+recipes['a-bad'].products[1].independent_probability=0.5
+recipes['b-good'].products[1].independent_probability=1
+recipes['b-good'].products[1].shared_probability={min=0,max=1}
+recipes['quality-recipe'].products[1].quality_min='rare'
+""", assertions="""
+assert(facts.recipes.choice.recipe=='b-good')
+assert(facts.recipe_observations['a-bad'].solid_classification.cause=='nondeterministic_output')
+assert(facts.recipe_observations['b-good'].solid_classification.supported)
+assert(facts.recipe_observations['quality-recipe'].solid_classification.cause=='quality_unsupported')
+assert(facts.recipes['quality-product']==nil)
+""")
+
+
+@pytest.mark.fast
+@pytest.mark.lua
+def test_survey_keeps_existing_furnace_operations_without_assembler_compatibility():
+    _run_survey_lua(setup="""
+recipes['iron-plate'].categories={'smelting'}
+prototypes.entity['electric-furnace'].crafting_categories={smelting=true}
+""", assertions="""
+assert(facts.recipe_observations['iron-plate'].machine_speeds['assembling-machine-1']==nil)
+assert(facts.recipe_observations['iron-plate'].solid_classification.machine=='electric-furnace')
+assert(facts.recipes['iron-plate'].product_amount==1)
+""")
+
+
+@pytest.mark.fast
+@pytest.mark.lua
+def test_captured_recipe_resurvey_reaches_actual_candidate_material_check():
+    from collections import Counter
+    from training.laya_clean_runner import compile_menu
+    from training.laya_factory_status import compile_status, recipe_evidence
+
+    capture = json.loads(Path('tests/fixtures/laya_recipe_omission_c0b84004.json').read_text())
+    observed = capture['recipe']
+    assert capture['source_tick'] == 256291 and observed['enabled'] is True
+    assert capture['operation_entry_was_present'] is False
+    legacy = {'recipe_catalog': {'complete': False}, 'recipe_observations': {'advanced-circuit': observed}}
+    # The original serializer omitted quality bounds; do not authorize old data.
+    assert recipe_evidence(legacy, 'advanced-circuit')['cause'] == 'quality_unknown'
+
+    def literal(value):
+        if isinstance(value, dict):
+            return '{' + ','.join('[' + json.dumps(k) + ']=' + literal(v) for k, v in value.items()) + '}'
+        if isinstance(value, list):
+            return '{' + ','.join(literal(v) for v in value) + '}'
+        if isinstance(value, bool):
+            return str(value).lower()
+        return json.dumps(value)
+
+    prototype = {**copy.deepcopy(observed), 'energy': observed['energy_ticks'] / 60}
+    # Explicit unconstrained quality is an API-fixture condition for a new
+    # survey, not an assertion about fields missing from the historical JSON.
+    for part in prototype['ingredients'] + prototype['products']:
+        part.update(quality_min='normal', quality_max='normal', quality_change=0)
+    output = _run_survey_lua(setup='recipes["advanced-circuit"]=' + literal(prototype), assertions="""
+local entry=facts.recipes['advanced-circuit']
+assert(facts.recipe_observations['advanced-circuit'].solid_classification.supported)
+local parts={}
+for _,p in ipairs(entry.ingredients) do
+  parts[#parts+1]=string.format('{"name":%q,"amount":%s}',p.name,p.amount)
+end
+print(string.format('{"recipe":%q,"ingredients":[%s],"product_amount":%s,"energy_ticks":%s}',
+  entry.recipe,table.concat(parts,','),entry.product_amount,entry.energy_ticks))
+""")
+    entry = json.loads(output)
+    assert all('quality_min' not in p for p in observed['ingredients'] + observed['products'])
+    assert entry['recipe'] == 'advanced-circuit' and entry['ingredients'] == [
+        {'name': p['name'], 'amount': p['amount']} for p in observed['ingredients']]
+    world = facts()
+    world['recipes'] = {'advanced-circuit': entry}
+    world['poles'][0].update(name='substation', supply=9, grid='1')
+    # Fixture supply isolates the real candidate-to-construction-bill boundary.
+    world['networks']['1']['items'].update({'plastic-bar': 2, 'copper-cable': 4, 'electronic-circuit': 2})
+    checked = []
+
+    def validate(candidates):
+        results = {}
+        for candidate in candidates:
+            bill = Counter(a['entity'] for p in candidate['plan']['phases'] for a in p['actions'])
+            missing = sorted(item for item, count in bill.items()
+                             if world['networks']['1']['items'].get(item, 0) < count)
+            results[candidate['option_id']] = {'reason': 'item_shortfall:' + missing[0]} if missing else {'reason': None, 'bill': dict(bill)}
+            if candidate.get('product') == 'advanced-circuit':
+                checked.append(results[candidate['option_id']])
+        return results
+
+    menu = compile_menu(world, compile_status(world, {'advanced-circuit': 1}), validate, seed=0)
+    assert checked and all(row['reason'].startswith('item_shortfall:') for row in checked)
+    assert any(reason.startswith('item_shortfall:') for reason in menu['blocked']['item:advanced-circuit'])
+    assert 'item:advanced-circuit' not in menu['recipe_diagnostics']

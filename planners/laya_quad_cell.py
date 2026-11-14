@@ -5,6 +5,7 @@ from planners.plan_validation import actions, entity_footprint_tiles
 
 
 def generate_quad_slot(recipe, spec, center, side):
+    recipe = spec.get("recipe", recipe)
     if side not in QUAD_MALL_MACHINE_OFFSETS:
         raise ValueError("quad side must be north, west, east or south")
     group = "top" if side in {"north", "west"} else "bottom"

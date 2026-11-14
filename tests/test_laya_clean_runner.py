@@ -262,7 +262,7 @@ def test_already_built_options_are_pruned_and_blocked_needs_say_why():
     assert "coverage" not in {n["need_id"] for n in menu["needs"]}
     assert set(menu["blocked"]["coverage"]) == {"no_op"}
     assert set(menu["blocked"]["item:iron-gear-wheel"]) == {"item_shortfall:requester-chest"}
-    assert menu["blocked"]["item:stone-brick"] == {"no_candidate": 1}
+    assert menu["blocked"]["item:stone-brick"] == {"recipe_unknown": 1}
 
 
 def test_live_world_waits_on_the_running_clock_without_pausing():
@@ -732,3 +732,14 @@ def test_goal_reserve_counts_furnaces_later_smelted_goals_still_need_while_none_
     menu = compile_menu(f, compile_status(f, phase("C2")["targets"]), validator(), seed=1)
     # C2: iron 3.0 and copper 3.0 -> 5 furnaces each at 0.625/s; C3: stone 1.5 -> 3, one already placed.
     assert menu["goal_reserve"]["electric-furnace"] == 5 + 5 + 2
+
+
+@pytest.mark.fast
+def test_menu_carries_recipe_diagnostics_and_unlocks():
+    world = facts()
+    world['recipe_catalog'] = {'complete': True}
+    world['recipe_observations'] = {'locked-recipe': {'enabled': False, 'products': [{'type': 'item', 'name': 'locked-product'}], 'unlock_technologies': ['unlock-test']}}
+    board = compile_status(world, {'locked-product': 1})
+    menu = compile_menu(world, board, validator(), seed=1)
+    assert menu['recipe_diagnostics']['item:locked-product'] == {'condition': 'recipe_disabled', 'cause': 'disabled', 'recipes': ['locked-recipe'], 'unlock_technologies': ['unlock-test']}
+    assert menu['blocked']['item:locked-product'] == {'recipe_disabled': 1}

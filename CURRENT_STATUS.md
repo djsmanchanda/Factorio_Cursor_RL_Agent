@@ -452,3 +452,9 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - What: `laya-trackb-b-home-stonefirst-2x-20261114` finished 60/60: C4 16/30 (patience48) vs 21/30 (stone_first), +17 pp, paired 7W/2L p=0.180, medians 228.5 vs 238 decisions (matched exposure), gain in both halves. Mechanism matches the traced stone:short terminal bottleneck. Four SavedWorldError (3/1), all completed. C6-C9 0.
 - Evidence: registry per-arm counts and the corrected paired read; marked the queue entry complete (it still said running).
 - Lifecycle: froze and started the replication `laya-trackb-b-home-stonefirst-rep-2x-20261115` (fresh seeds 84600-84629, same code aaaa699e, ports 64800/63800, --adaptive-workers). Adoption only if it reproduces; otherwise next step is a stone mine/coverage siting operation. `home-merged...b-p2` held.
+
+
+## [2026-11-15 02:53 IST] Complete typed recipe survey and executable product contract
+- What: derive supported solid operations from the full force survey, preserve recipe/product identity through quad slots and gates, and distinguish disabled, unsupported and unknown recipe evidence. Keep the existing furnace and fluid operation paths.
+- Evidence: 163 focused behavioral checks passed. Final fast gate exit 0: 1,098 passed and one selected skip; five additional modules skipped at collection because optional lupa is absent. The critical recipe Lua tests ran through the available Lua interpreter. Captured recipe fields plus explicit refreshed normal-quality fixture inputs reach candidate material checks; missing historical quality facts remain unknown. No live result established.
+- Lifecycle: freeze/restart affected runners with the Python, query-sent Lua helper and schema together after active campaigns; no installed-mod deployment or Factorio reload required. No runtime action performed.

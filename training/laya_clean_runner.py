@@ -857,7 +857,11 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
                if need not in legal}
     for item in sorted(unmet):
         if all(f"item:{item}" not in group for group in (by_need, legal, external_needs, oil_needs)):
-            blocked[f"item:{item}"] = {"no_candidate": 1}
+            condition = next((n["condition"] for n in board["needs"] if n["item"] == item), "no_candidate")
+            reason = condition if condition.startswith("recipe_") else "no_candidate"
+            blocked[f"item:{item}"] = {reason: 1}
+    recipe_diagnostics = {f"item:{n['item']}": n["recipe_evidence"] for n in board["needs"]
+                          if n.get("recipe_evidence")}
     # Kit items the phase's still-unbuilt starters will need, so side builds can see what they would take.
     goal_reserve: dict[str, int] = {}
     for plate in STARTER_ORE:
@@ -892,7 +896,7 @@ def compile_menu(facts: Mapping, board: Mapping, validate: Validator, seed: int,
     outpost_ports = int(((oil_offer or {}).get("facts") or {}).get("roboports_to_outpost") or 0)
     if outpost_ports and missing_input("roboport", recipes, have):
         goal_reserve["roboport"] = goal_reserve.get("roboport", 0) + outpost_ports
-    return {"needs": needs, "options": options, "proposed": len(proposed) + len(external_results), "blocked": blocked,
+    return {"needs": needs, "options": options, "proposed": len(proposed) + len(external_results), "recipe_diagnostics": recipe_diagnostics, "blocked": blocked,
             "blocked_alternatives": blocked_alternatives,
             "rejected": dict(rejected), "shortfalls": dict(shortfalls), "unit_shortfalls": unit_shortfalls,
             "pending_units": pending_units, "goal_reserve": goal_reserve,

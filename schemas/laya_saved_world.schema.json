@@ -27,6 +27,7 @@
       "type": "object",
       "additionalProperties": {"$ref": "#/definitions/recipe_observation"}
     },
+    "recipe_product_index": {"type": "object", "additionalProperties": false, "required": ["version", "products"], "properties": {"version": {"const": "1"}, "products": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "string"}}}}},
     "recipe_catalog": {
       "type": "object", "additionalProperties": false,
       "description": "Survey-local metadata around the force.recipes observation map. This is not the /export_recipe_catalog document: it carries no recipes, machines, raw_resources or stack_sizes. The shared version token is a consumer contract, not provenance.",
@@ -91,6 +92,9 @@
       "required": ["enabled", "ingredients", "products", "categories", "machine_speeds", "energy_ticks"],
       "properties": {
         "enabled": {"type": ["boolean", "null"]},
+        "quality_state": {"enum": ["normal", "unknown", "unsupported"]},
+        "solid_classification": {"type": "object", "required": ["version", "supported"], "properties": {"version": {"const": "1"}, "supported": {"type": "boolean"}, "cause": {"type": "string"}, "machine": {"enum": ["assembling-machine-1", "electric-furnace"]}}, "additionalProperties": false},
+        "unlock_technologies": {"type": "array", "items": {"type": "string"}},
         "ingredients": {"$ref": "#/definitions/recipe_parts"},
         "products": {"$ref": "#/definitions/recipe_parts"},
         "category": {"type": "string"},
@@ -108,6 +112,9 @@
             "name": {"type": "string", "minLength": 1},
             "type": {"enum": ["item", "fluid"]},
             "amount": {"type": "number", "minimum": 0},
+            "quality_min": {"type": ["string", "integer"]},
+            "quality_max": {"type": ["string", "integer"]},
+            "quality_change": {"type": "integer"},
             "amount_min": {"type": "number", "minimum": 0},
             "amount_max": {"type": "number", "minimum": 0},
             "ignored_by_productivity": {"type": "number", "minimum": 0},

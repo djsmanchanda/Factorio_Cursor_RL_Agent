@@ -1,0 +1,53 @@
+{
+  "_comment": "Path: tests/fixtures/laya_recipe_omission_c0b84004.json | Purpose: Preserve captured AC recipe fields without inventing missing quality evidence. A refreshed-survey test explicitly supplies unconstrained normal-quality prototype facts; those are fixture inputs, not recovered history.",
+  "source_sha256": "f110a080c2c2df6c31d6bf9f416f0979a19e84c79d4403a6576113ca389a6fbd",
+  "source_run": "C0-b-s84004",
+  "source_tick": 256291,
+  "source_path": "data/laya-experiments/laya-trackb-b-home-2x-20261112-p2/arms/b/code/data/laya-saved-world/laya-trackb-b-home-2x-20261112-p2/C0-b-s84004/initial-state.json",
+  "operation_entry_was_present": false,
+  "recipe": {
+    "enabled": true,
+    "ingredients": [
+      {
+        "name": "plastic-bar",
+        "type": "item",
+        "amount": 2
+      },
+      {
+        "name": "copper-cable",
+        "type": "item",
+        "amount": 4
+      },
+      {
+        "name": "electronic-circuit",
+        "type": "item",
+        "amount": 2
+      }
+    ],
+    "products": [
+      {
+        "name": "advanced-circuit",
+        "type": "item",
+        "amount": 1,
+        "independent_probability": 1,
+        "shared_probability": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "categories": [
+      "crafting",
+      "electromagnetics"
+    ],
+    "machine_speeds": {
+      "assembling-machine-1": 0.5,
+      "assembling-machine-2": 0.75,
+      "assembling-machine-3": 1.25,
+      "electromagnetic-plant": 2
+    },
+    "energy_ticks": 360,
+    "productivity_bonus": 0,
+    "category": "crafting"
+  }
+}

@@ -91,6 +91,7 @@ def mall_cells(root: Path, facts: Mapping) -> list[dict]:
     """
     machines = {(m["position"]["x"], m["position"]["y"]): m for m in facts.get("machines", [])
                 if m["name"] in ASSEMBLERS}
+    products = {spec.get("recipe", item): item for item, spec in sorted((facts.get("recipes") or {}).items())}
     cells, seen, retargeted = [], set(), {}
     for _, receipt in receipts(root):
         candidate = receipt["candidate"]
@@ -112,7 +113,8 @@ def mall_cells(root: Path, facts: Mapping) -> list[dict]:
             cells.append({"entity": machine["entity"], "position": dict(machine["position"]),
                           "requester": dict(requester["position"]), "group": section["group"],
                           "multiplier": int(section.get("multiplier", REQUEST_MULTIPLIER)),
-                          "product": live.get("recipe"), "status": live.get("status"),
+                          "product": products.get(live.get("recipe"), live.get("recipe")),
+                          "recipe": live.get("recipe"), "status": live.get("status"),
                           "network": candidate.get("network"), "network_anchor": candidate.get("network_anchor")})
     for cell in cells:
         cell["retargeted_tick"] = retargeted.get((cell["position"]["x"], cell["position"]["y"]))
@@ -123,9 +125,10 @@ def _configure(entity: str, position: Mapping, **fields) -> dict:
     return {"action_type": "configure_entity", "entity": entity, "position": dict(position), **fields}
 
 
-def gate_action(cell: Mapping, product: str, gated: bool, gate_scale: float = 1.0) -> dict:
+def gate_action(cell: Mapping, product: str, gated: bool, gate_scale: float = 1.0,
+                *, recipe: str | None = None) -> dict:
     fields = {"logistic_condition": stock_gate(product, gate_target(product,gate_scale))} if gated else {"clear_logistic_condition": True}
-    return _configure(cell["entity"], cell["position"], recipe=product, **fields)
+    return _configure(cell["entity"], cell["position"], recipe=recipe or cell.get("recipe") or product, **fields)
 
 
 def retarget_plan(cell: Mapping, item: str, recipes: Mapping, gated: bool, gate_scale: float = 1.0,
@@ -139,7 +142,7 @@ def retarget_plan(cell: Mapping, item: str, recipes: Mapping, gated: bool, gate_
         "name": f"laya-retarget-{item}",
         # Requests first: if the machine step then fails, the slot still runs its old recipe and stays offerable.
         "actions": [_configure("requester-chest", cell["requester"], logistic_sections=[section]),
-                    gate_action(cell, item, gated,gate_scale)]}]}
+                    gate_action(cell, item, gated,gate_scale, recipe=recipes[item].get("recipe", item))]}]}
 
 
 def slot_facts(cell: Mapping, cells: Iterable[Mapping], stock: Mapping[str, int], goal_items: set[str],
@@ -199,10 +202,10 @@ def gate_updates(cells: list[dict], goal_items: set[str], applied: dict, gate_sc
         if not cell["product"]:
             continue
         gated=cell['product'] not in goal_items
-        want = (cell["product"], gated,gate_target(cell['product'],gate_scale) if gated else None)
+        want = (cell.get("recipe") or cell["product"], gated,gate_target(cell['product'],gate_scale) if gated else None)
         key = (cell["position"]["x"], cell["position"]["y"])
         if applied.get(key) != want:
-            actions.append(gate_action(cell,want[0],want[1],gate_scale))
+            actions.append(gate_action(cell,cell["product"],want[1],gate_scale))
     return actions
 
 

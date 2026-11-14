@@ -258,9 +258,9 @@ def compile_candidates(facts: dict, seed: int = 0) -> list[dict]:
                     if product in {"iron-plate", "copper-plate", "stone-brick", "steel-plate"}:
                         continue
                     for side in ("west", "east", "north", "south"):
-                        placements = generate_quad_slot(product, spec, center, side)
+                        placements = generate_quad_slot(spec.get("recipe", product), spec, center, side)
                         target = next(a["position"] for a in placements if a["entity"] == "assembling-machine-1")
-                        if any(m["position"] == target and m.get("recipe") == product for m in facts["machines"]):
+                        if any(m["position"] == target and m.get("recipe") == spec.get("recipe", product) for m in facts["machines"]):
                             continue
                         add("assemble", f"{product} {side} ({center[0]},{center[1]})", local_power + placements,
                             port["network"], product)
