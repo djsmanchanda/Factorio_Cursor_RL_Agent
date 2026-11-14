@@ -464,3 +464,10 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - What: validate contradictory envelopes; reconcile only actual invocation/transaction identities; retain initial and final receipt states, unknown and malformed slots, and duplicate/conflict counts. Runner summaries and collector use one function; controller publications count every immutable planned job and separate inherited/current milestone evidence from earned targets.
 - Evidence: 51 focused passes; settled fast1107 passed,6 skipped(five optional-lupa collection modules,one fluid-chain case),exit0. Track B caller handshake/stream acceptance and retained stream replay remain open.
 - Lifecycle: future matching frozen runner/controller copies required; no runtime, deployment, service, save or campaign action performed.
+
+
+## [2026-11-15 04:09 IST] Preserve explicit upstream-construction deferrals
+
+- What:shared normalizer classifies production_prerequisite_deferred as deferred,retaining cause and exception precedence;unknown codes stay unknown.
+- Evidence:9 focused outcome/reconciliation checks passed;settled TrackB fast1,119passed,6skipped(five optional-Lupa collections,one known fluid-chain case),exit0. This combined gate includes the separately uncommitted handshake patch;its refusal-recovery acceptance remains open.
+- Lifecycle:future matching frozen Python runner/controller copies required;no runtime action.
