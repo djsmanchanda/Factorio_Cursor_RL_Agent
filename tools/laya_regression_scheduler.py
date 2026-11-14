@@ -20,7 +20,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 
 from tools.checkpoint_catalog import atomic_json
-from tools import laya_status_journal, runner_process
+from tools import laya_status_journal, runner_process, laya_experiment_contract
 from tools.deterministic_fleet_runtime import create_detached_checkout
 from training.laya_restart_checkpoint import load as load_checkpoint
 from training.laya_mission_contract import mission_settings, frozen_capability
@@ -50,6 +50,7 @@ STRICT_CURRENT_KEEP = 20
 # the runner's 1x default and keep it on resume, so no live cohort changes speed.
 DEFAULT_GAME_SPEED = 2.0
 LEGACY_GAME_SPEED = 1.0
+ACTION_PATH = 'deterministic'
 
 
 def sha(path):
@@ -171,6 +172,8 @@ def _milestone_versions(path):
 
 def enqueue(repo, registry, spec):
     """Freeze immutable Git arms and every planned job before any dispatch."""
+    if 'experiment_contract' in spec:
+        laya_experiment_contract.validate(spec['experiment_contract'], spec, action_path=ACTION_PATH)
     name = spec['name']
     if not name or Path(name).name != name or name.startswith(('.', '_')):
         raise ValueError('Invalid suite name')
@@ -353,6 +356,9 @@ def enqueue(repo, registry, spec):
         freeze['source_sha256'] = sha(spec['source_save'])
         if mixed and len({a['code_sha256'] for a in freeze['arms']}) != 1:
             raise ValueError('A/A calibration requires identical code, policy and interface')
+        if 'experiment_contract' in spec:
+            binding = laya_experiment_contract.make_binding(spec['experiment_contract'], jobs, freeze['arms'])
+            freeze['experiment_contract'] = laya_experiment_contract.publish(root, binding)
         freeze['state'] = 'ready'
     except Exception as error:
         freeze.update(state='incompatible', error=str(error))
@@ -669,9 +675,11 @@ def _reserve_job(root):
     spec, freeze = read(root/'regression.json'), read(root/'freeze.json')
     if sha(root/'regression.json') != freeze.get('spec_sha256') or freeze['state'] != 'ready':
         raise ValueError('Suite is not ready or frozen specification changed')
+    laya_experiment_contract.verify(root, spec, freeze, action_path=ACTION_PATH)
     if not predecessors_done(root.parent, spec['after']):
         return 'waiting_for_predecessors'
     def reserve(status):
+        laya_experiment_contract.verify(root, spec, freeze, status, action_path=ACTION_PATH)
         if any(j.get('legacy_status_missing') for j in status['jobs']):
             raise laya_status_journal.JournalUnavailable('legacy job status missing; dispatch unavailable')
         if time.time() >= datetime.fromisoformat(spec['until']).timestamp():
@@ -811,7 +819,7 @@ def _execute_job(root, executor, spec, freeze, job):
                     raise subprocess.CalledProcessError(code_returned, command)
                 return completed
             restart = ['--restart-checkpoint', job['bundle']] if job['bundle'] else []
-            common = ['--root',str(world),'--actions','deterministic']
+            common = ['--root',str(world),'--actions',ACTION_PATH]
             execute(['prepare',*common,'--game-port',str(job['game_port']), '--rcon-port',str(job['rcon_port']),
                      '--mods-source',spec['mods_source'],'--source-save',spec['source_save'],*restart])
             verify_engine(world, freeze['engine_sha256'])

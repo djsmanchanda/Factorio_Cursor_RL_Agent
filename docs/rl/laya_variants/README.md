@@ -45,3 +45,22 @@ weights; it grants no additional variant adoption or production promotion.
 Record experiment, report, decision and predicate version in `CURRENT_STATUS.md`,
 then archive the variant. Generated catalogs (`generated/`) are disposable and
 must be regenerated from synchronized sources for new runs.
+
+### Declared contracts
+
+A regression spec may opt in to `experiment_contract` version 1. It declares
+`hypothesis`, `factor`, `arms` (one `control` and a `treatment` list covering
+all other arms), `action_path` (the scheduler currently dispatches only `deterministic`),
+`eligible_start`, `endpoint`, `predicate_version`, `window` (`game_ticks` and
+`wall_seconds` matching the spec budgets), `sampling_unit`, `sampling_rule`,
+`missing_outcome_rule` (`retain_all_planned_jobs`), and `adoption_rule`.
+The scheduler binds canonical declaration bytes to the ordered plan and frozen
+arm source identities before ready, and checks the binding before reservation.
+The artifact is published exclusively after flushing its complete bytes. Reports
+group jobs by the bound plan, preserving missing, conflicting and duplicate
+status evidence as unknown. A damaged plan projection cannot change this
+denominator; an unreadable binding makes the denominator unavailable explicitly.
+A valid declaration does not establish effective factors, exposure, efficacy or
+adoption eligibility. Older roots remain descriptive with eligibility unknown.
+Effective-factor validation, runtime exposure telemetry and counterbalanced
+randomization remain follow-up work; RC11 is incomplete.

@@ -89,7 +89,7 @@ def test_host_admission_counts_stale_and_reserved_worlds_and_stale_gate_blocks(t
     assert not scheduler.may_admit(registry, 100, available_gb=2)
 
 
-def frozen_suite(tmp_path, arms=('candidate', 'reference')):
+def frozen_suite(tmp_path, arms=('candidate', 'reference'), contract=None, spec_updates=None):
     repo = tmp_path/'repo'
     repo.mkdir()
     for name in ('training/laya_restart_checkpoint.py','training/laya_restart_state.py',
@@ -111,6 +111,9 @@ def frozen_suite(tmp_path, arms=('candidate', 'reference')):
         'seeds':[1,2], 'max_game_ticks':1000,'trial_wall_seconds':60,'until':'2099-01-01T00:00:00+00:00',
         'source_save':str(source),'mods_source':str(mods),'python':sys.executable,
         'factorio_binary':sys.executable, 'after':['predecessor'], 'game_port_base':49100,'rcon_port_base':49200}
+    if contract is not None:
+        spec['experiment_contract'] = contract
+    spec.update(spec_updates or {})
     registry = tmp_path/'registry'
     root = scheduler.enqueue(repo,registry,spec)
     return root, registry
@@ -427,3 +430,158 @@ def test_adaptive_campaign_exceeds_old_cap_but_obeys_host_budget(tmp_path, monke
         assert result.result(timeout=20) == 'complete'
     assert scheduler.read(root/'dispatch-control.json')['frozen_max_workers'] == 8
     assert scheduler.sha(root/'regression.json') == freeze['spec_sha256']
+
+
+def declared_contract():
+    return {'version': 1, 'hypothesis': 'Treatment improves completion', 'factor': 'policy weight',
+            'arms': {'control': 'reference', 'treatment': ['candidate']}, 'action_path': 'deterministic',
+            'eligible_start': 'all full-origin starts', 'endpoint': 'C1 completion', 'predicate_version': 'c1-v1',
+            'window': {'game_ticks': 1000, 'wall_seconds': 60}, 'sampling_unit': 'job',
+            'sampling_rule': 'each planned seed and arm', 'missing_outcome_rule': 'retain_all_planned_jobs',
+            'adoption_rule': 'docs/rl/laya_variants/README.md'}
+
+
+def test_declared_contract_freeze_reservation_and_missing_outcomes(tmp_path, monkeypatch):
+    root, registry = frozen_suite(tmp_path, contract=declared_contract())
+    freeze = scheduler.read(root/'freeze.json')
+    assert freeze['experiment_contract']['sha256'] == scheduler.sha(root/'experiment-contract.json')
+    assert report(root)['experiment_contract']['state'] == 'valid_declared'
+    atomic_json(registry/'predecessor/job-status.json', {'jobs': [{'status': 'completed'}]})
+    monkeypatch.setattr(scheduler, 'may_admit', lambda *a, **kw: True)
+    monkeypatch.setattr(scheduler, 'ports_free', lambda *a: True)
+    assert scheduler._reserve_job(root)[2]['admission_reserved'] is True
+    result = report(root)
+    assert result['planned'] == 4 and sum(g['unknown'] for g in result['groups']) == 4
+    assert result['exposure_evidence'] == result['effective_intervention_evidence'] == 'unknown'
+    (root/'job-status.json').unlink()
+    result = report(root)
+    assert result['planned'] == 4 and sum(g['unknown'] for g in result['groups']) == 4
+
+
+def test_legacy_and_calibration_remain_descriptive(tmp_path, monkeypatch):
+    monkeypatch.setattr(scheduler, 'frozen_capability', lambda *args: {'objective_modes': ['measurement_only']})
+    root, _ = frozen_suite(tmp_path, spec_updates={'objective_mode': 'measurement_only'})
+    result = report(root)
+    assert result['experiment_contract']['state'] == 'descriptive_unknown'
+    assert result['inference_eligibility'] == 'unknown' and result['planned'] == 4
+
+
+@pytest.mark.parametrize('change', ['missing', 'arm', 'window', 'path', 'actual_path', 'unknown_field', 'boolean_tick'])
+def test_bad_contract_rejected_before_freeze(tmp_path, change):
+    contract = declared_contract()
+    updates = {}
+    if change == 'missing':
+        del contract['hypothesis']
+    elif change == 'arm':
+        contract['arms']['control'] = 'absent'
+    elif change == 'window':
+        contract['window']['game_ticks'] += 1
+    elif change == 'path':
+        updates['action_path'] = 'geometry'
+    elif change == 'actual_path':
+        contract['action_path'] = 'geometry'
+    elif change == 'unknown_field':
+        contract['endpoint_typo'] = 'wrong'
+    else:
+        contract['window']['game_ticks'] = True
+    with pytest.raises(ValueError):
+        frozen_suite(tmp_path, contract=contract, spec_updates=updates)
+
+
+@pytest.mark.parametrize('change', ['contract', 'missing', 'order', 'job', 'arm', 'status_arm'])
+def test_tampered_binding_blocks_reservation(tmp_path, change):
+    root, registry = frozen_suite(tmp_path, contract=declared_contract())
+    atomic_json(registry/'predecessor/job-status.json', {'jobs': [{'status': 'completed'}]})
+    if change == 'contract':
+        (root/'experiment-contract.json').write_text('{}')
+    elif change == 'missing':
+        (root/'experiment-contract.json').unlink()
+    elif change in ('order', 'job'):
+        plan = scheduler.read(root/'planned-jobs.json')
+        if change == 'order':
+            plan['jobs'].reverse()
+        else:
+            plan['jobs'][0]['seed'] = 99
+        atomic_json(root/'planned-jobs.json', plan)
+    elif change == 'arm':
+        freeze = scheduler.read(root/'freeze.json')
+        freeze['arms'][0]['code_sha256'] = 'changed'
+        atomic_json(root/'freeze.json', freeze)
+    else:
+        status = scheduler.read(root/'job-status.json')
+        status['jobs'][0]['arm'] = 'reference'
+        atomic_json(root/'job-status.json', status)
+    with pytest.raises(ValueError):
+        scheduler._reserve_job(root)
+    assert not any(j.get('admission_reserved') for j in scheduler.read(root/'job-status.json')['jobs'])
+
+
+@pytest.mark.parametrize('change', ['missing', 'duplicate', 'wrong_arm', 'wrong_seed', 'malformed_file', 'plan_order'])
+def test_contract_report_preserves_bound_denominator_and_identity(tmp_path, change):
+    root, _ = frozen_suite(tmp_path, contract=declared_contract())
+    status = scheduler.read(root/'job-status.json')
+    expected = status['jobs'][0]
+    if change == 'missing':
+        status['jobs'].pop(0)
+    elif change == 'duplicate':
+        status['jobs'].append({**expected, 'successor_passed': True})
+    elif change == 'wrong_arm':
+        status['jobs'][0] = {**expected, 'arm': 'reference', 'successor_passed': True}
+    elif change == 'wrong_seed':
+        status['jobs'][0] = {**expected, 'seed': 99, 'successor_passed': True}
+    elif change == 'plan_order':
+        planned = scheduler.read(root/'planned-jobs.json')
+        planned['jobs'].reverse()
+        atomic_json(root/'planned-jobs.json', planned)
+    atomic_json(root/'job-status.json', status)
+    if change == 'malformed_file':
+        (root/'job-status.json').write_text('{broken')
+    result = report(root)
+    assert result['denominator_evidence']['state'] == 'bound_plan'
+    assert result['planned'] == 4 and sum(g['planned'] for g in result['groups']) == 4
+    assert result['jobs'][0]['arm'] == expected['arm'] and result['jobs'][0]['seed'] == expected['seed']
+    assert sum(g['observed_successors'] for g in result['groups']) == 0
+    assert sum(g['unknown'] for g in result['groups']) == 4
+    if change == 'plan_order':
+        assert result['experiment_contract']['state'] == 'invalid'
+    assert result['inference_eligibility'] == 'unknown'
+
+
+def test_contract_publication_is_durable_and_exclusive(tmp_path, monkeypatch):
+    from tools import laya_experiment_contract as contract
+    binding = contract.make_binding(declared_contract(), [], [])
+    original = contract.publish(tmp_path, binding)
+    raw = (tmp_path/'experiment-contract.json').read_bytes()
+    with pytest.raises(FileExistsError):
+        contract.publish(tmp_path, {**binding, 'version': 2})
+    assert (tmp_path/'experiment-contract.json').read_bytes() == raw
+    assert original['sha256'] == scheduler.sha(tmp_path/'experiment-contract.json')
+    failed = tmp_path/'failed'
+    failed.mkdir()
+    monkeypatch.setattr(contract.os, 'fsync', lambda _: (_ for _ in ()).throw(OSError('flush failed')))
+    with pytest.raises(OSError):
+        contract.publish(failed, binding)
+    assert list(failed.iterdir()) == []
+
+
+def test_binding_boolean_version_and_changed_spec_are_refused(tmp_path):
+    root, _ = frozen_suite(tmp_path, contract=declared_contract())
+    from tools import laya_experiment_contract as contract
+    freeze = scheduler.read(root/'freeze.json')
+    binding = contract.load_binding(root, freeze['experiment_contract'])
+    binding['version'] = True
+    (root/'experiment-contract.json').write_bytes(contract.canonical(binding))
+    freeze['experiment_contract']['sha256'] = scheduler.sha(root/'experiment-contract.json')
+    atomic_json(root/'freeze.json', freeze)
+    assert report(root)['experiment_contract']['state'] == 'invalid'
+    with pytest.raises(ValueError):
+        scheduler._reserve_job(root)
+    # Restore the original artifact, then change an otherwise unvalidated spec field.
+    binding['version'] = 1
+    (root/'experiment-contract.json').write_bytes(contract.canonical(binding))
+    freeze['experiment_contract']['sha256'] = scheduler.sha(root/'experiment-contract.json')
+    atomic_json(root/'freeze.json', freeze)
+    spec = scheduler.read(root/'regression.json')
+    spec['seeds'] = [99]
+    atomic_json(root/'regression.json', spec)
+    assert report(root)['experiment_contract']['state'] == 'invalid'

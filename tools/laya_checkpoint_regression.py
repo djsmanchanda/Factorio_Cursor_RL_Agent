@@ -13,12 +13,65 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools.laya_regression_scheduler import enqueue, read, run_one, run_campaign, recover, TERMINAL
+from tools import laya_experiment_contract
 from training.laya_restart_checkpoint import load
 
 
 def report(root):
     """Account for every planned job; current observations are distinct from latches."""
-    status, spec = read(root/'job-status.json'), read(root/'regression.json')
+    spec = read(root/'regression.json')
+    try:
+        status = read(root/'job-status.json')
+        if not isinstance(status, dict) or not isinstance(status.get('jobs'), list):
+            raise ValueError('invalid status projection')
+    except (OSError, ValueError) as error:
+        status = {'name': spec.get('name', root.name), 'jobs': [], 'evidence_error': str(error)}
+    freeze = {}
+    try:
+        freeze = read(root/'freeze.json')
+        declaration = laya_experiment_contract.verify(root, spec, freeze)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        declaration = {'state': 'invalid', 'reference': None, 'error': str(error)}
+    denominator = {'state': 'legacy_status_only'}
+    try:
+        # The bound plan survives damage to its mutable on-disk projection.
+        if freeze.get('experiment_contract') is not None:
+            planned = laya_experiment_contract.load_binding(root, freeze['experiment_contract'])['planned_jobs']
+            denominator = {'state': 'bound_plan'}
+        else:
+            planned = read(root/'planned-jobs.json')['jobs']
+            denominator = {'state': 'planned_jobs_file'}
+        if (not isinstance(planned, list)
+                or any(not isinstance(job, dict) or not isinstance(job.get('id'), str) for job in planned)
+                or len({job['id'] for job in planned}) != len(planned)):
+            raise ValueError('invalid planned job identities')
+    except (OSError, KeyError, TypeError, ValueError) as error:
+        if freeze.get('experiment_contract') is not None:
+            denominator = {'state': 'unavailable', 'error': str(error)}
+            status['jobs'] = []
+        else:
+            denominator = {'state': 'legacy_status_only', 'error': str(error)}
+    else:
+        observed = {}
+        for row in status['jobs']:
+            if isinstance(row, dict) and isinstance(row.get('id'), str):
+                observed.setdefault(row['id'], []).append(row)
+        projected = []
+        for job in planned:
+            candidates = observed.get(job['id'], [])
+            row = candidates[0] if len(candidates) == 1 else None
+            try:
+                conflict = row is not None and any(
+                    k in row and laya_experiment_contract.canonical(row[k]) != laya_experiment_contract.canonical(v)
+                    for k, v in job.items() if k not in ('status', 'admission_reserved'))
+            except (TypeError, ValueError):
+                conflict = True
+            if row is None or conflict:
+                projected.append({**job, 'status': 'unknown',
+                                  'status_evidence': 'conflicting' if candidates else 'missing'})
+            else:
+                projected.append({**job, **row, 'status': row.get('status', 'unknown')})
+        status['jobs'] = projected
     groups = {}
     for job in status['jobs']:
         origin = job.get('origin', job.get('checkpoint', 'unknown'))
@@ -106,8 +159,11 @@ def report(root):
             if rows:
                 by_origin[origin] = {'planned':len(rows), 'observed_post_load':sum(stage in j.get('strict_reached',{}) for j in rows)}
         comparisons.append({'stage':stage,'origins':by_origin})
-    return {'kind': 'laya-restart-segment-v1', 'name': status['name'], 'groups': list(groups.values()),
-            'planned': len(status['jobs']), 'jobs': status['jobs'], 'until': spec.get('until'),
+    return {'experiment_contract': declaration, 'exposure_evidence': 'unknown',
+            'effective_intervention_evidence': 'unknown', 'inference_eligibility': 'unknown',
+            'kind': 'laya-restart-segment-v1', 'name': status['name'], 'groups': list(groups.values()),
+            'planned': None if denominator['state'] == 'unavailable' else len(status['jobs']),
+            'denominator_evidence': denominator, 'jobs': status['jobs'], 'until': spec.get('until'),
             'legacy_successor_fields_are_latches': True,
             'strict_evidence': 'post-load strict_current observations only; absent evidence is not failure',
             'proxy_phase_success': 'not inferred from strict evidence',
