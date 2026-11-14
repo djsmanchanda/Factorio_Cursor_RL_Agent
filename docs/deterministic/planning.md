@@ -23,6 +23,11 @@ These names describe intended responsibilities, not permission to build speculat
   destination and surveyed belt endpoints, direction constraints, attempted
   tiers, route limit, and planner reason. These details survive mission-blocker
   persistence; diagnostics do not relax route legality.
+- Ore hauls first use their short direct route, then the shared surface-belt search
+  around complete occupied footprints. Detours preserve collector and refinery
+  headings, stay within the haul budget and pass the same coverage, land, power
+  and engine checks. Established poles remain in service; relocation is not a
+  prerequisite when a legal belt detour exists.
 - Diagnose supply, delivery, inserter throughput, machine speed, and machine count in that order.
 - Repair existing capacity before duplicating it.
 - Change the tier of an owned machine through Factorio's native upgrade order,

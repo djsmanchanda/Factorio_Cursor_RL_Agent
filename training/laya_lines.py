@@ -104,7 +104,8 @@ def mine_unit(ox: float, oy: float, drills_per_row: int, flow: str = "east") -> 
     return actions, ((last + 0.5, belt_y) if flow == "east" else (first - 0.5, belt_y))
 
 
-def haul(start: tuple[float, float], flow: str, line_x: float, line_y: float) -> list[dict] | None:
+def haul(start: tuple[float, float], flow: str, line_x: float, line_y: float,
+         obstacles: list[Mapping] = ()) -> list[dict] | None:
     """Along the collector row, one turn, then east into the line input (line_x - 0.5, line_y + 1.5).
 
     ``start`` is the first tile past the collector head; an east flow must reach the
@@ -129,7 +130,15 @@ def haul(start: tuple[float, float], flow: str, line_x: float, line_y: float) ->
             belts.append(ghost("transport-belt", turn_x, y, vertical))
             y += step
     belts.append(ghost("transport-belt", turn_x, in_y, "east"))
-    return belts if len(belts) <= MAX_HAUL else None
+    if len(belts) > MAX_HAUL:
+        return None
+    if clear_of(belts, obstacles):
+        return belts
+    from planners.belt_bridge import surface_belt_route
+    from planners.plan_validation import entity_footprint_tiles
+    blocked = {tile for obstacle in obstacles for tile in entity_footprint_tiles(obstacle)}
+    return surface_belt_route(start, (turn_x, in_y), blocked, initial_direction=flow,
+                              final_direction="east", max_route_tiles=MAX_HAUL)
 
 
 def tap_sites(plan: Mapping | None, plate: str) -> list[tuple[float, float]]:
@@ -294,13 +303,29 @@ def line_candidates(facts: Mapping, plan: Mapping | None, plates: set[str], per_
                         if chests >= regular + CHEST_SPARE:
                             tap_options.append(("inserter", regular))
                     for inserter, taps in tap_options:
-                        actions = mine + route + furnaces + output_taps(rows, lx, ly, taps=taps, inserter=inserter)
+                        outputs = output_taps(rows, lx, ly, taps=taps, inserter=inserter)
+                        actions = mine + route + furnaces + outputs
                         if not _reachable(actions, ports, port["network"]):
                             count('outside_network_reach')
                             continue
                         if not clear_of(actions, obstacles):
-                            count('placed_collision')
-                            continue
+                            # A blocked machine body needs another site. A blocked haul
+                            # can use the shared detour search around the same live facts.
+                            if not clear_of(outputs, obstacles):
+                                count('placed_collision')
+                                continue
+                            detour = haul(end, flow, lx, ly, [*obstacles, *mine, *furnaces, *outputs])
+                            if detour is None:
+                                count('haul_blocked')
+                                continue
+                            actions = mine + detour + furnaces + outputs
+                            if not _reachable(actions, ports, port["network"]):
+                                count('outside_network_reach')
+                                continue
+                            if not clear_of(actions, obstacles):
+                                count('placed_collision')
+                                continue
+                            count('haul_detoured')
                         if not off_corridors(actions, plan):
                             count('grid_corridor')
                             continue

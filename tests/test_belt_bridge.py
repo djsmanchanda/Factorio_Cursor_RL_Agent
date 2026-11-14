@@ -40,6 +40,19 @@ def _bridge(**kwargs):
     return bridge_chest_to_chest(source, dest, **defaults)
 
 
+def test_surface_detour_preserves_interfaces_full_footprints_and_tile_budget():
+    from planners.belt_bridge import surface_belt_route
+    from planners.plan_validation import entity_footprint_tiles
+    blocked = set(entity_footprint_tiles({"entity": "roboport", "position": {"x": 6, "y": 0}}))
+    options = {"initial_direction": "east", "final_direction": "east", "max_route_tiles": 30}
+    route = surface_belt_route((.5, .5), (12.5, .5), blocked, **options)
+    assert route and route[0]["direction"] == route[-1]["direction"] == "east"
+    assert all(a["entity"] == "transport-belt" and not entity_footprint_tiles(a) & blocked for a in route)
+    assert surface_belt_route((.5, .5), (12.5, .5), blocked, **{**options, "max_route_tiles": 12}) is None
+    assert surface_belt_route((.5, .5), (12.5, .5), blocked | {(0, 0)}, **options) is None
+    assert surface_belt_route((.5, .5), (12.5, .5), blocked | {(12, 0)}, **options) is None
+
+
 def test_underground_reach_matches_the_live_prototypes() -> None:
     """Queried live against Factorio 2.0.77 via
     prototypes.entity[name].max_underground_distance. A wrong value here emits

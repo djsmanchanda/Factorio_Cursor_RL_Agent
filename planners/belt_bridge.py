@@ -858,6 +858,32 @@ def search_clear_route(
     return None
 
 
+def surface_belt_route(
+    start: Point, end: Point, blocked: set[tuple[int, int]], *,
+    initial_direction: str,
+    final_direction: str,
+    max_route_tiles: int,
+    belt_type: str = "transport-belt",
+) -> list[dict] | None:
+    """A bounded surface-only detour preserving both belt interface headings.
+
+    Reuse the shared search and corner emission without introducing tunnel
+    endpoints or requiring any existing infrastructure to be removed.
+    """
+    if start == end:
+        if _tile(start) in blocked or initial_direction != final_direction or max_route_tiles < 1:
+            return None
+        return [_surface_action(_tile(start), belt_type, final_direction)]
+    route = search_clear_route(start, end, blocked, initial_direction=initial_direction,
+                               final_direction=final_direction)
+    if route is None:
+        return None
+    points = _route_points(route)
+    if len(points) > max_route_tiles or len({_tile(point) for point, _, _ in points}) != len(points):
+        return None
+    return [_surface_action(_tile(point), belt_type, direction) for point, direction, _ in points]
+
+
 def _unwind(
     came: dict[tuple[Point, str | None], tuple[Point, str | None]],
     state: tuple[Point, str | None],

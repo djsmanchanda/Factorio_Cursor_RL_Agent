@@ -213,3 +213,12 @@ resources, using the engine's mining radius rather than the drill's footprint.
 
 Evidence: focused regression tests plus read-only live validation. No production
 improvement or acceptance milestone is established before a fresh frozen cohort.
+
+## Ore-haul obstacle detours (2026-11-14)
+
+Line generation adapts the shared `planners.belt_bridge.surface_belt_route` operation when a haul
+collides with existing infrastructure. Full entity footprints and the proposed mine, furnace body
+and output taps constrain the route. Both belt interface headings and the 90-tile haul limit remain
+required. A collision in a machine body still requires another site; an impossible detour remains
+blocked. All returned belt actions are ghosts, and the original land, coverage, power and live
+placement/funding validators still run. No pole is removed or reconfigured by this operation.

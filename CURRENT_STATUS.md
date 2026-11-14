@@ -457,3 +457,9 @@ User-authorized fresh C0 run launched on **Starship**, unit `laya-starship-capac
 Freeze and deadline are recorded under `/home/djsm/Github_Desktop/Factorio_Cursor_RL_Agent/data/laya-experiments/starship-capacity-requests-20261114/`; hard service cap **2026-11-15 02:36 IST**, plus 3,600,000-game-tick window and natural runner stops. Strict sidecar samples throughout; wrapper stops only this owned server at run end and preserves evidence. Antigravity `gemini-4-hydrogen` availability confirmed on Starship; requested read-only end-to-end observer is being dispatched. Lifecycle performed: copied a committed frozen checkout/inputs to Starship and started one isolated server/runner; no installed-mod deployment, active Miniship edit/restart, GUI closure or controller/supervisor message.
 
 User-requested Starship GUI opened on the same new run with a separate matching mod copy. Client logs confirm InGame; `LeonidasUIP` verified connected in spectator controller at tick284449 (`viewer/joined.json`). No factory edits were made for viewing.
+
+### 2026-11-14 17:27 IST — Copper ore-haul routing fix verified
+
+Added a bounded surface-only operation on the shared belt router and adapted line generation to detour blocked hauls around full existing/planned footprints. Preserve both belt interface headings, 90-tile budget, reach/land/power and engine validators; no pole deconstruction or grid interruption. Machine/output collisions remain site blockers.
+
+Evidence: **115 focused tests passed; fast gate 1,101 passed, 6 skipped (24.16s)**. Captured Starship world at tick515002 now yields a powered, land-legal copper line avoiding pole(77.5,-22.5), where frozen29cbf166 offered none. Read-only engine validation at tick581962 passes geometry and returns only3 missing mining drills and6 inserters; no live placement or production claim yet. Lifecycle: commit/freeze the fix for a separate continuation of the stalled disposable run; do not edit the active frozen arm.

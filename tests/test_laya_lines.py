@@ -36,6 +36,25 @@ def test_haul_is_continuous_and_enters_the_line_input_heading_east(flow):
     assert haul(head, flow, -line_x, 12) is None  # The wrong side cannot be reached without a U-turn.
 
 
+def test_copper_haul_detours_around_the_observed_pole_without_removing_power():
+    from training.laya_lines import clear_of
+    mine, head = mine_unit(93, -45, 3, "west")
+    body = line_units("copper-plate", 1, 79, -13) + output_taps(1, 79, -13, taps=1, inserter="fast-inserter")
+    pole = {"entity": "medium-electric-pole", "position": {"x": 77.5, "y": -22.5}}
+    assert not clear_of(haul(head, "west", 79, -13), [pole])
+    route = haul(head, "west", 79, -13, [pole, *mine, *body])
+    assert route and clear_of(route, [pole, *mine, *body])
+    tiles = [(a["position"]["x"], a["position"]["y"]) for a in route]
+    assert tiles[0] == head and tiles[-1] == (77.5, -11.5)
+    assert route[0]["direction"] == "west" and route[-1]["direction"] == "east"
+    vectors = {"west": (-1, 0), "east": (1, 0), "north": (0, -1), "south": (0, 1)}
+    assert all((a[0] + vectors[action["direction"]][0], a[1] + vectors[action["direction"]][1]) == b
+               for a, b, action in zip(tiles, tiles[1:], route))
+    assert all(a["entity"] == "transport-belt" and a["action_type"] == "place_ghost" for a in route)
+    validate_build_plan({"surface": "nauvis", "force": "player", "atomic": True,
+                         "phases": [{"name": "detoured", "actions": mine + route + body}]})
+
+
 def test_long_mines_get_substations_along_the_row():
     mine, _ = mine_unit(0, 0, 9, "east")
     assert entities(mine)["electric-mining-drill"] == 18 and entities(mine)["substation"] == 2
