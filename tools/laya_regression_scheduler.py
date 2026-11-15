@@ -650,6 +650,27 @@ def _update_job(root, identity, values):
     _publish(root, change)
 
 
+def record_checks(spec, status):
+    """Evaluate declared manipulation checks in place; a failure here must not block publication."""
+    try:
+        return laya_manipulation_check.evaluate(spec, status, TERMINAL)
+    except Exception as error:  # noqa: BLE001 -- the check is advisory for terminal publication and recovery
+        status['manipulation_check_error'] = f'{type(error).__name__}: {error}'
+        return []
+
+
+def finalize_checks(root, spec):
+    """Durably publish any declared verdict that is due, whether or not more admissions follow.
+
+    Writes nothing when no verdict is due, so it is cheap to call at recovery and at campaign end.
+    """
+    if not laya_manipulation_check.declarations(spec):
+        return []
+    if not laya_manipulation_check.evaluate(spec, copy.deepcopy(read(root/'job-status.json')), TERMINAL):
+        return []
+    return _publish(root, lambda status: record_checks(spec, status))
+
+
 def recover(root):
     spec = read(root/'regression.json')
     jobs = _publish(root, lambda status: copy.deepcopy(status['jobs']))
@@ -677,6 +698,7 @@ def recover(root):
             if job.get('status') not in TERMINAL:
                 updates.update(status='infrastructure_failure', termination_cause='coordinator_interrupted_attempt')
             _update_job(root, job['id'], updates)
+    finalize_checks(root, spec)
 
 
 def _reserve_job(root):
@@ -888,6 +910,8 @@ def _execute_job(root, executor, spec, freeze, job):
                 if item['id'] == attempt_id:
                     item['outcome'] = {'kind':row['status'], 'termination_cause':row.get('termination_cause')}
                     item['finished'] = time.time()
+            # The verdict is published with the result that completes it, so it does not wait for another admission.
+            record_checks(spec, status)
         pending = sys.exception()
         try:
             _publish(root, terminal)
@@ -940,6 +964,7 @@ def run_campaign(root, *, workers=MAX_MIXED_WORKERS, executor=subprocess.run, ad
                 status = read(root/'job-status.json')
                 queued = any(j['status']=='queued' for j in status['jobs'])
                 if not active and not queued:
+                    finalize_checks(root, spec)
                     return 'complete'
                 idle = False
                 if len(active) < workers and queued:

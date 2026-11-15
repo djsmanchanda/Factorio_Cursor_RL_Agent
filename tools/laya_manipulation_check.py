@@ -17,9 +17,14 @@ Each form is measured per job from ``evidence/decision-states.jsonl`` only:
 - ``succeeded``    as ``chosen`` with ``outcome.ok is True``
 - ``rule_applied`` decision records whose ``choice.rules`` contains ``rule``
 - ``network_stock`` largest provider network stock of ``item`` seen in any
-  decision record (``state.observation_digest.saved_world.provider_stock.network``)
+  decision record (``state.observation_digest.saved_world.provider_stock.network``).
+  A record whose census is missing or malformed is not an observation; only a
+  valid census without the item is an observed zero.
 
-A job shows the exposure when its measure is at least ``at_least``. If fewer
+A job shows the exposure when its measure is at least ``at_least``. Only jobs
+with at least one usable exposure observation are measured; a job whose
+telemetry is unavailable records ``value=null, shown=null`` with a cause and
+never counts toward K. If fewer
 than ``min_jobs`` of the first K measured jobs show it, the arm fails: its
 queued jobs are cancelled with ``manipulation_check_failed`` and the verdict is
 recorded in the cohort status. Running jobs are never touched. Arms without a
@@ -142,9 +147,30 @@ def _matches(option, exposure):
     return option.get('family') == exposure['family']
 
 
+def _network_stock(row, item):
+    """Stock of ``item`` in the row's provider network census, or None when the census is unusable.
+
+    An item absent from a valid census is an observed zero; a missing or malformed census is not.
+    """
+    try:
+        census = row['state']['observation_digest']['saved_world']['provider_stock']['network']
+    except (KeyError, TypeError):
+        return None
+    if not isinstance(census, dict):
+        return None
+    value = census.get(item, 0)
+    if type(value) not in (int, float) or value != value or value < 0 or value == float('inf'):
+        return None
+    return value
+
+
 def measure_records(records, exposure):
-    """Return (measure, decision record count) for one job's decision records."""
-    form, count, decisions = exposure['form'], 0, 0
+    """Return (measure, decision record count, usable observation count) for one job's decision records.
+
+    ``observations`` counts the decision rows that carry the telemetry this form reads,
+    so a row without it can neither show nor refute the exposure.
+    """
+    form, count, decisions, observations = exposure['form'], 0, 0, 0
     for row in records:
         if not isinstance(row, dict) or not isinstance(row.get('choice'), dict):
             continue
@@ -152,22 +178,26 @@ def measure_records(records, exposure):
         options = row.get('options') if isinstance(row.get('options'), list) else []
         choice = row['choice']
         if form == 'offered':
+            if not isinstance(row.get('options'), list):
+                continue
+            observations += 1
             count += any(_matches(option, exposure) for option in options)
         elif form in ('chosen', 'succeeded'):
+            observations += 1
             chosen = next((o for o in options if isinstance(o, dict)
                            and o.get('option_id') == choice.get('option_id')), {'option_id': choice.get('option_id')})
             outcome = row.get('outcome') if isinstance(row.get('outcome'), dict) else {}
             count += _matches(chosen, exposure) and (form == 'chosen' or outcome.get('ok') is True)
         elif form == 'rule_applied':
+            observations += 1
             count += exposure['rule'] in (choice.get('rules') or ())
         else:
-            try:
-                value = row['state']['observation_digest']['saved_world']['provider_stock']['network'].get(exposure['item'], 0)
-            except (KeyError, TypeError, AttributeError):
+            value = _network_stock(row, exposure['item'])
+            if value is None:
                 continue
-            if type(value) in (int, float):
-                count = max(count, value)
-    return count, decisions
+            observations += 1
+            count = max(count, value)
+    return count, decisions, observations
 
 
 def measure_job(world, declaration):
@@ -183,17 +213,46 @@ def measure_job(world, declaration):
                     rows.append(json.loads(line))
                 except ValueError:
                     continue
-        value, decisions = measure_records(rows, exposure)
-        record.update(value=value, decisions=decisions, shown=value >= exposure['at_least'])
+        value, decisions, observations = measure_records(rows, exposure)
+        if observations:
+            record.update(value=value, decisions=decisions, observations=observations, shown=value >= exposure['at_least'])
+        else:
+            cause = 'exposure_telemetry_unavailable' if decisions else 'no_decision_records'
+            record.update(value=None, decisions=decisions, observations=0, shown=None, cause=cause)
     except Exception as error:  # noqa: BLE001 -- runs in the scheduler's finally; must never block terminal publication
-        record.update(value=None, decisions=0, shown=None, error=f'{type(error).__name__}: {error}')
+        record.update(value=None, decisions=0, observations=0, shown=None, cause='measurement_error', error=f'{type(error).__name__}: {error}')
     return record
+
+
+def _usable(job, terminal):
+    """A terminal job whose exposure record holds at least one usable observation.
+
+    Records written before ``observations`` existed fall back to their decision count.
+    """
+    exposure = job.get('exposure')
+    return (job.get('status') in terminal and isinstance(exposure, dict)
+            and (exposure.get('observations', exposure.get('decisions')) or 0) > 0)
+
+
+def _measured(status, arm, terminal):
+    return sorted((job for job in status['jobs'] if job.get('arm') == arm and _usable(job, terminal)),
+                  key=lambda job: (job['exposure'].get('measured_at') or 0, job['id']))
+
+
+def _verdict(declaration, window, state, **extra):
+    shown = [job['id'] for job in window if job['exposure'].get('shown') is True]
+    return {'state': state, 'evaluated_at': time.time(), 'declaration': declaration,
+            'evaluated_jobs': [job['id'] for job in window],
+            'values': {job['id']: job['exposure'].get('value') for job in window},
+            'jobs_showing_exposure': shown, 'cancelled_jobs': [], **extra}
 
 
 def evaluate(spec, status, terminal):
     """Record verdicts for arms that reached K measured jobs; cancel a failed arm's queued jobs.
 
     Mutates ``status`` only for specs that declare a check. Returns the arms given a verdict now.
+    An arm whose jobs are all terminal but fewer than K were measured gets an ``inconclusive``
+    verdict: nothing more can arrive, and an unmeasured treatment is not a failed one.
     """
     declared = declarations(spec)
     if not declared:
@@ -204,24 +263,26 @@ def evaluate(spec, status, terminal):
         if arm in verdicts:
             continue
         declaration = validate(raw, sum(job.get('arm') == arm for job in status['jobs']))
-        measured = sorted((job for job in status['jobs'] if job.get('arm') == arm and job.get('status') in terminal
-                           and isinstance(job.get('exposure'), dict) and (job['exposure'].get('decisions') or 0) > 0),
-                          key=lambda job: (job['exposure'].get('measured_at') or 0, job['id']))
+        measured = _measured(status, arm, terminal)
         if len(measured) < declaration['after_jobs']:
+            jobs = [job for job in status['jobs'] if job.get('arm') == arm]
+            if jobs and all(job.get('status') in terminal for job in jobs):
+                verdicts[arm] = _verdict(
+                    declaration, measured, 'inconclusive', measured_jobs=len(measured),
+                    unmeasured_jobs={job['id']: (job.get('exposure') or {}).get('cause') or 'no_exposure_record'
+                                     for job in jobs if not _usable(job, terminal)},
+                    reason=f"{len(measured)} of {declaration['after_jobs']} required jobs had usable exposure telemetry")
+                recorded.append(arm)
             continue
         window = measured[:declaration['after_jobs']]
-        shown = [job['id'] for job in window if job['exposure'].get('shown') is True]
-        passed = len(shown) >= declaration['min_jobs']
-        verdict = {'state': 'passed' if passed else 'failed', 'evaluated_at': time.time(),
-                   'declaration': declaration, 'evaluated_jobs': [job['id'] for job in window],
-                   'values': {job['id']: job['exposure'].get('value') for job in window},
-                   'jobs_showing_exposure': shown, 'cancelled_jobs': []}
+        passed = sum(job['exposure'].get('shown') is True for job in window) >= declaration['min_jobs']
+        verdict = _verdict(declaration, window, 'passed' if passed else 'failed')
         if not passed:
             for job in status['jobs']:
                 if job.get('arm') == arm and job.get('status') == 'queued' and not job.get('admission_reserved'):
                     job.update(status='cancelled', termination_cause=FAILED_CAUSE)
                     verdict['cancelled_jobs'].append(job['id'])
-            verdict['reason'] = (f"{len(shown)} of the first {len(window)} measured jobs showed "
+            verdict['reason'] = (f"{len(verdict['jobs_showing_exposure'])} of the first {len(window)} measured jobs showed "
                                  f"{declaration['exposure']}; {declaration['min_jobs']} required")
         verdicts[arm] = verdict
         recorded.append(arm)
@@ -239,7 +300,67 @@ def summarize(spec, status, terminal):
         if arm in verdicts:
             result[arm] = verdicts[arm]
             continue
-        measured = [job for job in status.get('jobs', []) if job.get('arm') == arm and job.get('status') in terminal
-                    and isinstance(job.get('exposure'), dict) and (job['exposure'].get('decisions') or 0) > 0]
-        result[arm] = {'state': 'pending', 'declaration': raw, 'measured_jobs': len(measured)}
+        arm_jobs = [job for job in status.get('jobs', []) if job.get('arm') == arm]
+        measured = [job for job in arm_jobs if _usable(job, terminal)]
+        unmeasured = {job['id']: (job.get('exposure') or {}).get('cause') or 'no_exposure_record'
+                      for job in arm_jobs if job.get('status') in terminal and not _usable(job, terminal)}
+        result[arm] = {'state': 'pending', 'declaration': raw, 'measured_jobs': len(measured),
+                       'unmeasured_jobs': unmeasured}
     return {'arms': result, 'control_arms_unchecked': [arm for arm in (spec.get('arms') or {}) if arm not in declared]}
+
+
+def offline_verdicts(root, terminal, *, remeasure=True):
+    """Verdicts for a cohort directory computed read-only; nothing is written.
+
+    Reads ``regression.json`` and ``job-status.json`` and, with ``remeasure``, re-reads each terminal
+    job's ``evidence/decision-states.jsonl`` so records written under older measurement rules are
+    judged by the current ones. Returns the verdicts computed now and, separately, any the
+    scheduler had already published.
+    """
+    import copy
+    root = Path(root)
+    spec = json.loads((root/'regression.json').read_text())
+    status = copy.deepcopy(json.loads((root/'job-status.json').read_text()))
+    published = copy.deepcopy(status.get('manipulation_checks') or {})
+    status['manipulation_checks'] = {}
+    declared = declarations(spec)
+    if remeasure:
+        for job in status['jobs']:
+            if job.get('arm') in declared and job.get('status') in terminal and job.get('world'):
+                kept = (job.get('exposure') or {}).get('measured_at')
+                job['exposure'] = measure_job(job['world'], validate(
+                    declared[job['arm']], sum(row.get('arm') == job['arm'] for row in status['jobs'])))
+                if kept is not None:  # keep the scheduler's original window order
+                    job['exposure']['measured_at'] = kept
+    evaluate(spec, status, terminal)
+    return {'cohort': root.name, 'remeasured': remeasure,
+            'verdicts': status['manipulation_checks'], 'published_verdicts': published}
+
+
+def main(argv=None):
+    """``offline COHORT_DIR``: print the verdicts a finished cohort's declared checks yield; read-only."""
+    import argparse
+    import sys
+    from tools.laya_regression_scheduler import TERMINAL
+    parser = argparse.ArgumentParser(description=main.__doc__)
+    sub = parser.add_subparsers(dest='command', required=True)
+    offline = sub.add_parser('offline', help='evaluate a cohort directory without writing into it')
+    offline.add_argument('cohort', type=Path)
+    offline.add_argument('--stored-exposure', action='store_true',
+                         help='use the exposure records stored on the job rows instead of re-reading each world')
+    offline.add_argument('--output', type=Path, help='also write the JSON here (refused inside the cohort directory)')
+    args = parser.parse_args(argv)
+    cohort = args.cohort.resolve()
+    result = offline_verdicts(cohort, TERMINAL, remeasure=not args.stored_exposure)
+    text = json.dumps(result, indent=2, sort_keys=True)
+    if args.output is not None:
+        out = args.output.resolve()
+        if cohort == out or cohort in out.parents:
+            parser.error('--output must be outside the cohort directory')
+        out.write_text(text + '\n')
+    sys.stdout.write(text + '\n')
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
