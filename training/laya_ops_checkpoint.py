@@ -2,6 +2,7 @@
 from __future__ import annotations
 import dataclasses
 import importlib
+import hashlib
 import json
 import math
 import os
@@ -150,15 +151,25 @@ def restore_session(session, state):
 
 def _sidecars(root, episode_id):
     # Register authoritative state only, never credentials or stale report exports.
+    from orchestrator.checkpoint_restart_state import _no_symlinks
     for folder in ("server/logs/deterministic-material-reservations", "server/logs/deterministic-bootstrap-districts",
                    "server/logs/deterministic-bootstrap-work", "server/script-output/logs", "evidence"):
         for p in (root / folder).rglob("*"):
             if p.is_file() and p.suffix in {".json", ".jsonl"}:
+                _no_symlinks(p)
                 yield p
+    # Validate and transfer only this episode's bounded invocation journal.
+    from orchestrator.checkpoint_restart_state import sidecar_registry, _read_sidecars
+    registry = sidecar_registry(root / "server/script-output", episode_id)
+    journal = registry["operation_invocations"]
+    entries = _read_sidecars({"operation_invocations": journal}, episode_id)
+    for name in entries["operation_invocations"]:
+        yield journal / name
     # Gate repair budgets are durable episode state, never Python cache state.
     from orchestrator.loan_gate_retries import GateRetries
     retries = GateRetries(root / 'server/script-output', episode_id)
-    if retries.path.exists():
+    retry_entries = _read_sidecars({"loan_gate_retries": retries.path}, episode_id)
+    if retry_entries["loan_gate_retries"]:
         yield retries.path
 
 
@@ -178,7 +189,10 @@ def load_bundle(path):
     if not {"source.zip", "controller.json", "engine-state.json"} <= set(meta["files"]):
         raise ValueError("incomplete ops checkpoint generation")
     for name, digest in meta["files"].items():
-        source = (path / name).resolve()
+        from orchestrator.checkpoint_restart_state import _no_symlinks
+        candidate = path / name
+        _no_symlinks(candidate)
+        source = candidate.resolve()
         if not source.is_relative_to(path) or not source.is_file() or file_hash(source) != digest:
             raise ValueError("checkpoint hash or path mismatch")
     controller = decode(json.loads((path / "controller.json").read_text()))
@@ -241,16 +255,90 @@ def restore_context(bundle, root):
     manifest = json.loads((root / "manifest.json").read_text())
     if manifest["source_sha256"] != meta["files"]["source.zip"] or manifest["mod_hashes"] != meta["mod_hashes"]:
         raise ValueError("checkpoint save/mod provenance mismatch")
-    # Newly prepared roots must be empty of controller context; never overlay a later generation.
-    for name in meta["files"]:
-        if name.startswith("context/"):
-            target = root / name.removeprefix("context/")
-            if target.exists(): raise ValueError("restore would replace existing controller context")
-    for name in meta["files"]:
-        if name.startswith("context/"):
-            target = root / name.removeprefix("context/")
+    # Preflight every payload and destination before installing any authoritative state.
+    from orchestrator.checkpoint_restart_state import (
+        MAX_BYTES, MAX_FILES, _files, _no_symlinks, _valid_name, sidecar_registry,
+    )
+    from orchestrator.operation_invocations import decode_record
+    from orchestrator.loan_gate_retries import decode_state
+    episode = meta["logical_episode_id"]
+    registry = sidecar_registry(root / "server/script-output", episode)
+    journal = registry["operation_invocations"]
+    retry = registry["loan_gate_retries"]
+    if _files(journal, 'operation_invocations') or _files(retry, 'loan_gate_retries'):
+        raise ValueError('restore would replace existing controller context')
+    pending = []
+    destinations = set()
+    count = total = 0
+    bundle = Path(bundle).resolve()
+    for name, digest in meta["files"].items():
+        if not name.startswith("context/"):
+            continue
+        relative = Path(name.removeprefix("context/"))
+        if relative.is_absolute() or any(part in (".", "..") for part in relative.parts):
+            raise ValueError("invalid context path")
+        target = root / relative
+        if target in destinations:
+            raise ValueError('duplicate context destination')
+        destinations.add(target)
+        permitted_folders = (
+            Path("server/logs/deterministic-material-reservations"),
+            Path("server/logs/deterministic-bootstrap-districts"),
+            Path("server/logs/deterministic-bootstrap-work"),
+            Path("server/script-output/logs"), Path("evidence"),
+        )
+        ordinary = (relative.suffix in {".json", ".jsonl"} and
+                    any(relative.is_relative_to(folder) and relative != folder for folder in permitted_folders))
+        if not ordinary and target != retry and target.parent != journal:
+            raise ValueError("unregistered controller context path")
+        _no_symlinks(target)
+        if target.exists():
+            raise ValueError("restore would replace existing controller context")
+        source = bundle / name
+        is_invocation = (relative.parts[:2] == ("server", "script-output") and any(
+            part.startswith("operation-invocations-") for part in relative.parts))
+        if is_invocation and source.stat().st_size > MAX_BYTES - total:
+            raise ValueError("invocation bundle exceeds size limits")
+        data = source.read_bytes()
+        if hashlib.sha256(data).hexdigest() != digest:
+            raise ValueError("checkpoint context digest mismatch")
+        if is_invocation:
+            if target.parent != journal or not _valid_name("operation_invocations", target.name, journal):
+                raise ValueError("invalid invocation ownership or name")
+            decode_record(data, target.name, episode)
+            count += 1
+            total += len(data)
+        elif target == retry:
+            decode_state(data, episode)
+        if count > MAX_FILES or total > MAX_BYTES:
+            raise ValueError("invocation bundle exceeds size limits")
+        pending.append((target, data))
+    created = []
+    directories = set()
+    try:
+        for target, data in pending:
+            parent = target.parent
+            directories.add(parent)
+            while not parent.exists():
+                parent = parent.parent
+                directories.add(parent)
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(Path(bundle) / name, target)
+            _no_symlinks(target)
+            with target.open("xb") as handle:
+                created.append(target)
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+        for directory in sorted(directories, key=lambda p: len(p.parts), reverse=True):
+            descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+    except BaseException:
+        for target in created:
+            target.unlink(missing_ok=True)
+        raise
     return meta, state
 
 

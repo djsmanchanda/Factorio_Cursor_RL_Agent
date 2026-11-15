@@ -2,6 +2,7 @@
 import copy
 import dataclasses
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 import pytest
@@ -177,3 +178,120 @@ def test_restore_preserves_shared_coverage_progress_identity():
     assert construction_coverage._COVERAGE_PROGRESS is original
     assert stage_services._COVERAGE_PROGRESS is original
     assert original.revision==17
+
+
+@pytest.mark.fast
+@pytest.mark.parametrize('kind', ['uncertain', 'returned', 'empty', 'legacy'])
+def test_ops_capture_restores_invocation_fence_to_real_constructor(tmp_path, monkeypatch, kind):
+    from orchestrator.operation_invocations import Invocations
+    from orchestrator.operation_session import DeterministicSession
+    from tests.test_laya_async_invocations import PLAN
+    adapter, session, state = _capture_fixture(tmp_path, monkeypatch)
+    (adapter.root / 'server/logs/deterministic-material-reservations/logical.json').unlink()
+    inv = Invocations(adapter.root / 'server/script-output', 'logical')
+    record = inv.begin('starter', {})
+    if kind == 'uncertain':
+        with pytest.raises(KeyboardInterrupt):
+            inv.submit(record, lambda *args: (_ for _ in ()).throw(KeyboardInterrupt()), {}, PLAN)
+    elif kind == 'returned':
+        inv.submit(record, lambda *args: 'receipt', {}, PLAN)
+    elif kind == 'legacy':
+        (inv.directory / 'legacy-unknown.json').write_text('{"provenance":"unknown"}')
+    foreign = Invocations(adapter.root / 'server/script-output', 'foreign')
+    foreign.begin('starter', {})
+    bundle = tmp_path / 'data/bundle'
+    meta = checkpoint.capture(adapter, GuidedPolicy(7), session, bundle, state)
+    assert not any(foreign.directory.name in name for name in meta['files'])
+    target = tmp_path / 'data/restored'
+    (target / 'server').mkdir(parents=True)
+    (target / 'server/rcon-password').write_text('password')
+    (target / 'manifest.json').write_text(json.dumps({'rcon_port': 1, 'source_sha256': meta['files']['source.zip'],
+                                                      'mod_hashes': meta['mod_hashes']}))
+    monkeypatch.setattr(checkpoint, 'owned_root', lambda path: Path(path))
+    checkpoint.load_bundle(bundle)
+    checkpoint.restore_context(bundle, target)
+    calls = []
+    monkeypatch.setattr('orchestrator.operation_session.RconClient', lambda *args: object())
+    monkeypatch.setattr('orchestrator.operation_session.GameBridge', lambda **kwargs: object())
+    for name in ('initialize_operation_runtime', '_restore_bootstrap_reservations',
+                 '_reconcile_bootstrap_work', '_reserve_plastic_output_chest'):
+        monkeypatch.setattr('orchestrator.operation_session.ab.' + name, lambda *args: calls.append('maintenance'))
+    restored = DeterministicSession(target, logical_episode_id='logical')
+    if kind in ('uncertain', 'legacy'):
+        assert calls == []
+        assert restored.run('produce', item='advanced-circuit')['code'] == 'readback_required'
+        assert calls == []
+    else:
+        assert calls
+        restored.invocations.require_clear()
+
+
+@pytest.mark.fast
+@pytest.mark.parametrize('failure', ['semantic', 'malformed', 'symlink', 'overwrite', 'other_journal',
+                                   'fsync', 'directory_fsync', 'interrupted', 'write'])
+def test_ops_restore_preflights_and_refuses_unsafe_context(tmp_path, monkeypatch, failure):
+    from orchestrator.operation_invocations import Invocations
+    adapter, session, state = _capture_fixture(tmp_path, monkeypatch)
+    inv = Invocations(adapter.root / 'server/script-output', 'logical')
+    inv.begin('starter', {})
+    bundle = tmp_path / 'data/bundle'
+    meta = checkpoint.capture(adapter, GuidedPolicy(7), session, bundle, state)
+    name = next(n for n in meta['files'] if 'operation-invocations-' in n)
+    target = tmp_path / 'data/restored'
+    target.mkdir()
+    (target / 'manifest.json').write_text(json.dumps({'source_sha256': meta['files']['source.zip'], 'mod_hashes': meta['mod_hashes']}))
+    monkeypatch.setattr(checkpoint, 'owned_root', lambda path: Path(path))
+    if failure in ('semantic', 'malformed'):
+        path = bundle / name
+        record = json.loads(path.read_text())
+        record['episode_id'] = 'foreign'
+        path.write_text(json.dumps(record) if failure == 'semantic' else '{')
+        meta['files'][name] = checkpoint.file_hash(path)
+        (bundle / 'checkpoint.json').write_text(json.dumps(meta))
+    elif failure == 'symlink':
+        (target / 'server').symlink_to(adapter.root / 'server', target_is_directory=True)
+    elif failure in ('overwrite', 'other_journal'):
+        existing = target / name.removeprefix('context/')
+        if failure == 'other_journal':
+            existing = existing.with_name('b' * 32 + '.json')
+        existing.parent.mkdir(parents=True)
+        existing.write_text('existing')
+    elif failure == 'fsync':
+        monkeypatch.setattr(checkpoint.os, 'fsync', lambda fd: (_ for _ in ()).throw(OSError('flush failed')))
+    elif failure == 'interrupted':
+        monkeypatch.setattr(checkpoint.os, 'fsync', lambda fd: (_ for _ in ()).throw(KeyboardInterrupt()))
+    elif failure == 'directory_fsync':
+        import stat
+        original_sync = os.fsync
+        def sync(fd):
+            if stat.S_ISDIR(os.fstat(fd).st_mode):
+                raise OSError('directory flush failed')
+            original_sync(fd)
+        monkeypatch.setattr(checkpoint.os, 'fsync', sync)
+    else:
+        original_open = Path.open
+        def failing_open(path, mode='r', *args, **kwargs):
+            if mode == 'xb':
+                raise OSError('write failed')
+            return original_open(path, mode, *args, **kwargs)
+        monkeypatch.setattr(Path, 'open', failing_open)
+    with pytest.raises((ValueError, OSError, KeyboardInterrupt)):
+        checkpoint.restore_context(bundle, target)
+    assert not (target / 'server/logs/deterministic-material-reservations/logical.json').exists() or failure == 'symlink'
+    if failure in ('overwrite', 'other_journal'):
+        assert existing.read_text() == 'existing'
+
+
+@pytest.mark.fast
+def test_ops_capture_refuses_symlink_in_registered_source_context(tmp_path, monkeypatch):
+    adapter, session, state = _capture_fixture(tmp_path, monkeypatch)
+    path = adapter.root / 'server/logs/deterministic-material-reservations/logical.json'
+    path.unlink()
+    outside = tmp_path / 'outside.json'
+    outside.write_text('{"not_owned":true}')
+    path.symlink_to(outside)
+    destination = tmp_path / 'data/bundle'
+    with pytest.raises(ValueError, match='Symlink'):
+        checkpoint.capture(adapter, GuidedPolicy(7), session, destination, state)
+    assert not destination.exists()
+    assert not list(destination.parent.glob('.bundle.pending-*/context/**/logical.json'))

@@ -62,3 +62,12 @@ This contract covers bounded retry conservation in offline fixtures. It does
 not prove full loan/controller restart equivalence, machine identity continuity,
 correlated configuration readback, delivery, or live efficacy. A reviewed new
 frozen runner is required for future use; no runtime action was performed.
+
+The separate ops-generation capture now transfers the exact episode-owned
+invocation directory through its own context path. Restore validates the bounded
+journal, ownership, record semantics and digests alongside the complete context
+before installing files, and flushes installed files and directory entries.
+Empty and returned records remain clear; interrupted and legacy-unknown records
+continue to fence a fresh session. Existing source-hash compatibility still
+requires explicit migration for older generations. This does not transfer the
+acceptance accumulator or establish live restart equivalence.
