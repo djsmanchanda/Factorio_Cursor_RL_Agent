@@ -647,6 +647,42 @@ def repeat_fails(results: list[dict], key: tuple) -> int:
     return min(count, 3)
 
 
+# Outcome details fields that name an item the outcome lacks or waits on (single names / bills).
+BLOCKER_ITEM_FIELDS = ("item", "rung", "prerequisite", "predecessor", "target")
+BLOCKER_BILL_FIELDS = ("required", "missing")
+
+
+def blocker_items(result: Mapping) -> list[str]:
+    """Items a refused or deferred outcome names in its own details (what it lacks or waits on)."""
+    details = result.get("details") or {}
+    items = {details[f] for f in BLOCKER_ITEM_FIELDS if isinstance(details.get(f), str)}
+    for bill in [details.get(f) for f in BLOCKER_BILL_FIELDS] + [(details.get("slot_claim") or {}).get("required")]:
+        if isinstance(bill, Mapping):
+            items.update(bill)
+    return sorted(items)
+
+
+def blocker_unchanged(results: list[dict], key: tuple, stock: Mapping[str, int]) -> bool:
+    """This option's latest attempt was refused or deferred and nothing it depended on has changed since.
+
+    The remembered signature is the outcome's code plus the network stock of the items its details named
+    (``blocker_stock``, recorded at the failure). The fact clears when any named item gained stock, when any
+    operation since succeeded or put something into the world (tiles, power, slots and loans may have
+    changed), or when the option itself succeeded. A failure recorded without ``blocker_stock`` (older
+    checkpoint) cannot be re-derived and is not marked.
+    """
+    last = None
+    for back, r in enumerate(reversed(results)):
+        if r["operation"] != "wait" and _key(r) == key:
+            last, later = r, results[len(results) - back:]
+            break
+    if last is None or last.get("ok") or last.get("code") in BUILT or "blocker_stock" not in last:
+        return False
+    if any(int(stock.get(item, 0)) > int(seen) for item, seen in last["blocker_stock"].items()):
+        return False
+    return not any((r.get("ok") and r["operation"] != "wait") or r.get("code") in BUILT for r in later)
+
+
 def history_features(results: list[dict], key: tuple, family: str) -> dict:
     """What Laya's recent decisions say about one option (rules in docs/rl/laya_ops_guidelines.json weigh them)."""
     last = next((r for r in reversed(results) if r["operation"] != "wait"), None)
@@ -954,7 +990,8 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     for option in options:  # Laya's own recent decisions, per option and per need
         params = option["params"]
         key = (option["family"], params.get("recipe") or params.get("item"))
-        option["features"].update(history_features(results, key, option["family"]))
+        option["features"].update(history_features(results, key, option["family"]),
+                                  blocker_unchanged=blocker_unchanged(results, key, stock or {}))
         mine = [r for r in results if r["operation"] != "wait" and _key(r) == key]
         if option["family"] == "extend" and mine:
             latest = mine[-1]
@@ -1372,6 +1409,9 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         result["need_id"] = chosen["need_id"]  # per-need no-progress facts
         if result.get("code") == "material_shortage":  # What was in stock when it failed, to see change later.
             result["stock_at"] = {item: stock.get(item, 0) for item in ((result.get("details") or {}).get("required") or {})}
+        if chosen["family"] != "wait" and not result.get("ok") and result.get("code") not in BUILT:
+            # The blocker's signature: stock of the items the refusal names, to see later whether it changed.
+            result["blocker_stock"] = {item: int(stock.get(item, 0)) for item in blocker_items(result)}
         results.append(result)
         after = adapter.query()
         if c6.explicit_choice(chosen):
