@@ -221,6 +221,15 @@ def _world_unstable(world: Path, window_s: float) -> bool:
     log = world / "logs/laya-runner.log"
     heartbeat = world / "laya-runner.heartbeat.json"
     if not heartbeat.exists():
+        # A world that is still preparing has no heartbeat yet; treating that
+        # as instability collapsed the host target to min_slots at every
+        # cohort start and forced a ~9 min/slot climb. A recently written
+        # runner log means it is starting, not sick.
+        try:
+            if log.exists() and time.time() - log.stat().st_mtime < 600:
+                return False
+        except OSError:
+            pass
         return True
     try:
         if time.time() - heartbeat.stat().st_mtime > 60:
@@ -422,6 +431,14 @@ def choose(
             state["settle_until"] = now + float(config["settle_windows"]) * float(config["window_seconds"])
         return done(cap, cap_reason if cap_reason != mode else "mode_cap")
 
+    if (int(metrics.get("active_slots") or 0) == 0
+            and int(metrics.get("queued") or 0) > 0
+            and state.get("sweet_spot")):
+        # Resume a known-good population instead of climbing from min_slots
+        # after an idle gap.
+        resume = min(int(state["sweet_spot"]), cap)
+        if resume > target:
+            return done(resume, "resume_sweet_spot")
     p95 = metrics.get("ups_p95")
     p98 = metrics.get("ups_p98")
     if p95 is not None and p98 is not None and (p95 < float(config["min_ups_p95"]) or p98 < float(config["min_ups_p98"])):

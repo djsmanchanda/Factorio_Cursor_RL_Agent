@@ -11,6 +11,7 @@ from tools.laya_host_scheduler import (
     allocate,
     choose,
     effective_max,
+    _world_unstable,
     main,
     world_ups,
 )
@@ -315,3 +316,19 @@ def test_floors_compare_one_x_equivalent_ups_and_show_measured(tmp_path):
     # A 2x world at 100 UPS is at 50 of 60 target: below a 52 floor, as a 1x world at 50 would be.
     assert metrics['ups_p98'] == pytest.approx(50, abs=.5)
     assert metrics['total_ups'] == pytest.approx(60+50+60)
+
+
+def test_an_idle_gap_resumes_the_measured_sweet_spot_instead_of_climbing():
+    config = _config(start_slots=4, max_slots=16, step=2)
+    state = {"target": 4, "mode": "performance", "sweet_spot": 12}
+    target, reason, _ = choose(config, state, _metrics(active_slots=0, queued=20, ups_samples=0,
+                                                        ups_p95=None, ups_p98=None), now=100)
+    assert (target, reason) == (12, "resume_sweet_spot")
+
+
+def test_a_world_still_preparing_is_not_counted_unstable(tmp_path):
+    world = tmp_path / "world"
+    (world / "logs").mkdir(parents=True)
+    assert _world_unstable(world, 600)  # no heartbeat and no fresh log
+    (world / "logs/laya-runner.log").write_text("starting\n", encoding="utf-8")
+    assert not _world_unstable(world, 600)
