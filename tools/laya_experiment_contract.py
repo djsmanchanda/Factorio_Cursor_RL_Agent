@@ -7,6 +7,8 @@ import math
 import os
 import tempfile
 
+from tools import laya_experiment_assignment
+
 FIELDS = {'version', 'hypothesis', 'factor', 'arms', 'action_path', 'eligible_start',
           'endpoint', 'predicate_version', 'sampling_unit', 'sampling_rule',
           'adoption_rule', 'missing_outcome_rule', 'window'}
@@ -17,7 +19,7 @@ def canonical(value):
 
 
 def validate(contract, spec, *, action_path='deterministic'):
-    if (not isinstance(contract, dict) or set(contract) != FIELDS
+    if (not isinstance(contract, dict) or set(contract) not in (FIELDS, FIELDS | {'assignment'})
             or type(contract.get('version')) is not int or contract['version'] != 1):
         raise ValueError('experiment contract requires version 1')
     for field in ('hypothesis', 'factor', 'eligible_start', 'endpoint', 'predicate_version', 'sampling_unit', 'sampling_rule', 'adoption_rule'):
@@ -50,6 +52,8 @@ def validate(contract, spec, *, action_path='deterministic'):
         raise ValueError('experiment contract requires positive game and wall windows')
     if window != {'game_ticks': spec['max_game_ticks'], 'wall_seconds': spec['trial_wall_seconds']}:
         raise ValueError('experiment window contradicts specification')
+    if 'assignment' in contract:
+        laya_experiment_assignment.validate(contract['assignment'])
     canonical(contract)
 
 
@@ -117,6 +121,11 @@ def verify(root, spec, freeze, status=None, *, action_path='deterministic'):
         plan = json.loads((root / 'planned-jobs.json').read_text())['jobs']
         if canonical(binding['planned_jobs']) != canonical(plan) or len(plan) != freeze['planned_jobs']:
             raise ValueError('experiment planned job binding mismatch')
+        if 'assignment' in binding['contract']:
+            assigned = laya_experiment_assignment.assign(plan, spec['arms'], binding['contract']['assignment'],
+                                                         mixed=spec.get('design') == 'mixed-start-v1')
+            if canonical(assigned) != canonical(plan):
+                raise ValueError('experiment assignment order mismatch')
         if status is not None:
             rows = status['jobs']
             if (not isinstance(rows, list) or len(rows) != len(plan)

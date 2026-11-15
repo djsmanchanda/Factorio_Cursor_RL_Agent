@@ -31,9 +31,9 @@ gear/cable/circuit factors from 180 to 30; they do not isolate other slots.
 Default adoption requires more long-window target completions on matched
 conditions, no increase in safety/tool failures, and no earlier-service
 regression. Preserve every planned job's terminal status; omitted crashes or
-interrupted jobs cannot silently improve a denominator. The current harness
-does not yet provide complete-cohort accounting, and its failure counter omits
-typed blocks. Check raw outcomes alongside the report. Changing rate windows
+interrupted jobs cannot silently improve a denominator. Contract-bound reports retain every planned job and keep missing or inconsistent
+evidence unknown. Legacy counters may include waits and shortages; keep them
+separate from typed faults and caught exceptions. Changing rate windows
 changes acceptance conditions and is not a like-for-like promotion comparison.
 
 An explicitly recorded early-milestone default is **provisional**, not evidence
@@ -62,5 +62,22 @@ status evidence as unknown. A damaged plan projection cannot change this
 denominator; an unreadable binding makes the denominator unavailable explicitly.
 A valid declaration does not establish effective factors, exposure, efficacy or
 adoption eligibility. Older roots remain descriptive with eligibility unknown.
-Effective-factor validation, runtime exposure telemetry and counterbalanced
-randomization remain follow-up work; RC11 is incomplete.
+An optional contract `assignment` declaration uses `{"method":
+"sha256-rotations-v1", "seed": 123}` (nonnegative integer seed; booleans are
+invalid). Without it, existing ordering remains unchanged. The method groups
+ordinary rows by origin, immutable checkpoint digest and seed, and mixed rows by pair ID; every
+block must contain exactly one row per arm with matching remaining source,
+seed and target identity. It sorts blocks and arms by SHA-256 of compact UTF-8
+JSON arrays `[seed, "block", canonical_block_key]` and `[seed, "arm", arm]`,
+with lexical tie breaks. The canonical block key is the compact JSON string
+`[origin, bundle_sha256, seed]` (null digest for a full origin) or `[pair_id]`.
+A checkpoint directory may relocate during freezing without changing its digest.
+The sorted arm sequence rotates left by the zero-based
+block index modulo arm count. Thus each arm occurs in each position equally
+across every complete cycle of N blocks; across a remainder, position counts
+for any two arms differ by at most one. This is a global guarantee, not a
+per-origin guarantee. The declared method and seed and resulting exact plan
+are bound before ready and the assignment is recomputed before admission.
+This scheduling assignment does not establish exposure, effective factors,
+inference eligibility, efficacy or adoption. Effective-factor validation and
+runtime exposure telemetry remain follow-up work; RC11 is incomplete.

@@ -573,3 +573,184 @@ def test_binding_boolean_version_and_changed_spec_are_refused(tmp_path):
     spec['seeds'] = [99]
     atomic_json(root/'regression.json', spec)
     assert report(root)['experiment_contract']['state'] == 'invalid'
+
+
+def test_seeded_assignment_boundaries(tmp_path, monkeypatch):
+    from collections import Counter
+    from tools import laya_mixed_design
+
+    def mixed_jobs(origins, *, arms, policy_seeds, **kwargs):
+        return {'jobs': [dict(id=f'pair-{i}-{arm}', pair_id=i, origin='C0', checkpoint='C0',
+                              arm=arm, seed=seed, source=origins['C0'], strict_target=None, status='queued')
+                         for i, seed in enumerate(policy_seeds) for arm in arms]}
+    monkeypatch.setattr(laya_mixed_design, 'build_jobs', mixed_jobs)
+    monkeypatch.setattr(scheduler, 'frozen_capability', lambda *args: {'objective_modes': ['measurement_only']})
+    for mixed in (False, True):
+        plans = []
+        for seed in (41, 41, 42):
+            case = tmp_path / f'{mixed}-{len(plans)}'
+            case.mkdir()
+            contract = declared_contract()
+            contract['assignment'] = {'method': 'sha256-rotations-v1', 'seed': seed}
+            updates = {'seeds': list(range(60 if mixed else 12))}
+            if mixed:
+                updates.update(design='mixed-start-v1', objective_mode='measurement_only', origins={'C0': {'generation_id': 'source'}},
+                               factorio_version='2.1.23')
+            root, registry = frozen_suite(case, contract=contract, spec_updates=updates)
+            plan = scheduler.read(root/'planned-jobs.json')['jobs']
+            plans.append([j['id'] for j in plan])
+            assert len(set(plans[-1])) == len(plan) == 2 * len(updates['seeds'])
+            assert all(len({j['seed'] for j in plan[i:i+2]}) == 1 for i in range(0, len(plan), 2))
+            assert Counter(j['arm'] for j in plan[::2]) == Counter(j['arm'] for j in plan[1::2])
+            assert report(root)['planned'] == len(plan)
+            atomic_json(registry/'predecessor/job-status.json', {'jobs': [{'status': 'completed'}]})
+            monkeypatch.setattr(scheduler, 'may_admit', lambda *a, **kw: True)
+            monkeypatch.setattr(scheduler, 'ports_free', lambda *a: True)
+            assert scheduler._reserve_job(root)[2]['id'] == plan[0]['id']
+            reordered = scheduler.read(root/'planned-jobs.json')
+            reordered['jobs'].reverse()
+            atomic_json(root/'planned-jobs.json', reordered)
+            with pytest.raises(ValueError):
+                scheduler._reserve_job(root)
+            assert report(root)['planned'] == len(plan)
+        assert plans[0] == plans[1] and plans[0] != plans[2]
+        assert set(plans[0]) == set(plans[2])
+
+
+@pytest.mark.parametrize('declaration', [{'method': 'sha256-rotations-v1', 'seed': True},
+                                          {'method': 'sha256-rotations-v1', 'seed': -1},
+                                          {'method': 'unknown', 'seed': 1}])
+def test_assignment_bad_declaration_refused_before_publication(tmp_path, declaration):
+    contract = declared_contract()
+    contract['assignment'] = declaration
+    with pytest.raises(ValueError):
+        frozen_suite(tmp_path, contract=contract)
+    assert not (tmp_path/'registry').exists()
+
+
+def test_assignment_rejects_incomplete_blocks_before_publication(tmp_path, monkeypatch):
+    from tools import laya_experiment_assignment
+    original = laya_experiment_assignment.assign
+    def broken(jobs, *args, **kwargs):
+        return original(jobs[:-1], *args, **kwargs)
+    monkeypatch.setattr(laya_experiment_assignment, 'assign', broken)
+    contract = declared_contract()
+    contract['assignment'] = {'method': 'sha256-rotations-v1', 'seed': 3}
+    with pytest.raises(ValueError, match='complete matched'):
+        frozen_suite(tmp_path, contract=contract)
+    assert not (tmp_path/'registry').exists()
+
+
+def test_assignment_rotations_balance_remainders_and_reject_bad_blocks():
+    from collections import Counter
+    from tools.laya_experiment_assignment import assign
+    arms = ['a', 'b', 'c', 'd']
+    jobs = [dict(id=f'{seed}-{arm}', arm=arm, seed=seed, origin='C0', bundle=None,
+                 strict_target=None) for seed in range(11) for arm in arms]
+    declaration = {'method': 'sha256-rotations-v1', 'seed': 7}
+    ordered = assign(jobs, arms, declaration, mixed=False)
+    for position in range(len(arms)):
+        counts = Counter(row['arm'] for row in ordered[position::len(arms)])
+        assert max(counts.values()) - min(counts.values()) <= 1
+    assert assign(ordered, arms, declaration, mixed=False) == ordered
+    for bad in (jobs[:-1], jobs + [jobs[0]], jobs[:1] + [{**jobs[1], 'strict_target': 'C2'}] + jobs[2:]):
+        with pytest.raises(ValueError):
+            assign(bad, arms, declaration, mixed=False)
+
+
+def test_assignment_recomputed_even_if_binding_and_plan_rewritten(tmp_path):
+    from tools import laya_experiment_contract as contract_module
+    contract = declared_contract()
+    contract['assignment'] = {'method': 'sha256-rotations-v1', 'seed': 5}
+    root, _ = frozen_suite(tmp_path, contract=contract, spec_updates={'seeds': list(range(8))})
+    freeze = scheduler.read(root/'freeze.json')
+    binding = contract_module.load_binding(root, freeze['experiment_contract'])
+    binding['planned_jobs'].reverse()
+    (root/'experiment-contract.json').write_bytes(contract_module.canonical(binding))
+    freeze['experiment_contract']['sha256'] = scheduler.sha(root/'experiment-contract.json')
+    atomic_json(root/'freeze.json', freeze)
+    atomic_json(root/'planned-jobs.json', {'version': 1, 'jobs': binding['planned_jobs']})
+    with pytest.raises(ValueError, match='assignment order'):
+        scheduler._reserve_job(root)
+
+
+def test_assignment_uses_real_mixed_origin_generator_before_freeze_and_admission(tmp_path, monkeypatch):
+    import hashlib
+    from collections import Counter
+    from tools import laya_checkpoint_bank
+    from tools.laya_mixed_design import build_jobs
+    origins = {f'C{i}': {'generation_id': f'g{i}', 'validated': True, 'immutable': True} for i in range(7)}
+    for origin, source in origins.items():
+        if origin == 'C0':
+            continue
+        bundle = tmp_path / 'bundles' / origin
+        bundle.mkdir(parents=True)
+        (bundle / 'checkpoint.json').write_text('{}')
+        source.update(bundle=str(bundle), bank=str(tmp_path / 'bank'))
+    predicate_hash = hashlib.sha256(b'# fixture source\n').hexdigest()
+    def checkpoint_metadata(path):
+        name = Path(path).name
+        origin = 'C' + name[1:] if name.startswith('g') else name
+        return ({'checkpoint_id': origin, 'generation_id': origins[origin]['generation_id']},
+                {'predicate_sha256': predicate_hash})
+    monkeypatch.setattr(scheduler, 'load_checkpoint', checkpoint_metadata)
+    monkeypatch.setattr(laya_checkpoint_bank, 'validated_receipts', lambda *a: [{'offline': True}])
+    monkeypatch.setattr(scheduler, 'frozen_capability', lambda *a: {'objective_modes': ['measurement_only']})
+    contract = declared_contract()
+    contract['assignment'] = {'method': 'sha256-rotations-v1', 'seed': 2026}
+    root, registry = frozen_suite(tmp_path, contract=contract, spec_updates={
+        'seeds': list(range(60)), 'total_runs': 120, 'design': 'mixed-start-v1', 'objective_mode': 'measurement_only',
+        'origins': origins, 'factorio_version': '2.1.24'})
+    freeze = scheduler.read(root / 'freeze.json')
+    original = build_jobs(origins, arms=('candidate', 'reference'), policy_seeds=range(60),
+                          engine='2.1.24', mods=freeze['mods_sha256'], budget={'ticks': 1000, 'wall_seconds': 60})['jobs']
+    plan = scheduler.read(root / 'planned-jobs.json')['jobs']
+    fields = ('id', 'pair_id', 'origin', 'checkpoint', 'arm', 'seed', 'source',
+              'generation_id', 'engine', 'mods', 'budget', 'strict_target')
+    by_id = lambda rows: {row['id']: {field: row[field] for field in fields} for row in rows}
+    assert by_id(plan) == by_id(original)
+    assert Counter(row['origin'] for row in plan) == Counter(row['origin'] for row in original)
+    assert Counter(row['arm'] for row in plan[::2]) == Counter(row['arm'] for row in plan[1::2])
+    assert [row['id'] for row in plan] != [row['id'] for row in original]
+    atomic_json(registry / 'predecessor/job-status.json', {'jobs': [{'status': 'completed'}]})
+    monkeypatch.setattr(scheduler, 'may_admit', lambda *a, **k: True)
+    monkeypatch.setattr(scheduler, 'ports_free', lambda *a: True)
+    assert scheduler._reserve_job(root)[2]['id'] == plan[0]['id']
+    assert report(root)['planned'] == len(original) == 120
+
+
+def test_assignment_nonfinite_identity_fails_before_publication(tmp_path, monkeypatch):
+    from tools import laya_experiment_assignment
+    original = laya_experiment_assignment.assign
+    def invalid(jobs, *args, **kwargs):
+        for job in jobs:
+            job['unknown_source_fact'] = float('nan')
+        return original(jobs, *args, **kwargs)
+    monkeypatch.setattr(laya_experiment_assignment, 'assign', invalid)
+    contract = declared_contract()
+    contract['assignment'] = {'method': 'sha256-rotations-v1', 'seed': 1}
+    with pytest.raises(ValueError, match='finite JSON'):
+        frozen_suite(tmp_path, contract=contract)
+    assert not (tmp_path / 'registry').exists()
+
+
+def test_assignment_checkpoint_order_survives_input_relocation_at_freeze(tmp_path, monkeypatch):
+    import hashlib
+    bundle = tmp_path / 'original-checkpoint'
+    bundle.mkdir()
+    (bundle / 'checkpoint.json').write_text('{}')
+    predicate_hash = hashlib.sha256(b'# fixture source\n').hexdigest()
+    monkeypatch.setattr(scheduler, 'load_checkpoint', lambda path: (
+        {'checkpoint_id': 'C2', 'generation_id': 'generation-C2'}, {'predicate_sha256': predicate_hash}))
+    contract = declared_contract()
+    contract['assignment'] = {'method': 'sha256-rotations-v1', 'seed': 29}
+    root, registry = frozen_suite(tmp_path, contract=contract, spec_updates={
+        'seeds': list(range(8)), 'checkpoints': [str(bundle)]})
+    plan = scheduler.read(root / 'planned-jobs.json')['jobs']
+    assert len(plan) == 32
+    assert all(row['bundle'] != str(bundle) for row in plan if row['origin'] == 'C2')
+    atomic_json(registry / 'predecessor/job-status.json', {'jobs': [{'status': 'completed'}]})
+    monkeypatch.setattr(scheduler, 'may_admit', lambda *a, **k: True)
+    monkeypatch.setattr(scheduler, 'ports_free', lambda *a: True)
+    assert scheduler._reserve_job(root)[2]['id'] == plan[0]['id']
+    assert report(root)['experiment_contract']['state'] == 'valid_declared'

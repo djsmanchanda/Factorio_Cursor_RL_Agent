@@ -271,6 +271,10 @@ def enqueue(repo, registry, spec):
                         'status': 'queued', 'admission_reserved': False})
         if setup and len(jobs) > 12:
             raise ValueError('Disposable setup cap exceeded')
+    assignment = spec.get('experiment_contract', {}).get('assignment')
+    if assignment is not None:
+        from tools.laya_experiment_assignment import assign
+        jobs = assign(jobs, spec['arms'], assignment, mixed=mixed)
     validate_port_ranges(spec, len(jobs), registry)
     root = registry / name
     root.mkdir(parents=True, exist_ok=False)
