@@ -125,6 +125,10 @@ def main(argv=None):
                         help='wall seconds between strict samples of the one persistent sidecar')
     replay.add_argument('--fund-shortages', action='store_true',
                         help='after a material_shortage, run the existing produce operation for each short item')
+    replay.add_argument('--funding-depth', type=int, default=FUNDING_DEPTH,
+                        help='levels of nested shortage bills to fund in one step (1 = the service bill only)')
+    replay.add_argument('--restore-sidecars', action='store_true',
+                        help="install the bundle's deterministic sidecars and run under its episode id, as a cohort restart does")
     replay.add_argument('--engine-binary', type=Path,
                         default=Path('/home/miniship/.local/share/factorio-rl/runtime/factorio-2.1.24/bin/x64/factorio'))
     replay.add_argument('--require-idle-host', action='store_true',
@@ -194,8 +198,10 @@ def main(argv=None):
             return 3
         # Persist the reload leg now: it reads live state and cannot be recomputed
         # after the disposable server is closed.
+        restored = (restore_sidecars(args.bank/'generations'/args.generation, args.root)
+                    if args.restore_sidecars else None)
         (args.root/'provenance-reload.json').write_text(
-            json.dumps({**reload_info, 'prepared': prepared}, indent=2) + "\n")
+            json.dumps({**reload_info, 'prepared': prepared, 'restored_sidecars': restored}, indent=2) + "\n")
         from orchestrator.operation_session import DeterministicSession
         trail: list[str] = []
 
@@ -214,12 +220,14 @@ def main(argv=None):
         try:
             summary = run_live_replay(
                 reload_info, lambda: LiveWorld(args.root),
-                lambda: DeterministicSession(args.root, emit=_emit),
+                lambda: DeterministicSession(args.root, emit=_emit,
+                                             origin_episode_id=restored['episode_id'] if restored else None),
                 args.root/'evidence/pm-replay.jsonl', max_steps=max(1, args.max_steps),
                 deadline=args.deadline, after_live=sampler.start,
                 stock_reader=lambda s: ((s.economics() or {}).get('stock') or {}).get('network') or {},
                 message_reader=_read_trail, consumption_probe=sampler.probe,
-                fund_shortages=args.fund_shortages, observe_after_placement=True)
+                fund_shortages=args.fund_shortages, funding_depth=max(1, args.funding_depth),
+                observe_after_placement=True)
         finally:
             sampler.close()
         print(json.dumps({**summary, 'prepared': prepared, 'reload': reload_info,
@@ -231,6 +239,7 @@ def main(argv=None):
 
 PM_ITEM = "productivity-module"
 PM_MACHINE = "assembling-machine-2"
+FUNDING_DEPTH = 3  # levels of nested construction bills the replay funds in one step
 
 
 class ReplayError(RuntimeError):
@@ -303,7 +312,8 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
           deadline: float | None = None, clock=None, message_reader=None,
           tick_reader=None, initial_tick=None, max_game_ticks: int = 108000,
           stall_seconds: float = 10.0, monotonic=None, sleep=None,
-          fund_shortages: bool = False, observe_after_placement: bool = False) -> dict:
+          fund_shortages: bool = False, funding_depth: int = FUNDING_DEPTH,
+          observe_after_placement: bool = False) -> dict:
     """Run the existing production_service operation until PM places and consumes.
 
     ``session`` is the real DeterministicSession in live replay, or a fake with
@@ -420,7 +430,8 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
                 deadline_reached = stop_reason == "deadline_reached"
                 break
             if fund_shortages and outcome.get("code") == "material_shortage":
-                step["funding"] = _fund_shortage(session, stream, index, step["bill"], message_reader)
+                step["funding"] = _fund_shortage(session, stream, index, step["bill"], message_reader,
+                                                 max_depth=funding_depth)
             if not placed and outcome.get("code") == "production_prerequisite_deferred":
                 # A deferral is not progress by itself; keep the bounded budget and
                 # let the next step re-observe. The journal records every attempt.
@@ -478,28 +489,50 @@ def observe_consumption(probe, tick_reader, last_tick: int, *, initial_tick: int
             "min_gap_ticks": min_gap_ticks, "sustained": rises >= min_rises, "last_tick": last_tick}
 
 
-def _fund_shortage(session, stream, index: int, bill: dict, message_reader=None) -> list[dict]:
-    """Run the existing ``produce`` operation once for each short item of a construction bill.
+def _fund_shortage(session, stream, index: int, bill: dict, message_reader=None, *,
+                   max_depth: int = FUNDING_DEPTH) -> list[dict]:
+    """Run the existing ``produce`` operation for each short item of a construction bill.
 
     This mirrors the Laya runner, which turns a material_shortage bill into
     ``op.produce.<item>`` options at the bill's required network level
     (training/laya_ops_runner.py shortages/shortage_levels). Without it the
     replay retries production_service against a bill nothing produces.
+
+    A funding attempt can itself answer material_shortage with its own bill
+    (live pm-replay-20261115-o3: long-handed-inserter's mall cell needed an
+    assembling-machine-1 nothing made, 49 times). Its short items are funded
+    next, depth-first, down to ``max_depth`` levels; the runner reaches the
+    same item across decisions because ``shortages`` reads every operation's
+    latest bill. An item is funded at most once per step, and every row
+    records its depth and the item whose bill asked for it.
     """
-    funded = []
-    for item in sorted(bill.get("short") or {}):
-        level = int((bill.get("required") or {}).get(item, 0))
-        try:
-            result = session.run("produce", item=item, stock_target=max(1, level))
-        except Exception as error:  # noqa: BLE001 -- a failed funding attempt is evidence, not a crash
-            result = {"code": "funding_error", "ok": False, "message": f"{type(error).__name__}: {error}"}
-        row = {"step": index, "item": item, "stock_target": max(1, level),
-               "outcome": result.get("code"), "ok": result.get("ok"), "state": result.get("state"),
-               "message": result.get("message")}
-        funded.append(row)
-        _journal_messages(stream, index, _drain_messages(message_reader))
-        stream.write(json.dumps({"event": "pm_replay_funding", **row}) + "\n")
-        stream.flush()
+    funded: list[dict] = []
+    attempted: set[str] = set()
+
+    def fund(current: dict, depth: int, parent: str | None) -> None:
+        for item in sorted(current.get("short") or {}):
+            if item in attempted:
+                continue
+            attempted.add(item)
+            level = max(1, int((current.get("required") or {}).get(item, 0)))
+            try:
+                result = session.run("produce", item=item, stock_target=level)
+            except Exception as error:  # noqa: BLE001 -- a failed funding attempt is evidence, not a crash
+                result = {"code": "funding_error", "ok": False, "message": f"{type(error).__name__}: {error}"}
+            nested = pm_bill(result) if result.get("code") == "material_shortage" else None
+            row = {"step": index, "item": item, "stock_target": level, "depth": depth, "parent": parent,
+                   "outcome": result.get("code"), "ok": result.get("ok"), "state": result.get("state"),
+                   "message": result.get("message")}
+            if nested is not None:
+                row["bill"] = nested
+            funded.append(row)
+            _journal_messages(stream, index, _drain_messages(message_reader))
+            stream.write(json.dumps({"event": "pm_replay_funding", **row}) + "\n")
+            stream.flush()
+            if nested is not None and depth < max_depth:
+                fund(nested, depth + 1, item)
+
+    fund(bill, 1, None)
     return funded
 
 
@@ -853,6 +886,49 @@ def reload_receipt(root: Path, expected_tick: int) -> dict:
             "observed_tick": tick, "reload_verified": tick == expected_tick,
             "evidence_scope": "diagnostic_replay_only"}
 
+
+
+RESTART_CONTEXT = "state/logs/laya-restart-context.json"
+
+
+def restore_sidecars(bundle: Path, root: Path, *, loader=load) -> dict:
+    """Install the bundle's durable deterministic sidecars and name the episode that owns them.
+
+    A cohort restart (training/laya_restart_checkpoint.restore) copies every
+    ``state/`` file into ``<root>/server`` and opens the session under the
+    bundle's episode id, so the bootstrap districts, material reservations and
+    oil transactions of the captured run stay owned. The replay skipped both:
+    its session started with no district state, so copper-plate had no owned
+    refinery and expansion sited a new one from the existing collector's head
+    (live pm-replay-20261115-o3: 92 of 160 steps ``blocked_source``). This is
+    the same file install without the strict-acceptance import, which this
+    bundle's older snapshot shape cannot decode and the replay does not use.
+    """
+    import hashlib
+    metadata, context = loader(bundle)
+    episode_id = ((context.get("restart_state") or {}).get("scope") or {}).get("episode_id")
+    if not episode_id:
+        raise ReplayError("checkpoint names no restart episode")
+    installed = []
+    for relative, digest in sorted((metadata.get("files") or {}).items()):
+        if not relative.startswith("state/") or relative == RESTART_CONTEXT:
+            continue
+        source = Path(bundle) / relative
+        target = Path(root) / "server" / relative.removeprefix("state/")
+        if source.is_symlink() or target.is_symlink():
+            raise ReplayError(f"refusing a symlinked sidecar: {relative}")
+        data = source.read_bytes()
+        if hashlib.sha256(data).hexdigest() != digest:
+            raise ReplayError(f"bundle sidecar does not match its manifest: {relative}")
+        if target.exists():
+            if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+                raise ReplayError(f"destination sidecar conflicts with the bundle: {relative}")
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("xb") as stream:
+                stream.write(data)
+        installed.append(relative)
+    return {"episode_id": episode_id, "installed": installed}
 
 if __name__ == '__main__':
     raise SystemExit(main())
