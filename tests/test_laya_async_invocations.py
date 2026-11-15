@@ -175,3 +175,114 @@ def test_failed_persistence_prevents_dispatch_and_preserves_previous_record(tmp_
         s.invocations.submit(record, s.bridge.build_layout, {}, PLAN)
     assert calls == []
     assert (s.invocations.directory / (record['operation_id'] + '.json')).read_text() == before
+
+
+def test_interrupted_dispatch_roundtrips_and_fences_reconstruction(tmp_path):
+    from orchestrator.checkpoint_restart_state import export_restart_state, import_restart_state
+    from orchestrator.checkpoint_milestones import CheckpointEvaluator, FactorySnapshot
+    from orchestrator.operation_invocations import ReadbackRequired
+    source = tmp_path / 'source'
+    invocations = Invocations(source, 'episode')
+    record = invocations.begin('starter', {})
+    def interrupt(*args):
+        raise KeyboardInterrupt()
+    with pytest.raises(KeyboardInterrupt):
+        invocations.submit(record, interrupt, {}, PLAN)
+    original = (invocations.directory / (record['operation_id'] + '.json')).read_bytes()
+    with pytest.raises(ReadbackRequired):
+        Invocations(source, 'episode').submit(invocations.begin('starter', {}), lambda *args: pytest.fail('resent'), {}, PLAN)
+    baseline = FactorySnapshot()
+    bundle = export_restart_state(source, 'episode', 'mods', baseline, [baseline], CheckpointEvaluator())
+    target = tmp_path / 'target'
+    import_restart_state(bundle, target, episode_id='episode', mod_scope='mods')
+    restored = Invocations(target, 'episode')
+    assert (restored.directory / (record['operation_id'] + '.json')).read_bytes() == original
+    s, calls = session(target)
+    assert s.run('starter')['code'] == 'readback_required'
+    assert calls == []
+    with pytest.raises(ReadbackRequired):
+        restored.submit(restored.begin('starter', {}), lambda *args: pytest.fail('resent'), {}, PLAN)
+
+
+def test_empty_and_returned_journals_do_not_fence_but_malformed_does(tmp_path):
+    from orchestrator.operation_invocations import ReadbackRequired
+    inv = Invocations(tmp_path, 'episode')
+    inv.begin('starter', {})
+    record = inv.begin('starter', {})
+    assert inv.submit(record, lambda *args: 'receipt', {}, PLAN) == 'receipt'
+    Invocations(tmp_path, 'episode').require_clear()
+    (inv.directory / ('a' * 32 + '.json')).write_text('{')
+    with pytest.raises(ReadbackRequired):
+        inv.require_clear()
+
+
+def test_constructor_skips_mutating_initialization_when_uncertain(tmp_path, monkeypatch):
+    root = tmp_path / 'root'
+    (root / 'server').mkdir(parents=True)
+    (root / 'manifest.json').write_text('{"rcon_port": 1}')
+    (root / 'server' / 'rcon-password').write_text('password')
+    inv = Invocations(root / 'server' / 'script-output', 'episode')
+    record = inv.begin('starter', {})
+    with pytest.raises(KeyboardInterrupt):
+        inv.submit(record, lambda *args: (_ for _ in ()).throw(KeyboardInterrupt()), {}, PLAN)
+    monkeypatch.setattr('orchestrator.operation_session.RconClient', lambda *args: object())
+    monkeypatch.setattr('orchestrator.operation_session.GameBridge', lambda **kwargs: object())
+    monkeypatch.setattr('orchestrator.operation_session.ab.initialize_operation_runtime', lambda *args: pytest.fail('mutating initialization'))
+    s = DeterministicSession(root, logical_episode_id='episode')
+    assert s.run('starter')['code'] == 'readback_required'
+
+
+def test_current_session_cannot_repeat_interrupted_build_or_maintain(tmp_path):
+    from orchestrator.operation_invocations import ReadbackRequired
+    s, _ = session(tmp_path)
+    calls = []
+    def interrupted(*args):
+        calls.append('dispatch')
+        raise KeyboardInterrupt()
+    s.bridge.build_layout = interrupted
+    with pytest.raises(KeyboardInterrupt):
+        s.run('starter')
+    assert s.last_operation_id
+    assert s.run('starter')['code'] == 'readback_required'
+    assert s.last_operation_id is None
+    with pytest.raises(ReadbackRequired):
+        DeterministicSession._maintain_mall(s)
+    with pytest.raises(ReadbackRequired):
+        s._submit_stock_gate(PLAN, 'gate')
+    assert calls == ['dispatch']
+
+
+def test_real_constructor_after_checkpoint_transfer_stays_fenced(tmp_path, monkeypatch):
+    from orchestrator.checkpoint_restart_state import export_restart_state, import_restart_state
+    from orchestrator.checkpoint_milestones import CheckpointEvaluator, FactorySnapshot
+    root = tmp_path / 'root'
+    (root / 'server').mkdir(parents=True)
+    (root / 'manifest.json').write_text('{"rcon_port": 1}')
+    (root / 'server' / 'rcon-password').write_text('password')
+    inv = Invocations(tmp_path / 'source', 'episode')
+    record = inv.begin('starter', {})
+    with pytest.raises(KeyboardInterrupt):
+        inv.submit(record, lambda *args: (_ for _ in ()).throw(KeyboardInterrupt()), {}, PLAN)
+    baseline = FactorySnapshot()
+    bundle = export_restart_state(tmp_path / 'source', 'episode', 'mods', baseline, [baseline], CheckpointEvaluator())
+    import_restart_state(bundle, root / 'server/script-output', episode_id='episode', mod_scope='mods')
+    monkeypatch.setattr('orchestrator.operation_session.RconClient', lambda *args: object())
+    monkeypatch.setattr('orchestrator.operation_session.GameBridge', lambda **kwargs: object())
+    for name in ('initialize_operation_runtime', '_restore_bootstrap_reservations',
+                 '_reconcile_bootstrap_work', '_reserve_plastic_output_chest'):
+        monkeypatch.setattr('orchestrator.operation_session.ab.' + name,
+                            lambda *args: pytest.fail('constructor maintenance dispatched'))
+    restored = DeterministicSession(root, logical_episode_id='episode')
+    assert restored.run('produce', item='advanced-circuit')['code'] == 'readback_required'
+    assert json.loads(next(restored.invocations.directory.glob('*.json')).read_text()) == record
+
+
+def test_symlink_cannot_change_invocation_ownership(tmp_path):
+    from orchestrator.operation_invocations import ReadbackRequired
+    inv = Invocations(tmp_path / 'source', 'episode')
+    inv.begin('starter', {})
+    destination = tmp_path / 'target'
+    destination.mkdir()
+    (destination / inv.directory.name).symlink_to(inv.directory, target_is_directory=True)
+    with pytest.raises(ReadbackRequired):
+        Invocations(destination, 'episode')

@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, fields, is_dataclass
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import re
 import types
@@ -16,14 +17,27 @@ from typing import Any, Union, get_args, get_origin, get_type_hints
 
 from orchestrator.checkpoint_milestones import CheckpointEvaluator, FactorySnapshot
 from orchestrator.oil_transaction import OilTransactionStore
+from orchestrator.operation_invocations import decode_record
 
-VERSION = 2
+VERSION = 3
 MAX_FILES = 256
 MAX_BYTES = 16 * 1024 * 1024
 MAX_HISTORY = 20
 SURFACE, FORCE, PROFILE = "nauvis", "player", "reduced-v1"
 _IDENTITY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z", re.ASCII)
+_INVOCATION_FILE = re.compile(r"[0-9a-f]{32}\.json\Z", re.ASCII)
 _DISTRICT_FILE = re.compile(r"[0-9a-f]{16}\.json\Z", re.ASCII)
+_DIRECTORY_ROLES = {'bootstrap_district', 'operation_invocations'}
+
+
+def _valid_name(role, name, path):
+    if not isinstance(name, str):
+        return False
+    if role == 'bootstrap_district':
+        return bool(_DISTRICT_FILE.fullmatch(name))
+    if role == 'operation_invocations':
+        return bool(_INVOCATION_FILE.fullmatch(name)) or name == 'legacy-unknown.json'
+    return name == path.name
 
 
 def validate_episode_id(value: str) -> str:
@@ -50,6 +64,7 @@ def sidecar_registry(script_output: Path, episode_id: str) -> dict[str, Path]:
             "steel_district": material.with_suffix(".steel-district.json"),
             "bootstrap_work": logs / "deterministic-bootstrap-work" / f"{episode_id}.json",
             "bootstrap_district": logs / "deterministic-bootstrap-districts" / episode_id,
+            "operation_invocations": Path(script_output) / ("operation-invocations-" + hashlib.sha256(episode_id.encode()).hexdigest()[:20]),
             "oil_transaction": OilTransactionStore(Path(script_output), episode_id, SURFACE, FORCE).path}
 
 
@@ -58,11 +73,11 @@ def _no_symlinks(path: Path) -> None:
         raise ValueError(f"Symlink in sidecar path: {path}")
 
 
-def _files(path: Path, directory: bool) -> list[Path]:
+def _files(path: Path, role: str) -> list[Path]:
     _no_symlinks(path)
     if not path.exists():
         return []
-    if not directory:
+    if role not in _DIRECTORY_ROLES:
         if not path.is_file():
             raise ValueError(f"Invalid sidecar file: {path}")
         return [path]
@@ -71,17 +86,17 @@ def _files(path: Path, directory: bool) -> list[Path]:
     result = sorted(path.iterdir())
     for entry in result:
         _no_symlinks(entry)
-        if not _DISTRICT_FILE.fullmatch(entry.name) or not entry.is_file():
-            raise ValueError(f"Unexpected district sidecar: {entry}")
+        if not _valid_name(role, entry.name, path) or not entry.is_file():
+            raise ValueError(f"Unexpected {role} sidecar: {entry}")
     return result
 
 
-def _read_sidecars(registry: dict[str, Path]) -> dict:
+def _read_sidecars(registry: dict[str, Path], episode_id: str) -> dict:
     result = {}
     total = count = 0
     for role, path in registry.items():
         entries = {}
-        for entry in _files(path, role == "bootstrap_district"):
+        for entry in _files(path, role):
             if entry.stat().st_size > MAX_BYTES - total:
                 raise ValueError("Sidecar bundle exceeds size limits")
             data = entry.read_bytes()
@@ -90,7 +105,10 @@ def _read_sidecars(registry: dict[str, Path]) -> dict:
             if total > MAX_BYTES or count > MAX_FILES:
                 raise ValueError("Sidecar bundle exceeds size limits")
             try:
-                json.loads(data)
+                if role == "operation_invocations":
+                    decode_record(data, entry.name, episode_id)
+                else:
+                    json.loads(data)
             except (ValueError, UnicodeDecodeError) as error:
                 raise ValueError(f"Invalid JSON sidecar: {entry}") from error
             entries[entry.name] = {"sha256": hashlib.sha256(data).hexdigest(),
@@ -173,7 +191,7 @@ def export_restart_state(script_output: Path, episode_id: str, mod_scope: str,
     bundle = {"evidence_state": evidence_state, "version": VERSION, "scope": scope, "milestones": _milestones(evaluator),
               "baseline": asdict(baseline), "history": [asdict(sample) for sample in history],
               "reached": sorted(evaluator.reached),
-              "sidecars": _read_sidecars(sidecar_registry(script_output, episode_id))}
+              "sidecars": _read_sidecars(sidecar_registry(script_output, episode_id), episode_id)}
     try:
         encoded = json.dumps(bundle, allow_nan=False)
         decoded = json.loads(encoded)
@@ -196,9 +214,9 @@ def import_restart_state(bundle: dict, script_output: Path, *, episode_id: str, 
         raise ValueError("Restart bundle must be JSON") from error
     if len(encoded.encode()) > MAX_BYTES * 2:
         raise ValueError("Restart bundle exceeds size limit")
-    if not isinstance(bundle, dict) or set(bundle) != ({"version", "scope", "milestones", "baseline", "history", "reached", "sidecars"} | ({"evidence_state"} if bundle.get("version") == VERSION else set())):
+    if not isinstance(bundle, dict) or set(bundle) != ({"version", "scope", "milestones", "baseline", "history", "reached", "sidecars"} | ({"evidence_state"} if bundle.get("version") in (2, 3) else set())):
         raise ValueError("Invalid restart bundle shape")
-    if type(bundle["version"]) is not int or bundle["version"] not in (1, VERSION) or bundle["scope"] != scope:
+    if type(bundle["version"]) is not int or bundle["version"] not in (1, 2, VERSION) or bundle["scope"] != scope:
         raise ValueError("Restart version or scope mismatch")
     evaluator = CheckpointEvaluator()
     current = _milestones(evaluator)
@@ -220,21 +238,21 @@ def import_restart_state(bundle: dict, script_output: Path, *, episode_id: str, 
         raise ValueError("Invalid reached checkpoints")
     evaluator.reached = set(reached)
     from orchestrator.checkpoint_evidence import new_evidence_state, validate_evidence_state
-    evidence_state = validate_evidence_state(bundle["evidence_state"]) if bundle["version"] == VERSION else new_evidence_state(origin="unknown")
+    evidence_state = validate_evidence_state(bundle["evidence_state"]) if bundle["version"] in (2, 3) else new_evidence_state(origin="unknown")
     registry = sidecar_registry(script_output, episode_id)
     sidecars = bundle["sidecars"]
-    if not isinstance(sidecars, dict) or set(sidecars) != set(registry):
+    if not isinstance(sidecars, dict) or set(sidecars) != (set(registry) if bundle["version"] == VERSION else set(registry) - {"operation_invocations"}):
         raise ValueError("Incomplete sidecar registry")
     pending = []
     total = 0
     for role, path in registry.items():
-        if _files(path, role == "bootstrap_district"):
+        if _files(path, role):
             raise ValueError(f"Destination sidecar is not empty: {role}")
-        entries = sidecars[role]
+        entries = sidecars.get(role, {})
         if not isinstance(entries, dict):
             raise ValueError("Invalid sidecar entries")
         for name, payload in entries.items():
-            if not isinstance(name, str) or (not _DISTRICT_FILE.fullmatch(name) if role == "bootstrap_district" else name != path.name):
+            if not _valid_name(role, name, path):
                 raise ValueError("Invalid sidecar name")
             if not isinstance(payload, dict) or set(payload) != {"sha256", "base64"}:
                 raise ValueError("Invalid sidecar payload")
@@ -246,15 +264,36 @@ def import_restart_state(bundle: dict, script_output: Path, *, episode_id: str, 
             total += len(data)
             if total > MAX_BYTES or len(pending) >= MAX_FILES or hashlib.sha256(data).hexdigest() != payload["sha256"]:
                 raise ValueError("Sidecar limit or digest mismatch")
-            pending.append((path / name if role == "bootstrap_district" else path, data))
+            if role == "operation_invocations":
+                decode_record(data, name, episode_id)
+            pending.append((path / name if role in _DIRECTORY_ROLES else path, data))
+    if bundle["version"] < 3:
+        pending.append((registry["operation_invocations"] / "legacy-unknown.json", b'{"provenance":"unknown"}'))
+        if len(pending) > MAX_FILES or total + len(pending[-1][1]) > MAX_BYTES:
+            raise ValueError('Legacy provenance marker exceeds sidecar limit')
     created = []
+    directories = set()
     try:
         for path, data in pending:
+            parent = path.parent
+            directories.add(parent)
+            while not parent.exists():
+                parent = parent.parent
+                directories.add(parent)
             path.parent.mkdir(parents=True, exist_ok=True)
             _no_symlinks(path)
             with path.open("xb") as handle:
                 created.append(path)
                 handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+        # Sync newly created parent entries as well as the final file directories.
+        for directory in sorted(directories, key=lambda path: len(path.parts), reverse=True):
+            descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
     except Exception:
         for path in created:
             path.unlink(missing_ok=True)

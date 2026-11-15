@@ -56,7 +56,9 @@ def test_real_evaluator_baseline_history_and_ownership_roundtrip(tmp_path):
     assert not CheckpointEvaluator().evaluate("C5", snapshot(7200, 3), history=state.history[-1:]).passed
     for role, path in sidecar_registry(source, "laya-original").items():
         destination = sidecar_registry(target, "laya-original")[role]
-        if path.is_dir():
+        if not path.exists():
+            assert not destination.exists()
+        elif path.is_dir():
             assert {p.name: p.read_bytes() for p in path.iterdir()} == {p.name: p.read_bytes() for p in destination.iterdir()}
         else:
             assert path.read_bytes() == destination.read_bytes()
@@ -116,7 +118,7 @@ def test_training_export_import_restores_real_session_boundary(tmp_path):
                                  mod_scope="factorio-2/test-mod-hash")
     assert TrainingRestartState is RestartState
     assert type(state) is RestartState
-    assert bundle["version"] == VERSION == 2
+    assert bundle["version"] == VERSION == 3
     session = DeterministicSession.__new__(DeterministicSession)
     session.episode_id = "laya-original"
     session.script_output = target
@@ -154,3 +156,123 @@ def test_foreign_scope_rejected_without_sidecar_mutation(tmp_path, field, value)
         import_restart_state(bundle, target, episode_id="laya-original", mod_scope="factorio-2/test-mod-hash")
     assert foreign.read_text() == '{"keep": true}'
     assert not sidecar_registry(target, "laya-original")["material_reservations"].exists()
+
+
+@pytest.mark.parametrize('version', [1, 2])
+def test_legacy_invocation_provenance_stays_unknown(tmp_path, version):
+    from orchestrator.operation_invocations import Invocations, ReadbackRequired
+    _, bundle = make_bundle(tmp_path)
+    bundle['version'] = version
+    del bundle['sidecars']['operation_invocations']
+    if version == 1:
+        del bundle['evidence_state']
+    target = tmp_path / 'target' / 'script-output'
+    import_restart_state(bundle, target, episode_id='laya-original', mod_scope='factorio-2/test-mod-hash')
+    with pytest.raises(ReadbackRequired):
+        Invocations(target, 'laya-original').require_clear()
+
+
+def test_invocation_tampering_fails_preflight(tmp_path):
+    from orchestrator.operation_invocations import Invocations
+    source, _ = make_bundle(tmp_path)
+    inv = Invocations(source, 'laya-original')
+    inv.begin('starter', {})
+    baseline = snapshot(0, 1)
+    bundle = export_restart_state(source, 'laya-original', 'factorio-2/test-mod-hash', baseline, [baseline], CheckpointEvaluator())
+    entry = next(iter(bundle['sidecars']['operation_invocations'].values()))
+    entry['sha256'] = '0' * 64
+    target = tmp_path / 'target' / 'script-output'
+    with pytest.raises(ValueError):
+        import_restart_state(bundle, target, episode_id='laya-original', mod_scope='factorio-2/test-mod-hash')
+    assert not (target.parent / 'logs').exists()
+
+
+@pytest.mark.parametrize('change', ['episode', 'submissions', 'scope', 'duplicate', 'nonfinite'])
+def test_invocation_payload_preflight_checks_more_than_the_digest(tmp_path, change):
+    import base64
+    import hashlib
+    from orchestrator.operation_invocations import Invocations
+    source, _ = make_bundle(tmp_path)
+    inv = Invocations(source, 'laya-original')
+    record = inv.begin('starter', {})
+    baseline = snapshot(0, 1)
+    bundle = export_restart_state(source, 'laya-original', 'mods', baseline, [baseline], CheckpointEvaluator())
+    if change == 'episode':
+        record['episode_id'] = 'foreign'
+    elif change == 'submissions':
+        record['submissions'] = 'unknown'
+    elif change == 'scope':
+        record['scope']['force'] = 'enemy'
+    data = json.dumps(record).encode()
+    if change == 'duplicate':
+        data = data[:-1] + b', "finished": true}'
+    elif change == 'nonfinite':
+        data = data[:-1] + b', "unknown": NaN}'
+    name = record['operation_id'] + '.json'
+    bundle['sidecars']['operation_invocations'][name] = {
+        'sha256': hashlib.sha256(data).hexdigest(), 'base64': base64.b64encode(data).decode()}
+    target = tmp_path / 'target/server/script-output'
+    with pytest.raises(ValueError):
+        import_restart_state(bundle, target, episode_id='laya-original', mod_scope='mods')
+    assert not target.parent.exists()
+
+
+def test_import_flush_failure_rolls_back_files(tmp_path, monkeypatch):
+    from orchestrator import checkpoint_restart_state as restart
+    _, bundle = make_bundle(tmp_path)
+    target = tmp_path / 'target/server/script-output'
+    monkeypatch.setattr(restart.os, 'fsync', lambda _: (_ for _ in ()).throw(OSError('flush failed')))
+    with pytest.raises(OSError, match='flush failed'):
+        import_restart_state(bundle, target, episode_id='laya-original', mod_scope='factorio-2/test-mod-hash')
+    assert not list((tmp_path / 'target').rglob('*.json'))
+
+
+def test_import_syncs_files_and_directory_entries(tmp_path, monkeypatch):
+    import os
+    import stat
+    from orchestrator import checkpoint_restart_state as restart
+    _, bundle = make_bundle(tmp_path)
+    flushed = []
+    original = os.fsync
+    def sync(fd):
+        flushed.append(os.fstat(fd).st_mode)
+        return original(fd)
+    monkeypatch.setattr(restart.os, 'fsync', sync)
+    import_restart_state(bundle, tmp_path / 'target/server/script-output',
+                         episode_id='laya-original', mod_scope='factorio-2/test-mod-hash')
+    assert any(stat.S_ISREG(mode) for mode in flushed)
+    assert any(stat.S_ISDIR(mode) for mode in flushed)
+
+
+def test_legacy_marker_obeys_total_file_bound(tmp_path, monkeypatch):
+    from orchestrator import checkpoint_restart_state as restart
+    _, bundle = make_bundle(tmp_path)
+    bundle['version'] = 2
+    del bundle['sidecars']['operation_invocations']
+    monkeypatch.setattr(restart, 'MAX_FILES', sum(len(files) for files in bundle['sidecars'].values()))
+    target = tmp_path / 'target/server/script-output'
+    with pytest.raises(ValueError, match='marker exceeds'):
+        import_restart_state(bundle, target, episode_id='laya-original', mod_scope='factorio-2/test-mod-hash')
+    assert not target.parent.exists()
+
+
+def test_only_owned_journals_are_transferred_and_legacy_unknown_survives(tmp_path):
+    from orchestrator.operation_invocations import Invocations, ReadbackRequired
+    source, bundle = make_bundle(tmp_path)
+    foreign = Invocations(source, 'foreign')
+    foreign.begin('starter', {})
+    own = Invocations(source, 'laya-original')
+    record = own.begin('starter', {})
+    baseline = snapshot(0, 1)
+    bundle = export_restart_state(source, 'laya-original', 'mods', baseline, [baseline], CheckpointEvaluator())
+    assert list(bundle['sidecars']['operation_invocations']) == [record['operation_id'] + '.json']
+    bundle['version'] = 2
+    del bundle['sidecars']['operation_invocations']
+    target = tmp_path / 'legacy/server/script-output'
+    import_restart_state(bundle, target, episode_id='laya-original', mod_scope='mods')
+    upgraded = export_restart_state(target, 'laya-original', 'mods', baseline, [baseline], CheckpointEvaluator())
+    assert list(upgraded['sidecars']['operation_invocations']) == ['legacy-unknown.json']
+    final = tmp_path / 'upgraded/server/script-output'
+    import_restart_state(upgraded, final, episode_id='laya-original', mod_scope='mods')
+    with pytest.raises(ReadbackRequired):
+        Invocations(final, 'laya-original').require_clear()

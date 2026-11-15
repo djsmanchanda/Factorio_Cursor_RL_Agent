@@ -9,3 +9,23 @@ The accumulator retains the first failed-to-passed observed event per checkpoint
 The current bounded 20-sample projection retains adjacent positive-tick plastic counter changes, including flat intervals and recovery. There is no specified maximum gap or required rate, so continuity and coverage remain unknown even across 120 game seconds. No new C5 predicate is claimed. Historical c5-v1 remains sample sensitive. Historical c6-v3 remains available independently: its retained-history calculation can bridge a failed poll because failure markers are not snapshots; its result is not corrected evidence of uninterrupted consumer observation. The accumulator's consumer delta never bridges a recorded failure or missing telemetry. Neither establishes unseen continuity. Proxy phase is null unless explicitly supplied by the caller and is never inferred from strict reached flags.
 
 Restart version 2 carries the accumulator and preflights it before installing sidecars. Future frozen runners must use this source and explicitly pass proxy phase when available. These are source contracts, not live or cohort results.
+
+## Version 3 invocation transfer
+
+Restart bundles now include the exact episode-owned operation invocation directory.
+New journals record the episode explicitly; older local journals retain their
+directory scope. Import validates names, scope, payload shape and digests before
+installing any sidecars, then flushes files and their directory entries. Unknown
+or interrupted dispatch remains unknown and fences subsequent session operations,
+constructor maintenance and direct invocation submissions. Returned submissions
+and empty pre-dispatch records do not fence. Failed writes roll back installed
+files; symlinks cannot change journal ownership.
+
+Version 1 and 2 imports install an unknown-provenance marker. Re-exporting that
+state preserves the marker; it does not prove the absence of an earlier dispatch.
+Correlated readback is required before configuration uncertainty can be cleared.
+The existing 256-file and 16 MiB transfer bounds still apply; overflow refuses
+export/import rather than omitting journals. This is a bounded uncertainty
+fence, not full controller or loan restart equivalence. Gate-retry state and
+background submissions outside the selected invocation journal remain separate
+acceptance work. Runtime manifests retain their own immutable startup checks.

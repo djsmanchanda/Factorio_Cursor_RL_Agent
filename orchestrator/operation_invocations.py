@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import tempfile
 import uuid
 from pathlib import Path
@@ -12,12 +13,75 @@ from orchestrator import live_base
 from planners.plan_validation import validate_build_plan
 
 
+class ReadbackRequired(RuntimeError):
+    """Prior dispatch provenance is unknown; mutation requires correlated readback."""
+
+
+def decode_record(data, name, episode_id):
+    """Validate transferred evidence without treating an uncertain call as returned."""
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('duplicate invocation field')
+            result[key] = value
+        return result
+    def invalid_constant(value):
+        raise ValueError('nonfinite invocation field')
+    record = json.loads(data, object_pairs_hook=unique, parse_constant=invalid_constant)
+    if name == 'legacy-unknown.json':
+        if record != {'provenance': 'unknown'}:
+            raise ValueError('invalid legacy provenance marker')
+        return record
+    if (not re.fullmatch(r'[0-9a-f]{32}\.json', name)
+            or not isinstance(record, dict) or record.get('operation_id') != name[:-5]
+            or not isinstance(record.get('operation'), str) or not isinstance(record.get('params'), dict)
+            or record.get('scope') != {'surface': 'nauvis', 'force': 'player'}
+            or type(record.get('finished')) is not bool or not isinstance(record.get('submissions'), list)):
+        raise ValueError('malformed invocation')
+    # Earlier local journals were scoped by their episode directory only.
+    if ('episode_id' in record or 'version' in record) and (
+            type(record.get('version')) is not int or record['version'] != 1
+            or record.get('episode_id') != episode_id):
+        raise ValueError('invocation episode mismatch')
+    for entry in record['submissions']:
+        if (not isinstance(entry, dict) or not isinstance(entry.get('authorization'), dict)
+                or not isinstance(entry.get('plan'), dict) or entry.get('dispatch') not in ('uncertain', 'returned')
+                or (entry['dispatch'] == 'returned' and not isinstance(entry.get('receipt'), str))):
+            raise ValueError('malformed submission')
+        if entry['plan'].get('surface') != 'nauvis' or entry['plan'].get('force') != 'player':
+            raise ValueError('invalid submission scope')
+        validate_build_plan(entry['plan'])
+        if any(action.get('surface', 'nauvis') != 'nauvis' or action.get('force', 'player') != 'player'
+               for phase in entry['plan']['phases'] for action in phase['actions']):
+            raise ValueError('invalid action scope')
+    return record
+
+
 class Invocations:
     def __init__(self, directory, episode_id):
+        self.episode_id = episode_id
         self.directory = Path(directory) / ('operation-invocations-' + hashlib.sha256(episode_id.encode()).hexdigest()[:20])
+        self._check_directory()
+        parents = []
+        parent = self.directory
+        while not parent.exists():
+            parent = parent.parent
+            parents.append(parent)
         self.directory.mkdir(parents=True, exist_ok=True)
+        for parent in parents:
+            descriptor = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+
+    def _check_directory(self):
+        if any(path.is_symlink() for path in (self.directory, *self.directory.parents)):
+            raise ReadbackRequired('Invocation directory crosses a symlink')
 
     def save(self, record):
+        self._check_directory()
         path = self.directory / (record['operation_id'] + '.json')
         temporary = None
         try:
@@ -39,12 +103,27 @@ class Invocations:
                 temporary.unlink(missing_ok=True)
 
     def begin(self, operation, params):
-        record = {'operation_id': uuid.uuid4().hex, 'operation': operation, 'params': copy.deepcopy(params),
+        self.require_clear()
+        record = {'version': 1, 'episode_id': self.episode_id,
+                  'operation_id': uuid.uuid4().hex, 'operation': operation, 'params': copy.deepcopy(params),
                   'scope': {'surface': 'nauvis', 'force': 'player'}, 'submissions': [], 'finished': False}
         self.save(record)
         return record
 
+    def require_clear(self):
+        try:
+            self._check_directory()
+            for path in self.directory.iterdir():
+                if path.is_symlink() or not path.is_file():
+                    raise ValueError("unknown invocation provenance")
+                record = decode_record(path.read_bytes(), path.name, self.episode_id)
+                if path.name == 'legacy-unknown.json' or any(entry['dispatch'] != 'returned' for entry in record['submissions']):
+                    raise ValueError('unresolved submission provenance')
+        except (OSError, ValueError, TypeError) as error:
+            raise ReadbackRequired("Invocation readback required; prior dispatch is unknown") from error
+
     def submit(self, record, call, authorization, plan, *args, **kwargs):
+        self.require_clear()
         entry = {'authorization': copy.deepcopy(authorization), 'plan': copy.deepcopy(plan), 'dispatch': 'uncertain'}
         record['submissions'].append(entry)
         self.save(record)  # Durable before dispatch, including an interrupted call.
@@ -57,7 +136,7 @@ class Invocations:
     def observe(self, client):
         for path in sorted(self.directory.glob('*.json')):
             try:
-                record = json.loads(path.read_text())
+                record = decode_record(path.read_bytes(), path.name, self.episode_id)
                 submissions = record['submissions']
                 if (not record['finished'] or not submissions
                         or record.get('outcome', {}).get('code') not in {'submitted', 'prerequisite_advanced'}

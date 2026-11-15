@@ -34,7 +34,7 @@ from planners.plan_validation import validate_build_plan
 from orchestrator.material_reservations import MaterialReservationLedger, set_active_material_ledger
 from orchestrator.parts_mall import MaterialShortage
 from orchestrator.work_state import WorkStateSignal
-from orchestrator.operation_invocations import Invocations
+from orchestrator.operation_invocations import Invocations, ReadbackRequired
 from tools.rcon_client import RconClient
 
 SURFACE, FORCE = "nauvis", "player"
@@ -114,6 +114,10 @@ class DeterministicSession:
         construction_coverage.reset_coverage_progress()
         ab._TRANSFERABLE_WAITS.clear()
         ab._STAGE_DELIVERY_ATTEMPTS.clear()
+        try:
+            self.invocations.require_clear()
+        except ReadbackRequired:
+            return  # Keep read-only observation available; no constructor maintenance.
         ab.initialize_operation_runtime(self.bridge, SURFACE, FORCE, goal_item, emit)
         ab._restore_bootstrap_reservations()
         ab._reconcile_bootstrap_work(self.client, SURFACE, FORCE)
@@ -214,6 +218,12 @@ class DeterministicSession:
 
     def run(self, operation: str, **params) -> dict:
         """Run one operation; the tooling's own signals become a typed result."""
+        self.last_operation_id = None
+        try:
+            self.invocations.require_clear()
+        except ReadbackRequired as error:
+            return {"ok": False, "operation": operation, "params": params, "code": "readback_required",
+                    "state": "unknown", "message": str(error)}
         record = self.invocations.begin(operation, params)
         self.last_operation_id = record["operation_id"]
         original = self.bridge.build_layout
@@ -246,6 +256,7 @@ class DeterministicSession:
     def _maintain_mall(self) -> None:
         """After every operation: cap standing gear/cable cells, hand back cells whose loan is already stocked,
         and release the reservations of mall cells that are already producing."""
+        self.invocations.require_clear()
         for name, upkeep in (
                 ("MATERIAL PROJECT CLOSE", lambda: ab.complete_producing_material_projects(self.client, SURFACE, FORCE,
                                                                                             self.emit)),
@@ -352,6 +363,7 @@ class DeterministicSession:
     def _submit_stock_gate(self, plan: dict, name: str) -> dict:
         # Use the shared validator/authorization/bridge submission without the
         # construction wrapper's clutter, pole relocation or ledger side effects.
+        self.invocations.require_clear()
         validate_build_plan(plan)
         authorization = build_layout_authorization([(name, plan)])
         report = load_json(self.bridge.build_layout(authorization, plan))

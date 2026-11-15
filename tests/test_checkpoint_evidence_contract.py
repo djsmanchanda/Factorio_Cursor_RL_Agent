@@ -129,6 +129,7 @@ def test_legacy_and_corrupt_restart_preflight(tmp_path):
     evaluator = CheckpointEvaluator(); evaluator.reached.add('C0')
     bundle = export_restart_state(tmp_path / 'source', 'episode', 'mods', start, [start], evaluator)
     legacy = copy.deepcopy(bundle); legacy['version'] = 1; del legacy['evidence_state']
+    del legacy['sidecars']['operation_invocations']
     state = import_restart_state(legacy, tmp_path / 'legacy', episode_id='episode', mod_scope='mods')
     assert state.evaluator.reached == {'C0'} and state.evidence_state['origin'] == 'unknown'
     broken = copy.deepcopy(bundle); broken['evidence_state']['events']['C0'] = {'bad': True}
