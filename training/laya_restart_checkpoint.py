@@ -311,6 +311,56 @@ def _predicate_version(checkpoint_id):
                  if item.checkpoint_id == checkpoint_id), None)
 
 
+CONTEXT_FILE = 'state/logs/laya-restart-context.json'
+
+
+def auxiliary_files(bundle, root, metadata):
+    """Validated writes for the bundle's registered ``state/`` files; touches nothing.
+
+    A destination already holding identical bytes is left alone; a different
+    one is a conflict.
+    """
+    from training.laya_restart_state import _no_symlinks
+    pending = []
+    for relative, digest in sorted((metadata.get('files') or {}).items()):
+        if not relative.startswith('state/') or relative == CONTEXT_FILE:
+            continue
+        source = Path(bundle) / relative
+        target = Path(root) / 'server' / relative.removeprefix('state/')
+        _no_symlinks(source)
+        _no_symlinks(target)
+        data = source.read_bytes()
+        if hashlib.sha256(data).hexdigest() != digest:
+            raise ValueError(f'Bundle sidecar does not match its manifest: {relative}')
+        if target.exists():
+            if checkpoints.sha256(target) != digest:
+                raise ValueError(f'Destination durable sidecar conflicts with source: {relative}')
+            continue
+        pending.append((target, data))
+    return pending
+
+
+def install_sidecars(bundle, root, metadata, context):
+    """Install a restart bundle's durable sidecars without decoding its strict snapshots.
+
+    The same embedded-role preflight and all-or-nothing install as ``restore``
+    (uncertain-dispatch fences, loan-gate retry budgets, legacy unknown
+    provenance) plus the registered auxiliary files, for callers such as the
+    PM replay that only need ownership state. Returns the episode id and the
+    files written.
+    """
+    from orchestrator.checkpoint_restart_state import install_sidecars as install, plan_sidecars
+    state = (context or {}).get('restart_state') or {}
+    episode_id = (state.get('scope') or {}).get('episode_id')
+    if not episode_id:
+        raise ValueError('Checkpoint names no restart episode')
+    script_output = Path(root) / 'server/script-output'
+    written = install(plan_sidecars(state, script_output, episode_id=episode_id),
+                      auxiliary_files(bundle, root, metadata))
+    return {'episode_id': episode_id,
+            'installed': sorted(str(path.relative_to(Path(root) / 'server')) for path in written)}
+
+
 def restore(bundle, root, *, migration_contract=None):
     from training.laya_restart_state import import_restart_state
     metadata, context = load(bundle)
@@ -326,24 +376,12 @@ def restore(bundle, root, *, migration_contract=None):
         raise ValueError('Prepared world does not derive from this checkpoint')
     state = copy.deepcopy(context['restart_state'])
     state['scope']['mod_scope'] = mod_scope(manifest)
+    # Embedded roles are only part of the durable state. Validate every
+    # registered auxiliary file too, then install both in one all-or-nothing
+    # step before a session can reconcile its ledgers.
     restored = import_restart_state(state, Path(root) / 'server/script-output',
-        episode_id=state['scope']['episode_id'], mod_scope=mod_scope(manifest))
-    # Embedded roles above are only part of the durable state. Restore every
-    # registered auxiliary file before a session can reconcile its ledgers.
-    for relative in metadata['files']:
-        if not relative.startswith('state/') or relative == 'state/logs/laya-restart-context.json':
-            continue
-        target = Path(root) / 'server' / relative.removeprefix('state/')
-        from training.laya_restart_state import _no_symlinks
-        _no_symlinks(target)
-        source = Path(bundle) / relative
-        if target.exists():
-            if checkpoints.sha256(target) != metadata['files'][relative]:
-                raise ValueError('Destination durable sidecar conflicts with source')
-        else:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with target.open('xb') as stream:
-                stream.write(source.read_bytes())
+        episode_id=state['scope']['episode_id'], mod_scope=mod_scope(manifest),
+        extra_writes=auxiliary_files(bundle, root, metadata))
     context = {**context, 'migration_contract_sha256': migration}
     return restored, context
 

@@ -53,6 +53,7 @@ _DETERMINISTIC_HINTS = (
 # highest-value safety/contracts across all domains; breadth remains in the
 # scheduled/manual full suite instead of masquerading as fast validation.
 _FAST_FILES = {
+    "test_laya_replay_restart_sidecars.py", "test_laya_pm_replay_review_fixes.py",
     "test_laya_decision_pacing.py", "test_mall_reconciliation.py",
     "test_checkpoint_observer.py",
     "test_laya_ops_initialization.py", "test_mall_cell_release_lua.py",

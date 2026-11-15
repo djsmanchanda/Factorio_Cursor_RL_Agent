@@ -34,7 +34,7 @@ class Session:
 
 def drive(tmp_path, **kwargs):
     session = Session()
-    result = replay.drive(session, tmp_path / 'journal', max_steps=2, **kwargs)
+    result = replay.drive(session, tmp_path / 'journal', max_steps=2, stock_reader=lambda s: {}, **kwargs)
     rows = [json.loads(line) for line in (tmp_path / 'journal').read_text().splitlines()]
     return session, result, rows
 
@@ -196,7 +196,8 @@ class Nested(Session):
 
 def funded(tmp_path, **kwargs):
     session = Nested()
-    result = replay.drive(session, tmp_path / 'journal', max_steps=1, fund_shortages=True, **kwargs)
+    result = replay.drive(session, tmp_path / 'journal', max_steps=1, fund_shortages=True,
+                          stock_reader=lambda s: {}, **kwargs)
     rows = [json.loads(line) for line in (tmp_path / 'journal').read_text().splitlines()]
     return session, result, [row for row in rows if row['event'] == 'pm_replay_funding']
 
@@ -225,7 +226,7 @@ def test_depth_one_funds_only_the_service_bill(tmp_path):
 
 def test_each_step_funds_afresh(tmp_path):
     session = Nested()
-    replay.drive(session, tmp_path / 'journal', max_steps=2, fund_shortages=True)
+    replay.drive(session, tmp_path / 'journal', max_steps=2, fund_shortages=True, stock_reader=lambda s: {})
     produce = [kwargs['item'] for operation, kwargs in session.calls if operation == 'produce']
     assert produce.count('assembling-machine-1') == 2  # once per step, not once per replay
 
@@ -238,59 +239,8 @@ def test_a_failed_nested_attempt_is_evidence_not_a_crash(tmp_path):
             return super().run(operation, **kwargs)
 
     session = Broken()
-    replay.drive(session, tmp_path / 'journal', max_steps=1, fund_shortages=True)
+    replay.drive(session, tmp_path / 'journal', max_steps=1, fund_shortages=True, stock_reader=lambda s: {})
     rows = [json.loads(line) for line in (tmp_path / 'journal').read_text().splitlines()]
     machine = next(row for row in rows if row.get('item') == 'assembling-machine-1')
     assert machine['outcome'] == 'funding_error' and 'bill' not in machine
     assert not any(row.get('item') == 'electronic-circuit' for row in rows)
-
-
-def bundle(tmp_path, files):
-    import hashlib
-    root = tmp_path / 'bundle'
-    digests = {}
-    for relative, text in files.items():
-        path = root / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
-        digests[relative] = hashlib.sha256(text.encode()).hexdigest()
-    context = {'restart_state': {'scope': {'episode_id': 'laya-C0-reference-s1'}}}
-    return root, lambda _bundle: ({'files': digests}, context)
-
-
-SIDECARS = {
-    'state/logs/deterministic-bootstrap-districts/laya-C0-reference-s1/b5372b10c7f8f832.json': '{"recipe": "copper-plate"}',
-    'state/logs/deterministic-material-reservations/laya-C0-reference-s1.json': '{}',
-    'state/script-output/logs/deterministic-plan-reservations.jsonl': '{}\n',
-    'state/logs/laya-restart-context.json': '{"not": "installed"}',
-    'world.zip': 'zip',
-}
-
-
-def test_restore_installs_bundle_sidecars_where_the_session_ledgers_read_them(tmp_path):
-    source, loader = bundle(tmp_path, SIDECARS)
-    world = tmp_path / 'world'
-    restored = replay.restore_sidecars(source, world, loader=loader)
-    assert restored['episode_id'] == 'laya-C0-reference-s1'
-    from orchestrator.bootstrap_district import BootstrapDistrictLedger
-    ledger = BootstrapDistrictLedger(world / 'server/script-output', episode_id=restored['episode_id'],
-                                     surface='nauvis', force='player', bootstrap_profile='reduced-v1')
-    assert (ledger.root / 'b5372b10c7f8f832.json').is_file()
-    assert (world / 'server/script-output/logs/deterministic-plan-reservations.jsonl').is_file()
-    assert not (world / 'server/logs/laya-restart-context.json').exists()
-    assert not (world / 'server/world.zip').exists()
-    assert replay.restore_sidecars(source, world, loader=loader)['installed'] == restored['installed']
-
-
-def test_restore_refuses_a_tampered_or_conflicting_sidecar(tmp_path):
-    source, loader = bundle(tmp_path, SIDECARS)
-    world = tmp_path / 'world'
-    target = world / 'server/logs/deterministic-material-reservations/laya-C0-reference-s1.json'
-    target.parent.mkdir(parents=True)
-    target.write_text('{"other": "run"}')
-    with pytest.raises(replay.ReplayError, match='conflicts'):
-        replay.restore_sidecars(source, world, loader=loader)
-    target.unlink()
-    (source / 'state/logs/deterministic-material-reservations/laya-C0-reference-s1.json').write_text('{"x": 1}')
-    with pytest.raises(replay.ReplayError, match='manifest'):
-        replay.restore_sidecars(source, world, loader=loader)

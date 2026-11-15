@@ -108,11 +108,22 @@ def test_drive_succeeds_only_with_placement_and_pm_consumption(tmp_path):
     summary = replay.drive(session, tmp_path / "evidence.jsonl", max_steps=5,
                            stock_reader=lambda s: {},
                            consumption_probe=lambda: {"pm_consumption_verified": True,
-                                                      "samples": [{"tick": 10, "crafts": 2}]})
+                                                      "samples": [{"tick": 10, "crafts": 2},
+                                                                  {"tick": 3700, "crafts": 3}]})
     assert summary["pm_placed"] is True
     assert summary["pm_consumption_verified"] is True
     assert summary["pm_evidence_complete"] is True
+    assert summary["acceptance"]["rises"] == 2
     assert summary["steps"][-1]["pm_consumption"][0]["crafts"] == 2
+
+
+def test_one_verified_probe_sample_does_not_complete_the_drive(tmp_path):
+    session = FakeSession([{"ok": True, "code": None}], cells_at=3)
+    summary = replay.drive(session, tmp_path / "evidence.jsonl", max_steps=5,
+                           stock_reader=lambda s: {},
+                           consumption_probe=lambda: {"pm_consumption_verified": True,
+                                                      "samples": [{"tick": 10, "crafts": 2}]})
+    assert summary["pm_placed"] is True and summary["pm_evidence_complete"] is False
 
 
 def test_a_generic_c6_pass_is_not_pm_consumption(tmp_path):
@@ -234,7 +245,8 @@ def test_sidecar_pm_consumption_requires_c6_v3_and_positive_crafts(tmp_path):
     ])
     result = replay.sidecar_consumption(report)
     assert result["pm_consumption_verified"] is True
-    assert result["samples"][0]["crafts"] == 3
+    assert result["observations"][0]["window_crafts"] == 3
+    assert result["samples"] == []  # a window total is not cumulative evidence
 
 
 def test_a_bulk_inserter_c6_or_c6_v2_is_not_pm_consumption(tmp_path):
@@ -334,7 +346,7 @@ def test_verify_falls_back_to_the_sidecar_report(tmp_path):
     result = replay.consumption(world)
     assert result["source"] == "strict_sidecar"
     assert result["pm_consumption_verified"] is True
-    assert result["samples"][0]["crafts"] == 2
+    assert result["observations"][0]["window_crafts"] == 2
 
 
 def test_report_combines_provenance_placement_and_consumption(tmp_path):
@@ -344,9 +356,11 @@ def test_report_combines_provenance_placement_and_consumption(tmp_path):
     (world / "evidence").mkdir()
     (world / "evidence/pm-placement.json").write_text(json.dumps({"placement_receipt": True, "machines": 1}))
     _sidecar_report(world / "evidence/strict.json", [
-        {"tick": 9, "predicate_evidence": {"C6": {"predicate_version": "c6-v3", "status": "passed",
-                                                  "evidence": {"machine_consumption": {"productivity-module": 2}}}},
-         "statuses": {"C6": True}}])
+        {"tick": tick, "predicate_evidence": {"C6": {"predicate_version": "c6-v3", "status": "passed",
+                                                     "evidence": {"machine_consumption": {"productivity-module": 2}}}},
+         "statuses": {"C6": True},
+         "machine_crafts": {"generation": "g", "cumulative": {"productivity-module": crafts}}}
+        for tick, crafts in ((9, 0), (3609, 1), (7209, 2))])
     (world / "provenance-reload.json").write_text(json.dumps(
         {"kind": "laya-pm-reload-v1", "expected_tick": 514525,
          "observed_tick": 514525, "reload_verified": True}))

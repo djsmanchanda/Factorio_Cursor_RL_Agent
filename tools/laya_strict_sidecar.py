@@ -31,7 +31,7 @@ import sys  # noqa: E402
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from orchestrator.checkpoint_milestones import DEFAULT_MILESTONES, MILESTONE_IDS, evaluate_milestone  # noqa: E402
+from orchestrator.checkpoint_milestones import DEFAULT_MILESTONES, MILESTONE_IDS, _machine_consumption, evaluate_milestone  # noqa: E402
 from orchestrator.checkpoint_evidence import project_evidence, retained_samples, new_evidence_state, evidence_success, evidence_failure, state_projection  # noqa: E402
 
 #: Full evidence is kept for the checkpoints a track comparison reads closely; others keep version and status.
@@ -57,12 +57,34 @@ class Measurement:
     """Baseline, bounded history and the first tick each predicate passed."""
 
     def __init__(self, identity: dict[str, str]) -> None:
+        import uuid
         self.identity, self.baseline, self.history = identity, None, []
         self.reached: dict[str, int | None] = {}
         self.rows: list[dict[str, Any]] = []
         self.evidence_state = new_evidence_state()
+        # Cumulative per-recipe crafts for this measurement only (one generation).
+        self.generation, self.crafts, self._consumers = uuid.uuid4().hex, {}, None
+
+    def _count_crafts(self, snapshot) -> dict[str, Any] | None:
+        """Crafts since the previous sample that had machine telemetry, accumulated for this generation.
+
+        C6's ``machine_consumption`` is a sum over the retained window (at
+        most 20 samples), so it can stay flat or fall while machines keep
+        crafting. This counter only grows. It uses the same per-machine rule
+        (a machine's first sample on a recipe is a baseline, so inherited
+        lifetime counts and recipe changes add nothing); a sample without
+        telemetry, or a failed poll, leaves the previous sample as the base.
+        """
+        if not isinstance(snapshot.ac_consumers, (list, tuple)):
+            return None
+        delta = {} if self._consumers is None else (_machine_consumption([self._consumers, snapshot]) or {})
+        self._consumers = snapshot
+        for recipe, count in delta.items():
+            self.crafts[recipe] = self.crafts.get(recipe, 0) + count
+        return {"generation": self.generation, "cumulative": dict(self.crafts), "since_previous": delta}
 
     def add(self, snapshot) -> dict[str, Any]:
+        crafts = self._count_crafts(snapshot)
         self.baseline = self.baseline or snapshot
         self.history = retained_samples([*self.history, snapshot])[-20:]
         # Historical predicates use object identity to decide whether the last
@@ -79,7 +101,8 @@ class Measurement:
                "statuses": {cid: (True if r.passed else False if r.failed else None) for cid, r in results.items()},
                "predicate_evidence": {cid: {"predicate_version": r.predicate_version, "status": r.status.value,
                                             **({"evidence": dict(r.evidence)} if cid in DETAILED else {})}
-                                      for cid, r in results.items()}}
+                                      for cid, r in results.items()},
+               "machine_crafts": crafts}
         row["predicate_evidence"]["_contract"] = state_projection(self.baseline, self.history, self.evidence_state)
         self.rows.append(row)
         return row

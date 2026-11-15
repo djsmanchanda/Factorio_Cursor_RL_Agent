@@ -44,30 +44,54 @@ def consumption(world: Path) -> dict:
     manifest = json.loads((world/'manifest.json').read_text())
     if manifest.get('production_authority') is not False:
         raise ValueError('PM replay evidence must come from an explicitly disposable world')
-    matches = []
+    rows = []
     journal = world/'evidence/clean-decisions.jsonl'
     with journal.open() if journal.is_file() else _empty_stream() as stream:
         for line in stream:
             row = json.loads(line)
-            if row.get('event') != 'strict_current':
-                continue
-            predicate = (row.get('predicate_evidence') or {}).get('C6') or {}
-            count = ((predicate.get('evidence') or {}).get('machine_consumption') or {}).get('productivity-module')
-            if (predicate.get('predicate_version') == 'c6-v3'
-                    and (row.get('statuses') or {}).get('C6') is True
-                    and type(count) is int and count > 0):
-                matches.append({'tick': row.get('tick'), 'run_id': row.get('run_id'), 'crafts': count})
-    source = "clean_decisions"
-    if not matches:
+            if row.get('event') == 'strict_current':
+                rows.append(row)
+    parsed, source = pm_samples(rows), "clean_decisions"
+    if not parsed["observations"] and not parsed["samples"]:
         sidecar = world / "evidence/strict.json"
         if sidecar.is_file():
-            side = sidecar_consumption(sidecar)
-            matches = side["samples"]
-            source = "strict_sidecar"
-    return {'kind': 'laya-pm-consumption-v1', 'world': str(world.resolve()), 'source': source,
-            'pm_consumption_verified': bool(matches), 'samples': matches,
+            parsed, source = sidecar_consumption(sidecar), "strict_sidecar"
+    return {'kind': 'laya-pm-consumption-v2', 'world': str(world.resolve()), 'source': source,
+            'pm_consumption_verified': bool(parsed["observations"]),
+            'observations': parsed["observations"], 'samples': parsed["samples"],
+            'sustained_rises': sustained_rises(parsed["samples"]),
             'evidence_scope': 'diagnostic_replay_only',
             'placement_receipt_required': True, 'automatic_adoption': False}
+
+
+ACCEPTANCE_VERSION = "pm-sustained-v2"
+MIN_RISES = 2
+MIN_GAP_TICKS = 3600
+
+
+def acceptance(placed, samples: list[dict], driver: dict | None = None) -> dict:
+    """The one PM-evidence verdict for drive, report and verify.
+
+    Complete needs a placement receipt and ``MIN_RISES`` separated rises of
+    cumulative PM crafts (``sustained_rises``). A one-sample window
+    observation is separate evidence and never completes. With a driver
+    summary: a failed driver is never overridden; a current-version claim of
+    success that the measurement does not support is contradictory, so the
+    verdict is unknown (None).
+    """
+    rises = sustained_rises(samples)
+    measured = bool(placed) and rises >= MIN_RISES
+    claim = None if driver is None else driver.get("pm_evidence_complete")
+    if driver is not None and claim is not True:
+        complete, reason = False, "driver_not_complete"
+    elif measured:
+        complete, reason = True, "placed_and_sustained"
+    elif driver is not None and driver.get("acceptance_version") == ACCEPTANCE_VERSION:
+        complete, reason = None, "driver_claim_not_supported_by_measurement"
+    else:
+        complete, reason = False, "not_placed" if not placed else "consumption_not_sustained"
+    return {"version": ACCEPTANCE_VERSION, "complete": complete, "reason": reason, "placed": bool(placed),
+            "rises": rises, "min_rises": MIN_RISES, "min_gap_ticks": MIN_GAP_TICKS}
 
 
 def replay_summary(world: Path):
@@ -93,14 +117,17 @@ def replay_report(world: Path) -> dict:
     try:
         use = consumption(world)
     except (OSError, ValueError) as error:
-        use = {"pm_consumption_verified": False, "error": str(error)}
-    complete = bool(placement and use.get("pm_consumption_verified"))
-    return {"kind": "laya-pm-replay-report-v1", "world": str(world.resolve()),
+        use = {"pm_consumption_verified": False, "samples": [], "error": str(error)}
+    summary = replay_summary(world)
+    verdict = acceptance(placement is not None, use.get("samples") or [], summary)
+    if placement is None and summary is None and "error" in use:
+        verdict = {**verdict, "complete": None, "reason": "no_evidence"}
+    return {"kind": "laya-pm-replay-report-v2", "world": str(world.resolve()),
             "provenance": provenance, "reload": reload_info,
             "reload_verified": bool(reload_info and reload_info.get("reload_verified")),
             "placement": placement, "consumption": use,
-            "replay_summary": replay_summary(world),
-            "pm_evidence_complete": complete,
+            "replay_summary": summary, "acceptance": verdict,
+            "pm_evidence_complete": verdict["complete"],
             "evidence_scope": "diagnostic_replay_only", "automatic_adoption": False}
 
 
@@ -148,13 +175,14 @@ def main(argv=None):
         print(json.dumps(result, indent=2))
         return 0
     if args.action == 'verify':
-        result = consumption(args.world)
+        report = replay_report(args.world)
+        result = {**report["consumption"], "acceptance": report["acceptance"]}
         print(json.dumps(result, indent=2))
-        return 0 if result['pm_consumption_verified'] else 1
+        return 0 if report["acceptance"]["complete"] is True else 1
     if args.action == 'report':
         result = replay_report(args.world)
         print(json.dumps(result, indent=2))
-        return 0 if result["pm_evidence_complete"] else 4
+        return 0 if result["pm_evidence_complete"] is True else 4
     if args.action == 'reload':
         result = reload_receipt(args.root, args.expected_tick)
         print(json.dumps(result, indent=2))
@@ -257,14 +285,72 @@ def stock_delta(before: dict, after: dict) -> dict[str, int]:
             for key in keys if int(after.get(key, 0)) != int(before.get(key, 0))}
 
 
-def pm_bill(outcome: dict) -> dict:
+def pm_bill(outcome: dict, stock: dict | None = None) -> dict:
+    """The bill of a failed operation, with the network level each short item needs.
+
+    ``stock`` is the network stock read just before the failing operation; as
+    in the runner (``result["stock_at"]``), it fixes the level at failure time
+    (``training.laya_ops_runner.shortage_levels``: stock then plus the
+    shortfall). A ``stock_at`` the outcome already carries wins. Without
+    either, ``levels`` stays empty: the level is unknown, never ``required``.
+    """
+    from training.laya_ops_runner import shortage_levels
     details = outcome.get("details") or {}
+    required = details.get("required") or {}
+    stock_at = details.get("stock_at", outcome.get("stock_at"))
+    if stock_at is None and stock is not None:
+        stock_at = {item: int(stock.get(item, 0)) for item in required}
+    levels = (shortage_levels([{"operation": "bill", "code": "material_shortage", "details": details,
+                                "stock_at": stock_at}]) if stock_at is not None else {})
     return {"stage": details.get("stage"),
-            "required": details.get("required") or {},
+            "required": required,
             "available": details.get("available") or {},
+            "stock_at": stock_at,
+            "levels": levels,
             "short": {name: int(count) - int((details.get("available") or {}).get(name, 0))
-                      for name, count in (details.get("required") or {}).items()
+                      for name, count in required.items()
                       if int(count) > int((details.get("available") or {}).get(name, 0))}}
+
+
+def _read_stock(reader, session) -> dict | None:
+    """Network stock now, or None when no reader was supplied or the read failed."""
+    if reader is None:
+        return None
+    try:
+        stock = reader(session)
+    except Exception:  # noqa: BLE001 -- unknown stock stays unknown
+        return None
+    return dict(stock) if isinstance(stock, dict) else None
+
+
+class Budget:
+    """The one wall-clock and game-tick guard checked before every operation the replay starts.
+
+    The first terminating cause is kept: once spent, nothing new starts (an
+    operation already running may finish; synchronous calls cannot be cut).
+    """
+
+    def __init__(self, *, deadline, clock, tick_reader, initial_tick: int, max_game_ticks: int):
+        self.deadline, self.clock, self.tick_reader = deadline, clock, tick_reader
+        self.initial_tick, self.max_game_ticks = initial_tick, max_game_ticks
+        self.highest_tick, self.cause = initial_tick, None
+
+    def check(self) -> tuple[str | None, int | None]:
+        """(terminating cause or None, the tick read)."""
+        if self.cause is not None:
+            return self.cause, None
+        tick = None
+        if self.deadline is not None and self.clock() >= self.deadline:
+            self.cause = "deadline_reached"
+        else:
+            tick = self.tick_reader()
+            if tick < self.highest_tick:
+                self.cause = "clock_not_advancing"
+            elif tick - self.initial_tick >= self.max_game_ticks:
+                self.cause = "game_tick_budget_exhausted"
+            else:
+                self.highest_tick = tick
+        return self.cause, tick
 
 
 def _drain_messages(reader) -> list[str]:
@@ -308,7 +394,7 @@ def run_live_replay(reload_info, adapter_factory, session_factory, evidence_path
 
 
 def drive(session, evidence_path: Path, *, max_steps: int = 40,
-          stock_reader=lambda session: {}, consumption_probe=None,
+          stock_reader=None, consumption_probe=None,
           deadline: float | None = None, clock=None, message_reader=None,
           tick_reader=None, initial_tick=None, max_game_ticks: int = 108000,
           stall_seconds: float = 10.0, monotonic=None, sleep=None,
@@ -332,30 +418,22 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
     tick_reader = session.tick if tick_reader is None else tick_reader
     initial_tick = tick_reader() if initial_tick is None else initial_tick
     last_tick = initial_tick
+    budget = Budget(deadline=deadline, clock=clock, tick_reader=tick_reader,
+                    initial_tick=initial_tick, max_game_ticks=max_game_ticks)
     evidence_path.parent.mkdir(parents=True, exist_ok=True)
     with evidence_path.open("a") as stream:
         steps = []
         placed = False
         consumed = False
-        deadline_reached = False
+        samples: list[dict] = []
         stop_reason = "attempt_budget_exhausted"
         for index in range(1, max_steps + 1):
-            if deadline is not None and clock() >= deadline:
-                deadline_reached = True
-                stop_reason = "deadline_reached"
-                break
+            # Each attempt waits for the game clock to advance, under the same budget guard.
             wait_started = monotonic()
             while True:
-                if deadline is not None and clock() >= deadline:
-                    deadline_reached = True
-                    stop_reason = "deadline_reached"
-                    break
-                tick = tick_reader()
-                if tick < last_tick:
-                    stop_reason = "clock_not_advancing"
-                    break
-                if tick - initial_tick >= max_game_ticks:
-                    stop_reason = "game_tick_budget_exhausted"
+                cause, tick = budget.check()
+                if cause is not None:
+                    stop_reason = cause
                     break
                 if tick > last_tick:
                     last_tick = tick
@@ -366,7 +444,8 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
                 sleep(min(0.1, stall_seconds))
             if stop_reason != "attempt_budget_exhausted":
                 break
-            before = dict(stock_reader(session) or {})
+            stock_before = _read_stock(stock_reader, session)
+            before = dict(stock_before or {})
             try:
                 outcome = session.run("production_service", item=PM_ITEM, stock_target=1,
                                       minimum_machines=1, upgrade_bootstrap=True,
@@ -376,14 +455,14 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
                 raise
             trail = _drain_messages(message_reader)
             _journal_messages(stream, index, trail)
-            after = dict(stock_reader(session) or {})
+            after = dict(_read_stock(stock_reader, session) or {})
             cells = pm_cells(session.economics())
             step = {"step": index, "tick": last_tick, "operation": "production_service", "item": PM_ITEM,
                     "outcome": outcome.get("code"), "ok": outcome.get("ok"),
                     "classification": outcome.get("classification"),
                     "state": outcome.get("state"),
                     "details": outcome.get("details"),
-                    "message": outcome.get("message"), "bill": pm_bill(outcome),
+                    "message": outcome.get("message"), "bill": pm_bill(outcome, stock_before),
                     "stock_delta": stock_delta(before, after), "messages": len(trail),
                     "pm_cells": len(cells),
                     "pm_machines": sum(int(cell.get("machines") or 0) for cell in cells)}
@@ -407,8 +486,9 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
                 step["placement_receipt"] = str(receipt_path)
             if placed and consumption_probe is not None and not observe_after_placement:
                 probe = consumption_probe() or {}
-                consumed = bool(probe.get("pm_consumption_verified"))
-                step["pm_consumption"] = probe.get("samples") or []
+                samples = probe.get("samples") or []
+                consumed = acceptance(placed, samples)["complete"] is True
+                step["pm_consumption"] = samples
                 if consumed:
                     stop_reason = "pm_evidence_complete"
                     break
@@ -420,50 +500,66 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
                     consumption_probe, tick_reader, last_tick, initial_tick=initial_tick,
                     max_game_ticks=max_game_ticks, deadline=deadline, clock=clock,
                     monotonic=monotonic, sleep=sleep, stall_seconds=max(stall_seconds, 30.0))
-                step["pm_consumption"] = observed["samples"]
+                samples = observed["samples"]
+                step["pm_consumption"] = samples
                 stream.write(json.dumps({"event": "pm_replay_observation", "step": index,
                                          **{k: v for k, v in observed.items()}}) + "\n")
                 stream.flush()
-                consumed = observed["sustained"]
+                consumed = acceptance(placed, samples)["complete"] is True
                 last_tick = observed["last_tick"]
                 stop_reason = observed["outcome"]
-                deadline_reached = stop_reason == "deadline_reached"
                 break
             if fund_shortages and outcome.get("code") == "material_shortage":
                 step["funding"] = _fund_shortage(session, stream, index, step["bill"], message_reader,
-                                                 max_depth=funding_depth)
+                                                 max_depth=funding_depth, budget=budget,
+                                                 stock_reader=stock_reader)
+                if budget.cause is not None:
+                    stop_reason = budget.cause
+                    break
             if not placed and outcome.get("code") == "production_prerequisite_deferred":
                 # A deferral is not progress by itself; keep the bounded budget and
                 # let the next step re-observe. The journal records every attempt.
                 continue
+        verdict = acceptance(placed, samples)
         summary = {"kind": "laya-pm-replay-v1", "steps": steps,
-                   "deadline_reached": deadline_reached, "outcome": stop_reason,
+                   "deadline_reached": stop_reason == "deadline_reached", "outcome": stop_reason,
                    "clock": {"initial_tick": initial_tick, "last_advanced_tick": last_tick,
                              "max_game_ticks": max_game_ticks, "stall_seconds": stall_seconds},
                    "pm_placed": placed, "pm_consumption_verified": consumed,
                    "placement_receipt": str(evidence_path.parent / "pm-placement.json") if placed else None,
-                   "pm_evidence_complete": bool(placed and consumed),
+                   "pm_evidence_complete": verdict["complete"] is True,
+                   "acceptance_version": ACCEPTANCE_VERSION, "acceptance": verdict,
                    "evidence_scope": "diagnostic_replay_only", "automatic_adoption": False}
         stream.write(json.dumps({"event": "pm_replay_summary", **{k: v for k, v in summary.items()
                                                                   if k != "steps"}}) + "\n")
         return summary
 
 
-def sustained_rises(samples: list[dict], min_gap_ticks: int = 3600) -> int:
-    """Verified PM consumption samples whose crafts rose, each at least ``min_gap_ticks`` after the last rise."""
-    rises, last_tick, last_crafts = 0, None, 0
+def sustained_rises(samples: list[dict], min_gap_ticks: int = MIN_GAP_TICKS) -> int:
+    """Separated positive increments of cumulative PM crafts.
+
+    Each sample's ``crafts`` is a cumulative count within its ``generation``
+    (one strict measurement; a new generation starts again from zero). A rise
+    is a sample whose count exceeds the previous sample of its generation,
+    while C6 holds (``c6_passed``, default true), at least ``min_gap_ticks``
+    after the last counted rise. Samples before C6 holds still advance the
+    base, so crafts made before the predicate was eligible never count.
+    """
+    rises, last_rise, previous = 0, None, {}
     for sample in sorted(samples, key=lambda row: int(row.get("tick") or 0)):
         tick, crafts = int(sample.get("tick") or 0), int(sample.get("crafts") or 0)
-        if crafts > last_crafts and (last_tick is None or tick - last_tick >= min_gap_ticks):
-            rises, last_tick = rises + 1, tick
-        last_crafts = max(last_crafts, crafts)
+        generation = sample.get("generation")
+        if (sample.get("c6_passed", True) and crafts > previous.get(generation, 0)
+                and (last_rise is None or tick - last_rise >= min_gap_ticks)):
+            rises, last_rise = rises + 1, tick
+        previous[generation] = max(previous.get(generation, 0), crafts)
     return rises
 
 
 def observe_consumption(probe, tick_reader, last_tick: int, *, initial_tick: int,
                         max_game_ticks: int, deadline: float | None, clock, monotonic, sleep,
                         stall_seconds: float = 30.0, poll: float = 5.0,
-                        min_rises: int = 2, min_gap_ticks: int = 3600) -> dict:
+                        min_rises: int = MIN_RISES, min_gap_ticks: int = MIN_GAP_TICKS) -> dict:
     """After PM placement, read the persistent strict report until consumption rises twice."""
     outcome, samples, moved = "deadline_reached", [], monotonic()
     while deadline is None or clock() < deadline:
@@ -490,47 +586,78 @@ def observe_consumption(probe, tick_reader, last_tick: int, *, initial_tick: int
 
 
 def _fund_shortage(session, stream, index: int, bill: dict, message_reader=None, *,
-                   max_depth: int = FUNDING_DEPTH) -> list[dict]:
+                   max_depth: int = FUNDING_DEPTH, budget: Budget | None = None,
+                   stock_reader=None) -> list[dict]:
     """Run the existing ``produce`` operation for each short item of a construction bill.
 
     This mirrors the Laya runner, which turns a material_shortage bill into
-    ``op.produce.<item>`` options at the bill's required network level
-    (training/laya_ops_runner.py shortages/shortage_levels). Without it the
-    replay retries production_service against a bill nothing produces.
+    ``op.produce.<item>`` options at the network level fixed when the bill
+    failed (training/laya_ops_runner.py shortages/shortage_levels): the stock
+    then plus the shortfall, carried in ``bill["levels"]``. An item whose level
+    is unknown (no stock observation) is journaled as ``stock_unknown`` and not
+    produced. Without funding the replay retries production_service against a
+    bill nothing produces.
 
     A funding attempt can itself answer material_shortage with its own bill
     (live pm-replay-20261115-o3: long-handed-inserter's mall cell needed an
     assembling-machine-1 nothing made, 49 times). Its short items are funded
     next, depth-first, down to ``max_depth`` levels; the runner reaches the
     same item across decisions because ``shortages`` reads every operation's
-    latest bill. An item is funded at most once per step, and every row
-    records its depth and the item whose bill asked for it.
+    latest bill. Within a step each item keeps the highest target requested so
+    far and is funded again only when a later bill raises it (a diamond's
+    larger branch is never dropped; a cycle stops because targets must rise).
+    ``budget`` is checked before every ``produce``, including nested children
+    and siblings; once spent nothing further starts and ``budget.cause`` says
+    why. Every row records its depth and the item whose bill asked for it.
     """
     funded: list[dict] = []
-    attempted: set[str] = set()
+    targets: dict[str, int] = {}
+    unknown: set[str] = set()
+
+    def journal(row: dict) -> None:
+        funded.append(row)
+        _journal_messages(stream, index, _drain_messages(message_reader))
+        stream.write(json.dumps({"event": "pm_replay_funding", **row}) + "\n")
+        stream.flush()
 
     def fund(current: dict, depth: int, parent: str | None) -> None:
         for item in sorted(current.get("short") or {}):
-            if item in attempted:
+            level = (current.get("levels") or {}).get(item)
+            if level is None:
+                if item not in unknown and item not in targets:
+                    unknown.add(item)
+                    journal({"step": index, "item": item, "stock_target": None, "depth": depth,
+                             "parent": parent, "outcome": "stock_unknown", "ok": False, "state": None,
+                             "message": "no failure-time stock observation; level unknown"})
                 continue
-            attempted.add(item)
-            level = max(1, int((current.get("required") or {}).get(item, 0)))
+            level = max(1, int(level))
+            if level <= targets.get(item, 0):
+                continue
+            if budget is not None:
+                cause, _ = budget.check()
+                if cause is not None:
+                    stream.write(json.dumps({"event": "pm_replay_budget_stop", "step": index,
+                                             "cause": cause, "before": {"item": item, "stock_target": level}})
+                                 + "\n")
+                    stream.flush()
+                    return
+            targets[item] = level
+            stock = _read_stock(stock_reader, session)
             try:
                 result = session.run("produce", item=item, stock_target=level)
             except Exception as error:  # noqa: BLE001 -- a failed funding attempt is evidence, not a crash
                 result = {"code": "funding_error", "ok": False, "message": f"{type(error).__name__}: {error}"}
-            nested = pm_bill(result) if result.get("code") == "material_shortage" else None
+            nested = pm_bill(result, stock) if result.get("code") == "material_shortage" else None
             row = {"step": index, "item": item, "stock_target": level, "depth": depth, "parent": parent,
                    "outcome": result.get("code"), "ok": result.get("ok"), "state": result.get("state"),
                    "message": result.get("message")}
             if nested is not None:
                 row["bill"] = nested
-            funded.append(row)
-            _journal_messages(stream, index, _drain_messages(message_reader))
-            stream.write(json.dumps({"event": "pm_replay_funding", **row}) + "\n")
-            stream.flush()
+            journal(row)
             if nested is not None and depth < max_depth:
                 fund(nested, depth + 1, item)
+            if budget is not None and budget.cause is not None:
+                return
 
     fund(bill, 1, None)
     return funded
@@ -653,26 +780,48 @@ def plan_replay(bank: Path, generation: str, root: Path, *, game_port: int, rcon
             "next_gate": "fresh C4 reload on candidate code/mods, then PM placement and c6-v3 PM consumption"}
 
 
+def pm_samples(rows: list) -> dict:
+    """PM evidence from strict_current rows.
+
+    ``samples``: cumulative PM crafts per row from the measurement's
+    ``machine_crafts`` (generation-scoped), with whether c6-v3 passed then;
+    these feed ``sustained_rises``. ``observations``: the older one-sample
+    signal, a c6-v3 pass whose rolling-window ``machine_consumption`` names
+    PM crafts. A window total is not cumulative, so it never feeds rises.
+    """
+    samples, observations = [], []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        c6 = (row.get("predicate_evidence") or {}).get("C6") or {}
+        current = c6.get("predicate_version") == "c6-v3"
+        passed = current and (c6.get("status") == "passed" or (row.get("statuses") or {}).get("C6") is True)
+        window = ((c6.get("evidence") or {}).get("machine_consumption") or {}).get(PM_ITEM)
+        if passed and type(window) is int and window > 0:
+            observations.append({"tick": row.get("tick"), "run_id": row.get("run_id"), "window_crafts": window})
+        crafts = row.get("machine_crafts")
+        if isinstance(crafts, dict) and isinstance(crafts.get("cumulative"), dict):
+            count = crafts["cumulative"].get(PM_ITEM, 0)
+            if type(count) is int and count >= 0:
+                samples.append({"tick": row.get("tick"), "run_id": row.get("run_id"), "crafts": count,
+                                "generation": crafts.get("generation"), "c6_passed": bool(passed)})
+    return {"samples": samples, "observations": observations}
+
+
 def sidecar_consumption(path: Path) -> dict:
     """Read PM consumption from a strict-sidecar JSON report.
 
     The replay session does not write runner evidence, so the sidecar is the
-    measurement source: a c6-v3 pass is accepted only when the same sample
-    carries positive machine_consumption["productivity-module"].
+    measurement source. ``pm_consumption_verified`` is the one-sample
+    observation (a c6-v3 pass with positive PM window crafts); completion is
+    ``acceptance`` over the cumulative ``samples``.
     """
     data = json.loads(path.read_text())
-    matches = []
-    for row in data.get("strict_current") or []:
-        if not isinstance(row, dict):
-            continue
-        c6 = (row.get("predicate_evidence") or {}).get("C6") or {}
-        evidence = c6.get("evidence") or {}
-        count = (evidence.get("machine_consumption") or {}).get("productivity-module")
-        passed = c6.get("status") == "passed" or (row.get("statuses") or {}).get("C6") is True
-        if c6.get("predicate_version") == "c6-v3" and passed and type(count) is int and count > 0:
-            matches.append({"tick": row.get("tick"), "run_id": row.get("run_id"), "crafts": count})
-    return {"kind": "laya-pm-sidecar-consumption-v1", "report": str(path),
-            "pm_consumption_verified": bool(matches), "samples": matches,
+    parsed = pm_samples(data.get("strict_current") or [])
+    return {"kind": "laya-pm-sidecar-consumption-v2", "report": str(path),
+            "pm_consumption_verified": bool(parsed["observations"]),
+            "observations": parsed["observations"], "samples": parsed["samples"],
+            "sustained_rises": sustained_rises(parsed["samples"]),
             "evidence_scope": "diagnostic_replay_only", "placement_receipt_required": True}
 
 
@@ -894,41 +1043,23 @@ RESTART_CONTEXT = "state/logs/laya-restart-context.json"
 def restore_sidecars(bundle: Path, root: Path, *, loader=load) -> dict:
     """Install the bundle's durable deterministic sidecars and name the episode that owns them.
 
-    A cohort restart (training/laya_restart_checkpoint.restore) copies every
-    ``state/`` file into ``<root>/server`` and opens the session under the
-    bundle's episode id, so the bootstrap districts, material reservations and
-    oil transactions of the captured run stay owned. The replay skipped both:
-    its session started with no district state, so copper-plate had no owned
-    refinery and expansion sited a new one from the existing collector's head
-    (live pm-replay-20261115-o3: 92 of 160 steps ``blocked_source``). This is
-    the same file install without the strict-acceptance import, which this
-    bundle's older snapshot shape cannot decode and the replay does not use.
+    A cohort restart (training/laya_restart_checkpoint.restore) installs the
+    embedded restart roles and every registered ``state/`` file, then opens
+    the session under the bundle's episode id, so bootstrap districts,
+    material reservations and oil transactions stay owned (live
+    pm-replay-20261115-o3: without them 92 of 160 steps were
+    ``blocked_source``). The replay uses the same preflight and all-or-nothing
+    install (``laya_restart_checkpoint.install_sidecars``), so uncertain
+    dispatches stay fenced, spent loan-gate retries stay spent and older
+    bundles get unknown-provenance markers. Only the strict snapshot decode is
+    skipped: older bundle shapes cannot decode and the replay does not use it.
     """
-    import hashlib
+    from training.laya_restart_checkpoint import install_sidecars
     metadata, context = loader(bundle)
-    episode_id = ((context.get("restart_state") or {}).get("scope") or {}).get("episode_id")
-    if not episode_id:
-        raise ReplayError("checkpoint names no restart episode")
-    installed = []
-    for relative, digest in sorted((metadata.get("files") or {}).items()):
-        if not relative.startswith("state/") or relative == RESTART_CONTEXT:
-            continue
-        source = Path(bundle) / relative
-        target = Path(root) / "server" / relative.removeprefix("state/")
-        if source.is_symlink() or target.is_symlink():
-            raise ReplayError(f"refusing a symlinked sidecar: {relative}")
-        data = source.read_bytes()
-        if hashlib.sha256(data).hexdigest() != digest:
-            raise ReplayError(f"bundle sidecar does not match its manifest: {relative}")
-        if target.exists():
-            if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
-                raise ReplayError(f"destination sidecar conflicts with the bundle: {relative}")
-        else:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with target.open("xb") as stream:
-                stream.write(data)
-        installed.append(relative)
-    return {"episode_id": episode_id, "installed": installed}
+    try:
+        return install_sidecars(bundle, root, metadata, context)
+    except ValueError as error:
+        raise ReplayError(str(error)) from error
 
 if __name__ == '__main__':
     raise SystemExit(main())

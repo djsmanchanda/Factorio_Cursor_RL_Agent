@@ -211,42 +211,22 @@ def export_restart_state(script_output: Path, episode_id: str, mod_scope: str,
     return decoded
 
 
-def import_restart_state(bundle: dict, script_output: Path, *, episode_id: str, mod_scope: str) -> RestartState:
-    """Preflight the complete bundle, then install sidecars into an empty isolated target."""
-    scope = _scope(episode_id, mod_scope)
-    try:
-        encoded = json.dumps(bundle, allow_nan=False)
-    except (TypeError, ValueError) as error:
-        raise ValueError("Restart bundle must be JSON") from error
-    if len(encoded.encode()) > MAX_BYTES * 2:
-        raise ValueError("Restart bundle exceeds size limit")
-    if not isinstance(bundle, dict) or set(bundle) != ({"version", "scope", "milestones", "baseline", "history", "reached", "sidecars"} | ({"evidence_state"} if bundle.get("version") in (2, 3, 4) else set())):
-        raise ValueError("Invalid restart bundle shape")
-    if type(bundle["version"]) is not int or bundle["version"] not in (1, 2, 3, VERSION) or bundle["scope"] != scope:
+def plan_sidecars(bundle: dict, script_output: Path, *, episode_id: str) -> list[tuple[Path, bytes]]:
+    """Validate a bundle's embedded sidecars and return their writes; touches nothing.
+
+    Shared by the strict importer and the PM replay, which cannot decode older
+    snapshot shapes but must install the same ownership state: invocation
+    journals (uncertain-dispatch fences), loan-gate retry budgets and the
+    unknown-provenance markers of pre-v3/v4 bundles. Every destination role
+    must be empty.
+    """
+    validate_episode_id(episode_id)
+    if not isinstance(bundle, dict) or type(bundle.get("version")) is not int or bundle["version"] not in (1, 2, 3, VERSION):
         raise ValueError("Restart version or scope mismatch")
-    evaluator = CheckpointEvaluator()
-    current = _milestones(evaluator)
-    if bundle["milestones"] != current:
-        # A newer version of an unreached milestone (c6-v2) may differ; reached ones must not.
-        reached_ids = set(bundle.get("reached") or ())
-        current_by_id = {item["id"]: item for item in current}
-        if any(item["id"] in reached_ids and current_by_id.get(item["id"]) != item
-               for item in bundle["milestones"]):
-            raise ValueError("Strict milestone definitions differ")
-    baseline = _decode_typed(bundle["baseline"], FactorySnapshot)
-    history = bundle["history"]
-    if not isinstance(history, list) or not 1 <= len(history) <= MAX_HISTORY:
-        raise ValueError("Invalid strict history")
-    history = tuple(_decode_typed(sample, FactorySnapshot) for sample in history)
-    reached = bundle["reached"]
-    if (not isinstance(reached, list) or not all(isinstance(item, str) for item in reached)
-            or reached != sorted(set(reached)) or not set(reached) <= {m.checkpoint_id for m in evaluator.milestones}):
-        raise ValueError("Invalid reached checkpoints")
-    evaluator.reached = set(reached)
-    from orchestrator.checkpoint_evidence import new_evidence_state, validate_evidence_state
-    evidence_state = validate_evidence_state(bundle["evidence_state"]) if bundle["version"] >= 2 else new_evidence_state(origin="unknown")
+    if not isinstance(bundle.get("scope"), dict) or bundle["scope"].get("episode_id") != episode_id:
+        raise ValueError("Restart version or scope mismatch")
     registry = sidecar_registry(script_output, episode_id)
-    sidecars = bundle["sidecars"]
+    sidecars = bundle.get("sidecars")
     expected_roles = set(registry)
     if bundle['version'] < 4:
         expected_roles.remove('loan_gate_retries')
@@ -289,6 +269,20 @@ def import_restart_state(bundle: dict, script_output: Path, *, episode_id: str, 
         total += len(data)
     if len(pending) > MAX_FILES or total > MAX_BYTES:
         raise ValueError('Legacy provenance marker exceeds sidecar limit')
+    return pending
+
+
+def install_sidecars(*groups: list[tuple[Path, bytes]]) -> list[Path]:
+    """Create every validated file exclusively and durably; remove all of them on any failure.
+
+    Groups may name the same path (an embedded role that is also a registered
+    auxiliary file) only with identical bytes; it is written once.
+    """
+    writes: dict[Path, bytes] = {}
+    for path, data in (item for group in groups for item in group):
+        if writes.setdefault(path, data) != data:
+            raise ValueError(f"Conflicting restart sidecar sources: {path}")
+    pending = list(writes.items())
     created = []
     directories = set()
     try:
@@ -316,4 +310,47 @@ def import_restart_state(bundle: dict, script_output: Path, *, episode_id: str, 
         for path in created:
             path.unlink(missing_ok=True)
         raise
+    return [path for path, _ in pending]
+
+
+def import_restart_state(bundle: dict, script_output: Path, *, episode_id: str, mod_scope: str,
+                         extra_writes: list[tuple[Path, bytes]] = ()) -> RestartState:
+    """Preflight the complete bundle, then install sidecars into an empty isolated target.
+
+    ``extra_writes`` are already validated auxiliary files installed in the
+    same all-or-nothing step, so nothing is written unless everything passed.
+    """
+    scope = _scope(episode_id, mod_scope)
+    try:
+        encoded = json.dumps(bundle, allow_nan=False)
+    except (TypeError, ValueError) as error:
+        raise ValueError("Restart bundle must be JSON") from error
+    if len(encoded.encode()) > MAX_BYTES * 2:
+        raise ValueError("Restart bundle exceeds size limit")
+    if not isinstance(bundle, dict) or set(bundle) != ({"version", "scope", "milestones", "baseline", "history", "reached", "sidecars"} | ({"evidence_state"} if bundle.get("version") in (2, 3, 4) else set())):
+        raise ValueError("Invalid restart bundle shape")
+    if type(bundle["version"]) is not int or bundle["version"] not in (1, 2, 3, VERSION) or bundle["scope"] != scope:
+        raise ValueError("Restart version or scope mismatch")
+    evaluator = CheckpointEvaluator()
+    current = _milestones(evaluator)
+    if bundle["milestones"] != current:
+        # A newer version of an unreached milestone (c6-v2) may differ; reached ones must not.
+        reached_ids = set(bundle.get("reached") or ())
+        current_by_id = {item["id"]: item for item in current}
+        if any(item["id"] in reached_ids and current_by_id.get(item["id"]) != item
+               for item in bundle["milestones"]):
+            raise ValueError("Strict milestone definitions differ")
+    baseline = _decode_typed(bundle["baseline"], FactorySnapshot)
+    history = bundle["history"]
+    if not isinstance(history, list) or not 1 <= len(history) <= MAX_HISTORY:
+        raise ValueError("Invalid strict history")
+    history = tuple(_decode_typed(sample, FactorySnapshot) for sample in history)
+    reached = bundle["reached"]
+    if (not isinstance(reached, list) or not all(isinstance(item, str) for item in reached)
+            or reached != sorted(set(reached)) or not set(reached) <= {m.checkpoint_id for m in evaluator.milestones}):
+        raise ValueError("Invalid reached checkpoints")
+    evaluator.reached = set(reached)
+    from orchestrator.checkpoint_evidence import new_evidence_state, validate_evidence_state
+    evidence_state = validate_evidence_state(bundle["evidence_state"]) if bundle["version"] >= 2 else new_evidence_state(origin="unknown")
+    install_sidecars(plan_sidecars(bundle, script_output, episode_id=episode_id), list(extra_writes))
     return RestartState(episode_id, Path(script_output).resolve(), baseline, history, evaluator, evidence_state)
