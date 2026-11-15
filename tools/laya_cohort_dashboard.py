@@ -18,7 +18,7 @@ import time
 import threading
 import math
 from urllib.parse import urlsplit, parse_qs
-from datetime import datetime
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 if __package__:
@@ -141,6 +141,19 @@ def listener_evidence(world, port, proc_root=Path('/proc')):
     return result
 
 
+
+CURATED_STALE_DAYS = 7
+
+
+def curated_status(curated):
+    """The history chart is a hand-written file, not run data: say how old it is so the UI can mark it stale."""
+    stamp = curated.get("updated_at") if isinstance(curated, dict) else None
+    try:
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(stamp)).total_seconds() / 86400
+    except (TypeError, ValueError):
+        return {"updated_at": stamp, "age_days": None, "stale": True, "generated": False}
+    return {"updated_at": stamp, "age_days": round(age, 1), "stale": age > CURATED_STALE_DAYS, "generated": False}
+
 class Dashboard:
     def __init__(self, repo, registry, host, data, enable_controls=False, viewer_bind=None, viewer_address=None):
         self.repo, self.registry, self.host, self.data = map(Path, (repo, registry, host, data))
@@ -227,7 +240,7 @@ class Dashboard:
             for job in jobs:
                 if not isinstance(job, dict):
                     continue
-                row = {key: job.get(key) for key in ("id", "arm", "seed", "status", "started", "runner_exited", "termination_cause", "runner_stop", "failures", "accepted_ever", "accepted_final", "c5_predicate_version", "c6_predicate_version", "comparison_eligible", "typed_outcomes", "outcome_classifications", "untyped_stuck", "maintenance_failure_events", "evidence_errors")}
+                row = {key: job.get(key) for key in ("id", "arm", "seed", "status", "started", "runner_exited", "termination_cause", "runner_stop", "failures", "accepted_ever", "accepted_ever_basis", "accepted_final", "milestones", "c5_predicate_version", "c6_predicate_version", "comparison_eligible", "typed_outcomes", "outcome_classifications", "untyped_stuck", "maintenance_failure_events", "evidence_errors")}
                 acceptance = job.get("laya_acceptance")
                 row["laya_c6_version"] = acceptance.get("C6", {}).get("version") if isinstance(acceptance, dict) and isinstance(acceptance.get("C6"), dict) else None
                 arm = arms.get(job.get("arm"), {})
@@ -264,7 +277,7 @@ class Dashboard:
         curated = self.cached(self.repo / "docs/rl/laya_cohort_curated_history.json", None)
         if not curated:
             curated = self.cached(self.repo / "docs/rl/laya_helper_runs/terra-review-20261028/cohorts.json", {}) or {}
-        return {"now": time.time(), "target": target, "config": config, "history": history["rows"], "history_window": history, "cohorts": self.cohorts(), "curated": curated, "notes": notes, "audit": audit, "cooling": read_json(self.data / "cooling.json", {}) or {}, "controls_enabled": self.enable_controls and compatible, "scheduler_compatibility": compatibility, "viewer_available": bool(self.viewer_bind and self.viewer_address)}
+        return {"now": time.time(), "curated_status": curated_status(curated), "target": target, "config": config, "history": history["rows"], "history_window": history, "cohorts": self.cohorts(), "curated": curated, "notes": notes, "audit": audit, "cooling": read_json(self.data / "cooling.json", {}) or {}, "controls_enabled": self.enable_controls and compatible, "scheduler_compatibility": compatibility, "viewer_available": bool(self.viewer_bind and self.viewer_address)}
 
     def selected_job(self, cohort, run):
         if not isinstance(cohort, str) or Path(cohort).name != cohort or cohort.startswith("_"):

@@ -121,27 +121,62 @@ def _slot_job(slots: list[int], experiment: str, variant: Path | None, seed: int
         slots.append(slot)
 
 
+def _earned(summary: dict) -> list[str] | None:
+    """Milestones earned by observed evidence; None when the run's summary predates the milestone block."""
+    block = summary.get("milestones")
+    return block.get("earned") if isinstance(block, dict) and isinstance(block.get("earned"), list) else None
+
+
 def score(rows: list[dict], target: str | None) -> dict:
-    """Reliability first (share of runs reaching the target), then speed and cleanliness."""
-    reached = [r for r in rows if target and target in r["summary"].get("phases_reached", [])]
+    """Reliability first (share of runs earning the target), then speed and cleanliness.
+
+    Earned and held come from the evidence-contract block (summary.milestones). A run whose summary lacks it
+    falls back to the runner's goal-ladder proxy (phases_reached) and the old latch, and is counted in
+    ``proxy_fallback`` so the two bases are never mixed silently.
+    """
+    def reached_ids(summary: dict) -> list[str]:
+        earned = _earned(summary)
+        return summary.get("phases_reached", []) if earned is None else earned
+
+    reached = [r for r in rows if target and target in reached_ids(r["summary"])]
+    held = [r for r in rows if target and target in ((r["summary"].get("milestones") or {}).get("holds_now") or [])]
     ticks = [r["summary"].get("phase_ticks", {}).get(target) for r in reached]
     ticks = [t for t in ticks if t is not None]
-    highest = [max((ORDER.index(p) for p in r["summary"].get("phases_reached", [])), default=-1) for r in rows]
+    highest = [max((ORDER.index(p) for p in reached_ids(r["summary"]) if p in ORDER), default=-1) for r in rows]
     return {"runs": len(rows), "reached": len(reached), "reach_rate": round(len(reached) / len(rows), 2) if rows else 0,
+            "held_at_end": len(held),
+            "proxy_fallback": sum(_earned(r["summary"]) is None for r in rows),
+            "proxy_phases_reached": sum(bool(target) and target in r["summary"].get("phases_reached", []) for r in rows),
             "median_ticks": statistics.median(ticks) if ticks else None,
             "mean_highest_phase": round(statistics.mean(highest), 2) if highest else None,
             "failures": sum(r["summary"].get("failures", 0) for r in rows),
             "untyped_stuck": sum((r["summary"].get("codes") or {}).get("untyped_stuck", 0) for r in rows),
-            # The deterministic predicate for the target, not the rate proxy (runs without it: not checked).
-            "accepted": sum(bool(target) and target in r["summary"].get("accepted", []) for r in rows),
-            "acceptance_checked": sum("acceptance" in r["summary"] for r in rows),
+            # The deterministic predicate for the target (runs without evidence: old latch, counted in proxy_fallback).
+            "accepted": sum(bool(target) and target in (_earned(r["summary"]) if _earned(r["summary"]) is not None
+                                                        else r["summary"].get("accepted", [])) for r in rows),
+            "acceptance_checked": sum("acceptance" in r["summary"] or _earned(r["summary"]) is not None for r in rows),
             "stops": dict(sorted({s: sum(r["summary"].get("stop") == s for r in rows)
                                   for s in {r["summary"].get("stop") for r in rows}}.items()))}
 
 
+def with_milestones(row: dict) -> dict:
+    """Index rows written before the milestone block get one from their own recorded polls (labelled legacy_polls)."""
+    summary = row.get("summary") or {}
+    if _earned(summary) is not None or not row.get("root"):
+        return row
+    journal = Path(row["root"]) / "evidence/clean-decisions.jsonl"
+    try:
+        polls = [json.loads(x) for x in journal.read_text().splitlines() if '"strict_current"' in x]
+        from training.laya_milestone_report import from_journal_rows
+        block = from_journal_rows([p for p in polls if isinstance(p, dict)])
+    except (OSError, ValueError):
+        return row
+    return {**row, "summary": {**summary, "milestones": block}} if block["source"] != "legacy_latch" else row
+
+
 def report(args: argparse.Namespace) -> int:
     rows = [json.loads(line) for line in RUN_INDEX.read_text().splitlines() if line.strip()] if RUN_INDEX.is_file() else []
-    rows = [r for r in rows if r.get("experiment") == args.experiment]
+    rows = [with_milestones(r) for r in rows if r.get("experiment") == args.experiment]
     if not rows:
         print(f"no runs recorded for experiment {args.experiment}")
         return 1
@@ -154,12 +189,12 @@ def report(args: argparse.Namespace) -> int:
     path = ROOT / f"data/laya-saved-world/exp-{args.experiment}/report.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result, indent=2) + "\n")
-    print(f"| variant | runs | reached {target} (proxy) | accepted {target} (deterministic) | median ticks | "
-          f"mean highest phase | failures | untyped stuck | stops |")
-    print("|---|---|---|---|---|---|---|---|---|")
+    print(f"| variant | runs | earned {target} (evidence; proxy for old runs) | held at end | accepted {target} (deterministic) | "
+          f"runs without evidence block | median ticks | mean highest phase | failures | untyped stuck | stops |")
+    print("|---|---|---|---|---|---|---|---|---|---|---|")
     for vid, s in table.items():
-        print(f"| {vid} | {s['runs']} | {s['reached']} ({s['reach_rate']:.0%}) | "
-              f"{s['accepted']}/{s['acceptance_checked']} | {s['median_ticks']} | "
+        print(f"| {vid} | {s['runs']} | {s['reached']} ({s['reach_rate']:.0%}) | {s['held_at_end']} | "
+              f"{s['accepted']}/{s['acceptance_checked']} | {s['proxy_fallback']} | {s['median_ticks']} | "
               f"{s['mean_highest_phase']} | {s['failures']} | {s['untyped_stuck']} | {s['stops']} |")
     print(f"report: {path}")
     return 0

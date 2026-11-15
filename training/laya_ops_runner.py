@@ -21,6 +21,7 @@ logs, ledger and helper are shared.  Sequencing lives in the docs, not here.
 from __future__ import annotations
 
 from training.laya_operation_outcome import normalize, summarize_records
+from training import laya_milestone_report as milestone_report
 
 from orchestrator.operation_observation import economics_observation, item_service_observation
 
@@ -1164,6 +1165,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                'decisions':summary['decisions'], 'elapsed_seconds':time.monotonic()-active_started}
         summary.setdefault('strict_current', []).append(row)
         summary['strict_current_at_end'] = current
+        # Earned / holds-now / inherited from the evidence contract; ``phases_reached`` is only the goal-ladder proxy.
+        summary['milestones'] = milestone_report.from_contract(evidence.get('_contract'), summary.get('loaded_tick'))
         _append(journal,row)
         if checkpoint_callback is not None and 'error' not in statuses:
             summary['_checkpoint_boundary'] = {'pid':os.getpid(), 'run_id':run_id,
@@ -1547,6 +1550,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     summary.update(summarize_records(records))
     _append(journal, {"run_id": run_id, "event": "summary", **summary})
     emit(f"SUMMARY: stop={summary['stop']} decisions={summary['decisions']} failures={summary['failures']} "
-         f"phases={','.join(reached) or 'none'} accepted={','.join(summary.get('accepted', [])) or 'none'} "
-         f"accepted_final={'unknown' if summary.get('accepted_final') is None else ','.join(summary['accepted_final']) or 'none'}")
+         f"{milestone_report.text(summary.get('milestones'))} "
+         f"proxy_phases={','.join(reached) or 'none'} latch_accepted={','.join(summary.get('accepted', [])) or 'none'} "
+         f"latch_final={'unknown' if summary.get('accepted_final') is None else ','.join(summary['accepted_final']) or 'none'}")
     return summary

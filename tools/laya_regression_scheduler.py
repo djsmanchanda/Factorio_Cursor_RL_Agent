@@ -24,6 +24,7 @@ from tools import laya_status_journal, runner_process, laya_experiment_contract,
 from tools.deterministic_fleet_runtime import create_detached_checkout
 from training.laya_restart_checkpoint import load as load_checkpoint
 from training.laya_mission_contract import mission_settings, frozen_capability
+from training import laya_milestone_report
 from training.laya_operation_outcome import read_records, summarize_records, planned_job_accounting
 
 # 2026-10-30 latest user directives (supersede the same-day 3-day scale
@@ -580,9 +581,14 @@ def collect_result(world, job):
     classification = summary.get('stop_classification')
     if classification is None:
         classification = 'genuine_failure' if summary.get('stop') == 'stalled' else 'unknown'
+    # One milestone block for every reader: contract evidence when present, else the same rule over polls, else the latch.
+    milestones = laya_milestone_report.from_journal_rows(observations, loaded, ever=sorted(latches), final=final)
+    from_contract = milestones['source'] == 'contract'
     relevant = [stage for stage in reached if stage > job.get('origin', job.get('checkpoint', 'C0'))]
     first = min(relevant, key=lambda stage: reached[stage]) if relevant else None
-    return {**accounting, 'legacy_counter_meanings': {'failures':'runner caught exceptions', 'faults':'historical summary or legacy fallback'}, 'faults':faults, 'accepted_ever':sorted(latches), 'accepted_final':final,
+    return {**accounting, 'legacy_counter_meanings': {'failures':'runner caught exceptions', 'faults':'historical summary or legacy fallback'}, 'faults':faults,
+            'milestones':milestones, 'accepted_ever':milestones['earned'] if from_contract else sorted(latches),
+            'accepted_ever_basis':'earned_events' if from_contract else 'legacy_latch', 'accepted_final':final,
             'legacy_latch_reached':latches, 'strict_reached':reached, 'loaded_tick':loaded,
             'strict_reached_basis':basis, 'legacy_current_pass_reached':legacy_reached,
             'objective_eligible':eligible, 'milestone_evidence':contract,

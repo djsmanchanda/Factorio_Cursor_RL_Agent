@@ -42,8 +42,9 @@ from tools.laya_batch_defaults import DEFAULT_TRIAL_WALL_SECONDS
 from tools.laya_batch_state import CohortLedger, dependencies_ready, file_lock, read_records, request_admission
 
 PHASE = re.compile(r"^\+(\d+)s PHASE REACHED: (C\d) .* at tick (\d+)")
-SUMMARY = re.compile(r"SUMMARY: stop=(\S+) decisions=(\d+) failures=(\d+) phases=(\S*) accepted=(\S*)")
-FINAL_ACCEPTANCE = re.compile(r"\baccepted_final=(\S+)")
+# Old lines: phases= accepted= accepted_final=. New lines: earned= holds_now= inherited= proxy_phases= latch_accepted= latch_final=.
+SUMMARY = re.compile(r"SUMMARY: stop=(\S+) decisions=(\d+) failures=(\d+) (.*)")
+SUMMARY_FIELD = re.compile(r"\b(\w+)=(\S*)")
 
 
 def _atomic(path: Path, data: object) -> None:
@@ -124,14 +125,18 @@ def summarize(world: Path) -> dict:
         if (match := PHASE.match(line)):
             phases[match.group(2)] = {"seconds": int(match.group(1)), "tick": int(match.group(3))}
         elif (match := SUMMARY.search(line)):
+            fields = dict(SUMMARY_FIELD.findall(match.group(4)))
+            names = lambda value: [p for p in (value or "").split(",") if p and p not in ("none", "unknown")]
+            latch = fields.get("latch_accepted", fields.get("accepted"))
+            final = fields.get("latch_final", fields.get("accepted_final"))
             out.update(runner_stop=match.group(1), decisions=int(match.group(2)), failures=int(match.group(3)),
-                       phases=[p for p in match.group(4).split(",") if p and p != "none"],
-                       accepted=[p for p in match.group(5).split(",") if p and p != "none"])
+                       phases=names(fields.get("proxy_phases", fields.get("phases"))), accepted=names(latch))
             # Ever-passed is the latched history; final is the fresh predicate on the last sample (unknown -> None).
             out["accepted_ever"] = list(out["accepted"])
-            final = FINAL_ACCEPTANCE.search(line)
-            out["accepted_final"] = (None if final is None or final.group(1) == "unknown" else
-                                     [p for p in final.group(1).split(",") if p and p != "none"])
+            out["accepted_final"] = None if final is None or final == "unknown" else names(final)
+            if "earned" in fields:  # contract evidence; "unknown" parts stay None
+                for key in ("earned", "holds_now", "inherited"):
+                    out[key] = None if fields.get(key) in (None, "unknown") else names(fields[key])
         elif start_tick is None and " tick=" in line and "DECISION 0 " in line:
             start_tick = int(line.split(" tick=")[1].split()[0])
     for phase in phases.values():
