@@ -478,6 +478,10 @@ def observe_consumption(probe, tick_reader, last_tick: int, *, initial_tick: int
             "min_gap_ticks": min_gap_ticks, "sustained": rises >= min_rises, "last_tick": last_tick}
 
 
+_FUND_MAX_DEPTH = 2
+_FUND_MAX_ITEMS = 6
+
+
 def _fund_shortage(session, stream, index: int, bill: dict, message_reader=None) -> list[dict]:
     """Run the existing ``produce`` operation once for each short item of a construction bill.
 
@@ -487,19 +491,35 @@ def _fund_shortage(session, stream, index: int, bill: dict, message_reader=None)
     replay retries production_service against a bill nothing produces.
     """
     funded = []
+    queue = []
     for item in sorted(bill.get("short") or {}):
         level = int((bill.get("required") or {}).get(item, 0))
+        queue.append((item, max(1, level), 0))
+    seen = set()
+    while queue and len(funded) < _FUND_MAX_ITEMS:
+        item, level, depth = queue.pop(0)
+        if (item, level) in seen:
+            continue
+        seen.add((item, level))
         try:
-            result = session.run("produce", item=item, stock_target=max(1, level))
+            result = session.run("produce", item=item, stock_target=level)
         except Exception as error:  # noqa: BLE001 -- a failed funding attempt is evidence, not a crash
             result = {"code": "funding_error", "ok": False, "message": f"{type(error).__name__}: {error}"}
-        row = {"step": index, "item": item, "stock_target": max(1, level),
+        row = {"step": index, "item": item, "stock_target": level,
                "outcome": result.get("code"), "ok": result.get("ok"), "state": result.get("state"),
                "message": result.get("message")}
         funded.append(row)
         _journal_messages(stream, index, _drain_messages(message_reader))
         stream.write(json.dumps({"event": "pm_replay_funding", **row}) + "\n")
         stream.flush()
+        # The 2026-11-15 o3 replay funded long-handed-inserter only to be told
+        # `assembling-machine-1: need 2, short 2`; funding stopped at the direct
+        # bill item, so the intermediate cell was never built. Fund the returned
+        # shortage too, bounded and cycle-safe.
+        if result.get("code") == "material_shortage" and depth < _FUND_MAX_DEPTH:
+            required = ((result.get("details") or {}).get("required") or {})
+            for sub_item, sub_level in sorted(required.items()):
+                queue.append((sub_item, max(1, int(sub_level)), depth + 1))
     return funded
 
 

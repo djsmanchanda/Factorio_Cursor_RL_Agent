@@ -168,3 +168,31 @@ def test_placement_without_rising_consumption_is_not_complete(tmp_path):
                           observe_after_placement=True)
     assert result['outcome'] == 'game_tick_budget_exhausted'
     assert result['pm_placed'] is True and result['pm_evidence_complete'] is False
+
+
+def test_funding_recurses_into_the_shortage_bill_once(tmp_path):
+    class Nested:
+        def __init__(self):
+            self.calls = []
+
+        def run(self, operation, **kwargs):
+            self.calls.append(kwargs["item"])
+            if kwargs["item"] == 'long-handed-inserter':
+                return {'code': 'material_shortage', 'ok': False,
+                        'details': {'required': {'assembling-machine-1': 2}}}
+            if kwargs['item'] == 'assembling-machine-1':
+                return {'code': 'material_shortage', 'ok': False,
+                        'details': {'required': {'iron-gear-wheel': 9}}}
+            return {'code': 'produced', 'ok': True}
+
+    session = Nested()
+    journal = tmp_path / 'journal'
+    with journal.open('w') as stream:
+        funded = replay._fund_shortage(
+            session, stream, 1,
+            {'short': {'long-handed-inserter': 1}, 'required': {'long-handed-inserter': 1}})
+    assert session.calls == ['long-handed-inserter', 'assembling-machine-1', 'iron-gear-wheel']
+    assert [row['item'] for row in funded] == session.calls
+    assert funded[-1]['outcome'] == 'produced'
+    rows = [json.loads(line) for line in journal.read_text().splitlines()]
+    assert [row['event'] for row in rows] == ['pm_replay_funding'] * 3
