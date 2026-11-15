@@ -46,7 +46,11 @@ def test_a_slow_world_does_not_create_a_per_minute_drain_cascade():
     state = {"target": 20, "mode": "performance"}
     assert choose(config, state, _metrics(ups_p95=90), now=100)[:2] == (20, "unhealthy_pending")
     assert choose(config, state, _metrics(ups_p95=90), now=160)[:2] == (19, "unhealthy")
-    for now in (220, 280, 340):
-        assert choose(config, state, _metrics(ups_p95=90, active_slots=19), now=now)[:2] == (19, "settling")
-    # Critical memory pressure still lowers admission immediately during that hold.
-    assert choose(config, state, _metrics(active_slots=19, available_gb=1), now=341)[:2] == (18, "memory")
+    # Merge note (O1, 2026-11-15): the harness scheduler (4818e4a7, later than this Oct 22 test)
+    # lets a sustained UPS breach drain through settling (test_ceiling_is_not_a_target_and_ups_still_drains).
+    # The protection kept here: at most one step per `unhealthy_samples` (2) windows, never per minute.
+    assert choose(config, state, _metrics(ups_p95=90, active_slots=19), now=220)[:2] == (19, "unhealthy_pending")
+    assert choose(config, state, _metrics(ups_p95=90, active_slots=19), now=280)[:2] == (18, "unhealthy")
+    assert choose(config, state, _metrics(ups_p95=90, active_slots=18), now=340)[:2] == (18, "unhealthy_pending")
+    # Critical memory pressure still lowers admission immediately.
+    assert choose(config, state, _metrics(active_slots=18, available_gb=1), now=341)[:2] == (17, "memory")

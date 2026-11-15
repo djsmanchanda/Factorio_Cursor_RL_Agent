@@ -88,11 +88,18 @@ class DeterministicSession:
     """One Laya world with the deterministic runtime's per-run state."""
 
     growable = ab.GROWABLE_PRODUCERS  # producers the "grow" operation may add a cell to
+    # Independent experiment factors (c10a75c3); the runner sets them from Settings.ops_*.
+    consumer_choices_enabled = False
+    filter_fluid_shortages_enabled = False
+    chain_economics_enabled = False
 
     def __init__(self, root: Path, *, goal_item: str = "automation-science-pack",
                  reference_point: tuple[float, float] = (0.0, 0.0), emit: Callable[[str], None] = print,
                  logical_episode_id: str | None = None, origin_episode_id: str | None = None) -> None:
         import json
+        if origin_episode_id is not None:  # reject an unsafe restored identity before any session I/O
+            from orchestrator.checkpoint_restart_state import validate_episode_id
+            validate_episode_id(origin_episode_id)
         manifest = json.loads((root / "manifest.json").read_text())
         server = root / "server"
         password = (server / "rcon-password").read_text().strip()
@@ -347,8 +354,18 @@ class DeterministicSession:
             transactions = self.material_transactions()
         except Exception:
             transactions = None
+        requester_draws = None
+        if self.chain_economics_enabled and projects is not None:
+            items = {item for project in projects.values() for item in project["required"]}
+            if len(items) <= 128:
+                try:
+                    requester_draws = {item: ab.live_base.logistic_request_total(
+                        self.client, SURFACE, FORCE, item) for item in sorted(items)}
+                except Exception:
+                    pass
         return {"version": 1, "projects": projects, "loans": loans, "slots": slots, "cells": cells,
-                "guarded_configuration": guarded_configuration, "transactions": transactions}
+                "guarded_configuration": guarded_configuration, "transactions": transactions,
+                "requester_draws": requester_draws}
 
     def _raise_stock_gate(self, item: str, preview: dict) -> dict:
         result = mall_control.execute_raise(item, preview, observe=self._stock_control_observation,

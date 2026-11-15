@@ -1,0 +1,8 @@
+{
+  "version": "1.0.0",
+  "variant_id": "production-services-v1",
+  "description": "Offer the shared permanent production operation for enabled unmet supported recipes.",
+  "settings": {
+    "ops_production_services": true
+  }
+}

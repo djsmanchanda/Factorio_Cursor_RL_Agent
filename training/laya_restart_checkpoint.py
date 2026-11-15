@@ -144,7 +144,7 @@ def ownership_defect(adapter, session):
             or tuple(session.reference_point) != (0., 0.)):
         return 'lineage_or_session_scope'
     registry = sidecar_registry(session.script_output, session.episode_id)
-    _read_sidecars(registry)  # Includes symlink, bounds and JSON validation.
+    _read_sidecars(registry, session.episode_id)  # Includes symlink, bounds and JSON/record validation.
     live = ab._MATERIAL_RESERVATION_LEDGER
     disk = MaterialReservationLedger(session.script_output, episode_id=session.episode_id,
                                      surface='nauvis', force='player')

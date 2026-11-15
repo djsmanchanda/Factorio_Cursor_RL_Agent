@@ -1,15 +1,18 @@
 # Path: tests/test_laya_restart_state.py | Purpose: Verify bounded restart ownership and strict milestone continuity.
 import copy
 import json
+from types import SimpleNamespace
 
 import pytest
 
+from orchestrator import autonomous_builder as builder
 from orchestrator.bootstrap_work import BootstrapWorkLedger
 from orchestrator.checkpoint_milestones import CheckpointEvaluator, FactorySnapshot, RecipeEvidence
 from orchestrator.material_reservations import MaterialReservationLedger
 from orchestrator.operation_session import DeterministicSession
 from orchestrator.checkpoint_restart_state import RestartState, VERSION
 from training.laya_restart_state import RestartState as TrainingRestartState
+from training import laya_ops
 from training.laya_restart_state import export_restart_state, import_restart_state, sidecar_registry
 
 pytestmark = pytest.mark.fast
@@ -279,3 +282,54 @@ def test_only_owned_journals_are_transferred_and_legacy_unknown_survives(tmp_pat
     import_restart_state(upgraded, final, episode_id='laya-original', mod_scope='mods')
     with pytest.raises(ReadbackRequired):
         Invocations(final, 'laya-original').require_clear()
+
+
+# Session restore tests from the harness branch (fde2a6d2); run against the single operation_session.
+@pytest.mark.parametrize("identity", ["../escape", ".", "..", "a/b", "", "a\\b", "a\n"])
+def test_unsafe_identity_rejected_before_session_io(tmp_path, identity):
+    with pytest.raises(ValueError, match="identity"):
+        laya_ops.DeterministicSession(tmp_path / "nonexistent", origin_episode_id=identity)
+
+
+def test_session_restores_before_acceptance_and_reuses_origin(tmp_path, monkeypatch):
+    _, bundle = make_bundle(tmp_path)
+    root = tmp_path / "copy"
+    server = root / "server"
+    (server / "script-output").mkdir(parents=True)
+    (server / "rcon-password").write_text("test")
+    (root / "manifest.json").write_text('{"rcon_port": 1234}')
+    state = import_restart_state(bundle, server / "script-output", episode_id="laya-original", mod_scope="factorio-2/test-mod-hash")
+    monkeypatch.setattr(laya_ops, "GameBridge", lambda **kwargs: SimpleNamespace(**kwargs))
+    monkeypatch.setattr(laya_ops, "RconClient", lambda *args: object())
+    monkeypatch.setattr(builder, "initialize_operation_runtime", lambda *args: None)
+    monkeypatch.setattr(builder, "_restore_bootstrap_reservations", lambda: None)
+    monkeypatch.setattr(builder, "_reconcile_bootstrap_work", lambda *args: None)
+    # Merge note (O1): Track A's session also fences the plastic output chest at open (8a0b62ab).
+    monkeypatch.setattr(builder, "_reserve_plastic_output_chest", lambda *args: None)
+    monkeypatch.setattr(builder, "_BOOTSTRAP_DISTRICT_LEDGER", None)
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", None)
+    monkeypatch.setattr(builder, "_BOOTSTRAP_WORK_LEDGER", None)
+    session = laya_ops.DeterministicSession(root, origin_episode_id="laya-original")
+    assert session.bridge.episode_id == "laya-original"
+    assert builder._MATERIAL_RESERVATION_LEDGER.projects["foundation"].reserved == {"transport-belt": 4}
+    session.restore_restart_acceptance(state)
+    from orchestrator import checkpoint_observer
+    monkeypatch.setattr(checkpoint_observer, "LiveCheckpointObservationAdapter",
+                        lambda *args, **kwargs: SimpleNamespace(observe=lambda: SimpleNamespace(snapshot=snapshot(200, 2))))
+    assert session.acceptance()["C4"] == "passed"
+    assert session._baseline == snapshot(0, 1)
+    assert session.export_restart_state(mod_scope="factorio-2/test-mod-hash")["baseline"] == bundle["baseline"]
+    with pytest.raises(ValueError, match="initialized"):
+        session.restore_restart_acceptance(state)
+    session.close()
+
+
+def test_restored_state_is_bound_to_imported_directory(tmp_path):
+    _, bundle = make_bundle(tmp_path)
+    target = tmp_path / "target" / "script-output"
+    state = import_restart_state(bundle, target, episode_id="laya-original", mod_scope="factorio-2/test-mod-hash")
+    session = laya_ops.DeterministicSession.__new__(laya_ops.DeterministicSession)
+    session.episode_id = "laya-original"
+    session.script_output = tmp_path / "other" / "script-output"
+    with pytest.raises(ValueError, match="identity"):
+        session.restore_restart_acceptance(state)

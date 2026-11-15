@@ -1,4 +1,4 @@
-# Path: tests/test_laya_host_scheduler.py | Purpose: Protect the host-wide slot budget: measured growth, sweet-spot backoff, cool/thermal caps, graceful drain and fair allocation.
+# Path: tests/test_laya_host_scheduler.py | Purpose: Protect the host-wide slot budget: measured growth, sweet-spot backoff, cool/thermal caps, graceful drain, fair allocation, and UPS judged relative to each world's game speed.
 
 from __future__ import annotations
 
@@ -103,12 +103,14 @@ def test_manual_target_drains_without_starting_more_worlds():
     allotment = allocate(5, cohorts)
     assert allotment == {"old": 6, "new": 4}
 
+    # Merge note (O1, 2026-11-15): the harness scheduler (4818e4a7) made the
+    # manual target a ceiling, so the drain now reports "manual_ceiling".
     target, reason, _ = choose(config, state, _metrics(active_slots=10), now=100)
-    assert (target, reason) == (5, "manual_target")
+    assert (target, reason) == (5, "manual_ceiling")
 
     config["manual_target"] = 0
     target, reason, _ = choose(config, state, _metrics(active_slots=10), now=160)
-    assert (target, reason) == (0, "manual_target")
+    assert (target, reason) == (0, "manual_ceiling")
 
 
 def test_allocate_gives_new_slots_round_robin_oldest_first():
@@ -150,7 +152,9 @@ def test_world_ups_reads_the_decision_log(tmp_path):
 def test_cli_configures_start_max_and_manual_target(tmp_path):
     root = tmp_path / "host"
 
-    main(["--root", str(root), "configure", "--start", "10", "--max", "18", "--cool-max", "8"])
+    # Merge note (O1): the harness scheduler validates balanced_max <= max (default 26).
+    main(["--root", str(root), "configure", "--start", "10", "--max", "18", "--cool-max", "8",
+          "--balanced-max", "14"])
     main(["--root", str(root), "target", "12"])
 
     config = json.loads((root / "config.json").read_text())
@@ -233,7 +237,11 @@ def test_trial_waits_a_full_window_after_all_worlds_are_measured():
     assert choose(config, state, metrics, now=340)[:2] == (12, "trial_increase")
 
 
-def test_a_timed_target_restores_the_previous_target_when_it_expires(tmp_path):
+def test_a_timed_target_clears_its_ceiling_when_it_expires(tmp_path):
+    # Merge note (O1, 2026-11-15): renamed from ..._restores_the_previous_target_...
+    # The harness scheduler (4818e4a7) treats a manual target as a ceiling and,
+    # on expiry, restores the prior ceiling (see test_temporary_ceilings_restore_prior_policy)
+    # rather than forcing the slot target back; the hill climb resumes from here.
     import time
     from tools.laya_host_scheduler import cycle
 
@@ -244,7 +252,8 @@ def test_a_timed_target_restores_the_previous_target_when_it_expires(tmp_path):
                      manual_target_until=time.time() + 0.1, manual_previous_target=18)
     report = cycle(config, {"target": 8, "mode": "performance"}, registry=registry, root=root,
                    now=time.time() + 2)
-    assert report["target_slots"] == 18
+    assert report["manual_target"] is None
+    assert "manual_ceiling" not in report["observed_constraints"]
     saved = json.loads((root / "config.json").read_text())
     assert saved["manual_target"] is None and saved["manual_target_until"] is None
 
@@ -278,3 +287,31 @@ def test_bump_restarts_the_search_from_a_new_target_instead_of_pinning_it(tmp_pa
     # Automatic control resumes from the bumped target: an unhealthy window steps it down.
     target, reason, _ = choose(_config(step=1, unhealthy_samples=1), state, _metrics(active_slots=20, ups_p95=90.0))
     assert (target, reason) == (19, "unhealthy")
+
+
+# Game-speed-relative UPS (harness branch, 7c41148b).
+import pytest
+
+from tools import laya_host_scheduler as host
+
+
+def world(tmp_path, name, speed_field, ups):
+    root = tmp_path/name
+    (root/'logs').mkdir(parents=True)
+    lines = [f'RUN START: ts=2026-11-05T10:00:00+05:30 command=run runner=laya-clean mode=live {speed_field} policy=guided']
+    lines += [f'+{t}s DECISION {i} phase=C4 tick={int(t*ups)} need=wait' for i, t in enumerate(range(0, 181, 30))]
+    (root/'logs/laya-runner.log').write_text('\n'.join(lines)+'\n')
+    (root/'laya-runner.heartbeat.json').write_text(json.dumps({'elapsed_s': 180}))
+    return root
+
+
+@pytest.mark.fast
+def test_floors_compare_one_x_equivalent_ups_and_show_measured(tmp_path):
+    worlds = [world(tmp_path, 'fast', 'speed=2.0', 120), world(tmp_path, 'slow', 'speed=2.0', 100),
+              world(tmp_path, 'legacy', 'decisions=unlimited', 60)]
+    metrics = host.measure([host.Cohort('c', tmp_path, 0, 3, 0, 0, worlds)], window_s=180)
+    assert metrics['game_speeds'] == [1.0, 2.0]
+    assert metrics['measured_ups_mean'] == pytest.approx((120+100+60)/3)
+    # A 2x world at 100 UPS is at 50 of 60 target: below a 52 floor, as a 1x world at 50 would be.
+    assert metrics['ups_p98'] == pytest.approx(50, abs=.5)
+    assert metrics['total_ups'] == pytest.approx(60+50+60)

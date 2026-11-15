@@ -1,0 +1,14 @@
+# Path: systemd/laya-cohort-cool-recovery.timer.example | Purpose: Retry cooling recovery across user-manager restarts.
+[Unit]
+Description=Periodic Laya cooling recovery
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+OnCalendar=*-*-* *:*:00
+Persistent=true
+AccuracySec=1s
+Unit=laya-cohort-cool-recovery.service
+
+[Install]
+WantedBy=timers.target

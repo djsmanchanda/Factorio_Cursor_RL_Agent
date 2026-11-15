@@ -30,12 +30,17 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import contextlib
+import fcntl
+import hashlib
 import json
 import math
+import os
 import re
 import statistics
 import subprocess
 import time
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -47,7 +52,16 @@ DEFAULT_REGISTRY = ROOT / "data/laya-experiments"
 OCCUPYING = {"preparing", "running"}
 ACTIVE_QUEUE = {"queued", "preparing", "running"}
 DECISION = re.compile(r"^\+(\d+)s DECISION \d+ .*?\btick=(\d+)", re.M)
+RUN_SPEED = re.compile(r"^RUN START: .*?\bspeed=([0-9.]+)")
 TAIL_BYTES = 262144
+PROTOCOL = 1
+SOURCE_HASH = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+
+
+def process_identity():
+    stat = Path(f"/proc/{os.getpid()}/stat").read_text().rsplit(")", 1)[1].split()
+    return {"protocol": PROTOCOL, "source_sha256": SOURCE_HASH, "pid": os.getpid(),
+            "start_ticks": int(stat[19]), "script": str(Path(__file__).resolve())}
 
 DEFAULTS: dict[str, Any] = {
     "start_slots": 24,
@@ -59,6 +73,7 @@ DEFAULTS: dict[str, Any] = {
     "stale_seconds": 900,
     "min_ups_p95": 105.0,
     "min_ups_p98": 95.0,
+    "growth_margin_ups": 5.0,
     "min_total_ups_gain": 0.02,
     "temp_limit_c": 93.0,
     "temp_hard_c": 95.0,
@@ -80,9 +95,26 @@ DEFAULTS: dict[str, Any] = {
 
 def _atomic(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+        temporary = Path(handle.name)
+        try:
+            json.dump(data, handle, indent=2, sort_keys=True, allow_nan=False)
+            handle.write("\n")
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
     temporary.replace(path)
+
+
+@contextlib.contextmanager
+def control_lock(root: Path):
+    root.mkdir(parents=True, exist_ok=True)
+    with (root / "control.lock").open("a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 def _read_json(path: Path, fallback: Any) -> Any:
@@ -151,6 +183,17 @@ def _tail(path: Path, size: int = TAIL_BYTES) -> str:
     with path.open("rb") as handle:
         handle.seek(max(0, file_size - size))
         return handle.read().decode(errors="replace")
+
+
+def world_speed(log: Path) -> float:
+    """Live game speed the runner logged at start; worlds without it ran at 1x."""
+    try:
+        with log.open("rb") as handle:
+            match = RUN_SPEED.match(handle.readline(4096).decode(errors="replace"))
+    except OSError:
+        return 1.0
+    speed = float(match.group(1)) if match else 1.0
+    return speed if speed > 0 else 1.0
 
 
 def world_ups(world: Path, window_s: float) -> float | None:
@@ -244,13 +287,20 @@ def discover(registry: Path, *, now: float | None = None, stale_seconds: float =
 
 
 def measure(cohorts: list[Cohort], *, window_s: float) -> dict[str, Any]:
+    # Floors and the climb use 1x-equivalent UPS (measured / game speed) so a
+    # floor means the same share of target speed for 1x and 2x cohorts.
     samples: list[float] = []
+    measured: list[float] = []
+    speeds: set[float] = set()
     unstable: list[str] = []
     for cohort in cohorts:
         for world in cohort.worlds:
             ups = world_ups(world, window_s)
             if ups is not None:
-                samples.append(ups)
+                speed = world_speed(world / "logs/laya-runner.log")
+                measured.append(ups)
+                samples.append(ups / speed)
+                speeds.add(speed)
             if _world_unstable(world, window_s):
                 unstable.append(f"{cohort.name}:{world.name}")
     return {
@@ -261,6 +311,8 @@ def measure(cohorts: list[Cohort], *, window_s: float) -> dict[str, Any]:
         "ups_p98": _percentile(samples, 0.02),
         "ups_mean": statistics.fmean(samples) if samples else None,
         "total_ups": sum(samples) if samples else None,
+        "measured_ups_mean": statistics.fmean(measured) if measured else None,
+        "game_speeds": sorted(speeds),
         "unstable": unstable,
         "temp_c": _package_temp_c(),
         "available_gb": _available_gb(),
@@ -270,7 +322,7 @@ def measure(cohorts: list[Cohort], *, window_s: float) -> dict[str, Any]:
 
 def effective_max(config: dict[str, Any], metrics: dict[str, Any], mode: str) -> tuple[int, str]:
     maximum = int(config["max_slots"])
-    minimum = int(config["min_slots"])
+    minimum = 0 if config.get("manual_target") is not None and int(config["manual_target"]) < int(config["min_slots"]) else int(config["min_slots"])
     active = int(metrics["active_slots"])
     cap = maximum
     reason = mode
@@ -324,10 +376,11 @@ def choose(
 ) -> tuple[int, str, dict[str, Any]]:
     """Return the next host target, its reason, and updated hill-climb state."""
     now = time.time() if now is None else now
-    minimum = int(config["min_slots"])
+    manual = config.get("manual_target")
+    minimum = 0 if manual is not None and int(manual) < int(config["min_slots"]) else int(config["min_slots"])
     maximum = int(config["max_slots"])
     target = int(state.get("target", config["start_slots"]))
-    target = max(minimum, min(maximum, target))
+    target = max(0, min(maximum, target))
     requested_mode = str(config.get("mode") or "auto")
     mode = _mode_from_profile(metrics.get("power_profile") or "unknown") if requested_mode == "auto" else requested_mode
     # Soft temperature and UPS signals need persistence; hard/memory/liveness caps stay immediate.
@@ -344,7 +397,8 @@ def choose(
     ):
         cap_metrics["temp_c"] = None
     cap, cap_reason = effective_max(config, cap_metrics, mode)
-    manual = config.get("manual_target")
+    if manual is not None and int(manual) < cap:
+        cap, cap_reason = int(manual), "manual_ceiling"
 
     def done(value: int, reason: str) -> tuple[int, str, dict[str, Any]]:
         state["target"] = value
@@ -360,11 +414,6 @@ def choose(
         state["sweet_spot"] = None
         state["settle_until"] = 0.0
 
-    if manual is not None:
-        target = max(0, min(cap, int(manual)))
-        clear_trial()
-        return done(target, "manual_target")
-
     # Mode, temperature, memory and liveness caps apply even while a trial is
     # still filling its new slots; waiting for measurements must not override them.
     if target > cap:
@@ -372,6 +421,18 @@ def choose(
         if cap_reason == "thermal":
             state["settle_until"] = now + float(config["settle_windows"]) * float(config["window_seconds"])
         return done(cap, cap_reason if cap_reason != mode else "mode_cap")
+
+    p95 = metrics.get("ups_p95")
+    p98 = metrics.get("ups_p98")
+    if p95 is not None and p98 is not None and (p95 < float(config["min_ups_p95"]) or p98 < float(config["min_ups_p98"])):
+        state["unhealthy_windows"] = int(state.get("unhealthy_windows", 0)) + 1
+        state["healthy_windows"] = 0
+        clear_trial()
+        if state["unhealthy_windows"] < int(config.get("unhealthy_samples", 2)):
+            return done(target, "unhealthy_pending")
+        state["unhealthy_windows"] = 0
+        state["settle_until"] = now + float(config["settle_windows"]) * float(config["window_seconds"])
+        return done(max(min(minimum, target), target - int(config["step"])), "unhealthy")
 
     if now < float(state.get("settle_until") or 0.0):
         target = min(target, cap)
@@ -400,13 +461,15 @@ def choose(
             state["sweet_spot"] = target
             state["settle_until"] = now + float(config["settle_windows"]) * float(config["window_seconds"])
             clear_trial()
-            return done(max(minimum, min(target, cap)), "sweet_spot")
+            return done(max(0, min(target, cap)), "sweet_spot")
         state["sweet_spot"] = target
         clear_trial()
 
     p95 = metrics.get("ups_p95")
     p98 = metrics.get("ups_p98")
     if p95 is None or p98 is None:
+        if target == 0 and int(metrics["active_slots"]) == 0 and int(metrics.get("queued") or 0) > 0 and cap > 0 and not hot and not metrics.get("unstable") and (metrics.get("available_gb") is None or metrics["available_gb"] >= float(config["memory_min_gb"])):
+            return done(1, "bootstrap_unmeasured")
         return done(min(target, cap), "no_measurement")
     healthy = (
         p95 is not None
@@ -438,11 +501,15 @@ def choose(
             return done(target, "unhealthy_pending")
         state["unhealthy_windows"] = 0
         state["settle_until"] = now + float(config["settle_windows"]) * float(config["window_seconds"])
-        target = max(minimum, target - int(config["step"]))
+        target = max(min(minimum, target), target - int(config["step"]))
         return done(min(target, cap), "unhealthy")
 
     state["healthy_windows"] = int(state.get("healthy_windows", 0)) + 1
     state["unhealthy_windows"] = 0
+    # Holding a safe population needs less headroom than trying another world.
+    growth_ready = p95 >= float(config["min_ups_p95"]) + float(config["growth_margin_ups"])
+    if not growth_ready:
+        state["healthy_windows"] = 0
     grow_after = 2 if mode == "cool" else 1
     if target > cap:
         return done(cap, cap_reason if cap_reason != mode else "mode_cap")
@@ -453,9 +520,10 @@ def choose(
     )
     if (
         headroom
+        and growth_ready
         and state["healthy_windows"] >= grow_after
         and target < cap
-        and int(metrics["active_slots"]) >= target
+        and int(metrics["active_slots"]) == target
         and int(metrics.get("ups_samples") or 0) == int(metrics["active_slots"])
         and int(metrics.get("queued") or 0) > 0
     ):
@@ -465,7 +533,9 @@ def choose(
         state["trial_ready_since"] = None
         step = int(config["cool_step"] if mode == "cool" else config["step"])
         return done(min(cap, target + step), "trial_increase")
-    return done(target, "thermal_hold" if not headroom and metrics.get("temp_c") is not None else "hold")
+    if not headroom and metrics.get("temp_c") is not None:
+        return done(target, "thermal_hold")
+    return done(target, "ups_growth_hold" if not growth_ready else "hold")
 
 
 def write_gate(registry: Path, target: int, now: float) -> None:
@@ -494,9 +564,19 @@ def _expire_manual(config: dict[str, Any], root: Path, now: float, write: bool) 
     if until is None or now < float(until):
         return config, None
     previous = config.get("manual_previous_target")
-    config["manual_target"] = None
-    config["manual_target_until"] = None
-    config["manual_previous_target"] = None
+    stack = config.get("manual_stack", [])
+    while stack:
+        entry = stack.pop()
+        if entry.get("until") is None or now < entry["until"]:
+            config["manual_target"] = entry["target"]
+            config["manual_target_until"] = entry.get("until")
+            config["manual_previous_target"] = entry.get("previous")
+            break
+    else:
+        config["manual_target"] = None
+        config["manual_target_until"] = None
+        config["manual_previous_target"] = None
+    config["manual_stack"] = stack
     if write:
         _atomic(root / "config.json", config)
     return config, int(previous) if previous is not None else None
@@ -510,11 +590,11 @@ def cycle(
     root: Path,
     now: float | None = None,
     write: bool = True,
+    controller: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     now = time.time() if now is None else now
     config, restored = _expire_manual(config, root, now, write)
     if restored is not None:
-        state["target"] = restored
         state["trial_base"] = None
         state["trial_total_ups"] = None
         state["trial_started"] = None
@@ -524,11 +604,24 @@ def cycle(
     target, reason, state = choose(config, state, metrics, now=now)
     state["target"] = target
     allocation = allocate(target, cohorts)
+    observed = []
+    mode = state.get("mode") or "performance"
+    if config.get("manual_target") is not None:
+        observed.append("manual_ceiling")
+    if metrics.get("temp_c") is not None and metrics["temp_c"] >= float(config["cool_temp_limit_c" if mode == "cool" else "temp_limit_c"]):
+        observed.append("thermal")
+    if any(metrics.get(key) is not None and metrics[key] < float(config[f"min_{key}"]) for key in ("ups_p95", "ups_p98")):
+        observed.append("ups_below_floor")
+    if metrics.get("available_gb") is not None and metrics["available_gb"] < float(config["memory_min_gb"]):
+        observed.append("memory")
+    if metrics.get("unstable"):
+        observed.append("runner_unstable")
     report = {
         "target_slots": target,
-        "effective_max": int(effective_max(config, metrics, state.get("mode") or "performance")[0]),
+        "effective_max": min(int(effective_max(config, metrics, state.get("mode") or "performance")[0]), int(config["manual_target"])) if config.get("manual_target") is not None else int(effective_max(config, metrics, state.get("mode") or "performance")[0]),
         "mode": state.get("mode"),
         "reason": reason,
+        "observed_constraints": observed,
         "active_slots": metrics["active_slots"],
         "queued": metrics["queued"],
         "allocations": allocation,
@@ -539,9 +632,11 @@ def cycle(
         "metrics": {key: value for key, value in metrics.items() if key != "unstable"},
         "unstable": metrics["unstable"],
         "sweet_spot": state.get("sweet_spot"),
+        "growth_ups_p95": float(config["min_ups_p95"]) + float(config["growth_margin_ups"]),
         "manual_target": config.get("manual_target"),
         "manual_target_until": config.get("manual_target_until"),
         "updated": now,
+        "controller": controller,
     }
     if write:
         _atomic(root / "state.json", state)
@@ -590,7 +685,24 @@ def _set_config(root: Path, **changes: Any) -> dict[str, Any]:
     return config
 
 
-def main(argv: list[str] | None = None) -> int:
+def validate_config(config: dict[str, Any]) -> None:
+    for key in ("min_ups_p95", "min_ups_p98", "growth_margin_ups", "temp_limit_c", "cool_temp_limit_c", "temp_hard_c"):
+        if not isinstance(config[key], (int, float)) or not math.isfinite(config[key]):
+            raise ValueError(f"{key} must be finite")
+    if not (0 < config["min_ups_p98"] <= config["min_ups_p95"] <= 10000):
+        raise ValueError("UPS floors must satisfy 0 < p98 <= p95 <= 10000")
+    if not (0 <= config["growth_margin_ups"] <= 10000):
+        raise ValueError("growth margin must be nonnegative")
+    if not (0 < config["cool_temp_limit_c"] <= config["temp_limit_c"] <= config["temp_hard_c"] <= 120):
+        raise ValueError("temperatures must satisfy 0 < cool <= target <= hard <= 120")
+    if not (0 <= config["min_slots"] <= config["max_slots"] <= 1000 and
+            0 <= config["start_slots"] <= config["max_slots"] and
+            0 <= config["cool_max_slots"] <= config["max_slots"] and
+            0 <= config["balanced_max_slots"] <= config["max_slots"] and config["step"] > 0):
+        raise ValueError("invalid slot limits")
+
+
+def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
     parser.add_argument("--registry", type=Path, default=DEFAULT_REGISTRY)
@@ -618,6 +730,10 @@ def main(argv: list[str] | None = None) -> int:
     configure.add_argument("--temp-hard", dest="temp_hard_c", type=float)
     configure.add_argument("--thermal-samples", type=int, choices=range(1, 11))
     configure.add_argument("--unhealthy-samples", type=int, choices=range(1, 11))
+    configure.add_argument("--growth-margin-ups", type=float,
+                           help="p95 UPS headroom above the hold floor required to try another slot")
+    configure.add_argument("--min-ups-p95", type=float)
+    configure.add_argument("--min-ups-p98", type=float)
 
     target = sub.add_parser("target", help="set a manual drain ceiling")
     target.add_argument("slots", type=int)
@@ -640,23 +756,43 @@ def main(argv: list[str] | None = None) -> int:
     root.mkdir(parents=True, exist_ok=True)
 
     if args.command == "configure":
+        if args.growth_margin_ups is not None and (
+            not math.isfinite(args.growth_margin_ups) or args.growth_margin_ups < 0
+        ):
+            parser.error("growth UPS margin must be finite and nonnegative")
         changes = {
             "start_slots": args.start, "max_slots": args.max_slots, "min_slots": args.min_slots,
             "step": args.step, "cool_max_slots": args.cool_max_slots, "balanced_max_slots": args.balanced_max_slots,
             "cool_temp_limit_c": args.cool_temp_limit_c, "temp_limit_c": args.temp_limit_c,
             "temp_hard_c": args.temp_hard_c,
             "thermal_samples": args.thermal_samples, "unhealthy_samples": args.unhealthy_samples,
+            "growth_margin_ups": args.growth_margin_ups,
+            "min_ups_p95": args.min_ups_p95, "min_ups_p98": args.min_ups_p98,
         }
-        config = _set_config(root, **{key: value for key, value in changes.items() if value is not None})
+        changes = {key: value for key, value in changes.items() if value is not None}
+        config = _load_config(root)
+        config.update(changes)
+        try:
+            validate_config(config)
+        except ValueError as error:
+            parser.error(str(error))
+        config = _set_config(root, **changes)
         print(json.dumps(config, indent=2, sort_keys=True))
         return 0
     if args.command in {"target", "pause"}:
         state = _load_state(root)
         previous = int(state.get("target", _load_config(root)["start_slots"]))
         slots = 0 if args.command == "pause" else args.slots
+        if slots < 0 or slots > int(_load_config(root)["max_slots"]):
+            parser.error("ceiling must be between zero and max slots")
         until = _expiry(args.duration, args.until, time.time())
+        config = _load_config(root)
+        stack = list(config.get("manual_stack", [])) if until is not None else []
+        if until is not None and config.get("manual_target") is not None:
+            stack.append({"target": config["manual_target"], "until": config.get("manual_target_until"),
+                          "previous": config.get("manual_previous_target")})
         config = _set_config(root, manual_target=slots, manual_target_until=until,
-                             manual_previous_target=previous)
+                             manual_previous_target=previous, manual_stack=stack)
         print(json.dumps({"manual_target": config["manual_target"],
                           "manual_target_until": config["manual_target_until"]}, sort_keys=True))
         return 0
@@ -672,23 +808,17 @@ def main(argv: list[str] | None = None) -> int:
         state.update({"target": slots, "trial_base": None, "trial_total_ups": None, "trial_started": None,
                       "trial_ready_since": None, "settle_until": 0.0, "sweet_spot": None})
         _atomic(root / "state.json", state)
-        _set_config(root, manual_target=None, manual_target_until=None, manual_previous_target=None)
+        _set_config(root, manual_target=None, manual_target_until=None, manual_previous_target=None, manual_stack=[])
         print(json.dumps({"target": slots, "previous": current}, sort_keys=True))
         return 0
     if args.command in {"resume", "clear-target"}:
         config = _load_config(root)
-        previous = config.get("manual_previous_target")
-        if previous is not None:
-            state = _load_state(root)
-            state.update({"target": int(previous), "trial_base": None, "trial_total_ups": None,
-                          "trial_started": None, "settle_until": 0.0})
-            _atomic(root / "state.json", state)
         config = _set_config(root, manual_target=None, manual_target_until=None,
-                             manual_previous_target=None)
+                             manual_previous_target=None, manual_stack=[])
         print(json.dumps({"manual_target": config["manual_target"]}, sort_keys=True))
         return 0
     if args.command == "mode":
-        config = _set_config(root, mode=args.mode)
+        config = _set_config(root, mode=args.mode, dashboard_cool_token=None)
         print(json.dumps({"mode": config["mode"]}))
         return 0
     if args.command == "status":
@@ -696,7 +826,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "reset":
         config = _set_config(root, manual_target=None, manual_target_until=None,
-                             manual_previous_target=None)
+                             manual_previous_target=None, manual_stack=[])
         state = {"target": int(config["start_slots"]), "mode": config.get("mode") or "auto"}
         _atomic(root / "state.json", state)
         print(json.dumps(state, sort_keys=True))
@@ -706,11 +836,13 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0
 
+    identity = process_identity()
     while True:
         try:
-            config = _load_config(root)
-            state = _load_state(root)
-            report = cycle(config, state, registry=registry, root=root)
+            with control_lock(root):
+                config = _load_config(root)
+                state = _load_state(root)
+                report = cycle(config, state, registry=registry, root=root, controller=identity)
             print(json.dumps({"target": report["target_slots"], "reason": report["reason"],
                               "active": report["active_slots"], "queued": report["queued"],
                               "mode": report["mode"], "temp_c": report["metrics"].get("temp_c")}, sort_keys=True),
@@ -720,6 +852,19 @@ def main(argv: list[str] | None = None) -> int:
         if args.once:
             return 0
         time.sleep(max(5.0, args.interval))
+
+
+def main(argv: list[str] | None = None) -> int:
+    import sys
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    probe = argparse.ArgumentParser(add_help=False)
+    probe.add_argument("--root", type=Path, default=DEFAULT_ROOT)
+    probe.add_argument("--registry")
+    known, remaining = probe.parse_known_args(arguments)
+    if remaining and remaining[0] == "run":
+        return _main(arguments)
+    with control_lock(known.root.resolve()):
+        return _main(arguments)
 
 
 if __name__ == "__main__":

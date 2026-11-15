@@ -68,7 +68,7 @@ _FAST_FILES = {
     "test_resource_district_state.py", "test_run_loop_bounds.py",
     "test_runner_log_retention.py", "test_sandbox_contracts.py",
     "test_science_recipe_graph.py", "test_training_isolation.py",
-    "test_test_taxonomy.py",
+    "test_test_taxonomy.py", "test_laya_coordinator_health.py",
     "test_training_power.py", "test_training_rewards.py",
     "test_transport_occupancy.py",
 }

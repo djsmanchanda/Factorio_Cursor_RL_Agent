@@ -453,7 +453,17 @@ fresh frozen copy of dabdfd5 with its mods staged into each disposable world.
 
 - 2026-10-21 00:53 IST: Takeover verified menu/C6 choice-output/loan lifecycle fixes (433 focused tests) and fleet 2.1.23 defaults (49 tests); fast gate 1179 pass/1 skip, only preexisting import firewall failure. C11 complete 144/144: C5 ever/final copper16/14, ready17/15, reconcile16/15; no adoption, legacy C6 exploratory. Initial 2.1.22 C12/C13 stopped for user-requested upgrade and fully accounted separately. Fresh C12 (192 jobs, initial12 slots) and C13 (144, initial6) now run solely on miniship, 2.1.23 build87750; no starship game runs after02:30, already zero. New Opus5.5 high owner scheduled03:32 IST with55-minute checks. Lifecycle: new frozen runners active; both headless engines/GUI launch targets updated, older runtimes retained; no real-save action. See docs/rl/Laya_Cohort_Ledger_2026-10-21.md and Laya_C11_Result_2026-10-21.md.
 
+## [2026-10-21 01:30 IST] T3 tool-call audit workflow guidance
+- What: Factorio T3 audit found long supervision sleeps, repeated test gates and self-matching process polls. Added guidance for scheduled wakes, process/session completion, test exit status and result reuse; existing pytest testpaths=tests is retained.
+- Evidence: Read-only extraction of 1,730 stored Miniship tool calls; pytest configuration parsed and documentation diff checked. No tests or campaigns launched on this host.
+- Lifecycle: Future agent/test invocations only; active frozen campaigns unchanged.
+
 - 2026-10-21 02:28 IST: First observed Laya C6 choice/output-v2 achievements in the live 2.1.23 cohorts: C12 2/21 completed (ref-s79400, seed-s79401), C13 4/19 (ref-s79401, menu-s79400/s79403, loan-s79402); each stored receipt has explicit produce.advanced-circuit plus a scoped engine item delta of 1–2 after choice, with recycler absent. Deterministic legacy C6 remains separate (C12 0 ever/final, C13 2/0). C5 ever/final 3/3 and 4/1; no adoption from partial cohorts. 21+11+160=192 C12, 19+7+118=144 C13; zero tool errors/safety stops, typed failures remain. Evidence: data/laya-orchestration/takeover-20261021/checkin_helper_runs/20261021-0227.md and each world's latest-status receipt. Lifecycle: none; both frozen miniship campaigns continue, starship excluded, Opus handoff 03:32 IST.
+
+## [2026-10-21 02:38 IST] Smaller fast scaffolding test with retained full composition coverage
+- What: Fast payload check uses a real four-roboport backbone; all original assertions still run against the complete electronics bundle in the slow composition family. Production code unchanged.
+- Evidence: 24 infrastructure/taxonomy tests pass, including complete bundle checks. Fast gate 38.69 s; exit 1; failures: test_current_repository_obeys_import_firewall. Starship measured the isolated check at 7.84 s -> 0.30 s and retained exactly the same 959 fast test IDs.
+- Lifecycle: Future test invocations only; active frozen campaigns unchanged.
 
 - 2026-10-21 05:05 IST: Steel-seed bill facts (`934f9cb`): the parameterless steel operation gains `unchanged_failure`, and its bill items count as goal-serving. 19/79 completed C12/C13 runs had retried an unchanged drill/inserter-short steel seed ≥3 times (max 77). Focused runner tests pass 38/38; the new regression fails on the parent; smoke was 8 decisions with 0 failures. Shared host slot budget in `tools/run_laya_batch.py` (`57feb31`): slots are a host-wide total and older cohorts get first claim; admission is memory-headroom-gated and paced (47 batch/scheduler tests). C14 `laya-c14-2123-miniship-20261021` launched on miniship: 150 jobs = seeds 79400–79474 × ref c1b8680 / steelbill 934f9cb. Host total starts at 20 and may grow to 30 (min 10), UPS floors p95 105 / p98 95; admission until 2026-10-22 02:00 IST, cap 83000 s. Fast gate: 1179 passed, 1 skipped, only the known firewall failure. C12/C13 are unchanged. No mod, server or real-save action.
 
@@ -537,9 +547,55 @@ Added opt-in selected reconciliation of measured finished loan prerequisites thr
 Set shared new-cohort default7200 and updated generators; longer15000-second research windows retained. C26/C27 safely drained/stopped before any admission, original records archived, both arms amended7200 and wrappers resumed behind C25; verified60 queued each, hashes intact, original unit horizon preserved. C25 and Starship live attempts keep6000 because no safe hot extension exists. Evidence:frontier37 focused/1358 fast+3 skips; Miniship36/1326+3 skips, all exit0; live waiting-supervisor readback verified. Lifecycle:new Python freezes for future defaults; no Factorio/mod restart or controller message. See docs/rl/Laya_Wall_Allowance_2026-10-24.md and data/laya-orchestration/wall-allowance-7200-20261024/.
 
 
+2026-10-28 15:21 IST — Added maintained docs/rl/Laya_Cohort_Results_Index.md: C1–C43 and retry/no-start records, earlier October campaigns, model trials and separately dated C44–C46 pending status; linked from the RL README. DS41F OC Go draft parent-reviewed against ledgers, selected source reports and three Terra reviews. Documentation coverage/table/source checks pass (49 resolved references); isolated baseline fast gate: 1,122 passed, one skipped, one existing import-firewall failure (laya_ops -> autonomous_builder/stage_services), with no Python changes. Lifecycle: none; active campaigns, saves, mods and policies unchanged; no push.
+
+
+2026-10-28 16:02 IST — Added independent opt-in consumer menu, solid fluid filtering, committed-owner bill facts and shared permanent-production operations; receipts distinguish prerequisites/provider availability from sustained output. Added policy/executor timing and event/run fault summaries. Evidence: 83 focused tests in original checkout; isolated fast gate 1130 passed, 3 skipped, known baseline import-firewall failure. No cohort benefit/adoption claimed. Lifecycle: freeze new code and queue disposable validation behind active campaigns; no active runner/mod/server change.
+
+
+2026-10-28 16:42 IST — Deployed the isolated cohort dashboard with guarded concurrency ceilings, UPS/thermal controls, durable cooling recovery, Starship viewing and reversible client-mod sync. Added 6h/1d/7d telemetry, newest-first cohorts, persistent run reviews and curated 7–28 October history (57 rows/150 arms; pending/invalid outcomes explicit). Evidence: 24 focused checks passed; fast gate 1155 passed, 3 skipped, known baseline import-firewall failure. Live scheduler handshake/history and Starship HTTP tunnel verified; cooling and mod replacement remain fixture-only. Lifecycle: dashboard/scheduler/recovery timer deployed; campaigns, server saves/mods unchanged. Sonnet UI refinement next; no push.
+
+
+2026-10-28 17:10 IST — Integrated Sonnet 5.5 dashboard refinement: Overview/Performance/Jobs/History, shared chart tooltips and legends, responsive light/dark layout, clearer admission controls and review workflows. Parent fixed in-flight review draft preservation, invalid numeric ranking and old queued records appearing active. Evidence: 25 focused checks, 89 isolated browser checks, read-only live four-tab/day/week checks; fast 1155 passed/3 skipped plus known baseline import-firewall failure. Lifecycle: frontend served immediately; browser refresh only, no service/campaign restart or live control/mod-sync action; no push.
+
+
+2026-10-28 17:31 IST — Added descriptive curated-cohort chronology with separate base/experimental panels, reached/final/retention metrics, window filters and keyboard/tooltips. Parent removed unsupported significance verdicts, qualified connectors by known predicate/window metadata, kept unknown-only gaps and individual replicate-arm counts, and required ten compatible metadata points for descriptive medians. Evidence: 116 browser fixtures/25 focused passed, live read-only UI/Starship checks; fast 1155 passed/3 skipped plus known baseline import-firewall failure. Lifecycle: assets served immediately; browser refresh only, no service/campaign/control/mod changes; no adoption or improvement claim, no push.
+
+
+### 2026-10-28 21:06 IST — dashboard admission target and standing power modes
+
+Integrated the missing delegate checkout into the served cohort dashboard: +1/+2/+4 admission-target nudges and persistent Auto/Cool/Balanced/Performance controls. Temporary cooling preserves the prior profile; stale recovery cannot override an explicit mode. Evidence: 30 focused tests, 140 isolated browser fixture checks, JS syntax, live API dispatch and Starship tunnel asset checks; fast gate has only the known training/laya_ops.py import-firewall failure. Restarted only laya-cohort-dashboard.service at 21:05 IST; recovery service already resolves this updated script. Host config SHA256 stayed 9c18bc795ed28dba0fe21d376079c4c0e14ef4877bbc2cd4ba89333e5218895d; no live mode/target was applied, no campaign/server/mod/save changes. Refresh the browser to load the controls.
+
+
+### 2026-10-28 21:12 IST — dashboard temperature control fixed
+
+Corrected the dashboard scheduler flag from unsupported --cool-temp-limit to --cool-temp. Two real-CLI regressions prove settings apply above/below the cool threshold on temporary hosts and preserve mode/ceiling. All 32 focused checks pass; fast gate retains only the known training/laya_ops.py firewall failure. Restarted only the dashboard. Live invalid-input dispatch reached temperature validation; host configuration remained byte-identical. User must resubmit the desired temperature; no campaign or live temperature was changed by this fix.
+
+
+## [2026-10-29 01:27 IST] Factorio 2.1.24 cohort upgrade verified; C45/C46 successors launched
+- Private build 87808 and full matching data verified against Starship provenance; original runtimes, pre-upgrade selectors and copied saves retained. Copied-save migration/reload, schema/RCON and disposable water/steam temperature fixtures passed; C46 consumer products_finished/unit_number fields verified. 63 focused tests passed; fast gate: 1155 passed, one skipped, known pre-existing import-firewall failure only. No throughput or policy benefit measured.
+- C44 finished 200/200 with physical cleanup. Old held C45/C46 accounted 120 cancelled-before-start each, zero starts, durable drain retained, supervisors exited. New engine-labelled 2124 successors preserve original source/mods/seeds/120-job designs/windows. C45 actual engine/data/mod load verified; C46 remains queued behind new C45. Original Oct31/Nov1 06:00 IST deadlines retained, shared host admission unchanged.
+- Lifecycle: future manager/dashboard defaults select 2.1.24; running successors use private frozen-manager XDG mappings. Existing idle worlds were not migrated/resumed. Receipts, rollback and exact units: data/factorio-upgrades/2.1.24/state.json. Mixed-start/C47 work remains gated on actual C46 completion/cleanup; no production save, installed mod or policy adoption changed.
+
+
+## 2026-11-13 02:49 IST — controller reporting and admission fixes
+
+Isolated harness branch fixes completed-pair eligibility/treatment win direction, preserves unknown and early strict-latch evidence through C9, resolves per-arm research targets, distinguishes geometry runner errors from missing-ok receipts, validates full UDP/TCP port ranges before freezing, and separates coordinator heartbeat from job progress. Existing per-arm runner/target and waiting-publish changes are retained. Focused regressions: 36 passed; fast gate: 1,190 passed, one skipped, one pre-existing training import-firewall failure (unchanged training/laya_ops.py imports). Lifecycle: use the committed isolated coordinator for subsequent cohorts after current-headline cleanup; no active freeze or loaded coordinator changed. PM replay/repair proceeds on the separate c6-v3 candidate. See docs/rl/Laya_Controller_Continuation.md.
+
+
 ## 2026-11-13 02:52 IST — PM feed-contract repair and diagnostic gates
 
 C6-v3 candidate derives recovery feed prototypes from the same constructed plan used at build time, accepting declared steel belt feeds while still rejecting mismatched endpoints. Added read-only C4 bank preflight and PM-specific consumption gate: generic bulk-inserter C6 cannot qualify. Target-line focused tests: 12 passed; fast gate: 1,355 passed, one skipped, one pre-existing import-firewall failure (unchanged operation_session/training boundaries). Real local C4 bundle hashes and one reload receipt verified; source remains diagnostic-only (acceptance_eligible false). No PM placement/consumption demonstrated and no speculative funding rule added: inspected C95b LH supply advances; PM waits on chemical capability. Lifecycle: candidate runner/replay only after active-headline terminal cleanup; no installed mod or live freeze changed. See docs/rl/Laya_PM_Replay.md.
+
+## 2026-11-13 06:22 IST — restore host-adaptive dispatch and bounded cooling
+
+Added coordinator-side, nonblocking reservation before worker submission and an explicit --adaptive-workers operational override, preserving frozen solver inputs. The pool can exceed the old eight-worker cap while the host still owns measured UPS/thermal/memory admission. Added a drain-safe coordinator handoff with cleanup/listener checks, rollback, superseding-ceiling handling and a two-hour admission-pause expiry. Evidence: 37 focused checks passed; fast gate 1,199 passed, one skipped, same pre-existing training/laya_ops.py import-firewall failure. Lifecycle: user requested cool mode applied at 06:15 IST until 08:15:40 IST with existing recovery timer; queue adaptive headline replacement only after current worlds finish and physically clean, with no Factorio/solver/mod restart. Future Controller B launches use --adaptive-workers. Runtime receipt: root data/laya-host/dispatch-handoff.json.
+
+
+## 2026-11-14 — supervisor-driven controller wakes
+
+User clarified that A/B must have no periodic schedules. Archived and removed the two remaining disabled controller schedules; only the existing 90-minute supervisor remains enabled. Its prompt now wakes owners after terminal accounting/cleanup and also wakes A when B completion releases the host for its queued PM replay, with deduplicated dependent notifications. Removed the obsolete hourly-continuation requirement from the controller contract. Evidence: scheduled-task inventory and updated supervisor prompt checked; documentation only, no test/runtime code change. Lifecycle: schedule configuration is effective immediately; no campaign/runner/mod restart.
+
 
 ## [2026-11-15 02:30 IST] PM replay clock lifecycle repaired
 - What: verify the paused capture before live startup, require new observed ticks per production attempt, report clock stalls separately, close evidence/resources and stop the owned disposable server on exit.
@@ -559,10 +615,21 @@ C6-v3 candidate derives recovery feed prototypes from the same constructed plan 
 - Lifecycle: integrate the companion controller mission check and freeze/restart future runners after campaigns. No mod or Factorio reload and no runtime action performed.
 
 
+## [2026-11-15 03:04 IST] Validate mission against the selected frozen runner
+- What: require declared modes for new calibrations/research missions; read the selected frozen runner's versioned capability manifest; persist mission/runner/command evidence and forward the validated mode and effective target. Unknown capability cannot authorize explicit measurement or research completion. Preserve undeclared frozen legacy missions.
+- Evidence: 38 focused controller/scheduler checks passed. Final fast gate remains red: 1,208 passed, three skipped and one unchanged import-firewall failure in training/laya_ops.py. No live dispatch or research completion was exercised.
+- Lifecycle: integrate with PM runner commit 4275f690, freeze future runners and restart the affected controller after active campaigns; no service, campaign, mod or Factorio action performed.
+
+
 ## [2026-11-15 03:16 IST] Bounded alternate second-collector row/link search
 - What: after a refused link, try a bounded set of nonoverlapping row candidates using the existing site and route validators. Refusal evidence records the eight-row and300-probe per-survey limits; bounded exhaustion leaves other layouts unexplored.
 - Evidence: main14 focused composed-plan tests passed,including translated recorded copper geometry,owned haul continuity,reservation/occupancy protection and no mutation on refusal. Delegate fast gate1399 passed,one selected skip; other workers changed the shared source during that run,so a final settled combined gate remains required. Exact historical stone,physical provider delivery and cutover were not replayed.
 - Lifecycle: use a newly frozen future Python runner and separately authorized disposable acceptance after campaigns; no installed-mod change or runtime action performed.
+
+## [2026-11-15 03:16 IST] Restore active session ownership without a firewall exception
+- What: extract this branch's unchanged deterministic session and economics projection into orchestrator; retain the training module as an identity-preserving compatibility alias. The import firewall is unchanged.
+- Evidence: 50 focused initialization/runner/isolation checks passed; final combined controller fast gate1,215 passed,three skipped (two optional-lupa collection modules and one known fluid-chain case),exit0. The combined tree includes the uncommitted RC7 outcome work, which remains under separate review; this entry verifies the dependency repair only.
+- Lifecycle: future frozen Python runners/controllers need the source; no mod deployment or Factorio reload. No runtime action or full controller restart-equivalence proof.
 
 ## [2026-11-15 03:25 IST] Loan recovery uses local and advancing evidence
 
@@ -581,6 +648,16 @@ C6-v3 candidate derives recovery feed prototypes from the same constructed plan 
 - What: validate contradictory envelopes; reconcile only actual invocation/transaction identities; retain initial and final receipt states, unknown and malformed slots, and duplicate/conflict counts. Runner summaries and collector use one function; controller publications count every immutable planned job and separate inherited/current milestone evidence from earned targets.
 - Evidence: 127 combined focused passes; settled fast1437 passed,3 skipped(two optional-lupa collection modules,one fluid-chain case),exit0. PM invocation/observation wiring and retained stream replay remain open.
 - Lifecycle: future matching frozen runner/controller copies required; no runtime, deployment, service, save or campaign action performed.
+- Harness branch (291aa479) record of the same entry:
+- Evidence: 43 focused passes before the final narrow latency projection adjustment, also covered by the fast gate; settled fast1226 passed,3 skipped(two optional-lupa collection modules,one fluid-chain case),exit0. PM observation emission and retained stream replay remain open; no cohort adoption is claimed.
+- Lifecycle: future matching frozen runner/controller copies required; no runtime, deployment, service, save or campaign action performed.
+
+
+## [2026-11-15 04:02 IST] Preserve explicit upstream-construction deferrals
+
+- What: normalize the shared builder production_prerequisite_deferred receipt as deferred, preserving its cause and exception precedence. Unknown codes remain unknown. This repairs the concrete coverage gap found in retained C94 decisions317/318.
+- Evidence:14 focused outcome/reconciliation tests passed; settled controller fast1,227 passed,3 skipped(two optional-lupa collection modules and one known fluid-chain case),exit0. Historical replay counts retain their original source hashes; no new replay or eventual-delivery claim.
+- Lifecycle: future frozen controller and matching runner copies required; no runtime action.
 
 
 ## [2026-11-15 04:08 IST] Preserve explicit upstream-construction deferrals
@@ -609,10 +686,24 @@ C6-v3 candidate derives recovery feed prototypes from the same constructed plan 
 
 - 2026-11-15: RC6 bounded extension refusal evidence reviewed and connected to the menu and journals, preserving the prerequisite-deferred outcome. Coverage names one standing-refinery candidate and remains explicitly historical until revalidated. Main focused geometry/session/runner checks: 106 passed, including translated geometry and stale-fact replacement. Settled fast gate: 1,477 passed, 3 skipped (2 optional-Lupa collection, 1 known fluid chain), exit 0. Refusal caching, a separate new-line/owned-transition capability and exact historical C92 replay remain open. Lifecycle: future frozen Python runner start; no runtime action performed.
 
+## [2026-11-15 04:30 IST] Journal scheduler status before aggregate publication
+
+- What:fsynced versioned baseline/job/metadata events precede aggregate replacement;publication and cleanup recovery restore stale/missing projections. Immutable planned identities bind the journal;missing legacy status remains unknown and blocks dispatch. A bounded validated-state cache avoids full replay on each own write;external file edits invalidate it. Ambiguous JSON,torn sequences and corrupt evidence fail visibly.
+- Evidence:53 focused scheduler/journal/outcome tests passed;settled controller fast1,237passed,3skipped(two optional-Lupa collections,one fluid-chain case),exit0. Main added duplicate/nonfinite/bool-version rejection,cache invalidation/no-reparse checks,and explicit journal fast marker(the delegate gate excluded these tests).
+- Limits:aggregate lock and serialization remain;boot/process/attempt lineage,exact command/exit provenance,independent liveness and full scale tests remain open.
+- Lifecycle:future frozen controller/restart required;no runtime,service,campaign,Factorio,save or mod action.
+
+- 2026-11-15: RC10 durable attempt/prepare/run provenance and interruption recovery reviewed. Main removed the false exit-zero default for missing executor return codes, handles returned nonzero/signal codes even if an injected executor ignores check=True, timestamps completion and marks unfinished receipts unknown during terminal-result recovery. Focused scheduler/journal boundary tests: 55 passed. Settled fast: 1,253 passed, 3 skipped (2 optional-Lupa collection, 1 known fluid chain), exit 0. Independent liveness and unobserved child/runner lineage remain open/unknown. Lifecycle: future reviewed frozen controller start; no service, Factorio or campaign action performed.
+
+- 2026-11-15: RC11 declared contract freezes exact ordered jobs and arm source identities before admission. Main enforced the actual deterministic dispatch path, strict versions and fields, durable exclusive artifact publication, spec digest checks, and bound-plan report groups that retain missing/duplicate/conflicting outcomes as unknown. Focused scheduler/attempt/journal checks: 78 passed. Settled fast: 1,277 passed, 3 skipped (2 optional-Lupa collection, 1 known fluid chain), 2,984 deselected, exit 0. Effective-factor validation, runtime exposure and counterbalanced assignment remain open; inference eligibility is unknown. Lifecycle: future reviewed frozen controller start; no runtime action performed.
+
 - 2026-11-15 05:03 IST: RC6 shared managed-refinery geometry reuse caches only bounded pure template deltas, with fresh template/build validation, ownership, occupancy and combined affordability on each attempt. Focused 9 passed; settled fast 1,482 passed, 3 skipped, exit 0 (two optional Lupa, one known fluid chain). No refusal or extraction plan is cached; no live result. Lifecycle: future reviewed frozen Python runner; no runtime action performed.
 
 - 2026-11-15: RC7/RC12 uncertain-dispatch checkpoint fence reviewed. Version 3 transfers episode-owned invocation journals with full preflight, explicit new episode identity, strict payload/scope checks and durable file/directory sync. Legacy v1/v2 provenance stays unknown across re-export. Uncertainty blocks selected dispatch and constructor/maintenance paths; failed persistence cannot resend, and symlinks cannot change ownership. Focused:58 passed. Settled fast:1500 passed,3 skipped(two optional-Lupa collection,one known fluid chain),3118 deselected,exit0. Full loan restart, background dispatch journaling and correlated configuration readback remain open. Lifecycle: future matching frozen Python runner and authorized disposable replay, queued behind campaigns; no runtime action performed.
 
+- 2026-11-15 05:48 IST: RC10 independent coordinator-health sidecar and explicit unavailable dashboard evidence reviewed. Main tightened cohort/source/process/clock identity, preserved original interruptions, repaired standalone dashboard imports, and bounded aggregate reads with malformed/duplicate/nonfinite rows reported unavailable. Main combined focused suite: 99 passed before final added cases; final health module: 19 passed. Final settled fast: 1,296 passed, 3 skipped (2 optional-Lupa collection, 1 known fluid chain), 2,984 deselected, exit 0; JavaScript syntax and diff checks passed. Liveness does not establish dispatch progress, admission, engine health or child/runner lineage. Lifecycle: future reviewed frozen coordinator/dashboard processes must load this source; no runtime action performed.
+
 - 2026-11-15 06:07 IST: Main repaired durable loan-gate retry conservation after the scoped delegate returned without implementation. Episode/cell/loan/step-owned state now records each of the three permitted refreshes before dispatch, retains charged tick and craft high-water mark across real constructor reopen and v4 checkpoint transfer, and waits on unknown historical budgets. Both restart and ops-generation checkpoint paths carry the file; retired process counters were removed. Focused boundary suite: 312 passed. Final fast gate: 1,519 passed, 3 skipped (2 optional-Lupa collection, 1 known fluid chain), 3,118 deselected, exit 0; diff check passed. Full loan/controller equivalence and live efficacy remain unproved. Lifecycle: future reviewed frozen Python runner; no runtime or service action performed.
 
+- 2026-11-15 06:21 IST: RC11 seeded counterbalanced assignment reviewed and bound to immutable plans. Main fixed checkpoint relocation identity, rejected nonfinite plans, and exercised real mixed-origin generation through freeze/reserve/report. Focused: 67 passed; settled fast: 1,307 passed, 3 skipped (2 optional-Lupa collection, 1 known fluid chain), 2,984 deselected, exit 0. Balance is global; effective-factor/exposure and inference eligibility remain unknown. Lifecycle: future reviewed frozen controller start; active campaigns unchanged.
 - 2026-11-15 06:23 IST: Main reviewed ops-generation invocation transfer at actual capture/restore and fresh-session boundaries. Added source-symlink refusal, complete destination no-overwrite preflight, normalized duplicate rejection and interruption/directory-fsync rollback checks. Focused: 62 passed; settled fast: 1,533 passed, 3 skipped (2 optional-Lupa collection, 1 known fluid chain), 3,118 deselected, exit 0. Acceptance accumulator and full loan/controller restart equivalence remain open. Lifecycle: new reviewed frozen Python runner required; no runtime action performed.

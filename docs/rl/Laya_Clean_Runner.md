@@ -398,3 +398,37 @@ caller receives an isolated plan. Template and plan validation still run, and
 every shared preflight rereads ownership/occupancy and the current combined
 extraction/material bill. No refusal or extraction plan is cached. This reduces
 template composition only and establishes no measured wall-time improvement.
+
+## Research mission admission
+
+Explicit `research_completion` requires a valid target and a version 1 capability
+manifest from the selected frozen arm's runner, declaring deterministic research
+selection, lab and production scaling operations. The freeze records the runner,
+capability and effective mission; dispatch verifies the same frozen identity and
+forwards the mode and target. `measurement_only` requires advertised support for enforcing that mode and
+labels calibration without an effective research target. An arm may explicitly
+clear a cohort target; dispatch uses that validated effective value. A full-origin mission with no declaration keeps its legacy
+interpretation. Frozen historical specifications are not rewritten. Initial target
+eligibility and earned research must be observed by the capable runner; manifest
+support alone proves neither pack consumption nor completion.
+
+
+The deterministic session and shared economics projection live under
+orchestrator/laya_session.py and orchestrator/laya_economics.py. The historical
+training/laya_ops.py import aliases the active module so existing classes,
+functions and dependency patches retain identity. This source move preserves
+this controller branch's operations; it does not import later PM features.
+
+Scheduler attempt evidence (15 November 2026): each attempted frozen job retains
+a versioned attempt ID across retries, effective mission and frozen input
+identity, boot/coordinator identity where observable, and exact prepare/run argv
+and cwd. An invocation is durably journaled before dispatch and records a known
+exit, signal, timeout, exception or interruption after it returns. Missing or
+malformed return codes remain unknown and stop further dispatch; no environment
+or credentials are copied into receipts. Unobserved child and runner lineage
+remains unknown. Terminal evidence is published before scoped cleanup; admission
+is retained until cleanup succeeds. KeyboardInterrupt/SystemExit still reach
+the caller. Recovery marks unfinished invocation evidence unknown without
+erasing an already-published terminal result. Planned-job accounting remains
+independent of attempts, and legacy histories are not reconstructed. This
+does not provide game-progress monitoring or a lock redesign. The independent coordinator health sidecar is thread-liveness evidence only; see Laya_Controller_Continuation.md.

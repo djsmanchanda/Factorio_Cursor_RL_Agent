@@ -3,7 +3,12 @@
 
 The orchestrator owns execution, ledgers and geometry; the training runner owns
 choice. The session never calls the deterministic mission opener or run loop.
+This name is an alias of ``orchestrator.operation_session`` (one module object), so
+existing ``from training.laya_ops import DeterministicSession, receipt`` imports and
+module-level monkeypatching (``laya_ops.ab``) reach the single implementation.
 """
-from orchestrator.operation_session import DeterministicSession, receipt
+import sys
 
-__all__ = ["DeterministicSession", "receipt"]
+from orchestrator import operation_session
+
+sys.modules[__name__] = operation_session

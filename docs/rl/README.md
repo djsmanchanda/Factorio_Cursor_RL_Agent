@@ -18,6 +18,8 @@ learning system around Laya.
 
 For the factory runner, start with [current evidence](Laya_Current_Handoff.md),
 [the runner contract](Laya_Clean_Runner.md) and [strategy](Laya_Strategy_Guidelines.md).
+The maintained [cohort results index](Laya_Cohort_Results_Index.md) records
+recent experiments, terminal accounting, endpoint differences and decisions.
 The ops path is currently a guided sampler over partly strategic wrappers;
 lab-model results do not establish a learned ops policy. Read `training.md`
 for dataset/training work and mechanics references for the selected adapter.
