@@ -22,12 +22,13 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 if __package__:
-    from tools import laya_host_scheduler as scheduler
+    from tools import laya_host_scheduler as scheduler, laya_coordinator_health
     from tools.laya_cohort_view import ViewerRelay
     from tools.laya_cohort_history import History
     from tools.laya_cohort_mod_sync import sync_to_starship
 else:
     import laya_host_scheduler as scheduler
+    import laya_coordinator_health
     from laya_cohort_view import ViewerRelay
     from laya_cohort_history import History
     from laya_cohort_mod_sync import sync_to_starship
@@ -47,6 +48,33 @@ def read_json(path, fallback=None):
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return fallback
+
+
+def aggregate_status(path):
+    try:
+        if path.stat().st_size > MAX_JSON:
+            return None, 'oversized'
+        with path.open('rb') as stream:
+            data = stream.read(MAX_JSON + 1)
+        if len(data) > MAX_JSON:
+            return None, 'oversized'
+        def invalid_number(value):
+            raise ValueError('nonfinite status number')
+        value = json.loads(data, parse_constant=invalid_number)
+        if not isinstance(value, dict) or not isinstance(value.get('jobs'), list):
+            return None, 'malformed'
+        jobs = value['jobs']
+        if (any(not isinstance(job, dict) or not isinstance(job.get('id'), str)
+                or not isinstance(job.get('status'), str) for job in jobs)
+                or len({job['id'] for job in jobs}) != len(jobs)):
+            return None, 'malformed'
+        return value, None
+    except FileNotFoundError:
+        return None, 'missing'
+    except (ValueError, UnicodeError):
+        return None, 'malformed'
+    except OSError:
+        return None, 'unreadable'
 
 
 def tail_jsonl(path, limit=MAX_TAIL):
@@ -134,6 +162,17 @@ class Dashboard:
             self.cache[path] = (stamp, read_json(path, fallback))
         return self.cache[path][1]
 
+    def cached_aggregate(self, path):
+        try:
+            metadata = path.stat()
+        except OSError:
+            return aggregate_status(path)
+        stamp = (metadata.st_dev, metadata.st_ino, metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns)
+        key = ('aggregate', path)
+        if key not in self.cache or self.cache[key][0] != stamp:
+            self.cache[key] = (stamp, aggregate_status(path))
+        return self.cache[key][1]
+
     def audit(self, action, details):
         with (self.data / "audit.jsonl").open("a", encoding="utf-8") as file:
             file.write(json.dumps({"time": time.time(), "action": action, "details": details}, allow_nan=False) + "\n")
@@ -169,7 +208,8 @@ class Dashboard:
         for path in sorted(self.registry.iterdir() if self.registry.exists() else []):
             if not path.is_dir() or path.name.startswith("_"):
                 continue
-            status = self.cached(path / "job-status.json", {}) or {}
+            status, status_error = self.cached_aggregate(path / "job-status.json")
+            status = status or {}
             batch = self.cached(path / "batch.json", {}) or {}
             freeze = self.cached(path / "freeze.json", {}) or {}
             plan = self.cached(path / "planned-jobs.json", {}) or {}
@@ -211,7 +251,7 @@ class Dashboard:
                     except (ValueError, OSError):
                         pass
                 clean.append(row)
-            result.append({"name": path.name, "planned": planned, "counts": dict(counts), "unaccounted": max(0, planned - len(jobs)) if isinstance(planned, int) else None, "updated": status.get("updated"), "created": freeze.get("frozen_at") or batch.get("created_at"), "queue_status": queue_by_name.get(path.name, {}).get("status"), "engine": freeze.get("engine"), "jobs": clean, "source": str(path / "report.md")})
+            result.append({"name": path.name, "planned": planned, "counts": dict(counts) if not status_error else None, "status_availability": {"state": "unavailable" if status_error else "available", "cause": status_error}, "coordinator_health": laya_coordinator_health.present(read_json(path / laya_coordinator_health.NAME), root=path), "unaccounted": max(0, planned - len(jobs)) if not status_error and isinstance(planned, int) else None, "updated": status.get("updated"), "created": freeze.get("frozen_at") or batch.get("created_at"), "queue_status": queue_by_name.get(path.name, {}).get("status"), "engine": freeze.get("engine"), "jobs": clean, "source": str(path / "report.md")})
         return result
 
     def snapshot(self):

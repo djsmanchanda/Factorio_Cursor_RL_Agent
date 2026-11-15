@@ -20,7 +20,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 
 from tools.checkpoint_catalog import atomic_json
-from tools import laya_status_journal, runner_process, laya_experiment_contract
+from tools import laya_status_journal, runner_process, laya_experiment_contract, laya_coordinator_health
 from tools.deterministic_fleet_runtime import create_detached_checkout
 from training.laya_restart_checkpoint import load as load_checkpoint
 from training.laya_mission_contract import mission_settings, frozen_capability
@@ -635,13 +635,6 @@ def _update_job(root, identity, values):
     _publish(root, change)
 
 
-def coordinator_heartbeat(root):
-    """Publish coordinator liveness separately from job progress and keepalives."""
-    def change(status):
-        status['coordinator_heartbeat'] = {'pid': os.getpid(), 'updated': time.time()}
-    _publish(root, change)
-
-
 def recover(root):
     spec = read(root/'regression.json')
     jobs = _publish(root, lambda status: copy.deepcopy(status['jobs']))
@@ -888,7 +881,7 @@ def _execute_job(root, executor, spec, freeze, job):
 
 def run_one(root, *, executor=subprocess.run):
     root = root.resolve()
-    with lock(root/'coordinator.lock'):
+    with lock(root/'coordinator.lock'), laya_coordinator_health.coordinator_health(root):
         recover(root)
         return _dispatch(root, executor)
 
@@ -910,7 +903,7 @@ def cohort_workers(spec, workers=MAX_MIXED_WORKERS, *, adaptive=False):
 def run_campaign(root, *, workers=MAX_MIXED_WORKERS, executor=subprocess.run, adaptive=False):
     """Interleave the frozen plan with concurrent, host-admitted attempts."""
     root = root.resolve()
-    with lock(root/'coordinator.lock'):
+    with lock(root/'coordinator.lock'), laya_coordinator_health.coordinator_health(root):
         recover(root)
         spec = read(root/'regression.json')
         validate_port_ranges(spec, len(read(root/'job-status.json')['jobs']))
@@ -921,11 +914,7 @@ def run_campaign(root, *, workers=MAX_MIXED_WORKERS, executor=subprocess.run, ad
                 'coordinator_pid':os.getpid(), 'scheduler_source_sha256':sha(Path(__file__))})
         with ThreadPoolExecutor(max_workers=workers) as pool:
             active = set()
-            heartbeat_at = 0.0
             while True:
-                if time.monotonic() - heartbeat_at >= HEARTBEAT_SECONDS:
-                    coordinator_heartbeat(root)
-                    heartbeat_at = time.monotonic()
                 status = read(root/'job-status.json')
                 queued = any(j['status']=='queued' for j in status['jobs'])
                 if not active and not queued:

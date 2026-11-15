@@ -210,4 +210,4 @@ is retained until cleanup succeeds. KeyboardInterrupt/SystemExit still reach
 the caller. Recovery marks unfinished invocation evidence unknown without
 erasing an already-published terminal result. Planned-job accounting remains
 independent of attempts, and legacy histories are not reconstructed. This
-does not provide independent heartbeat/game-progress monitoring or a lock redesign.
+does not provide game-progress monitoring or a lock redesign. The independent coordinator health sidecar is thread-liveness evidence only; see Laya_Controller_Continuation.md.

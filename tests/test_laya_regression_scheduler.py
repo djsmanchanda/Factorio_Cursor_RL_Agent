@@ -318,18 +318,6 @@ def test_geometry_status_receipts_are_not_invented_tool_errors(tmp_path):
     assert scheduler.collect_result(tmp_path, {'origin': 'C0'})['stop_classification'] == 'genuine_failure'
 
 
-def test_coordinator_heartbeat_does_not_fake_job_progress(tmp_path):
-    atomic_json(tmp_path/'job-status.json', {'updated': 1, 'progress_updated': 2,
-                                           'jobs': [{'id': 'job', 'status': 'running'}]})
-    scheduler.coordinator_heartbeat(tmp_path)
-    status = scheduler.read(tmp_path/'job-status.json')
-    assert status['coordinator_heartbeat']['pid'] == os.getpid()
-    assert status['coordinator_heartbeat']['updated'] > 2
-    assert status['progress_updated'] == 2
-    scheduler._update_job(tmp_path, 'job', {'status': 'completed'})
-    assert scheduler.read(tmp_path/'job-status.json')['progress_updated'] > 2
-
-
 def test_report_uses_early_latches_after_history_trim_and_per_arm_target(tmp_path):
     root, _ = frozen_suite(tmp_path)
     spec = scheduler.read(root/'regression.json')

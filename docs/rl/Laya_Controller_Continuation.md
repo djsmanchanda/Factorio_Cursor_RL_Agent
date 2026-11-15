@@ -50,11 +50,20 @@ again before running a coordinator. Every range must fit in 1..65535. Numeric
 overlap between UDP and TCP is legal. Same-protocol reuse requires an explicit
 predecessor gate or released old worlds; check actual listeners before launch.
 
-New coordinators publish `coordinator_heartbeat` separately from
-`progress_updated`. Legacy keepalives may refresh `updated`, so that field alone
-does not prove dispatcher liveness or useful progress. Compare job transitions
-and bounded runner evidence as well. Waiting with ongoing progress is not a
-stall. Existing cohorts keep their loaded coordinator until their cleanup.
+New coordinators publish a bounded `coordinator-health.json` independently of
+`status.lock`, beginning after coordinator lock ownership and before recovery.
+Its generation, boot, process creation and source component hashes and wall/monotonic clocks are
+checked before presenting health. A fresh pulse shows only that the coordinator
+health thread is alive; it does not prove dispatch progress, admission, engine
+health or mission success. Missing or mismatched identity, clock regression and
+legacy roots remain unknown. Terminal states describe coordinator exit, subject
+to the same identity checks. Job progress and host scheduler verification are
+separate. The dashboard reports unavailable aggregate status and its cause with
+unknown counts while retaining a known planned denominator. Oversized files are
+rejected before reading their contents; unchanged aggregate data is cached by
+file identity. Unknown status does not display as zero running servers. Waiting with ongoing
+progress is not a stall. Existing cohorts keep their loaded coordinator until
+their cleanup.
 
 ## Adaptive concurrency (2026-11-13)
 
