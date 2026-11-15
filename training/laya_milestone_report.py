@@ -1,7 +1,9 @@
 # Path: training/laya_milestone_report.py | Purpose: one {earned, holds_now, inherited} milestone block for every reader, built from the checkpoint-evidence contract, with a labelled fallback for journals that predate it.
 """Milestone reporting source of truth.
 
-earned     passed after an observed failed->passed pair of adjacent polls (never at the first observation).
+earned     passed after an observed failed->passed pair of adjacent polls (never at the first observation, never across an
+           unusable or missing poll). ``events`` (additive) gives each earned id its transition tick; ``origin_tick`` is the
+           origin those ticks are measured from (``origin_basis`` names it).
 holds_now  passes on the last successful poll (current state, not history).
 inherited  already passing on the first observation; not earned by the run.
 
@@ -26,33 +28,89 @@ def _passed(predicates):
                     if (v.get("status") if isinstance(v, dict) else v) in ("passed", True))
 
 
+def _event(cid, tick, from_tick):
+    return {"id": cid, "tick": tick, "from_tick": from_tick}
+
+
+def _by_id(events):
+    """One event per milestone (the first), in milestone order."""
+    first = {}
+    for event in events:
+        first.setdefault(event["id"], event)
+    return [first[c] for c in _ordered(first)]
+
+
 def from_contract(contract, loaded_tick=None):
-    """Block from a ``_contract`` evidence dict, or None when it is absent or not the accumulator's shape."""
+    """Block from a ``_contract`` evidence dict, or None when it is absent or not the accumulator's shape.
+
+    ``events`` (additive) carries each earned milestone's observed transition tick; ``origin_tick`` is the run's
+    loaded tick, the origin that tick is measured from (None when the runner did not record it).
+    """
     if not isinstance(contract, dict) or "observed_events" not in contract:
         return None
-    earned = [e["checkpoint"] for e in contract.get("observed_events") or ()
+    events = [_event(e["checkpoint"], e["tick"] if type(e.get("tick")) is int else None,
+                     e["from_tick"] if type(e.get("from_tick")) is int else None)
+              for e in contract.get("observed_events") or ()
               if isinstance(e, dict) and e.get("kind") == "predicate_transition" and isinstance(e.get("checkpoint"), str)
               and (type(loaded_tick) is not int or (type(e.get("tick")) is int and e["tick"] > loaded_tick))]
+    events = _by_id(events)
     inherited = contract.get("inherited_start")
-    return {"source": "contract", "earned": _ordered(earned),
+    return {"source": "contract", "earned": [e["id"] for e in events],
             "holds_now": _passed(contract.get("present")),
-            "inherited": _passed(inherited.get("predicates")) if isinstance(inherited, dict) else None}
+            "inherited": _passed(inherited.get("predicates")) if isinstance(inherited, dict) else None,
+            "events": events, "origin_tick": loaded_tick if type(loaded_tick) is int else None,
+            "origin_basis": "loaded_tick" if type(loaded_tick) is int else None}
+
+
+def _usable(row):
+    """A poll that observed at least one milestone state at a known tick."""
+    return (isinstance(row, dict) and isinstance(row.get("statuses"), dict) and type(row.get("tick")) is int
+            and any(v is not None for v in row["statuses"].values()))
 
 
 def from_polls(rows, loaded_tick=None):
-    """Same rule as the accumulator over recorded ``strict_current`` rows (statuses True/False/None)."""
-    polls = [r for r in rows if isinstance(r, dict) and isinstance(r.get("statuses"), dict) and r["statuses"]
-             and type(r.get("tick")) is int and any(v is not None for v in r["statuses"].values())]
-    if not polls:
+    """Same rule as the accumulator over recorded ``strict_current`` rows (statuses True/False/None).
+
+    The ordered stream is replayed with its unusable polls (empty, all-unknown, tick-less) kept as boundaries: such a
+    poll clears transition eligibility, so a pass is credited only against the adjacent, strictly earlier poll that
+    recorded the milestone as False. A clock regression or repeated tick credits nothing but the next advancing poll
+    may compare against it, as the accumulator does. ``holds_now`` and ``inherited`` come from the last and first
+    usable polls and do not depend on eligibility.
+    """
+    rows = [r for r in rows if isinstance(r, dict)]
+    usable = [r for r in rows if _usable(r)]
+    if not usable:
         return None
-    first, earned, previous = polls[0]["statuses"], set(), None
-    for row in polls:
-        if previous is not None and row["tick"] > previous["tick"] and (type(loaded_tick) is not int or row["tick"] > loaded_tick):
-            earned.update(c for c, v in row["statuses"].items() if v is True and previous["statuses"].get(c) is False)
+    first, last = usable[0], usable[-1]
+    events, previous = {}, None
+    for row in rows:
+        if not _usable(row):
+            previous = None  # observation gap: no transition may span it
+            continue
+        if (previous is not None and row["tick"] > previous["tick"]
+                and (type(loaded_tick) is not int or row["tick"] > loaded_tick)):
+            for cid, value in row["statuses"].items():
+                if value is True and previous["statuses"].get(cid) is False and cid not in events:
+                    events[cid] = _event(cid, row["tick"], previous["tick"])
         previous = row
-    return {"source": "legacy_polls", "earned": _ordered(earned),
-            "holds_now": _ordered(c for c, v in polls[-1]["statuses"].items() if v is True),
-            "inherited": _ordered(c for c, v in first.items() if v is True)}
+    events = _by_id(events.values())
+    origin, basis = ((loaded_tick, "loaded_tick") if type(loaded_tick) is int
+                     else (first["loaded_tick"], "loaded_tick") if type(first.get("loaded_tick")) is int
+                     else (first["tick"], "first_poll"))
+    return {"source": "legacy_polls", "earned": [e["id"] for e in events],
+            "holds_now": _ordered(c for c, v in last["statuses"].items() if v is True),
+            "inherited": _ordered(c for c, v in first["statuses"].items() if v is True),
+            "events": events, "origin_tick": origin, "origin_basis": basis}
+
+
+def event_ticks(block, cid):
+    """``(ticks since the run origin, origin basis)`` of ``cid``'s first earned event, or ``(None, None)`` when unknown."""
+    if not isinstance(block, dict) or type(block.get("origin_tick")) is not int:
+        return None, None
+    for event in block.get("events") or ():
+        if isinstance(event, dict) and event.get("id") == cid and type(event.get("tick")) is int:
+            return event["tick"] - block["origin_tick"], block.get("origin_basis")
+    return None, None
 
 
 def from_latch(ever, final=None):

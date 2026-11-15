@@ -199,7 +199,10 @@ def laya_entry(index: dict) -> dict:
     if block is not None:
         contract = next(((r.get("predicate_evidence") or {}).get("_contract") for r in reversed(rows)
                          if r.get("event") == "strict_current" and isinstance((r.get("predicate_evidence") or {}).get("_contract"), dict)), {})
+        # The block's own events carry the transition tick (also for replayed legacy polls); a summary block that
+        # predates them falls back to the contract's observed events. Null only when no source has the tick.
         ticks = {e.get("checkpoint"): e.get("tick") for e in contract.get("observed_events") or () if isinstance(e, dict)}
+        ticks.update({e["id"]: e.get("tick") for e in block.get("events") or () if isinstance(e, dict) and type(e.get("tick")) is int})
         milestones = [{"id": cid, "tick": ticks.get(cid)} for cid in block["earned"]]
     else:
         for row in rows:

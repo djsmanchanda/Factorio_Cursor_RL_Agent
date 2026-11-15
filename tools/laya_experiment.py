@@ -34,6 +34,7 @@ sys.path.insert(0, str(ROOT))
 
 from tools.run_laya_clean import RUN_INDEX  # noqa: E402
 from training.laya_mission import PHASES  # noqa: E402
+from training.laya_milestone_report import event_ticks  # noqa: E402
 from training.laya_variants import load_variant  # noqa: E402
 
 GAME_PORT, RCON_PORT, SLOTS = 34240, 27140, 20
@@ -140,14 +141,22 @@ def score(rows: list[dict], target: str | None) -> dict:
 
     reached = [r for r in rows if target and target in reached_ids(r["summary"])]
     held = [r for r in rows if target and target in ((r["summary"].get("milestones") or {}).get("holds_now") or [])]
-    ticks = [r["summary"].get("phase_ticks", {}).get(target) for r in reached]
-    ticks = [t for t in ticks if t is not None]
+    # Speed has two separately labelled bases. Evidence timing comes from the milestone block's own first-earned
+    # event, measured from the run's origin; a run whose event time or origin is missing stays unknown and is
+    # visible in the denominator (``timed_of``). Proxy timing is the runner's goal-ladder ``phase_ticks``.
+    timing = [event_ticks(r["summary"].get("milestones"), target) for r in reached if _earned(r["summary"]) is not None]
+    ticks = [t for t, _ in timing if t is not None]
+    proxy_ticks = [t for t in (r["summary"].get("phase_ticks", {}).get(target) for r in rows if target) if t is not None]
     highest = [max((ORDER.index(p) for p in reached_ids(r["summary"]) if p in ORDER), default=-1) for r in rows]
     return {"runs": len(rows), "reached": len(reached), "reach_rate": round(len(reached) / len(rows), 2) if rows else 0,
             "held_at_end": len(held),
             "proxy_fallback": sum(_earned(r["summary"]) is None for r in rows),
             "proxy_phases_reached": sum(bool(target) and target in r["summary"].get("phases_reached", []) for r in rows),
             "median_ticks": statistics.median(ticks) if ticks else None,
+            "timed": len(ticks), "timed_of": len(timing),
+            "timing_origins": sorted({o for t, o in timing if t is not None}),
+            "proxy_median_ticks": statistics.median(proxy_ticks) if proxy_ticks else None,
+            "proxy_timed": len(proxy_ticks),
             "mean_highest_phase": round(statistics.mean(highest), 2) if highest else None,
             "failures": sum(r["summary"].get("failures", 0) for r in rows),
             "untyped_stuck": sum((r["summary"].get("codes") or {}).get("untyped_stuck", 0) for r in rows),
@@ -190,11 +199,12 @@ def report(args: argparse.Namespace) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result, indent=2) + "\n")
     print(f"| variant | runs | earned {target} (evidence; proxy for old runs) | held at end | accepted {target} (deterministic) | "
-          f"runs without evidence block | median ticks | mean highest phase | failures | untyped stuck | stops |")
-    print("|---|---|---|---|---|---|---|---|---|---|---|")
+          f"runs without evidence block | median ticks (evidence; timed/earned) | proxy median ticks (timed) | mean highest phase | failures | untyped stuck | stops |")
+    print("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for vid, s in table.items():
         print(f"| {vid} | {s['runs']} | {s['reached']} ({s['reach_rate']:.0%}) | {s['held_at_end']} | "
-              f"{s['accepted']}/{s['acceptance_checked']} | {s['proxy_fallback']} | {s['median_ticks']} | "
+              f"{s['accepted']}/{s['acceptance_checked']} | {s['proxy_fallback']} | "
+              f"{s['median_ticks']} ({s['timed']}/{s['timed_of']}) | {s['proxy_median_ticks']} ({s['proxy_timed']}) | "
               f"{s['mean_highest_phase']} | {s['failures']} | {s['untyped_stuck']} | {s['stops']} |")
     print(f"report: {path}")
     return 0

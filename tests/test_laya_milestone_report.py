@@ -25,6 +25,9 @@ POLLS = [poll(100, C0=True, C1=False, C2=False, C5=False), poll(200, C0=True, C1
          poll(300, C0=True, C1=False, C2=True, C5=True), poll(400, C0=True, C1=False, C2=True, C5=False)]
 
 
+LEGACY_KEYS = ("source", "earned", "holds_now", "inherited")  # the block's original shape; new fields are additive
+
+
 def contract(earned, present, inherited):
     return {"version": "checkpoint-evidence-v1",
             "observed_events": [{"kind": "predicate_transition", "checkpoint": c, "tick": t} for c, t in earned],
@@ -39,7 +42,9 @@ CONTRACT_ROW = {**poll(400, C0=True, C2=True), "predicate_evidence": {"_contract
 
 def test_polls_separate_earned_from_inherited_and_held():
     block = report.from_polls(POLLS, loaded_tick=100)
-    assert block == {"source": "legacy_polls", "earned": ["C2", "C5"], "holds_now": ["C0", "C2"], "inherited": ["C0"]}
+    assert {k: block[k] for k in LEGACY_KEYS} == {"source": "legacy_polls", "earned": ["C2", "C5"],
+                                                  "holds_now": ["C0", "C2"], "inherited": ["C0"]}
+    assert [(e["id"], e["tick"]) for e in block["events"]] == [("C2", 200), ("C5", 300)]
 
 
 def test_an_unknown_poll_does_not_make_an_earned_pass():
@@ -77,8 +82,8 @@ def test_scheduler_labels_the_latch_fallback_and_still_reports_polls(tmp_path):
     latch = {"event": "acceptance", "tick": 100, "statuses": {"C0": "passed", "C2": "passed", "C5": "passed"}}
     result = scheduler.collect_result(write_world(tmp_path, [latch] + POLLS), {"strict_target": "C2"})
     assert result["accepted_ever_basis"] == "legacy_latch" and result["accepted_ever"] == ["C0", "C2", "C5"]
-    assert result["milestones"] == {"source": "legacy_polls", "earned": ["C2", "C5"],
-                                    "holds_now": ["C0", "C2"], "inherited": ["C0"]}
+    assert {k: result["milestones"][k] for k in LEGACY_KEYS} == {
+        "source": "legacy_polls", "earned": ["C2", "C5"], "holds_now": ["C0", "C2"], "inherited": ["C0"]}
     assert result["strict_reached"].keys() == {"C0", "C2", "C5"}  # old reach logic (incl. inherited C0) is unchanged
 
 
@@ -158,3 +163,96 @@ def test_experiment_report_rebuilds_the_block_for_old_index_rows(tmp_path):
     score = experiment.score([rebuilt], "C1")
     assert score["reached"] == 0 and score["proxy_phases_reached"] == 1 and score["proxy_fallback"] == 0
     assert experiment.with_milestones({"summary": {}}) == {"summary": {}}  # no root, no journal: unchanged
+
+
+# -- observation gaps, event ticks and evidence timing (review R9, R10, R11) ---------------------------------------
+@pytest.mark.parametrize("middle", [{}, {"C1": None}, {"C1": None, "C2": None}])
+def test_a_missing_or_all_unknown_poll_fences_the_transition(middle):
+    rows = [poll(1, C1=False), {"event": "strict_current", "tick": 2, "statuses": middle}, poll(3, C1=True)]
+    block = report.from_polls(rows)
+    assert block["earned"] == [] and block["events"] == [] and block["holds_now"] == ["C1"]
+
+
+def test_a_tickless_poll_is_a_boundary_too():
+    rows = [poll(1, C1=False), {"event": "strict_current", "tick": None, "statuses": {"C1": False}}, poll(3, C1=True)]
+    assert report.from_polls(rows)["earned"] == []
+
+
+def test_partial_unknowns_only_block_the_unknown_milestone():
+    rows = [poll(1, C1=False, C2=None, C3=False), poll(2, C1=True, C2=True, C3=True)]
+    block = report.from_polls(rows)
+    assert block["earned"] == ["C1", "C3"] and [e["tick"] for e in block["events"]] == [2, 2]
+
+
+def test_adjacent_known_failed_predecessor_is_credited_with_its_tick():
+    block = report.from_polls([{**poll(1, C1=False), "loaded_tick": None}, {**poll(3, C1=True), "loaded_tick": None}])
+    assert block["events"] == [{"id": "C1", "tick": 3, "from_tick": 1}] and block["origin_tick"] == 1
+    assert block["origin_basis"] == "first_poll"
+
+
+def test_duplicate_ticks_and_clock_regressions_credit_nothing():
+    assert report.from_polls([poll(5, C1=False), poll(5, C1=True)])["earned"] == []
+    assert report.from_polls([poll(9, C1=False), poll(4, C1=True)])["earned"] == []
+    # After a regression the next advancing poll compares with the regressed one (as the accumulator does).
+    block = report.from_polls([poll(9, C1=True), poll(4, C1=False), poll(6, C1=True)])
+    assert block["earned"] == ["C1"] and block["events"][0]["from_tick"] == 4
+
+
+def test_polls_and_contract_agree_on_a_gap_fixture():
+    # The accumulator never credits across a failed poll; the replay of the same recorded stream must agree.
+    from orchestrator.checkpoint_evidence import evidence_failure, evidence_success, new_evidence_state
+    from orchestrator.checkpoint_milestones import FactorySnapshot
+    state = new_evidence_state()
+    before, after = FactorySnapshot(tick=1, base_valid=False), FactorySnapshot(tick=3, base_valid=True)
+    evidence_success(state, before, [before])
+    evidence_failure(state)
+    evidence_success(state, before, [before, after])
+    assert "C0" not in state["events"]
+    rows = [poll(1, C0=False), {"event": "strict_current", "tick": 2, "statuses": {}}, poll(3, C0=True)]
+    assert report.from_polls(rows)["earned"] == []
+
+
+def test_contract_block_carries_event_ticks_and_the_load_origin():
+    block = report.from_contract(contract([("C2", 200), ("C5", 300)], {"C2": "passed"}, {"C2": "failed"}), loaded_tick=100)
+    assert [(e["id"], e["tick"]) for e in block["events"]] == [("C2", 200), ("C5", 300)]
+    assert report.event_ticks(block, "C5") == (200, "loaded_tick") and report.event_ticks(block, "C3") == (None, None)
+    assert report.event_ticks(report.from_contract(contract([("C2", 200)], {}, {})), "C2") == (None, None)  # origin unknown
+
+
+def test_ledger_keeps_the_transition_tick_for_legacy_journals(tmp_path):
+    rows = [{**poll(1, C1=False), "run_id": "r"}, {**poll(3, C1=True), "run_id": "r"}]
+    entry = run_ledger.laya_entry({"run_id": "r", "root": str(write_world(tmp_path, rows)), "summary": {}})
+    assert entry["milestones"] == [{"id": "C1", "tick": 3}]
+
+
+def test_ledger_has_no_event_across_a_gap(tmp_path):
+    rows = [{**poll(1, C1=False), "run_id": "r"}, {"event": "strict_current", "run_id": "r", "tick": 2, "statuses": {}},
+            {**poll(3, C1=True), "run_id": "r"}]
+    entry = run_ledger.laya_entry({"run_id": "r", "root": str(write_world(tmp_path, rows)), "summary": {}})
+    assert entry["milestones"] == []
+
+
+def test_experiment_speed_comes_from_the_evidence_event_not_the_proxy():
+    block = report.from_contract(contract([("C1", 100)], {"C1": "passed"}, {}), loaded_tick=40)
+    rows = [{"summary": {"milestones": block, "phase_ticks": {"C1": 10}}}]
+    score = experiment.score(rows, "C1")
+    assert score["median_ticks"] == 60 and score["timed"] == 1 and score["timed_of"] == 1
+    assert score["timing_origins"] == ["loaded_tick"] and score["proxy_median_ticks"] == 10 and score["proxy_timed"] == 1
+
+
+def test_experiment_leaves_missing_event_time_unknown_and_visible_in_the_denominator():
+    timed = report.from_contract(contract([("C1", 100)], {}, {}), loaded_tick=0)
+    untimed = report.from_contract(contract([("C1", 100)], {}, {}))  # no loaded tick: origin unknown
+    rows = [{"summary": {"milestones": timed, "phase_ticks": {"C1": 10}}},
+            {"summary": {"milestones": untimed, "phase_ticks": {"C1": 10}}}]
+    score = experiment.score(rows, "C1")
+    assert score["reached"] == 2 and (score["timed"], score["timed_of"]) == (1, 2) and score["median_ticks"] == 100
+    only_untimed = experiment.score(rows[1:], "C1")
+    assert only_untimed["median_ticks"] is None and only_untimed["proxy_median_ticks"] == 10
+
+
+def test_experiment_proxy_only_runs_report_no_evidence_timing():
+    rows = [{"summary": {"phases_reached": ["C1"], "phase_ticks": {"C1": 10}}}]
+    score = experiment.score(rows, "C1")
+    assert score["reached"] == 1 and score["median_ticks"] is None and score["timed_of"] == 0
+    assert score["proxy_median_ticks"] == 10
