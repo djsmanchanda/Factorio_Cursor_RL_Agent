@@ -26,6 +26,39 @@ state preserves the marker; it does not prove the absence of an earlier dispatch
 Correlated readback is required before configuration uncertainty can be cleared.
 The existing 256-file and 16 MiB transfer bounds still apply; overflow refuses
 export/import rather than omitting journals. This is a bounded uncertainty
-fence, not full controller or loan restart equivalence. Gate-retry state and
-background submissions outside the selected invocation journal remain separate
+fence, not full controller or loan restart equivalence. Background submissions outside the selected invocation journal remain separate
 acceptance work. Runtime manifests retain their own immutable startup checks.
+
+## Version 4 loan gate retry transfer
+
+Version 4 adds the bounded episode-owned loan gate retry file (256 records,
+256 KiB). Charges are flushed to disk and their directory entries before
+configuration dispatch. A charge remains spent if dispatch or receipt observation
+fails; invocation uncertainty independently fences further work. Reopening the
+actual session constructor does not reset the budget. The key includes the
+cell, lender, borrower, loan demand and step demand, while changes to a
+configuration group's encoded craft baseline do not create a new budget.
+
+The three-refresh limit and fed-cell/mismatched-readback requirements are
+unchanged. Same or regressing ticks and missing or regressing craft counts
+cannot charge or replenish it. Observed craft advancement above the durable
+high-water mark resets the attempt count while retaining the last charged tick.
+A missing historical budget starts unknown; it waits for observed advancement.
+A newly proposed loan can initialize a known budget before initial configuration.
+Unscoped callers cannot issue gate refreshes. This preserves safe refusal when
+no episode-owned durable state can be established.
+
+Version 1–3 imports create an unknown retry-provenance file; version 1–2
+imports also retain the existing invocation-uncertainty marker. Re-export does
+not upgrade either provenance claim. Payload/scope/type/digest validation and
+all import preflight complete before installing any sidecar. File and directory
+flush failures stop dispatch. The single-runner ownership rule still applies;
+this file is not a multi-writer coordinator. The separate ops-generation
+checkpoint path also captures this exact episode-owned file instead of the
+retired Python attempt dictionary; its existing source-hash checks still refuse
+old incompatible generations.
+
+This contract covers bounded retry conservation in offline fixtures. It does
+not prove full loan/controller restart equivalence, machine identity continuity,
+correlated configuration readback, delivery, or live efficacy. A reviewed new
+frozen runner is required for future use; no runtime action was performed.

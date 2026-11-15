@@ -18,8 +18,11 @@ from typing import Any, Union, get_args, get_origin, get_type_hints
 from orchestrator.checkpoint_milestones import CheckpointEvaluator, FactorySnapshot
 from orchestrator.oil_transaction import OilTransactionStore
 from orchestrator.operation_invocations import decode_record
+from orchestrator.loan_gate_retries import (
+    retry_path, decode_state as decode_gate_retries, empty_state as empty_gate_retries,
+)
 
-VERSION = 3
+VERSION = 4
 MAX_FILES = 256
 MAX_BYTES = 16 * 1024 * 1024
 MAX_HISTORY = 20
@@ -64,6 +67,7 @@ def sidecar_registry(script_output: Path, episode_id: str) -> dict[str, Path]:
             "steel_district": material.with_suffix(".steel-district.json"),
             "bootstrap_work": logs / "deterministic-bootstrap-work" / f"{episode_id}.json",
             "bootstrap_district": logs / "deterministic-bootstrap-districts" / episode_id,
+            "loan_gate_retries": retry_path(script_output, episode_id),
             "operation_invocations": Path(script_output) / ("operation-invocations-" + hashlib.sha256(episode_id.encode()).hexdigest()[:20]),
             "oil_transaction": OilTransactionStore(Path(script_output), episode_id, SURFACE, FORCE).path}
 
@@ -107,6 +111,8 @@ def _read_sidecars(registry: dict[str, Path], episode_id: str) -> dict:
             try:
                 if role == "operation_invocations":
                     decode_record(data, entry.name, episode_id)
+                elif role == "loan_gate_retries":
+                    decode_gate_retries(data, episode_id)
                 else:
                     json.loads(data)
             except (ValueError, UnicodeDecodeError) as error:
@@ -214,9 +220,9 @@ def import_restart_state(bundle: dict, script_output: Path, *, episode_id: str, 
         raise ValueError("Restart bundle must be JSON") from error
     if len(encoded.encode()) > MAX_BYTES * 2:
         raise ValueError("Restart bundle exceeds size limit")
-    if not isinstance(bundle, dict) or set(bundle) != ({"version", "scope", "milestones", "baseline", "history", "reached", "sidecars"} | ({"evidence_state"} if bundle.get("version") in (2, 3) else set())):
+    if not isinstance(bundle, dict) or set(bundle) != ({"version", "scope", "milestones", "baseline", "history", "reached", "sidecars"} | ({"evidence_state"} if bundle.get("version") in (2, 3, 4) else set())):
         raise ValueError("Invalid restart bundle shape")
-    if type(bundle["version"]) is not int or bundle["version"] not in (1, 2, VERSION) or bundle["scope"] != scope:
+    if type(bundle["version"]) is not int or bundle["version"] not in (1, 2, 3, VERSION) or bundle["scope"] != scope:
         raise ValueError("Restart version or scope mismatch")
     evaluator = CheckpointEvaluator()
     current = _milestones(evaluator)
@@ -238,10 +244,15 @@ def import_restart_state(bundle: dict, script_output: Path, *, episode_id: str, 
         raise ValueError("Invalid reached checkpoints")
     evaluator.reached = set(reached)
     from orchestrator.checkpoint_evidence import new_evidence_state, validate_evidence_state
-    evidence_state = validate_evidence_state(bundle["evidence_state"]) if bundle["version"] in (2, 3) else new_evidence_state(origin="unknown")
+    evidence_state = validate_evidence_state(bundle["evidence_state"]) if bundle["version"] >= 2 else new_evidence_state(origin="unknown")
     registry = sidecar_registry(script_output, episode_id)
     sidecars = bundle["sidecars"]
-    if not isinstance(sidecars, dict) or set(sidecars) != (set(registry) if bundle["version"] == VERSION else set(registry) - {"operation_invocations"}):
+    expected_roles = set(registry)
+    if bundle['version'] < 4:
+        expected_roles.remove('loan_gate_retries')
+    if bundle['version'] < 3:
+        expected_roles.remove('operation_invocations')
+    if not isinstance(sidecars, dict) or set(sidecars) != expected_roles:
         raise ValueError("Incomplete sidecar registry")
     pending = []
     total = 0
@@ -266,11 +277,18 @@ def import_restart_state(bundle: dict, script_output: Path, *, episode_id: str, 
                 raise ValueError("Sidecar limit or digest mismatch")
             if role == "operation_invocations":
                 decode_record(data, name, episode_id)
+            elif role == "loan_gate_retries":
+                decode_gate_retries(data, episode_id)
             pending.append((path / name if role in _DIRECTORY_ROLES else path, data))
     if bundle["version"] < 3:
         pending.append((registry["operation_invocations"] / "legacy-unknown.json", b'{"provenance":"unknown"}'))
-        if len(pending) > MAX_FILES or total + len(pending[-1][1]) > MAX_BYTES:
-            raise ValueError('Legacy provenance marker exceeds sidecar limit')
+        total += len(pending[-1][1])
+    if bundle['version'] < 4:
+        data = json.dumps(empty_gate_retries(episode_id, provenance='unknown')).encode()
+        pending.append((registry['loan_gate_retries'], data))
+        total += len(data)
+    if len(pending) > MAX_FILES or total > MAX_BYTES:
+        raise ValueError('Legacy provenance marker exceeds sidecar limit')
     created = []
     directories = set()
     try:

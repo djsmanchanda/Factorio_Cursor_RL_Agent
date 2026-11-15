@@ -22,6 +22,9 @@ from orchestrator.build_decisions import (
     may_consume_stocked_inputs,
 )
 from orchestrator.bootstrap_work import BootstrapWorkLedger
+from orchestrator.loan_gate_retries import (
+    GateRetries, identity as gate_retry_identity, LIMIT as _LOAN_GATE_REFRESH_LIMIT,
+)
 from orchestrator.build_diagnostics import _diagnose_blockage, _side_sample_plate_output
 from orchestrator.bootstrap_district import (
     BootstrapDistrictLedger, BootstrapDistrictState, BootstrapLifecycleError,
@@ -5808,12 +5811,15 @@ _DYNAMIC_BELT_BORROWERS = frozenset({"copper-cable"})
 _BOOTSTRAP_LOAN_PROGRESS_REVISION = 0
 # Configuration changes require re-observation even when they do not prove output.
 _BOOTSTRAP_LOAN_CONFIGURATION_REVISION = 0
-#: Consecutive gate refreshes per loan step without craft progress. A
-#: bill-frozen gate refreshes and continues; only a step that ignores
-#: repeated refreshes raises mall_loan_gate_mismatch.
-_LOAN_GATE_REFRESH_ATTEMPTS: dict[tuple[str, str, int], int] = {}
-_LOAN_GATE_REFRESH_LIMIT = 3
-_LOAN_GATE_REFRESH_TICKS: dict[tuple[str, str, int], int] = {}
+
+
+def _loan_gate_retry_store(bridge, surface, force):
+    """Reopen the episode-owned budget; process initialization cannot replenish it."""
+    if not getattr(bridge, 'episode_id', None) or not getattr(bridge, 'script_output', None):
+        return None  # Unscoped callers cannot establish a restart-safe repair budget.
+    return GateRetries(bridge.script_output, bridge.episode_id, surface, force)
+
+
 _BOOTSTRAP_SHARED_PROVIDER_ITEMS: set[str] = set()
 _MALL_REFRESH_SIGNATURES: set[tuple[object, ...]] = set()
 _MALL_PROVIDER_CAPACITY_FLOORS: dict[tuple[str, str, str, Point], int] = {}
@@ -6464,6 +6470,7 @@ def _submit_bootstrap_loan(
     count is stocked, skipping spare production: nothing else asks for more.
     """
     global _BOOTSTRAP_LOAN_PROGRESS_REVISION, _BOOTSTRAP_LOAN_CONFIGURATION_REVISION
+    gate_retries = _loan_gate_retry_store(bridge, surface, force)
     if loan.releasing:
         _restore_bootstrap_loan(client, bridge, surface, force, loan, emit,
                                 reason="finish pending WIP recovery", reference_point=reference_point)
@@ -6801,6 +6808,8 @@ def _submit_bootstrap_loan(
             ),
         )
         plan["surface"], plan["force"] = surface, force
+        if gate_retries is not None:
+            gate_retries.start(gate_retry_identity(loan, step), products_finished, proposed=loan.proposed)
         _submit(
             client, bridge, surface, plan,
             f"bootstrap_loan_{loan.target_item}", emit,
@@ -6839,10 +6848,18 @@ def _submit_bootstrap_loan(
         consume_wait(f"bootstrap_loan_{loan.target_item}")
         time.sleep(_BOOTSTRAP_LOAN_POLL_SECONDS)
         after = _bootstrap_loan_products_finished(client, surface, loan)
+        try:
+            after_tick = live_base.game_tick(client)
+        except Exception:
+            after_tick = None
+        refresh_key = gate_retry_identity(loan, step)
+        retry_observation = gate_retries is not None and gate_retries.observe(
+            refresh_key, products_finished, after, before_tick, after_tick)
         if after is not None and products_finished is not None and after > products_finished:
-            progress_key = (live_loan_group, step.recipe, step.target_count)
-            _LOAN_GATE_REFRESH_ATTEMPTS.pop(progress_key, None)
-            _LOAN_GATE_REFRESH_TICKS.pop(progress_key, None)
+            if gate_retries is not None and not retry_observation:
+                emit(f"  MALL BOOTSTRAP LOAN OBSERVATION WAIT: {step.recipe} "
+                     "craft or clock evidence regressed behind the durable observation")
+                return f"borrowed {loan.original_recipe} cell waits for {step.recipe} observation"
             _BOOTSTRAP_LOAN_PROGRESS_REVISION += 1
             emit(
                 f"  MALL BOOTSTRAP LOAN PROGRESS: {step.recipe} craft count "
@@ -6896,10 +6913,6 @@ def _submit_bootstrap_loan(
                 # refresh budget; only a fed cell that ignores refreshes is
                 # genuinely stuck.
                 evidence = _loan_input_evidence(client, surface, force, loan, step, after)
-                try:
-                    after_tick = live_base.game_tick(client)
-                except Exception:
-                    after_tick = None
                 # A source transfer is only a possible route, not delivery. A
                 # delayed or unobservable cell must retain its obligation.
                 if evidence.fed is not True:
@@ -6907,7 +6920,6 @@ def _submit_bootstrap_loan(
                          f"local inputs {'short' if evidence.fed is False else 'unknown'}")
                     return (f"borrowed {loan.original_recipe} cell waits for "
                             f"{step.recipe} ingredients for the {loan.target_item} seed")
-                refresh_key = (live_loan_group, step.recipe, step.target_count)
                 gate = evidence.gate
                 constant = gate.get("constant") if isinstance(gate, Mapping) else None
                 mismatch = (evidence.recipe == step.recipe and isinstance(gate, Mapping)
@@ -6917,18 +6929,14 @@ def _submit_bootstrap_loan(
                             and -(2 ** 31) <= constant < 2 ** 31
                             and constant == int(constant)
                             and constant != step.target_count)
-                last_tick = _LOAN_GATE_REFRESH_TICKS.get(refresh_key)
-                if (before_tick is None or after_tick is None or after_tick <= before_tick
-                        or (last_tick is not None and after_tick <= last_tick)
-                        or after is None or products_finished is None
-                        or after < products_finished or not mismatch):
+                if not retry_observation or not mismatch:
                     emit(f"  MALL BOOTSTRAP LOAN OBSERVATION WAIT: {step.recipe} "
-                         "requires advancing time, monotonic crafts and known mismatched control readback")
+                         "requires a known durable budget, advancing time, monotonic crafts and known mismatched control readback")
                     return f"borrowed {loan.original_recipe} cell waits for {step.recipe} observation"
-                _LOAN_GATE_REFRESH_TICKS[refresh_key] = after_tick
-                attempts = _LOAN_GATE_REFRESH_ATTEMPTS.get(refresh_key, 0) + 1
-                _LOAN_GATE_REFRESH_ATTEMPTS[refresh_key] = attempts
-                if attempts > _LOAN_GATE_REFRESH_LIMIT:
+                attempts = gate_retries.charge(refresh_key, after_tick)
+                if attempts is None:
+                    return f"borrowed {loan.original_recipe} cell waits for {step.recipe} observation"
+                if attempts == 0:
                     raise StuckError(
                         f"bootstrap loan step {step.recipe} is disabled below "
                         f"its stock target {step.target_count} after "
@@ -13476,8 +13484,6 @@ def initialize_operation_runtime(
     _STARTUP_MALL_LIMITS_RELEASED = False
     _STARTUP_MALL_LIMITS_FALLBACK_PROBED = False
     _BOOTSTRAP_LOAN_PROGRESS_REVISION = 0
-    _LOAN_GATE_REFRESH_ATTEMPTS.clear()
-    _LOAN_GATE_REFRESH_TICKS.clear()
     _CRAFT_PROOF_CONSUMED.clear()
     _POST_STARTER_TRANSITION_ANNOUNCED = False
     catalog = load_json(bridge.export_recipe_catalog(force=force))

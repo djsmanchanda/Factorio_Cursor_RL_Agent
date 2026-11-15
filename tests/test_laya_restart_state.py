@@ -118,7 +118,7 @@ def test_training_export_import_restores_real_session_boundary(tmp_path):
                                  mod_scope="factorio-2/test-mod-hash")
     assert TrainingRestartState is RestartState
     assert type(state) is RestartState
-    assert bundle["version"] == VERSION == 3
+    assert bundle["version"] == VERSION == 4
     session = DeterministicSession.__new__(DeterministicSession)
     session.episode_id = "laya-original"
     session.script_output = target
@@ -164,6 +164,7 @@ def test_legacy_invocation_provenance_stays_unknown(tmp_path, version):
     _, bundle = make_bundle(tmp_path)
     bundle['version'] = version
     del bundle['sidecars']['operation_invocations']
+    del bundle['sidecars']['loan_gate_retries']
     if version == 1:
         del bundle['evidence_state']
     target = tmp_path / 'target' / 'script-output'
@@ -249,6 +250,7 @@ def test_legacy_marker_obeys_total_file_bound(tmp_path, monkeypatch):
     _, bundle = make_bundle(tmp_path)
     bundle['version'] = 2
     del bundle['sidecars']['operation_invocations']
+    del bundle['sidecars']['loan_gate_retries']
     monkeypatch.setattr(restart, 'MAX_FILES', sum(len(files) for files in bundle['sidecars'].values()))
     target = tmp_path / 'target/server/script-output'
     with pytest.raises(ValueError, match='marker exceeds'):
@@ -268,6 +270,7 @@ def test_only_owned_journals_are_transferred_and_legacy_unknown_survives(tmp_pat
     assert list(bundle['sidecars']['operation_invocations']) == [record['operation_id'] + '.json']
     bundle['version'] = 2
     del bundle['sidecars']['operation_invocations']
+    del bundle['sidecars']['loan_gate_retries']
     target = tmp_path / 'legacy/server/script-output'
     import_restart_state(bundle, target, episode_id='laya-original', mod_scope='mods')
     upgraded = export_restart_state(target, 'laya-original', 'mods', baseline, [baseline], CheckpointEvaluator())

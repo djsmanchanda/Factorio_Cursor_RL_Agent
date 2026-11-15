@@ -5,8 +5,16 @@ import pytest
 
 from orchestrator import autonomous_builder as b
 from tests.test_laya_loan_delivery import _loan
+from orchestrator.loan_gate_retries import GateRetries, identity
 
 pytestmark = pytest.mark.fast
+
+
+@pytest.fixture(autouse=True)
+def retry_store(tmp_path, monkeypatch):
+    store = GateRetries(tmp_path / 'script-output', 'episode')
+    monkeypatch.setattr(b, '_loan_gate_retry_store', lambda *_: store)
+    return store
 
 
 def test_local_inputs_are_distinct_from_global_stock(monkeypatch):
@@ -24,7 +32,8 @@ def test_local_inputs_are_distinct_from_global_stock(monkeypatch):
 
 def _observed_loan(monkeypatch, *, constant=1, circuit_enabled=False):
     loan = _loan(monkeypatch)
-    monkeypatch.setattr(b, "_LOAN_GATE_REFRESH_TICKS", {})
+    store = b._loan_gate_retry_store(None, None, None)
+    store.start(identity(loan, SimpleNamespace(recipe='electronic-circuit', target_count=3)), 862, proposed=True)
     monkeypatch.setattr(b.live_base, "loan_cell_item_count", lambda *_: 100)
     monkeypatch.setattr(b.live_base, "mall_gate_survey", lambda *_: [{
         "position": loan.machine_position, "recipe": "electronic-circuit",
@@ -44,7 +53,7 @@ def test_same_or_regressing_tick_never_refreshes(monkeypatch, ticks):
     monkeypatch.setattr(b.live_base, "game_tick", lambda *_: next(samples))
     result = b._submit_bootstrap_loan(object(), object(), "nauvis", "player", loan, lambda *_: None)
     assert "waits for" in result
-    assert b._LOAN_GATE_REFRESH_ATTEMPTS == {}
+    assert all(row["attempts"] == 0 for row in b._loan_gate_retry_store(None, None, None).state["records"].values())
 
 
 @pytest.mark.parametrize("constant", [True, None, "1", 1.5, float("nan"), float("inf"), 2 ** 32])
@@ -52,14 +61,14 @@ def test_invalid_gate_threshold_never_spends_retry(monkeypatch, constant):
     loan = _observed_loan(monkeypatch, constant=constant)
     result = b._submit_bootstrap_loan(object(), object(), "nauvis", "player", loan, lambda *_: None)
     assert "waits for" in result
-    assert b._LOAN_GATE_REFRESH_ATTEMPTS == {}
+    assert all(row["attempts"] == 0 for row in b._loan_gate_retry_store(None, None, None).state["records"].values())
 
 
 @pytest.mark.parametrize("circuit_enabled", [True, None])
 def test_unsupported_control_readback_never_spends_retry(monkeypatch, circuit_enabled):
     loan = _observed_loan(monkeypatch, circuit_enabled=circuit_enabled)
     b._submit_bootstrap_loan(object(), object(), "nauvis", "player", loan, lambda *_: None)
-    assert b._LOAN_GATE_REFRESH_ATTEMPTS == {}
+    assert all(row["attempts"] == 0 for row in b._loan_gate_retry_store(None, None, None).state["records"].values())
 
 
 @pytest.mark.parametrize("first_status", [None, "disabled_by_control_behavior"])
@@ -80,7 +89,7 @@ def test_missing_status_never_claims_resumed(monkeypatch, first_status, missing)
     result = b._submit_bootstrap_loan(object(), object(), "nauvis", "player", loan, messages.append)
     assert "waits for" in result
     assert not any("RESUMED" in message for message in messages)
-    assert b._LOAN_GATE_REFRESH_ATTEMPTS == {}
+    assert all(row["attempts"] == 0 for row in b._loan_gate_retry_store(None, None, None).state["records"].values())
 
 
 def test_regressing_craft_counter_never_spends_retry(monkeypatch):
@@ -89,19 +98,20 @@ def test_regressing_craft_counter_never_spends_retry(monkeypatch):
     monkeypatch.setattr(b, "_bootstrap_loan_products_finished", lambda *_: next(samples))
     result = b._submit_bootstrap_loan(object(), object(), "nauvis", "player", loan, lambda *_: None)
     assert "waits for" in result
-    assert b._LOAN_GATE_REFRESH_ATTEMPTS == {}
+    assert all(row["attempts"] == 0 for row in b._loan_gate_retry_store(None, None, None).state["records"].values())
 
 
 def test_advancing_crafts_clear_step_retry_budget(monkeypatch):
     loan = _observed_loan(monkeypatch)
-    key = (loan.group, "electronic-circuit", 3)
-    b._LOAN_GATE_REFRESH_ATTEMPTS[key] = 2
-    b._LOAN_GATE_REFRESH_TICKS[key] = 9
+    key = identity(loan, SimpleNamespace(recipe='electronic-circuit', target_count=3))
+    store = b._loan_gate_retry_store(None, None, None)
+    store.charge(key, 7)
+    store.charge(key, 9)
     samples = iter([862, 863])
     monkeypatch.setattr(b, "_bootstrap_loan_products_finished", lambda *_: next(samples))
     b._submit_bootstrap_loan(object(), object(), "nauvis", "player", loan, lambda *_: None)
-    assert key not in b._LOAN_GATE_REFRESH_ATTEMPTS
-    assert key not in b._LOAN_GATE_REFRESH_TICKS
+    assert store.state['records'][key]['attempts'] == 0
+    assert store.state['records'][key]['last_tick'] == 9
 
 
 def test_unchanged_tick_cannot_spend_a_second_retry(monkeypatch):
@@ -110,4 +120,5 @@ def test_unchanged_tick_cannot_spend_a_second_retry(monkeypatch):
     monkeypatch.setattr(b.live_base, "game_tick", lambda *_: next(samples))
     for _ in range(2):
         b._submit_bootstrap_loan(object(), object(), "nauvis", "player", loan, lambda *_: None)
-    assert b._LOAN_GATE_REFRESH_ATTEMPTS == {(loan.group, "electronic-circuit", 3): 1}
+    key = identity(loan, SimpleNamespace(recipe='electronic-circuit', target_count=3))
+    assert b._loan_gate_retry_store(None, None, None).state['records'][key]['attempts'] == 1

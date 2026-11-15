@@ -64,6 +64,30 @@ def test_failed_save_generation_never_publishes_a_checkpoint(tmp_path, monkeypat
     assert list(destination.parent.glob(".bundle.pending-*"))  # retained crash evidence
 
 
+def test_ops_generation_transfers_episode_retry_budget_as_durable_sidecar(tmp_path, monkeypatch):
+    from orchestrator.loan_gate_retries import GateRetries
+    adapter, session, state = _capture_fixture(tmp_path, monkeypatch)
+    store = GateRetries(adapter.root / 'server/script-output', 'logical')
+    key = 'a' * 64
+    store.start(key, 862, proposed=True)
+    store.charge(key, 10)
+    store.charge(key, 20)
+    destination = tmp_path / 'data/bundle'
+    meta = checkpoint.capture(adapter, GuidedPolicy(7), session, destination, state)
+    target = tmp_path / 'data/restored'
+    target.mkdir()
+    (target / 'manifest.json').write_text(json.dumps({
+        'source_sha256': meta['files']['source.zip'], 'mod_hashes': meta['mod_hashes']}))
+    monkeypatch.setattr(checkpoint, 'owned_root', lambda path: Path(path))
+    _, restored_controller = checkpoint.restore_context(destination, target)
+    restored = GateRetries(target / 'server/script-output', 'logical')
+    assert restored.state == store.state
+    assert restored.charge(key, 20) is None
+    assert restored.charge(key, 30) == 3
+    assert restored.charge(key, 40) == 0
+    assert '_LOAN_GATE_REFRESH_ATTEMPTS' not in restored_controller['session']['runtime']['orchestrator.autonomous_builder']
+
+
 class World:
     root = None
     extra_recipes = ()

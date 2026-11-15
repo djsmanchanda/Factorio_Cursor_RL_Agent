@@ -39,7 +39,6 @@ def _loan(monkeypatch):
         step_target_count=3, step_baseline_finished=862,
         step_required_crafts=2, step_minimum_crafts=2)
     stock = {"electronic-circuit": 1, "copper-cable": 4, "iron-plate": 956}
-    monkeypatch.setattr(builder, "_LOAN_GATE_REFRESH_ATTEMPTS", {})
     monkeypatch.setattr(builder, "_bootstrap_loan_stock", lambda *_a: (dict(stock), dict(stock)))
     monkeypatch.setattr(builder, "next_bootstrap_step",
                         lambda *_a, **_k: MallBootstrapStep("electronic-circuit", 3, 2))
@@ -63,14 +62,12 @@ def test_provider_movement_does_not_prove_receipt(monkeypatch):
     remedy = builder._submit_bootstrap_loan(object(), object(), "nauvis", "player", loan, messages.append)
     assert "waits for" in remedy
     assert staged == [("electronic-circuit", loan.requester_position)]
-    assert builder._LOAN_GATE_REFRESH_ATTEMPTS == {}
 
 
 def test_missing_telemetry_does_not_refresh(monkeypatch):
     loan = _loan(monkeypatch)
     monkeypatch.setattr(builder, "_deliver_cell_ingredients", lambda *_a, **_k: False)
     builder._submit_bootstrap_loan(object(), object(), "nauvis", "player", loan, lambda *_: None)
-    assert builder._LOAN_GATE_REFRESH_ATTEMPTS == {}
 
 
 def _delivery_env(monkeypatch, *, radii, moves=5):

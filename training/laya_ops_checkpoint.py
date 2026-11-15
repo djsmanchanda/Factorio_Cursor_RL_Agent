@@ -20,7 +20,7 @@ RUNTIME = {
     "orchestrator.autonomous_builder": (
         "_STAGE_DELIVERY_PROVIDERS", "_STAGE_DELIVERY_ATTEMPTS", "_REFINERY_SITE_RESERVATIONS", "_TRANSFERABLE_WAITS",
         "_BLOCKING_MALL_ITEMS", "_DRAIN_WATCH_LAST_TRANSFERABLE", "_DRAIN_WATCH_PREVIOUS_TRANSFERABLE",
-        "UNBACKED_DRAWS", "MANAGED_INTERMEDIATE_SOURCES", "_LOAN_GATE_REFRESH_ATTEMPTS", "_BOOTSTRAP_SHARED_PROVIDER_ITEMS",
+        "UNBACKED_DRAWS", "MANAGED_INTERMEDIATE_SOURCES", "_BOOTSTRAP_SHARED_PROVIDER_ITEMS",
         "_MALL_REFRESH_SIGNATURES", "_MALL_PROVIDER_CAPACITY_FLOORS", "_MALL_STOCK_GATE_FLOORS", "_RAISED_STOCK_GATE_FLOORS",
         "_MALL_ITEM_PROVIDER_LIMITS", "_CRAFT_PROOF_CONSUMED", "_BOOTSTRAP_LOAN_PROGRESS_REVISION",
         "_BOOTSTRAP_LOAN_CONFIGURATION_REVISION", "_STARTUP_METAL_STARTERS_OBSERVED", "_STARTUP_MALL_LIMITS_RELEASED",
@@ -148,13 +148,18 @@ def restore_session(session, state):
         session._evaluator.reached = set(state["accepted"])
 
 
-def _sidecars(root):
+def _sidecars(root, episode_id):
     # Register authoritative state only, never credentials or stale report exports.
     for folder in ("server/logs/deterministic-material-reservations", "server/logs/deterministic-bootstrap-districts",
                    "server/logs/deterministic-bootstrap-work", "server/script-output/logs", "evidence"):
         for p in (root / folder).rglob("*"):
             if p.is_file() and p.suffix in {".json", ".jsonl"}:
                 yield p
+    # Gate repair budgets are durable episode state, never Python cache state.
+    from orchestrator.loan_gate_retries import GateRetries
+    retries = GateRetries(root / 'server/script-output', episode_id)
+    if retries.path.exists():
+        yield retries.path
 
 
 def _engine(root):
@@ -201,7 +206,7 @@ def capture(adapter, policy, session, destination, controller):
         controller = {**controller, "session": session_state(session), "rng": policy.rng.getstate(),
                       "policy": {"class": type(policy).__name__, "epsilon": getattr(policy, "epsilon", None),
                                  "preferences": getattr(policy, "preferences", None)}}
-        for path in _sidecars(adapter.root):
+        for path in _sidecars(adapter.root, session.episode_id):
             target = staging / "context" / path.relative_to(adapter.root)
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(path, target)
