@@ -121,6 +121,10 @@ def main(argv=None):
     replay.add_argument('--rcon-port', type=int, required=True)
     replay.add_argument('--deadline', type=float, required=True, help='epoch seconds; checked between synchronous operations and during clock waits')
     replay.add_argument('--max-steps', type=int, default=40)
+    replay.add_argument('--sample-interval', type=float, default=60.0,
+                        help='wall seconds between strict samples of the one persistent sidecar')
+    replay.add_argument('--fund-shortages', action='store_true',
+                        help='after a material_shortage, run the existing produce operation for each short item')
     replay.add_argument('--engine-binary', type=Path,
                         default=Path('/home/miniship/.local/share/factorio-rl/runtime/factorio-2.1.24/bin/x64/factorio'))
     replay.add_argument('--require-idle-host', action='store_true',
@@ -205,15 +209,19 @@ def main(argv=None):
             return lines
 
         from training.laya_clean_runner import LiveWorld
-        summary = run_live_replay(
-            reload_info, lambda: LiveWorld(args.root),
-            lambda: DeterministicSession(args.root, emit=_emit),
-            args.root/'evidence/pm-replay.jsonl', max_steps=max(1, args.max_steps),
-            deadline=args.deadline,
-            stock_reader=lambda s: ((s.economics() or {}).get('stock') or {}).get('network') or {},
-            message_reader=_read_trail,
-            consumption_probe=lambda: sample_consumption(
-                args.root, args.root/'evidence/strict.json'))
+        sampler = StrictSampler(args.root, args.root/'evidence/strict.json',
+                                interval=args.sample_interval)
+        try:
+            summary = run_live_replay(
+                reload_info, lambda: LiveWorld(args.root),
+                lambda: DeterministicSession(args.root, emit=_emit),
+                args.root/'evidence/pm-replay.jsonl', max_steps=max(1, args.max_steps),
+                deadline=args.deadline, after_live=sampler.start,
+                stock_reader=lambda s: ((s.economics() or {}).get('stock') or {}).get('network') or {},
+                message_reader=_read_trail, consumption_probe=sampler.probe,
+                fund_shortages=args.fund_shortages, observe_after_placement=True)
+        finally:
+            sampler.close()
         print(json.dumps({**summary, 'prepared': prepared, 'reload': reload_info,
                           'capacity': capacity}, indent=2))
         return 0 if summary['pm_evidence_complete'] else 4
@@ -267,7 +275,8 @@ def _journal_messages(stream, index: int, lines: list[str]) -> None:
         stream.flush()
 
 
-def run_live_replay(reload_info, adapter_factory, session_factory, evidence_path, **kwargs):
+def run_live_replay(reload_info, adapter_factory, session_factory, evidence_path, *,
+                    after_live=None, **kwargs):
     """Start live play only after the paused reload has been verified."""
     if not reload_info.get("reload_verified"):
         raise ReplayError("paused reload was not verified")
@@ -279,6 +288,8 @@ def run_live_replay(reload_info, adapter_factory, session_factory, evidence_path
             if start_tick != reload_info["observed_tick"]:
                 raise ReplayError("paused reload tick changed before live startup")
             adapter.go_live()
+            if after_live is not None:
+                after_live()  # baseline sample of the running world, before any attempt
             return drive(session, evidence_path, tick_reader=adapter.tick,
                          initial_tick=start_tick, **kwargs)
         finally:
@@ -291,7 +302,8 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
           stock_reader=lambda session: {}, consumption_probe=None,
           deadline: float | None = None, clock=None, message_reader=None,
           tick_reader=None, initial_tick=None, max_game_ticks: int = 108000,
-          stall_seconds: float = 10.0, monotonic=None, sleep=None) -> dict:
+          stall_seconds: float = 10.0, monotonic=None, sleep=None,
+          fund_shortages: bool = False, observe_after_placement: bool = False) -> dict:
     """Run the existing production_service operation until PM places and consumes.
 
     ``session`` is the real DeterministicSession in live replay, or a fake with
@@ -383,13 +395,32 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
                     "evidence_scope": "diagnostic_replay_only",
                     "placement_receipt": True}, indent=2) + "\n")
                 step["placement_receipt"] = str(receipt_path)
-            if placed and consumption_probe is not None:
+            if placed and consumption_probe is not None and not observe_after_placement:
                 probe = consumption_probe() or {}
                 consumed = bool(probe.get("pm_consumption_verified"))
                 step["pm_consumption"] = probe.get("samples") or []
                 if consumed:
                     stop_reason = "pm_evidence_complete"
                     break
+            elif placed and consumption_probe is not None:
+                # Placement ends the attempt loop: retrying the service cannot add
+                # evidence, and fast retries would spend the budget before a second
+                # strict sample. Observe the running machine instead.
+                observed = observe_consumption(
+                    consumption_probe, tick_reader, last_tick, initial_tick=initial_tick,
+                    max_game_ticks=max_game_ticks, deadline=deadline, clock=clock,
+                    monotonic=monotonic, sleep=sleep, stall_seconds=max(stall_seconds, 30.0))
+                step["pm_consumption"] = observed["samples"]
+                stream.write(json.dumps({"event": "pm_replay_observation", "step": index,
+                                         **{k: v for k, v in observed.items()}}) + "\n")
+                stream.flush()
+                consumed = observed["sustained"]
+                last_tick = observed["last_tick"]
+                stop_reason = observed["outcome"]
+                deadline_reached = stop_reason == "deadline_reached"
+                break
+            if fund_shortages and outcome.get("code") == "material_shortage":
+                step["funding"] = _fund_shortage(session, stream, index, step["bill"], message_reader)
             if not placed and outcome.get("code") == "production_prerequisite_deferred":
                 # A deferral is not progress by itself; keep the bounded budget and
                 # let the next step re-observe. The journal records every attempt.
@@ -405,6 +436,116 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
         stream.write(json.dumps({"event": "pm_replay_summary", **{k: v for k, v in summary.items()
                                                                   if k != "steps"}}) + "\n")
         return summary
+
+
+def sustained_rises(samples: list[dict], min_gap_ticks: int = 3600) -> int:
+    """Verified PM consumption samples whose crafts rose, each at least ``min_gap_ticks`` after the last rise."""
+    rises, last_tick, last_crafts = 0, None, 0
+    for sample in sorted(samples, key=lambda row: int(row.get("tick") or 0)):
+        tick, crafts = int(sample.get("tick") or 0), int(sample.get("crafts") or 0)
+        if crafts > last_crafts and (last_tick is None or tick - last_tick >= min_gap_ticks):
+            rises, last_tick = rises + 1, tick
+        last_crafts = max(last_crafts, crafts)
+    return rises
+
+
+def observe_consumption(probe, tick_reader, last_tick: int, *, initial_tick: int,
+                        max_game_ticks: int, deadline: float | None, clock, monotonic, sleep,
+                        stall_seconds: float = 30.0, poll: float = 5.0,
+                        min_rises: int = 2, min_gap_ticks: int = 3600) -> dict:
+    """After PM placement, read the persistent strict report until consumption rises twice."""
+    outcome, samples, moved = "deadline_reached", [], monotonic()
+    while deadline is None or clock() < deadline:
+        tick = tick_reader()
+        if tick < last_tick:
+            outcome = "clock_not_advancing"
+            break
+        if tick > last_tick:
+            last_tick, moved = tick, monotonic()
+        elif monotonic() - moved >= stall_seconds:
+            outcome = "clock_not_advancing"
+            break
+        samples = (probe() or {}).get("samples") or []
+        if sustained_rises(samples, min_gap_ticks) >= min_rises:
+            outcome = "pm_evidence_complete"
+            break
+        if tick - initial_tick >= max_game_ticks:
+            outcome = "game_tick_budget_exhausted"
+            break
+        sleep(poll)
+    rises = sustained_rises(samples, min_gap_ticks)
+    return {"outcome": outcome, "samples": samples, "rises": rises, "min_rises": min_rises,
+            "min_gap_ticks": min_gap_ticks, "sustained": rises >= min_rises, "last_tick": last_tick}
+
+
+def _fund_shortage(session, stream, index: int, bill: dict, message_reader=None) -> list[dict]:
+    """Run the existing ``produce`` operation once for each short item of a construction bill.
+
+    This mirrors the Laya runner, which turns a material_shortage bill into
+    ``op.produce.<item>`` options at the bill's required network level
+    (training/laya_ops_runner.py shortages/shortage_levels). Without it the
+    replay retries production_service against a bill nothing produces.
+    """
+    funded = []
+    for item in sorted(bill.get("short") or {}):
+        level = int((bill.get("required") or {}).get(item, 0))
+        try:
+            result = session.run("produce", item=item, stock_target=max(1, level))
+        except Exception as error:  # noqa: BLE001 -- a failed funding attempt is evidence, not a crash
+            result = {"code": "funding_error", "ok": False, "message": f"{type(error).__name__}: {error}"}
+        row = {"step": index, "item": item, "stock_target": max(1, level),
+               "outcome": result.get("code"), "ok": result.get("ok"), "state": result.get("state"),
+               "message": result.get("message")}
+        funded.append(row)
+        _journal_messages(stream, index, _drain_messages(message_reader))
+        stream.write(json.dumps({"event": "pm_replay_funding", **row}) + "\n")
+        stream.flush()
+    return funded
+
+
+class StrictSampler:
+    """One strict sidecar for the whole replay; probes read its latest report.
+
+    c6-v3 counts per-machine crafts between consecutive samples of one
+    measurement, so a fresh single-sample sidecar per probe can never show
+    consumption. The sidecar's first sample is the baseline of the running world.
+    """
+
+    def __init__(self, root: Path, report: Path, *, interval: float = 60.0,
+                 python: str | None = None, popen=None):
+        self.root, self.report, self.interval = root, report, interval
+        self.python, self.popen, self.process = python, popen, None
+
+    def start(self) -> None:
+        import subprocess
+        import sys as _sys
+        if self.process is not None:
+            return
+        self.report.parent.mkdir(parents=True, exist_ok=True)
+        self.report.unlink(missing_ok=True)  # never read a report this measurement did not write
+        command = [self.python or _sys.executable, str(ROOT / "tools/laya_strict_sidecar.py"),
+                   "--world-root", str(self.root), "--out", str(self.report),
+                   "--interval", str(self.interval)]
+        log = (self.report.parent / "strict-sidecar.log").open("a")
+        self.process = (self.popen or subprocess.Popen)(command, cwd=ROOT, stdout=log,
+                                                        stderr=subprocess.STDOUT, text=True)
+
+    def probe(self) -> dict:
+        try:
+            return sidecar_consumption(self.report)
+        except (OSError, ValueError):
+            return {"pm_consumption_verified": False, "samples": [], "report": str(self.report)}
+
+    def close(self) -> None:
+        import subprocess
+        if self.process is None or self.process.poll() is not None:
+            return
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=self.interval + 30)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
 
 
 def check_mods(bundle: Path, mods_source: Path) -> dict:
