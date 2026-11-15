@@ -89,14 +89,15 @@ def test_host_admission_counts_stale_and_reserved_worlds_and_stale_gate_blocks(t
     assert not scheduler.may_admit(registry, 100, available_gb=2)
 
 
-def frozen_suite(tmp_path, arms=('candidate', 'reference'), contract=None, spec_updates=None):
+def frozen_suite(tmp_path, arms=('candidate', 'reference'), contract=None, spec_updates=None, files=None):
     repo = tmp_path/'repo'
     repo.mkdir()
-    for name in ('training/laya_restart_checkpoint.py','training/laya_restart_state.py',
-                 'orchestrator/checkpoint_milestones.py','tools/run_laya_clean.py'):
+    sources = {name: '# fixture source\n' for name in ('training/laya_restart_checkpoint.py','training/laya_restart_state.py',
+               'orchestrator/checkpoint_milestones.py','tools/run_laya_clean.py')}
+    for name, text in {**sources, **(files or {})}.items():
         file=repo/name
-        file.parent.mkdir(exist_ok=True)
-        file.write_text('# fixture source\n')
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text(text)
     (repo/'.gitignore').write_text('data/\n')
     subprocess.run(['git','init','-q',str(repo)],check=True)
     subprocess.run(['git','add','.'],cwd=repo,check=True)

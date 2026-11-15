@@ -107,3 +107,22 @@ are bound before ready and the assignment is recomputed before admission.
 This scheduling assignment does not establish exposure, effective factors,
 inference eligibility, efficacy or adoption. Effective-factor validation and
 runtime exposure telemetry remain follow-up work; RC11 is incomplete.
+
+### Manipulation check
+
+A treatment arm may declare `manipulation_check` in its `arms` entry: the
+exposure that must be observed for the treatment to count. Forms, all measured
+per job from `evidence/decision-states.jsonl` (`tools/laya_manipulation_check.py`):
+`offered`, `chosen` or `succeeded` (`outcome.ok`) with one `option_id` or
+`family`; `rule_applied` with `rule` (in `choice.rules`); `network_stock` with
+`item` (largest provider network stock in any decision record). A job shows the
+exposure when its measure reaches `at_least` (default 1). After the arm's first
+`after_jobs` (K, default 6) finished jobs that have decision records, fewer than
+`min_jobs` (default 1) showing it fails the check: the arm's queued jobs become
+`cancelled` with `manipulation_check_failed`, running jobs are untouched, and
+the verdict is kept in the status `manipulation_checks` and the report's
+`manipulation_check`. Freeze refuses an unknown form, K above the arm's planned
+jobs, and a family, option family or rule absent from the frozen arm. It cannot
+see a default-off switch, so declare an exposure the control cannot produce.
+Arms without the field, and cohorts with none, behave as before. A passed check
+shows exposure only, not efficacy or adoption eligibility.

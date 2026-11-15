@@ -13,7 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools.laya_regression_scheduler import enqueue, read, run_one, run_campaign, recover, TERMINAL
-from tools import laya_experiment_contract
+from tools import laya_experiment_contract, laya_manipulation_check
 from training.laya_restart_checkpoint import load
 
 
@@ -159,7 +159,7 @@ def report(root):
             if rows:
                 by_origin[origin] = {'planned':len(rows), 'observed_post_load':sum(stage in j.get('strict_reached',{}) for j in rows)}
         comparisons.append({'stage':stage,'origins':by_origin})
-    return {'experiment_contract': declaration, 'exposure_evidence': 'unknown',
+    result = {'experiment_contract': declaration, 'exposure_evidence': 'unknown',
             'effective_intervention_evidence': 'unknown', 'inference_eligibility': 'unknown',
             'kind': 'laya-restart-segment-v1', 'name': status['name'], 'groups': list(groups.values()),
             'planned': None if denominator['state'] == 'unavailable' else len(status['jobs']),
@@ -175,6 +175,12 @@ def report(root):
             'interpretation': 'A/A measures wiring, not policy improvement, adoption, or significance; restart outcomes are conditional.',
             'full_run_acceptance_gate': 'not_evaluated', 'automatic_adoption': False,
             'same_seed_is_counterfactual': False, 'exact_continuation': False}
+    # Only cohorts that declare a manipulation check gain these fields.
+    checks = laya_manipulation_check.summarize(spec, status, TERMINAL)
+    if checks is not None:
+        result['manipulation_check'] = checks
+        result['exposure_evidence'] = 'declared_manipulation_check'
+    return result
 
 
 def main(argv=None):

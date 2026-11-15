@@ -21,6 +21,7 @@ from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 
 from tools.checkpoint_catalog import atomic_json
 from tools import laya_status_journal, runner_process, laya_experiment_contract, laya_coordinator_health
+from tools import laya_manipulation_check
 from tools.deterministic_fleet_runtime import create_detached_checkout
 from training.laya_restart_checkpoint import load as load_checkpoint
 from training.laya_mission_contract import mission_settings, frozen_capability
@@ -276,6 +277,8 @@ def enqueue(repo, registry, spec):
     if assignment is not None:
         from tools.laya_experiment_assignment import assign
         jobs = assign(jobs, spec['arms'], assignment, mixed=mixed)
+    checks = {arm: laya_manipulation_check.validate(raw, sum(job['arm'] == arm for job in jobs))
+              for arm, raw in laya_manipulation_check.declarations(spec).items()}
     validate_port_ranges(spec, len(jobs), registry)
     root = registry / name
     root.mkdir(parents=True, exist_ok=False)
@@ -350,6 +353,8 @@ def enqueue(repo, registry, spec):
                 variant.relative_to(code.resolve())
                 if not variant.is_file():
                     raise ValueError('Variant must be tracked inside the frozen arm')
+            if arm in checks:
+                laya_manipulation_check.validate_against_code(checks[arm], code)
             runner = config.get('runner') or spec.get('runner', 'tools/run_laya_clean.py')
             mission = mission_settings(spec, arm)
             capability = frozen_capability(code, runner, spec['python']) if mission['objective_mode'] != 'legacy_unspecified' else None
@@ -690,6 +695,9 @@ def _reserve_job(root):
                 if item['status'] == 'queued':
                     item.update(status='cancelled', termination_cause='campaign_deadline_unstarted')
             return 'deadline'
+        # Declared arms only; a new verdict is published before any further admission.
+        if laya_manipulation_check.evaluate(spec, status, TERMINAL):
+            return 'manipulation_check_recorded'
         job = next((j for j in status['jobs'] if j['status'] == 'queued'), None)
         if job is None:
             return 'complete'
@@ -866,6 +874,10 @@ def _execute_job(root, executor, spec, freeze, job):
                   'stop_classification':'unknown'}
         raise
     finally:
+        declared = laya_manipulation_check.declarations(spec).get(job['arm'])
+        if result and declared is not None:
+            result['exposure'] = laya_manipulation_check.measure_job(
+                world, laya_manipulation_check.validate(declared, freeze['planned_jobs']))
         # Publish terminal evidence before cleanup; retain the reservation if
         # physical cleanup fails, so the host cannot over-admit.
         def terminal(status):
