@@ -31,9 +31,10 @@ RECIPE_CATALOG_SUBDIR = Path("factorio_mod") / "recipe_catalogs"
 # again on each poll. Unbounded history therefore makes each command slower than
 # the last, forever, across every run sharing one script-output. Only the file a
 # command just produced is ever read back, so older reports are pure history:
-# keep a generous window for post-mortems and drop the rest. Reports whose
-# content repeats the newest file on disk (ignoring the tick stamp) are dropped
-# on collection instead: if nothing has changed, no new log is kept.
+# keep a generous window for post-mortems and drop the rest. When a report's
+# content repeats the newest file on disk (ignoring the tick stamp), the older
+# copy is dropped: unchanged state keeps one file, and the caller still reads
+# the fresh one with its current tick.
 REPORT_RETENTION = 200
 
 
@@ -165,15 +166,17 @@ class GameBridge:
         return json.dumps(payload, sort_keys=True)
 
     def _dedupe_unchanged_report(self, subdir: Path, collected: Path) -> Path:
-        """Drop ``collected`` when it repeats the newest report already on disk.
+        """Drop the older copy when ``collected`` repeats the newest report on disk.
 
         Pollers (e.g. a dashboard refreshing research every few seconds)
         re-issue the same command long after the game state stopped changing,
-        and the mod answers every call with a fresh tick-stamped file. Only
-        the returned file's content is ever read back, so a repeat is pure
-        history: delete it and hand the caller the report it duplicates. A
+        and the mod answers every call with a fresh tick-stamped file. A
+        repeat is history, so only one copy stays on disk -- but the caller
+        always receives the report its own command produced. Its tick is
+        evidence of freshness: handing back the older duplicate made every
+        research observation after the first look stale (cohort C96d). A
         genuine transition -- research started, completed, next target queued
-        -- always differs, so it is always kept. Anything unparseable is kept:
+        -- always differs, so both are kept. Anything unparseable is kept:
         a failed comparison must never delete a report.
         """
         try:
@@ -199,10 +202,10 @@ class GameBridge:
         if old != fresh:
             return collected
         try:
-            collected.unlink()
+            previous.unlink()
         except OSError:
-            return collected
-        return previous
+            pass
+        return collected
 
     def _run_and_collect(
         self, command_text: str, subdir: Path, timeout: float, *,

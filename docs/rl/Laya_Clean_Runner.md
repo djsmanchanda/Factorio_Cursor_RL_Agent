@@ -366,6 +366,21 @@ have offline boundary coverage; no new live pack consumption or completion has
 been established. Future use needs newly frozen runners after active campaigns;
 no installed mod change is required for this Python patch.
 
+An inherited target is a refusal, not a label (C96d ran 12 science jobs on an
+already-researched `advanced-oil-processing`). `run_laya_mixed.py run` exits 3
+before the world goes live when the prepared world's `initial-state.json`
+`researched` map marks the exact target name researched; ranged levels have no
+entry there, so the ops runner's first live observation refuses them with stop
+`research_target_already_complete` and a `mission_refused` journal event, before
+any decision. Cohort freeze cannot check this: research state is inside the save
+and is only read once a world is prepared.
+
+The bridge returns the report its own command produced. Its de-duplication of
+unchanged reports used to delete the new file and return the older one, so in
+C96d the unchanging science report kept its first tick and 1,738 of 1,745
+research observations were "stale or from future". It now deletes the older
+copy instead.
+
 Startup component evidence (15 November 2026): the ops runner writes
 `journal.jsonl.components.json`; the strict sidecar writes its own components
 artifact next to its summary. Journal and summary references name and hash the

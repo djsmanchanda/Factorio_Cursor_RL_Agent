@@ -1055,7 +1055,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     ``carried`` seeds the history with an earlier segment's lifecycle receipts when a fresh controller is
     restarted on the same world; everything else starts fresh.
     """
-    from training.laya_mission_capabilities import ELIGIBILITY_VERSION, FAMILIES, observe_start_and_research, validate_mode
+    from training.laya_mission_capabilities import ELIGIBILITY_VERSION, FAMILIES, observe_start_and_research, refusal_message, validate_mode
     validate_mode(objective_mode, settings.research_target)
     from training.laya_ops import DeterministicSession
     journal.parent.mkdir(parents=True, exist_ok=True)
@@ -1260,6 +1260,21 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                   "initial_eligibility": eligibility})
             summary["effective_mission"]["initial_eligibility"] = eligibility
             summary["research_acceptance"] = evidence
+            if first and eligibility["state"] == "inherited":
+                # A target the save already completed can never be earned: refuse before any decision.
+                import json
+                try:
+                    manifest = json.loads((Path(getattr(adapter, "root", None)) / "manifest.json").read_text())
+                except (OSError, TypeError, ValueError):
+                    manifest = {}
+                message = refusal_message(settings.research_target, manifest, tick=facts["tick"],
+                                          evidence="first live research observation")
+                _append(journal, {"run_id": run_id, "event": "mission_refused",
+                                  "reason": "research_target_already_complete", "message": message})
+                emit("MISSION REFUSED: " + message)
+                summary["stop"] = "research_target_already_complete"
+                summary["refusal"] = message
+                break
             if evidence["earned"]:
                 if "R1" not in reached:
                     reached.append("R1")

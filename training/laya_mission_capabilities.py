@@ -32,6 +32,27 @@ def initial_eligibility(observation, target, facts):
             'current_level': tech.get('current_level'), 'tick': observation.get('tick')}
 
 
+def completed_target_refusal(target, initial_state, manifest):
+    """Refusal message when the prepared save already completed ``target``, else None.
+
+    Reads only the exact technology name in the recorded ``researched`` map
+    (every researched prototype, written paused when the world is prepared).
+    A ranged level such as mining-productivity-4 has no entry of its own, so
+    it is not judged here; the runner's first live observation decides it.
+    """
+    researched = (initial_state or {}).get('researched')
+    if not target or not isinstance(researched, dict) or researched.get(target) is not True:
+        return None
+    return refusal_message(target, manifest, tick=(initial_state or {}).get('tick'), evidence='initial-state.json')
+
+
+def refusal_message(target, manifest, *, tick, evidence):
+    manifest = manifest or {}
+    return (f"research target {target!r} is already complete in save {manifest.get('source_save', 'unknown')} "
+            f"(sha256 {str(manifest.get('source_sha256', 'unknown'))[:12]}, tick {tick}, from {evidence}); "
+            "refusing before any decision")
+
+
 def observe_start_and_research(objective, observation, facts, *, target, service_ok, clean):
     """Latch the first observed eligibility and apply it to earned evidence."""
     first = "initial_eligibility" not in objective.state

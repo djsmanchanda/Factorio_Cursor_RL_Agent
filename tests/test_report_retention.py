@@ -181,11 +181,12 @@ def test_collect_waits_for_expected_report_instead_of_newer_concurrent_file(
     assert collected.name == "research_status_request42.json"
 
 
-def test_collect_drops_report_identical_to_previous_ignoring_tick(
+def test_collect_keeps_one_copy_of_unchanged_report_and_returns_the_fresh_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """If nothing has changed, no new log: the repeat is deleted and the
-    caller is handed the report it duplicates."""
+    """If nothing has changed, only one copy stays on disk -- but the caller
+    gets the report its own command produced, with its current tick. Handing
+    back the older duplicate made C96d's research observation stale."""
     directory = tmp_path / SUBDIR
     body = {"force": "player", "research_queue": [], "options": ["a"], "ok": True}
     first = _write_named_report(
@@ -197,9 +198,9 @@ def test_collect_drops_report_identical_to_previous_ignoring_tick(
         bridge, directory, monkeypatch, "layout_0002.json", {**body, "tick": 200},
     )
 
-    assert collected == first
-    assert first.exists()
-    assert not (directory / "layout_0002.json").exists()
+    assert collected == directory / "layout_0002.json"
+    assert json.loads(collected.read_text())["tick"] == 200
+    assert not first.exists()
     assert len(list(directory.glob("*.json"))) == 1
 
 

@@ -46,6 +46,10 @@ from training.laya_checkpoint import load_bundle, export_bundle, restore_context
 SOURCE_SAVE = ROOT / "saves/mod_playground.zip"
 
 
+# Distinct exit status: the research target is already complete in the prepared save.
+RESEARCH_TARGET_COMPLETE_EXIT = 3
+
+
 def saved_world(action: str, root: Path, *extra: str) -> str:
     return subprocess.run([sys.executable, str(ROOT / "tools/run_laya_saved_world.py"), action, "--root", str(root), *extra],
                           check=True, capture_output=True, text=True).stdout.strip()
@@ -159,6 +163,15 @@ def main(argv=None) -> int:
                                        research_sustain_ticks=args.research_sustain_ticks)
     elif args.fixed_science_target:
         p.error('fixed science target requires --research-target')
+    if settings.research_target and (root / 'initial-state.json').exists():
+        # Earliest reliable research state: the prepared world's paused readback.
+        from training.laya_mission_capabilities import completed_target_refusal
+        refusal = completed_target_refusal(settings.research_target,
+                                           json.loads((root / 'initial-state.json').read_text()),
+                                           json.loads((root / 'manifest.json').read_text()))
+        if refusal:
+            print(f"MISSION REFUSED: {refusal}", file=sys.stderr)
+            return RESEARCH_TARGET_COMPLETE_EXIT
     speed = float(runtime.get("speed", args.speed))
     tag = {"variant_id": variant["variant_id"], "variant_hash": variant_hash(variant), "experiment": args.experiment}
     paths = runner_paths(root)
