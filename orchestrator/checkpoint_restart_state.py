@@ -15,7 +15,7 @@ import re
 import types
 from typing import Any, Union, get_args, get_origin, get_type_hints
 
-from orchestrator.checkpoint_milestones import CheckpointEvaluator, FactorySnapshot, REEARNED_VERSIONS
+from orchestrator.checkpoint_milestones import CheckpointEvaluator, CounterEvidence, FactorySnapshot, REEARNED_VERSIONS, PRODUCTION_PROVENANCE_FIELDS
 from orchestrator.oil_transaction import OilTransactionStore
 from orchestrator.operation_invocations import decode_record
 from orchestrator.loan_gate_retries import (
@@ -163,7 +163,8 @@ def _decode_typed(value, annotation):
     elif isinstance(annotation, type) and is_dataclass(annotation):
         hints = get_type_hints(annotation)
         names = {item.name for item in fields(annotation)}
-        optional = _LATER_SNAPSHOT_FIELDS if annotation is FactorySnapshot else frozenset()
+        optional = (_LATER_SNAPSHOT_FIELDS if annotation is FactorySnapshot else
+                    PRODUCTION_PROVENANCE_FIELDS if annotation is CounterEvidence else frozenset())
         if isinstance(value, dict) and names - optional <= set(value) <= names:
             return annotation(**{name: _decode_typed(value.get(name), hints[name]) for name in names})
     raise ValueError("Invalid snapshot shape or field type")
@@ -174,6 +175,11 @@ def _snapshot_record(snapshot: FactorySnapshot) -> dict:
     for name in _LATER_SNAPSHOT_FIELDS:
         if record.get(name) is None:
             record.pop(name, None)
+    for section in ("production", "providers"):
+        for counter in record[section].values():
+            for name in PRODUCTION_PROVENANCE_FIELDS:
+                if counter[name] is None:
+                    counter.pop(name)
     return record
 
 

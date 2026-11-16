@@ -440,3 +440,25 @@ C45/C46 review remains with thread94dcfaf2. Mixed-start implementation and C47
 are reserved to the upgrade/integration thread **after actual C46 cleanup**;
 no implementation or C47 readiness/completion handoff has occurred. C47 and
 subsequent calibration ownership follows the existing user-directed contract.
+
+
+### 2026-11-17 01:00 IST — scoped item production counter verified offline
+
+Replaced plastic/advanced-circuit recipe-labelled machine lifetime totals with
+force/surface per-item production statistics. Recorded basis, scope, query tick
+and sampled generation; observed reset/scope/clock boundaries persist through
+unavailable intervals, bounded-history eviction and restart. Modern/legacy
+baselines remain incomparable (unknown), with no silent rebase or fence change.
+Independent review found one P2 gap; parent reproduced all nine boundary/gap
+cases failing, corrected it, and verified session/sidecar/monitor regressions.
+147 focused and 1,994 fast tests passed, one skipped, exit 0. C6 consumer rule,
+predicate versions and factory/cap/loan/research decisions are unchanged.
+
+The prior 90-minute diagnostic is fully assessed and physically cleaned:
+101-ghost copper route completed, 10,513 cable crafts; PM remained unplaced
+with zero cumulative crafts. Steel's direct-mining seed exhausted accessible
+ore; exact rung reselection still needs retained source/capability facts.
+Lifecycle: no active campaign changed. Commit before a short separate frozen
+2.1.24 counter smoke; live candidate evidence remains pending. Research stays
+off, no push, controller freezes untouched. Local evidence:
+`data/laya-orchestration/parent-next-setup-20261116/item_production_helper_runs/`.

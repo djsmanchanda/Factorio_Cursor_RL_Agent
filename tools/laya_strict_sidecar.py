@@ -31,7 +31,7 @@ import sys  # noqa: E402
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from orchestrator.checkpoint_milestones import DEFAULT_MILESTONES, MILESTONE_IDS, _machine_consumption, evaluate_milestone  # noqa: E402
+from orchestrator.checkpoint_milestones import DEFAULT_MILESTONES, MILESTONE_IDS, _machine_consumption, evaluate_milestone, track_item_production  # noqa: E402
 from orchestrator.checkpoint_evidence import bounded_history, project_evidence, retained_samples, new_evidence_state, evidence_success, evidence_failure, state_projection  # noqa: E402
 
 #: Full evidence is kept for the checkpoints a track comparison reads closely; others keep version and status.
@@ -84,6 +84,7 @@ class Measurement:
         return {"generation": self.generation, "cumulative": dict(self.crafts), "since_previous": delta}
 
     def add(self, snapshot) -> dict[str, Any]:
+        snapshot = track_item_production(snapshot, self.history[-1] if self.history else None)
         crafts = self._count_crafts(snapshot)
         self.baseline = self.baseline or snapshot
         self.history = bounded_history([*self.history, snapshot])

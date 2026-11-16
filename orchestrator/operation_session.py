@@ -447,7 +447,7 @@ class DeterministicSession:
         live world: passed / failed / unknown per C0..C6, monotonic once passed. The runner's C phases are rate
         proxies; these are the acceptance checks results are compared on. The first call is the baseline."""
         from orchestrator.checkpoint_milestones import (CheckpointEvaluator, _foundation_ready, evaluate_milestone,
-                                                         starter_blocker)
+                                                         starter_blocker, track_item_production)
         from orchestrator.checkpoint_observer import LiveCheckpointObservationAdapter, ObservationUnsupported
         from orchestrator.checkpoint_evidence import bounded_history, new_evidence_state, evidence_failure, evidence_success
         if not hasattr(self, "_evaluator"):
@@ -466,6 +466,7 @@ class DeterministicSession:
         except Exception:
             evidence_failure(self._evidence_state)
             raise
+        snapshot = track_item_production(snapshot, self._history[-1] if self._history else None)
         # Persist the exact normalized inputs to readiness, including missing fields.
         self.foundation_observations = {name: {"tick": snapshot.tick,
             "observation": asdict(snapshot.foundations[name]) if name in snapshot.foundations else None,

@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 
-from orchestrator.checkpoint_milestones import FactorySnapshot
+from orchestrator.checkpoint_milestones import FactorySnapshot, ITEM_PRODUCTION_BASIS
 from tools.rcon_client import RconError
 from orchestrator import live_base
 from orchestrator.baseline_production import BASELINE_MACHINES
@@ -501,7 +501,7 @@ class LiveCheckpointObservationAdapter:
                     "status": status,
                 })
 
-        production: dict[str, dict[str, int]] = {}
+        production = self._item_production(client)
         try:
             available_items = live_base.available_items(
                 client, self.surface, self.force,
@@ -513,21 +513,6 @@ class LiveCheckpointObservationAdapter:
             ) from error
         providers: dict[str, dict[str, int]] = {}
         for item in ("plastic-bar", "advanced-circuit"):
-            spec = LINE_RECIPES.get(item)
-            line = None
-            if spec is not None:
-                try:
-                    line = live_base.find_line(
-                        client, self.surface, self.force, item, spec["machine"],
-                        include_ghosts=False,
-                    )
-                except Exception as error:
-                    raise ObservationUnsupported(
-                        f"production telemetry request failed for {item}: {type(error).__name__}: {error}",
-                        evidence={"adapter": type(self).__name__, "survey": "production", "item": item},
-                    ) from error
-            produced = int(line.produced_count) if line is not None else 0
-            production[item] = {"produced": produced}
             # Force production statistics are not provider delivery.  Keep
             # the structured inventory aggregate under its honest field name.
             provider_evidence: dict[str, int] = {
@@ -571,6 +556,33 @@ class LiveCheckpointObservationAdapter:
             "plastic": self._plastic(client),
         }
         return _normalize(snapshot, source="live-rcon-structured")
+
+    def _item_production(self, client: Any) -> dict[str, dict[str, Any]]:
+        """Item output totals, not the lifetime crafts of machines currently on an item's recipe."""
+        lua = (
+            f"local s=game.surfaces[{json.dumps(self.surface)}];local f=game.forces[{json.dumps(self.force)}];"
+            "local stats=f.get_item_production_statistics(s);local counts={};"
+            "for _,item in ipairs({'plastic-bar','advanced-circuit'}) do counts[item]=stats.get_input_count(item) end;"
+            "rcon.print(helpers.table_to_json({tick=game.tick,surface=s.index,force=f.index,counts=counts}))"
+        )
+        try:
+            result = json.loads(client.command("/sc " + lua))
+            if (not isinstance(result, dict)
+                    or any(type(result.get(key)) is not int or result[key] < (0 if key == "tick" else 1)
+                           for key in ("tick", "surface", "force"))
+                    or not isinstance(result.get("counts"), dict)
+                    or any(type(result["counts"].get(item)) is not int or result["counts"][item] < 0
+                           for item in ("plastic-bar", "advanced-circuit"))):
+                raise ValueError("invalid item counter response")
+        except (ValueError, TypeError, OSError, RconError) as error:
+            raise ObservationUnsupported(
+                f"item production survey failed: {type(error).__name__}",
+                evidence={"adapter": type(self).__name__, "survey": "item-production"},
+            ) from error
+        scope = json.dumps([self.surface, result["surface"], self.force, result["force"]], separators=(",", ":"))
+        return {item: {"produced": result["counts"][item], "counter_basis": ITEM_PRODUCTION_BASIS,
+                       "counter_scope": scope, "counter_generation": 0, "sample_tick": result["tick"]}
+                for item in ("plastic-bar", "advanced-circuit")}
 
     def _plastic(self, client: Any) -> Any:
         """Plastic telemetry for c5-v2 and c6a-v1 in one read; None when the read fails (both stay unknown).

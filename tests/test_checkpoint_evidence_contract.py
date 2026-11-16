@@ -174,3 +174,85 @@ def test_clock_regression_breaks_consumer_generation_and_proxy_remains_explicit(
     session = SimpleNamespace(_baseline=measurement.baseline, _history=measurement.history)
     proxy = {'version': 'laya-runner-phase-v1', 'reached': ['C0']}
     assert current_predicates(session, proxy_phase=proxy)[1]['_contract']['proxy_phase'] == proxy
+
+
+def test_item_counter_provenance_and_reset_survive_restart_without_rebasing_legacy(tmp_path):
+    from orchestrator.checkpoint_milestones import CheckpointEvaluator, _new_output, track_item_production
+    from orchestrator.checkpoint_restart_state import export_restart_state, import_restart_state
+    def _item_sample(tick, count):
+        return FactorySnapshot.from_mapping({'tick': tick, 'production': {'advanced-circuit': {
+            'produced': count, 'counter_basis': 'force-surface-item-input-v1',
+            'counter_scope': '["nauvis",1,"player",1]', 'counter_generation': 0, 'sample_tick': tick}}})
+    baseline = _item_sample(10, 297)
+    reset = track_item_production(_item_sample(20, 1), baseline)
+    bundle = export_restart_state(tmp_path/'source', 'episode', 'mods', baseline, [reset], CheckpointEvaluator())
+    restored = import_restart_state(bundle, tmp_path/'target', episode_id='episode', mod_scope='mods')
+    rebound = track_item_production(_item_sample(30, 1000), restored.history[-1])
+    assert rebound.production['advanced-circuit'].counter_generation == 1
+    assert _new_output(rebound, restored.baseline, 'advanced-circuit')[0] is None
+    # Bundles predating the new provenance remain decodable and byte-identical on re-export.
+    legacy = sample(0, 0)
+    old = export_restart_state(tmp_path/'legacy-source', 'legacy', 'mods', legacy, [legacy], CheckpointEvaluator())
+    assert 'counter_basis' not in old['baseline']['production']['plastic-bar']
+    state = import_restart_state(old, tmp_path/'legacy-target', episode_id='legacy', mod_scope='mods')
+    assert export_restart_state(tmp_path/'legacy-target', 'legacy', 'mods', state.baseline, list(state.history),
+                                state.evaluator, state.evidence_state) == old
+    assert _new_output(_item_sample(30, 1000), state.baseline, 'advanced-circuit')[0] is None
+
+
+@pytest.mark.parametrize('gap', ['missing', 'malformed', 'legacy'])
+@pytest.mark.parametrize('boundary', ['reset', 'scope', 'clock'])
+def test_production_boundary_survives_unavailable_samples_eviction_and_session_restore(
+        tmp_path, monkeypatch, gap, boundary):
+    from orchestrator.operation_session import DeterministicSession
+    from orchestrator.checkpoint_restart_state import import_restart_state
+    from orchestrator import checkpoint_observer
+
+    def modern(tick, count, *, scope='nauvis:1/player:1', consumer=0):
+        return FactorySnapshot.from_mapping({'tick': tick, 'production': {'advanced-circuit': {
+            'produced': count, 'counter_basis': 'force-surface-item-input-v1', 'counter_scope': scope,
+            'counter_generation': 0, 'sample_tick': tick}},
+            'ac_consumers': [{'unit': 7, 'recipe': 'bulk-inserter', 'count': consumer}]})
+
+    queue = []
+    class Adapter:
+        def __init__(self, *args, **kwargs): pass
+        def observe(self): return SimpleNamespace(snapshot=queue.pop(0))
+    monkeypatch.setattr(checkpoint_observer, 'LiveCheckpointObservationAdapter', Adapter)
+    def session_at(path):
+        session = DeterministicSession.__new__(DeterministicSession)
+        session.client, session.bridge, session.reference_point = None, None, (0, 0)
+        session.script_output, session.episode_id = path, 'episode'
+        return session
+    session = session_at(tmp_path/'source')
+    measurement = Measurement({})
+    def poll(snapshot):
+        queue.append(snapshot)
+        session.acceptance()
+        return measurement.add(snapshot)
+
+    poll(modern(10, 297))
+    poll({'reset': modern(20, 1), 'scope': modern(20, 297, scope='other-surface'),
+          'clock': modern(5, 297)}[boundary])
+    for tick in range(21, 44):
+        unavailable = {'missing': FactorySnapshot(tick=tick),
+                       'malformed': modern(tick, True),
+                       'legacy': FactorySnapshot.from_mapping({'tick': tick, 'production': {
+                           'advanced-circuit': {'produced': 1}}})}[gap]
+        poll(unavailable)
+    assert len(session._history) == 20
+    # The unavailable interval itself must carry no usable output, and no stale count.
+    current = session._history[-1].production.get('advanced-circuit')
+    assert current is not None and current.produced is None
+    assert current.counter_generation > 0
+    bundle = session.export_restart_state(mod_scope='mods')
+    state = import_restart_state(bundle, tmp_path/'restored', episode_id='episode', mod_scope='mods')
+    session = session_at(tmp_path/'restored')
+    session.restore_restart_acceptance(state)
+    poll(modern(50, 300))
+    final = poll(modern(51, 301, consumer=1))
+    assert session.acceptance_fresh['C6'] == 'unknown'
+    assert final['statuses']['C6'] is None
+    assert final['predicate_evidence']['C6']['evidence']['production_delta'] is None
+    assert final['predicate_evidence']['C6']['evidence']['machine_consumption'] == {'bulk-inserter': 1}
+    assert 'C6' not in measurement.reached and 'C6' not in session._evaluator.reached

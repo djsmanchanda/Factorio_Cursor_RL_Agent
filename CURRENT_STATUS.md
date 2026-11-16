@@ -736,3 +736,25 @@ Corrected tier-spanning consumer demand: existing read-only survey retains worki
 ### 2026-11-16 22:22 IST — configurable finite PM replay simulation budget
 
 The replay CLI now exposes the existing driver tick budget with --max-game-ticks, preserving108000(30game minutes) by default. Plans reject nonpositive/noninteger budgets before preflight; dry plans/provenance and the live driver retain the same value. Wall deadlines, nested funding guards, restore/retry/mod fences, decision logic and PM acceptance are unchanged. Parent95focused/1978fast1skip passed,exit0; independent review found no findings,18selected tests plus CLI/real-driver boundary probes passed. This is tooling evidence only. Previous1957687f replay was terminal/cleaned/assessed, funding progressed but PM remained0; no new runner defect was proved. Lifecycle: separately freeze one90game-minute(324000tick) diagnostic with200steps/7200s wall deadline/7500s unit cap from the same version4C4/private pack. No cohort adoption,mod deployment or controller restart; standardresearch retained,researchOFF,nopush.
+
+
+### 2026-11-17 01:00 IST — scoped item production counter verified offline
+
+Replaced plastic/advanced-circuit recipe-labelled machine lifetime totals with
+force/surface per-item production statistics. Recorded basis, scope, query tick
+and sampled generation; observed reset/scope/clock boundaries persist through
+unavailable intervals, bounded-history eviction and restart. Modern/legacy
+baselines remain incomparable (unknown), with no silent rebase or fence change.
+Independent review found one P2 gap; parent reproduced all nine boundary/gap
+cases failing, corrected it, and verified session/sidecar/monitor regressions.
+147 focused and 1,994 fast tests passed, one skipped, exit 0. C6 consumer rule,
+predicate versions and factory/cap/loan/research decisions are unchanged.
+
+The prior 90-minute diagnostic is fully assessed and physically cleaned:
+101-ghost copper route completed, 10,513 cable crafts; PM remained unplaced
+with zero cumulative crafts. Steel's direct-mining seed exhausted accessible
+ore; exact rung reselection still needs retained source/capability facts.
+Lifecycle: no active campaign changed. Commit before a short separate frozen
+2.1.24 counter smoke; live candidate evidence remains pending. Research stays
+off, no push, controller freezes untouched. Local evidence:
+`data/laya-orchestration/parent-next-setup-20261116/item_production_helper_runs/`.

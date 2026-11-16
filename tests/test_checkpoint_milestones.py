@@ -251,3 +251,56 @@ def test_c6_v3_consumer_leg_is_unknown_without_machine_telemetry():
     baseline = _ac(1, 0, [])
     unreadable = FactorySnapshot.from_mapping({"tick": 2, "production": {"advanced-circuit": {"produced": 5}}})
     assert evaluate_milestone("C6", unreadable, baseline=baseline, history=[baseline, unreadable]).unknown
+
+
+def _item_sample(tick, produced, *, scope='["nauvis",1,"player",1]', generation=0, consumers=()):
+    return FactorySnapshot.from_mapping({"tick": tick, "production": {"advanced-circuit": {
+        "produced": produced, "counter_basis": "force-surface-item-input-v1", "counter_scope": scope,
+        "counter_generation": generation, "sample_tick": tick}},
+        "ac_consumers": [{"unit": 7, "recipe": "bulk-inserter", "count": count} for count in consumers]})
+
+
+def test_item_totals_do_not_credit_recipe_retarget_or_erase_output_on_removal():
+    # The replay reassigns a 131-lifetime-craft assembler to AC while actual AC remains 297.
+    # A genuine +2 consumer event must not make that relabel into AC production.
+    baseline = _item_sample(1, 297, consumers=[10])
+    retarget = _item_sample(2, 297, consumers=[12])
+    result = evaluate_milestone('C6', retarget, baseline=baseline, history=[baseline, retarget])
+    assert result.failed and result.evidence['production_delta'] == 0
+    assert result.evidence['machine_consumption'] == {'bulk-inserter': 2}
+    actual_output = _item_sample(3, 298, consumers=[13])
+    assert evaluate_milestone('C6', actual_output, baseline=baseline, history=[baseline, retarget, actual_output]).passed
+    # Item statistics retain output even when the AC recipe is absent or assigned again.
+    no_recipe = _item_sample(4, 298)
+    assert evaluate_milestone('C6', no_recipe, baseline=baseline).evidence['production_delta'] == 1
+    assert evaluate_milestone('C6', _item_sample(5, 298), baseline=baseline).evidence['production_delta'] == 1
+
+
+def test_item_counter_refuses_scope_reset_clock_and_legacy_comparisons():
+    from orchestrator.checkpoint_milestones import _new_output
+    baseline = _item_sample(10, 297)
+    for current in (_item_sample(20, 300, scope='other-surface'), _item_sample(20, 300, generation=1),
+                    _item_sample(20, 1), _item_sample(9, 300), _item_sample(10, 300)):
+        value, evidence = _new_output(current, baseline, 'advanced-circuit')
+        assert value is None and evidence['production_delta'] is None
+        assert evidence['production_counter']['unavailable_reason']
+    legacy = _ac(1, 0, [])
+    for current, before in ((baseline, legacy), (legacy, baseline)):
+        assert _new_output(current, before, 'advanced-circuit')[0] is None
+
+
+def test_observed_item_counter_reset_generation_survives_history_eviction():
+    from orchestrator.checkpoint_milestones import _new_output, track_item_production
+    from tools.laya_strict_sidecar import Measurement
+    measurement = Measurement({})
+    baseline = _item_sample(10, 297)
+    measurement.add(baseline)
+    measurement.add(_item_sample(20, 1))
+    for tick in range(21, 50):
+        measurement.add(_item_sample(tick, 400 + tick))
+    current = measurement.history[-1]
+    assert len(measurement.history) == 20
+    assert current.production['advanced-circuit'].counter_generation == 1
+    assert _new_output(current, measurement.baseline, 'advanced-circuit')[0] is None
+    rolled_back = track_item_production(_item_sample(5, 1000), current)
+    assert rolled_back.production['advanced-circuit'].counter_generation == 2

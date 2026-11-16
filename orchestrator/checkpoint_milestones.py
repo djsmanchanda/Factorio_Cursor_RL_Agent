@@ -11,7 +11,7 @@ measured negative result and makes predicates replayable in tests.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from enum import Enum
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
@@ -19,6 +19,8 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 PREDICATE_SCHEMA_VERSION = 1
 PLASTIC_ITEM = "plastic-bar"
 ADVANCED_CIRCUIT_ITEM = "advanced-circuit"
+ITEM_PRODUCTION_BASIS = "force-surface-item-input-v1"
+PRODUCTION_PROVENANCE_FIELDS = frozenset({"counter_basis", "counter_scope", "counter_generation", "sample_tick"})
 IRON_GEAR_RECIPE = "iron-gear-wheel"
 COPPER_CABLE_RECIPE = "copper-cable"
 CHEMICAL_SCIENCE_ITEM = "chemical-science-pack"
@@ -171,16 +173,27 @@ class CounterEvidence:
     delivered: int | None = None
     craft_count: int | None = None
     available: int | None = None
+    counter_basis: str | None = None
+    counter_scope: str | None = None
+    counter_generation: int | None = None
+    sample_tick: int | None = None
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any] | Any) -> "CounterEvidence":
         if not isinstance(value, Mapping):
             return cls(produced=_as_int(value), delivered=_as_int(value))
+        scoped = any(value.get(name) is not None for name in PRODUCTION_PROVENANCE_FIELDS)
+        produced = (value.get("produced") if type(value.get("produced")) is int else None) if scoped else (
+            _item_counter(value, "produced", "output_count", "output", "production"))
         return cls(
-            produced=_item_counter(value, "produced", "output_count", "output", "production"),
+            produced=produced,
             delivered=_item_counter(value, "delivered", "delivered_count", "provider_count"),
             craft_count=_item_counter(value, "craft_count", "crafts", "products_finished"),
             available=_item_counter(value, "available", "count", "inventory"),
+            counter_basis=value.get("counter_basis"),
+            counter_scope=value.get("counter_scope"),
+            counter_generation=value.get("counter_generation"),
+            sample_tick=value.get("sample_tick"),
         )
 
     def progression(self) -> int | None:
@@ -481,13 +494,85 @@ def _foundation_evidence(snapshot: FactorySnapshot, *names: str) -> dict[str, An
     }}
 
 
+def _item_counter_provenance(counter: CounterEvidence) -> bool:
+    return (counter.counter_basis == ITEM_PRODUCTION_BASIS
+            and isinstance(counter.counter_scope, str) and bool(counter.counter_scope)
+            and type(counter.counter_generation) is int and counter.counter_generation >= 0
+            and type(counter.sample_tick) is int and counter.sample_tick >= 0)
+
+
+def _scoped_item_counter(counter: CounterEvidence) -> bool:
+    return (_item_counter_provenance(counter)
+            and type(counter.produced) is int and counter.produced >= 0
+            and counter.craft_count is None)
+
+
+def track_item_production(snapshot: FactorySnapshot, previous: FactorySnapshot | None) -> FactorySnapshot:
+    """Carry sampled counter generations in snapshots, including across restart/history eviction.
+
+    This detects observed regressions, scope changes and clock rollback. A statistics reset that
+    happens and overtakes the previous count between samples remains unobservable; no continuity
+    claim is made. Unavailable intervals carry provenance without a count. Legacy-only counters
+    stay untouched; a legacy sample after scoped telemetry is an unavailable interval, not a rebase.
+    """
+    production = dict(snapshot.production)
+    previous_production = {} if previous is None else previous.production
+    for item in production.keys() | previous_production.keys():
+        current, prior = production.get(item), previous_production.get(item)
+        if prior is None or not _item_counter_provenance(prior):
+            continue
+        if current is None or not _scoped_item_counter(current):
+            # Retain the boundary, never the last count. One unavailable interval starts a new
+            # generation; repeating that interval cannot forget it, even after history eviction.
+            production[item] = CounterEvidence(
+                counter_basis=prior.counter_basis, counter_scope=prior.counter_scope,
+                counter_generation=prior.counter_generation + int(prior.produced is not None),
+                sample_tick=prior.sample_tick)
+            continue
+        boundary = (current.counter_scope != prior.counter_scope
+                    or current.sample_tick < prior.sample_tick
+                    or (prior.produced is not None and (current.produced < prior.produced
+                        or (current.sample_tick == prior.sample_tick and current.produced != prior.produced))))
+        production[item] = replace(current, counter_generation=max(
+            current.counter_generation, prior.counter_generation + int(boundary)))
+    return replace(snapshot, production=production)
+
+
 def _new_output(snapshot: FactorySnapshot, baseline: FactorySnapshot | None, item: str) -> tuple[bool | None, dict[str, Any]]:
     if baseline is None:
         return None, {"baseline": "missing"}
     current = snapshot.production.get(item)
     before = baseline.production.get(item)
+    # Old fixtures/reports retain their explicit legacy interpretation. Never difference a new
+    # force/surface item total against an old sum of recipe-labelled machine lifetime counters.
+    scoped = any(getattr(counter, name) is not None
+                 for counter in (current, before) if counter is not None
+                 for name in PRODUCTION_PROVENANCE_FIELDS)
+    provenance = {}
+    if scoped:
+        reason = None
+        if current is None or before is None or not all(_scoped_item_counter(c) for c in (current, before)):
+            reason = "missing_or_legacy_counter_provenance"
+        elif current.counter_scope != before.counter_scope:
+            reason = "counter_scope_changed"
+        elif current.counter_generation != before.counter_generation:
+            reason = "counter_generation_changed"
+        elif current.sample_tick < before.sample_tick or current.produced < before.produced:
+            reason = "counter_regressed"
+        elif current.sample_tick == before.sample_tick and current.produced != before.produced:
+            reason = "same_tick_counter_changed"
+        provenance = {"production_counter": {
+            "basis": None if current is None else current.counter_basis,
+            "scope": None if current is None else current.counter_scope,
+            "generation": None if current is None else current.counter_generation,
+            "baseline_tick": None if before is None else before.sample_tick,
+            "sample_tick": None if current is None else current.sample_tick,
+            "unavailable_reason": reason,
+        }}
+        if reason is not None:
+            return None, {"production_delta": None, **provenance}
     delta = _counter_delta(current, before)
-    return (None if delta is None else delta > 0), {"production_delta": delta}
+    return (None if delta is None else delta > 0), {"production_delta": delta, **provenance}
 
 
 def _new_delivery(snapshot: FactorySnapshot, baseline: FactorySnapshot | None, item: str) -> tuple[bool | None, dict[str, Any]]:

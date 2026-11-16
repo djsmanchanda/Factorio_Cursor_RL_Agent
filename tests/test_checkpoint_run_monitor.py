@@ -180,3 +180,21 @@ def test_terminal_capture_uses_last_structured_boundary(tmp_path: Path) -> None:
 
     assert [request.reason for request in requests] == ["milestone", "terminal"]
     assert any(key.startswith("terminal-C1-") for key in result["captures"])
+
+
+@pytest.mark.parametrize('partial', [{}, {'advanced-circuit': {'produced': True}}])
+def test_monitor_does_not_forget_production_reset_through_callable_partial_sample(tmp_path, partial):
+    from orchestrator.checkpoint_milestones import _new_output
+    def item(tick, count):
+        return {'tick': tick, 'production': {'advanced-circuit': {
+            'produced': count, 'counter_basis': 'force-surface-item-input-v1',
+            'counter_scope': 'nauvis:1/player:1', 'counter_generation': 0, 'sample_tick': tick}}}
+    values = [item(10, 297), item(20, 1), {'tick': 21, 'production': partial}, item(30, 301)]
+    monitor = CheckpointRunMonitor(_manifest(), root=tmp_path,
+                                  adapter=CallableObservationAdapter(lambda: values.pop(0)))
+    for _ in range(4):
+        monitor.observe_boundary()
+    current = monitor.history[-1]
+    assert current.production['advanced-circuit'].counter_generation > 0
+    assert _new_output(current, monitor.baseline, 'advanced-circuit')[0] is None
+    assert monitor._last_observation.raw['production']['advanced-circuit']['counter_generation'] > 0
