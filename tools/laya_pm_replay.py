@@ -150,6 +150,8 @@ def main(argv=None):
     replay.add_argument('--rcon-port', type=int, required=True)
     replay.add_argument('--deadline', type=float, required=True, help='epoch seconds; checked between synchronous operations and during clock waits')
     replay.add_argument('--max-steps', type=int, default=40)
+    replay.add_argument('--max-game-ticks', type=int, default=108000,
+                        help='finite simulation tick budget, independent of the wall deadline (default: 30 game minutes)')
     replay.add_argument('--sample-interval', type=float, default=60.0,
                         help='wall seconds between strict samples of the one persistent sidecar')
     replay.add_argument('--fund-shortages', action='store_true',
@@ -195,6 +197,7 @@ def main(argv=None):
         plan = plan_replay(args.bank, args.generation, args.root, game_port=args.game_port,
                            rcon_port=args.rcon_port, deadline=args.deadline,
                            max_steps=args.max_steps, planned=1,
+                           max_game_ticks=args.max_game_ticks,
                            mods_source=args.mods_source)
     except ReplayError as error:
         print(json.dumps({'kind': 'laya-pm-replay-blocked-v1', 'blocker': str(error)}, indent=2))
@@ -255,6 +258,7 @@ def main(argv=None):
                 lambda: DeterministicSession(args.root, emit=_emit,
                                              origin_episode_id=restored['episode_id'] if restored else None),
                 args.root/'evidence/pm-replay.jsonl', max_steps=max(1, args.max_steps),
+                max_game_ticks=args.max_game_ticks,
                 deadline=args.deadline, after_live=sampler.start,
                 message_reader=_read_trail, consumption_probe=sampler.probe,
                 fund_shortages=args.fund_shortages, funding_depth=max(1, args.funding_depth),
@@ -841,10 +845,13 @@ def port_is_free(port: int, kind: str = "game") -> bool:
 
 def plan_replay(bank: Path, generation: str, root: Path, *, game_port: int, rcon_port: int,
                 deadline: float, max_steps: int = 40, planned: int = 1,
-                now: float | None = None, mods_source: Path | None = None) -> dict:
+                now: float | None = None, mods_source: Path | None = None,
+                max_game_ticks: int = 108000) -> dict:
     """Validate every launch precondition without touching a world."""
     import time as _time
     now = _time.time() if now is None else now
+    if type(max_game_ticks) is not int or max_game_ticks < 1:
+        raise ReplayError('replay needs a positive integer game-tick budget')
     info = preflight(bank, generation)
     mods = None
     if mods_source is not None:
@@ -868,6 +875,7 @@ def plan_replay(bank: Path, generation: str, root: Path, *, game_port: int, rcon
     return {**info, "kind": "laya-pm-replay-plan-v1", "root": str(root),
             "game_port": game_port, "rcon_port": rcon_port,
             "deadline": deadline, "max_steps": max_steps,
+            "max_game_ticks": max_game_ticks,
             "next_gate": "fresh C4 reload on candidate code/mods, then PM placement and c6-v3 PM consumption"}
 
 
@@ -1048,7 +1056,8 @@ def provenance_receipt(plan: dict, bundle: Path, mods_source: Path, engine: dict
             "mods_source": str(mods_source.resolve()), "mods_verified": True,
             "engine": engine, "code_revision": code_revision,
             "game_port": plan.get("game_port"), "rcon_port": plan.get("rcon_port"),
-            "deadline": plan.get("deadline"), "planned_attempts": planned}
+            "deadline": plan.get("deadline"), "planned_attempts": planned,
+            "max_game_ticks": plan.get("max_game_ticks", 108000)}
 
 
 @contextmanager

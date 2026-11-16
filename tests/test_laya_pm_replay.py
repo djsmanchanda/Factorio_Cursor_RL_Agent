@@ -50,10 +50,59 @@ def test_plan_echoes_the_requested_step_budget(tmp_path):
                                   game_port=64000, rcon_port=65000, deadline=2 ** 40,
                                   max_steps=8)
         assert plan["max_steps"] == 8
+        assert plan["max_game_ticks"] == 108000
         with pytest.raises(replay.ReplayError, match="at least one"):
             replay.plan_replay(tmp_path / "bank", "gen", tmp_path / "root",
                                game_port=64000, rcon_port=65000, deadline=2 ** 40,
                                max_steps=0)
+
+
+@pytest.mark.parametrize('budget', [0, -1, True, 1.5])
+def test_invalid_game_tick_budget_is_rejected_before_preflight(tmp_path, budget):
+    with patch.object(replay, 'preflight') as preflight:
+        with pytest.raises(replay.ReplayError, match='positive integer game-tick budget'):
+            replay.plan_replay(tmp_path / 'bank', 'gen', tmp_path / 'world',
+                               game_port=31517, rcon_port=31518,
+                               deadline=2 ** 40, max_game_ticks=budget)
+        preflight.assert_not_called()
+
+
+@pytest.mark.parametrize('option,budget', [([], 108000), (['--max-game-ticks', '324000'], 324000)])
+def test_cli_preserves_game_tick_budget_through_plan_provenance_and_driver(tmp_path, monkeypatch, option, budget):
+    from contextlib import contextmanager
+    import subprocess
+
+    world = tmp_path / 'world'
+    captured = {}
+
+    @contextmanager
+    def owned_world(bundle, root, **kwargs):
+        captured['provenance'] = kwargs['provenance']
+        root.mkdir()
+        yield {'root': str(root), 'status': 'prepared', 'tick': 100}
+
+    def run_live(*args, **kwargs):
+        captured['driver_budget'] = kwargs['max_game_ticks']
+        return {'pm_evidence_complete': False}
+
+    monkeypatch.setattr(replay, 'preflight', lambda *args: {'capture_tick': 100})
+    monkeypatch.setattr(replay, 'check_mods', lambda *args: {'mods_verified': True})
+    monkeypatch.setattr(replay, 'port_is_free', lambda *args: True)
+    monkeypatch.setattr(replay, 'check_replay_capacity', lambda **kwargs: {})
+    monkeypatch.setattr(replay, 'engine_receipt', lambda *args: {})
+    monkeypatch.setattr(subprocess, 'check_output', lambda *args, **kwargs: 'a' * 40)
+    monkeypatch.setattr(replay, 'replay_world', owned_world)
+    monkeypatch.setattr(replay, 'reload_receipt', lambda *args: {'reload_verified': True, 'observed_tick': 100})
+    monkeypatch.setattr(replay, 'run_live_replay', run_live)
+    # The driver is stubbed; the native sampler must never start in this CLI contract test.
+    monkeypatch.setattr(replay.StrictSampler, 'close', lambda self: None)
+    argv = ['replay', '--bank', str(tmp_path / 'bank'), '--generation', 'g',
+            '--root', str(world), '--mods-source', str(tmp_path / 'mods'),
+            '--game-port', '31517', '--rcon-port', '31518', '--deadline', str(2 ** 40)] + option
+    assert replay.main(argv) == 0
+    assert not world.exists()  # planning cannot materialize a world
+    assert replay.main(argv + ['--execute']) == 4
+    assert captured['driver_budget'] == captured['provenance']['max_game_ticks'] == budget
 
 
 def test_plan_refuses_a_port_already_in_use(tmp_path):
