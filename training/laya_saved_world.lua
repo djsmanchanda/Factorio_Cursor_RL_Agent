@@ -114,9 +114,16 @@ for machine,p in pairs(prototypes.entity) do
     end
   end
 end
+-- LuaTechnology (the values of force.technologies) has no effects field; the
+-- effect list lives on its prototype. Keep the lookup in one helper so every
+-- survey uses the 2.1.24 API.
+local function technology_effects(technology)
+  local prototype = technology and technology.prototype
+  return prototype and prototype.effects or {}
+end
 local unlocks={}
 for tech_name,tech in pairs(force.technologies) do
-  for _,effect in pairs(tech.effects or {}) do
+  for _,effect in pairs(technology_effects(tech)) do
     if effect.type=="unlock-recipe" and effect.recipe then
       unlocks[effect.recipe]=unlocks[effect.recipe] or {}
       table.insert(unlocks[effect.recipe],tech_name)

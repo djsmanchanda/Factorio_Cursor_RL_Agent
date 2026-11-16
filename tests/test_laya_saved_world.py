@@ -1119,7 +1119,8 @@ def test_survey_indexes_aliases_disabled_and_unsupported_products():
  ['alias-recipe']=recipe('alias-recipe',{item('iron-plate',1)},{item('alias-product',2)}),
  ['multi-recipe']=recipe('multi-recipe',{item('iron-plate',1)},{item('first',1),item('second',1)}),
 """, setup="""
-game.forces.player.technologies['unlock-test']={researched=false,effects={{type='unlock-recipe',recipe='disabled-thing'}}}
+-- LuaTechnology has no effects field on 2.1.24; effects live on its prototype.
+game.forces.player.technologies['unlock-test']={researched=false,prototype={effects={{type='unlock-recipe',recipe='disabled-thing'}}}}
 """, assertions="""
 assert(facts.recipe_product_index.products['item:alias-product'][1]=='alias-recipe')
 assert(facts.recipe_product_index.products['item:first'][1]=='multi-recipe')
