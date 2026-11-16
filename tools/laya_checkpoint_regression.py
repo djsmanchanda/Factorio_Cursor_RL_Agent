@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
 from tools.laya_regression_scheduler import enqueue, read, run_one, run_campaign, recover, TERMINAL
 from tools import laya_experiment_contract, laya_manipulation_check
 from training.laya_restart_checkpoint import load
+from orchestrator.checkpoint_milestones import MILESTONE_IDS
 
 
 def report(root):
@@ -103,8 +104,9 @@ def report(root):
         observations = job.get('strict_current')
         observations = observations if isinstance(observations, list) else []
         loaded = job.get('loaded_tick')
-        index = int(origin[1:]) if origin in {f'C{i}' for i in range(10)} else 9
-        for stage in (f'C{i}' for i in range(index + 1, 10)):
+        index = MILESTONE_IDS.index(origin) if origin in MILESTONE_IDS else len(MILESTONE_IDS) - 1
+        versions = ((job.get('milestones') or {}).get('predicate_versions') or {})
+        for stage in MILESTONE_IDS[index + 1:]:
             rows = [row for row in observations if isinstance(row, dict) and
                     type(row.get('tick')) is int and type(loaded) is int and row['tick'] > loaded and
                     isinstance(row.get('statuses'), dict) and row['statuses'].get(stage) is True]
@@ -112,6 +114,9 @@ def report(root):
             reached = reached if type(reached) is int and type(loaded) is int and reached > loaded else None
             bucket = group['strict_reach'].setdefault(stage, {'reached': 0, 'not_observed': 0, 'ticks_from_load': []})
             bucket['reached' if rows or reached is not None else 'not_observed'] += 1
+            # Counts under different predicate versions (c5-v1, c5-v2) are labelled, never silently pooled.
+            label = versions.get(stage) or 'unrecorded'
+            bucket.setdefault('predicate_versions', {})[label] = bucket.get('predicate_versions', {}).get(label, 0) + 1
             if reached is not None or rows:
                 first = (job.get('stage_latency') or {}).get(stage, {})
                 if rows:
@@ -152,7 +157,7 @@ def report(root):
     signals = [{'origin':j.get('origin',j.get('checkpoint')), 'arm':j['arm'], 'generation':j.get('generation_id'),
                 'latency':j.get('progress_latency')} for j in status['jobs'] if j.get('progress_latency')]
     comparisons = []
-    for stage in (f'C{i}' for i in range(1,10)):
+    for stage in MILESTONE_IDS[1:]:
         by_origin = {}
         for origin in (f'C{i}' for i in range(7)):
             rows = [j for j in status['jobs'] if j.get('origin',j.get('checkpoint')) == origin]

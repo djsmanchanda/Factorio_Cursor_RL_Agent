@@ -32,10 +32,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from orchestrator.checkpoint_milestones import DEFAULT_MILESTONES, MILESTONE_IDS, _machine_consumption, evaluate_milestone  # noqa: E402
-from orchestrator.checkpoint_evidence import project_evidence, retained_samples, new_evidence_state, evidence_success, evidence_failure, state_projection  # noqa: E402
+from orchestrator.checkpoint_evidence import bounded_history, project_evidence, retained_samples, new_evidence_state, evidence_success, evidence_failure, state_projection  # noqa: E402
 
 #: Full evidence is kept for the checkpoints a track comparison reads closely; others keep version and status.
-DETAILED = {"C4", "C5", "C6", "C7", "C8", "C9"}
+DETAILED = {"C4", "C5", "C6a", "C6", "C7", "C8", "C9"}
 
 
 def instrument_identity() -> dict[str, str]:
@@ -86,7 +86,7 @@ class Measurement:
     def add(self, snapshot) -> dict[str, Any]:
         crafts = self._count_crafts(snapshot)
         self.baseline = self.baseline or snapshot
-        self.history = retained_samples([*self.history, snapshot])[-20:]
+        self.history = bounded_history([*self.history, snapshot])
         # Historical predicates use object identity to decide whether the last
         # sample is already in history; evaluate the retained representative.
         snapshot = self.history[-1]

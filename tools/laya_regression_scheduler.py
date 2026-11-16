@@ -589,10 +589,16 @@ def collect_result(world, job):
     # One milestone block for every reader: contract evidence when present, else the same rule over polls, else the latch.
     milestones = laya_milestone_report.from_journal_rows(observations, loaded, ever=sorted(latches), final=final)
     from_contract = milestones['source'] == 'contract'
-    relevant = [stage for stage in reached if stage > job.get('origin', job.get('checkpoint', 'C0'))]
+    from orchestrator.checkpoint_milestones import MILESTONE_IDS
+    rank = lambda stage: MILESTONE_IDS.index(stage) if stage in MILESTONE_IDS else len(MILESTONE_IDS)
+    relevant = [stage for stage in reached if rank(stage) > rank(job.get('origin', job.get('checkpoint', 'C0')))]
+    versions = milestones.get('predicate_versions') or {}
     first = min(relevant, key=lambda stage: reached[stage]) if relevant else None
     return {**accounting, 'legacy_counter_meanings': {'failures':'runner caught exceptions', 'faults':'historical summary or legacy fallback'}, 'faults':faults,
             'milestones':milestones, 'accepted_ever':milestones['earned'] if from_contract else sorted(latches),
+            # c5-v1 (stable window) and c5-v2 (planned rate) measure different things; readers must not pool them.
+            'c5_predicate_version':versions.get('C5'), 'c6a_predicate_version':versions.get('C6a'),
+            'c6_predicate_version':versions.get('C6'),
             'accepted_ever_basis':'earned_events' if from_contract else 'legacy_latch', 'accepted_final':final,
             'legacy_latch_reached':latches, 'strict_reached':reached, 'loaded_tick':loaded,
             'strict_reached_basis':basis, 'legacy_current_pass_reached':legacy_reached,

@@ -568,8 +568,42 @@ class LiveCheckpointObservationAdapter:
             "recipes": recipes,
             "science": self._science(client),
             "ac_consumers": self._ac_consumers(client),
+            "plastic": self._plastic(client),
         }
         return _normalize(snapshot, source="live-rcon-structured")
+
+    def _plastic(self, client: Any) -> Any:
+        """Plastic telemetry for c5-v2 and c6a-v1 in one read; None when the read fails (both stay unknown).
+
+        ``produced`` is the force's plastic-bar production statistic (bars). ``capacity`` is the installed
+        plant capacity: plants on the plastic recipe x their crafting speed x bars per craft / recipe time
+        (productivity bonus not included). ``declared_target`` is the planned rate a runner recorded in
+        the game with ``declare_planned_rate``; absent when no runner declared one. ``consumers`` lists
+        every assembler whose current recipe takes plastic-bar (unit, recipe, products_finished).
+        """
+        lua = (
+            f"local s=game.surfaces[{json.dumps(self.surface)}];local f=game.forces[{json.dumps(self.force)}];"
+            "local o={consumers={}};o.produced=f.get_item_production_statistics(s).get_input_count('plastic-bar');"
+            "local r=f.recipes['plastic-bar'];local per=0;"
+            "if r then for _,p in pairs(r.products) do if p.name=='plastic-bar' then "
+            "per=per+(p.amount or ((p.amount_min+p.amount_max)/2))*(p.probability or 1) end end end;"
+            "local n=0;local speed=0;"
+            "for _,e in pairs(s.find_entities_filtered{force=f,type='assembling-machine'}) do "
+            "local q=e.get_recipe();if q then "
+            "if q.name=='plastic-bar' then n=n+1;speed=speed+e.crafting_speed end;"
+            "for _,i in pairs(q.ingredients) do if i.name=='plastic-bar' then "
+            "o.consumers[#o.consumers+1]={unit=e.unit_number,recipe=q.name,count=e.products_finished};break end end "
+            "end end;"
+            "o.capacity={machines=n,crafting_speed=speed,products_per_craft=per,energy=r and r.energy or nil};"
+            "local d=storage.laya_planned_rates and storage.laya_planned_rates['plastic-bar'];"
+            "if d then o.declared_target={rate=d.rate,tick=d.tick,source=d.source} end;"
+            "rcon.print(helpers.table_to_json(o))"
+        )
+        try:
+            result = json.loads(client.command("/sc " + lua))
+        except (ValueError, TypeError, OSError, RconError):
+            return None
+        return normalize_plastic(result)
 
     def _ac_consumers(self, client: Any) -> Any:
         """Every assembler whose current recipe takes advanced circuits: unit, recipe, products_finished.
@@ -626,6 +660,52 @@ class LiveCheckpointObservationAdapter:
         return dict(result)
 
 
+def normalize_plastic(result: Any) -> dict[str, Any] | None:
+    """The collector's JSON with Lua's empty-table encoding and the derived capacity rate."""
+    if not isinstance(result, Mapping):
+        return None
+    out = dict(result)
+    consumers = out.get("consumers")
+    out["consumers"] = [] if consumers == {} else consumers if isinstance(consumers, list) else None
+    capacity = out.get("capacity")
+    if isinstance(capacity, Mapping):
+        capacity = dict(capacity)
+        speed, per, energy = (capacity.get(k) for k in ("crafting_speed", "products_per_craft", "energy"))
+        numbers = all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (speed, per, energy))
+        capacity["rate"] = round(speed * per / energy, 4) if numbers and energy > 0 else None
+        capacity["basis"] = "plants_x_crafting_speed_x_products_per_craft_per_recipe_seconds_no_productivity"
+        out["capacity"] = capacity
+    else:
+        out["capacity"] = None
+    out.setdefault("declared_target", None)
+    return out
+
+
+def declare_planned_rate(client: Any, item: str, rate: float, source: str) -> Mapping[str, Any] | None:
+    """Record a runner's planned production rate (items/s) for ``item`` in the game's script storage.
+
+    The one write in this module, and evidence only: it changes no entity. The strict observers read it
+    back with the game tick at which the declaration last changed, so the target a predicate compares
+    against is a declared, tick-stamped input rather than something the predicate invents. Re-declaring
+    an unchanged rate and source keeps the original tick. Returns the stored declaration, or None.
+    """
+    if (isinstance(rate, bool) or not isinstance(rate, (int, float)) or not rate > 0 or rate != rate
+            or rate == float("inf") or not isinstance(source, str) or not source):
+        raise ValueError("A positive finite rate and a source are required")
+    lua = (
+        "storage.laya_planned_rates=storage.laya_planned_rates or {};"
+        f"local item={json.dumps(item)};local rate={float(rate)!r};local source={json.dumps(source[:200])};"
+        "local o=storage.laya_planned_rates[item];"
+        "if not o or o.rate~=rate or o.source~=source then "
+        "storage.laya_planned_rates[item]={rate=rate,tick=game.tick,source=source} end;"
+        "rcon.print(helpers.table_to_json(storage.laya_planned_rates[item]))"
+    )
+    try:
+        result = json.loads(client.command("/sc " + lua))
+    except (ValueError, TypeError, OSError, RconError):
+        return None
+    return result if isinstance(result, Mapping) else None
+
 
 __all__ = [
     "CallableObservationAdapter",
@@ -636,4 +716,6 @@ __all__ = [
     "ObservationUnsupported",
     "StructuredObservation",
     "UnsupportedObservationAdapter",
+    "declare_planned_rate",
+    "normalize_plastic",
 ]

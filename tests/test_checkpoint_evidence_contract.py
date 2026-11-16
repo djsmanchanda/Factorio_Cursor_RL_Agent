@@ -27,7 +27,7 @@ def test_runner_and_sidecar_share_projection_with_flat_recovery_and_same_tick():
     assert evidence['_contract'] == row['predicate_evidence']['_contract']
     intervals = evidence['_contract']['sampled_plastic']['intervals']
     assert [x['craft_delta'] for x in intervals] == [1, 0, 1]
-    assert row['predicate_evidence']['C5']['predicate_version'] == 'c5-v1'
+    assert row['predicate_evidence']['C5']['predicate_version'] == 'c5-v2'
     assert evidence['_contract']['coverage']['complete_history'] is False
 
 
@@ -98,7 +98,7 @@ def test_real_session_failure_restart_and_sidecar_equivalence(tmp_path, monkeypa
     poll(a)
     poll(copy.deepcopy(a))
     poll(sample(7200, 2, consumer(2)))
-    assert session.acceptance_fresh['C5'] == 'passed'
+    assert session.acceptance_fresh['C4'] == 'passed'
     poll(ObservationUnsupported('missing'))
     assert current_predicates(session)[1]['_contract']['present'] is None
     bundle = session.export_restart_state(mod_scope='mods')

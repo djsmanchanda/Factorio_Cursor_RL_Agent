@@ -7,6 +7,9 @@ earned     passed after an observed failed->passed pair of adjacent polls (never
 holds_now  passes on the last successful poll (current state, not history).
 inherited  already passing on the first observation; not earned by the run.
 
+``predicate_versions`` (additive) maps each milestone to the predicate version that produced the block (c5-v1 and
+c5-v2 measure different things, so a reader must not pool them); None when the journal does not record versions.
+
 ``source`` says where the block came from: ``contract`` (checkpoint-evidence accumulator), ``legacy_polls``
 (the same rule replayed over recorded ``strict_current`` rows, for journals without ``_contract``) or
 ``legacy_latch`` (only the old "ever passed" acceptance latch exists). The runner's goal ladder
@@ -28,8 +31,21 @@ def _passed(predicates):
                     if (v.get("status") if isinstance(v, dict) else v) in ("passed", True))
 
 
-def _event(cid, tick, from_tick):
-    return {"id": cid, "tick": tick, "from_tick": from_tick}
+def _event(cid, tick, from_tick, version=None):
+    event = {"id": cid, "tick": tick, "from_tick": from_tick}
+    if isinstance(version, str):
+        event["predicate_version"] = version
+    return event
+
+
+def _versions(predicates):
+    """``{milestone: predicate version}`` from contract ``present`` or a poll's ``predicate_evidence``."""
+    if not isinstance(predicates, dict):
+        return None
+    found = {c: v.get("version", v.get("predicate_version")) for c, v in predicates.items()
+             if not str(c).startswith("_") and isinstance(v, dict)
+             and isinstance(v.get("version", v.get("predicate_version")), str)}
+    return {c: found[c] for c in _ordered(found)} or None
 
 
 def _by_id(events):
@@ -49,7 +65,7 @@ def from_contract(contract, loaded_tick=None):
     if not isinstance(contract, dict) or "observed_events" not in contract:
         return None
     events = [_event(e["checkpoint"], e["tick"] if type(e.get("tick")) is int else None,
-                     e["from_tick"] if type(e.get("from_tick")) is int else None)
+                     e["from_tick"] if type(e.get("from_tick")) is int else None, e.get("predicate_version"))
               for e in contract.get("observed_events") or ()
               if isinstance(e, dict) and e.get("kind") == "predicate_transition" and isinstance(e.get("checkpoint"), str)
               and (type(loaded_tick) is not int or (type(e.get("tick")) is int and e["tick"] > loaded_tick))]
@@ -59,7 +75,8 @@ def from_contract(contract, loaded_tick=None):
             "holds_now": _passed(contract.get("present")),
             "inherited": _passed(inherited.get("predicates")) if isinstance(inherited, dict) else None,
             "events": events, "origin_tick": loaded_tick if type(loaded_tick) is int else None,
-            "origin_basis": "loaded_tick" if type(loaded_tick) is int else None}
+            "origin_basis": "loaded_tick" if type(loaded_tick) is int else None,
+            "predicate_versions": _versions(contract.get("present"))}
 
 
 def _usable(row):
@@ -126,8 +143,14 @@ def from_journal_rows(rows, loaded_tick=None, ever=None, final=None):
         evidence = row.get("predicate_evidence")
         block = from_contract(evidence.get("_contract") if isinstance(evidence, dict) else None, loaded_tick)
         if block is not None:
+            block["predicate_versions"] = block["predicate_versions"] or _versions(evidence)
             return block
-    return from_polls(polls, loaded_tick) or from_latch(ever, final)
+    block = from_polls(polls, loaded_tick) or from_latch(ever, final)
+    versions = next((_versions(r.get("predicate_evidence")) for r in reversed(polls)
+                     if _versions(r.get("predicate_evidence"))), None)
+    if versions is not None:
+        block["predicate_versions"] = versions
+    return block
 
 
 def text(block):

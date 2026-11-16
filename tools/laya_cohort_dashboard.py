@@ -240,7 +240,7 @@ class Dashboard:
             for job in jobs:
                 if not isinstance(job, dict):
                     continue
-                row = {key: job.get(key) for key in ("id", "arm", "seed", "status", "started", "runner_exited", "termination_cause", "runner_stop", "failures", "accepted_ever", "accepted_ever_basis", "accepted_final", "milestones", "c5_predicate_version", "c6_predicate_version", "comparison_eligible", "typed_outcomes", "outcome_classifications", "untyped_stuck", "maintenance_failure_events", "evidence_errors")}
+                row = {key: job.get(key) for key in ("id", "arm", "seed", "status", "started", "runner_exited", "termination_cause", "runner_stop", "failures", "accepted_ever", "accepted_ever_basis", "accepted_final", "milestones", "c5_predicate_version", "c6a_predicate_version", "c6_predicate_version", "comparison_eligible", "typed_outcomes", "outcome_classifications", "untyped_stuck", "maintenance_failure_events", "evidence_errors")}
                 acceptance = job.get("laya_acceptance")
                 row["laya_c6_version"] = acceptance.get("C6", {}).get("version") if isinstance(acceptance, dict) and isinstance(acceptance.get("C6"), dict) else None
                 arm = arms.get(job.get("arm"), {})

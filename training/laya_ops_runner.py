@@ -804,6 +804,32 @@ def add_c6_consumer_options(menu: dict, phase: Mapping, facts: Mapping) -> dict:
     return menu
 
 
+PLANNED_PLASTIC_SOURCE = "laya_ops_runner.status_board.required_per_s"
+
+
+def planned_plastic_rate(board: Mapping | None) -> float | None:
+    """The plastic-bar rate (bars/s) the status board plans for, as STATUS prints it; None when not planned."""
+    need = next((n for n in (board or {}).get("needs", ()) if n.get("item") == "plastic-bar"), None)
+    rate = None if need is None else need.get("required_per_s")
+    return round(float(rate), 4) if isinstance(rate, (int, float)) and not isinstance(rate, bool) and rate > 0 else None
+
+
+def declare_plastic_target(session: Any, board: Mapping | None, declared: dict) -> None:
+    """Record the planned plastic rate in the game for strict C5 (c5-v2); measurement only, never fatal.
+
+    ``declared`` holds the last rate written by this process so an unchanged plan costs no RCON write.
+    """
+    rate, client = planned_plastic_rate(board), getattr(session, "client", None)
+    if rate is None or client is None or declared.get("rate") == rate:
+        return
+    from orchestrator.checkpoint_observer import declare_planned_rate
+    try:
+        if declare_planned_rate(client, "plastic-bar", rate, PLANNED_PLASTIC_SOURCE) is not None:
+            declared["rate"] = rate
+    except Exception:  # noqa: BLE001 -- a failed declaration leaves C5 unknown, never stops the run
+        pass
+
+
 def compile_options(board: Mapping, results: list[dict], tick: int | None = None, recipes: Mapping | None = None,
                     stock: Mapping[str, int] | None = None, machines: list[Mapping] | None = None,
                     growable: tuple[str, ...] = (), enabled_recipes: Mapping | None = None,
@@ -1135,6 +1161,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     consumer_observation = ConsumerObservation("advanced-circuit")
     summary['seed'] = seed
     accept = getattr(session, "acceptance", None)
+    declared_plastic: dict = {}
 
     def check_acceptance(event: str) -> None:
         """Deterministic milestone predicates beside the rate proxies (audit finding 7)."""
@@ -1321,6 +1348,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         if settings.until_phase and settings.until_phase in reached:
             summary["stop"] = "window_reached"
             break
+        declare_plastic_target(session, board, declared_plastic)
         stock: dict[str, int] = {}
         for network in (facts.get("networks") or {}).values():
             for name, count in (network.get("items") or {}).items():

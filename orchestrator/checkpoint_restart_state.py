@@ -15,7 +15,7 @@ import re
 import types
 from typing import Any, Union, get_args, get_origin, get_type_hints
 
-from orchestrator.checkpoint_milestones import CheckpointEvaluator, FactorySnapshot
+from orchestrator.checkpoint_milestones import CheckpointEvaluator, FactorySnapshot, REEARNED_VERSIONS
 from orchestrator.oil_transaction import OilTransactionStore
 from orchestrator.operation_invocations import decode_record
 from orchestrator.loan_gate_retries import (
@@ -31,6 +31,9 @@ _IDENTITY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z", re.ASCII)
 _INVOCATION_FILE = re.compile(r"[0-9a-f]{32}\.json\Z", re.ASCII)
 _DISTRICT_FILE = re.compile(r"[0-9a-f]{16}\.json\Z", re.ASCII)
 _DIRECTORY_ROLES = {'bootstrap_district', 'operation_invocations'}
+#: Snapshot fields added after bundles were already captured: absent means "not observed" (None).
+#: Export omits them while None so a restored older bundle re-exports byte-identically.
+_LATER_SNAPSHOT_FIELDS = frozenset({'plastic'})
 
 
 def _valid_name(role, name, path):
@@ -160,9 +163,45 @@ def _decode_typed(value, annotation):
     elif isinstance(annotation, type) and is_dataclass(annotation):
         hints = get_type_hints(annotation)
         names = {item.name for item in fields(annotation)}
-        if isinstance(value, dict) and set(value) == names:
-            return annotation(**{name: _decode_typed(value[name], hints[name]) for name in names})
+        optional = _LATER_SNAPSHOT_FIELDS if annotation is FactorySnapshot else frozenset()
+        if isinstance(value, dict) and names - optional <= set(value) <= names:
+            return annotation(**{name: _decode_typed(value.get(name), hints[name]) for name in names})
     raise ValueError("Invalid snapshot shape or field type")
+
+
+def _snapshot_record(snapshot: FactorySnapshot) -> dict:
+    record = asdict(snapshot)
+    for name in _LATER_SNAPSHOT_FIELDS:
+        if record.get(name) is None:
+            record.pop(name, None)
+    return record
+
+
+def reearned_milestones(bundle_milestones, reached) -> list[dict]:
+    """Reached milestones whose recorded version the current code re-earns instead of refusing.
+
+    A bundle that reached C5 under c5-v1 keeps every other reached milestone; C5 must be earned again
+    under c5-v2. Returns one ``{id, from_version, to_version}`` record per dropped milestone.
+    """
+    current = {item.checkpoint_id: item.predicate_version for item in CheckpointEvaluator().milestones}
+    recorded = {item.get("id"): item.get("predicate_version") for item in bundle_milestones or ()
+                if isinstance(item, dict)}
+    return [{"id": cid, "from_version": recorded[cid], "to_version": current[cid]}
+            for cid in sorted(set(reached or ()))
+            if cid in current and recorded.get(cid) != current[cid]
+            and recorded.get(cid) in REEARNED_VERSIONS.get(cid, ())]
+
+
+def migrate_reached(state: dict) -> tuple[dict, list[dict]]:
+    """``state`` with re-earned milestones removed from ``reached`` (a copy), and the migration records."""
+    reached = state.get("reached")
+    if not isinstance(reached, list) or not all(isinstance(cid, str) for cid in reached):
+        return state, []  # malformed: left for the importer's own validation to refuse
+    dropped = reearned_milestones(state.get("milestones"), reached)
+    if not dropped:
+        return state, []
+    ids = {item["id"] for item in dropped}
+    return {**state, "reached": [cid for cid in state.get("reached") or () if cid not in ids]}, dropped
 
 
 def _milestones(evaluator: CheckpointEvaluator) -> list[dict]:
@@ -178,6 +217,8 @@ class RestartState:
     history: tuple[FactorySnapshot, ...]
     evaluator: CheckpointEvaluator
     evidence_state: dict
+    # Reached milestones dropped on import to be re-earned under a newer version (see migrate_reached).
+    reearned: tuple = ()
 
 
 def export_restart_state(script_output: Path, episode_id: str, mod_scope: str,
@@ -195,7 +236,7 @@ def export_restart_state(script_output: Path, episode_id: str, mod_scope: str,
     from orchestrator.checkpoint_evidence import new_evidence_state, validate_evidence_state
     evidence_state = validate_evidence_state(evidence_state if evidence_state is not None else new_evidence_state(origin="unknown"))
     bundle = {"evidence_state": evidence_state, "version": VERSION, "scope": scope, "milestones": _milestones(evaluator),
-              "baseline": asdict(baseline), "history": [asdict(sample) for sample in history],
+              "baseline": _snapshot_record(baseline), "history": [_snapshot_record(sample) for sample in history],
               "reached": sorted(evaluator.reached),
               "sidecars": _read_sidecars(sidecar_registry(script_output, episode_id), episode_id)}
     try:
@@ -333,6 +374,9 @@ def import_restart_state(bundle: dict, script_output: Path, *, episode_id: str, 
         raise ValueError("Restart version or scope mismatch")
     evaluator = CheckpointEvaluator()
     current = _milestones(evaluator)
+    # A milestone reached under a version the current code re-earns (c5-v1 -> c5-v2) is dropped from
+    # reached here and recorded on the state; any other reached difference is still refused below.
+    bundle, reearned = migrate_reached(bundle)
     if bundle["milestones"] != current:
         # A newer version of an unreached milestone (c6-v2) may differ; reached ones must not.
         reached_ids = set(bundle.get("reached") or ())
@@ -353,4 +397,5 @@ def import_restart_state(bundle: dict, script_output: Path, *, episode_id: str, 
     from orchestrator.checkpoint_evidence import new_evidence_state, validate_evidence_state
     evidence_state = validate_evidence_state(bundle["evidence_state"]) if bundle["version"] >= 2 else new_evidence_state(origin="unknown")
     install_sidecars(plan_sidecars(bundle, script_output, episode_id=episode_id), list(extra_writes))
-    return RestartState(episode_id, Path(script_output).resolve(), baseline, history, evaluator, evidence_state)
+    return RestartState(episode_id, Path(script_output).resolve(), baseline, history, evaluator, evidence_state,
+                        tuple(reearned))

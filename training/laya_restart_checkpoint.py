@@ -382,7 +382,9 @@ def restore(bundle, root, *, migration_contract=None):
     restored = import_restart_state(state, Path(root) / 'server/script-output',
         episode_id=state['scope']['episode_id'], mod_scope=mod_scope(manifest),
         extra_writes=auxiliary_files(bundle, root, metadata))
-    context = {**context, 'migration_contract_sha256': migration}
+    context = {**context, 'migration_contract_sha256': migration,
+               # Reached milestones dropped to be re-earned under a newer predicate version (c5-v1 -> c5-v2).
+               'strict_reearned': [dict(item) for item in restored.reearned]}
     return restored, context
 
 
@@ -399,14 +401,17 @@ def validate_restored(adapter, session, bundle, *, migration_contract=None):
         raise ValueError('Reload must be disposable')
     if _clock(adapter) != metadata['capture_tick']:
         raise ValueError('Loaded tick differs from capture')
+    from orchestrator.checkpoint_restart_state import migrate_reached
     state = session.export_restart_state(mod_scope=mod_scope(adapter.manifest))
     state['scope']['mod_scope'] = context['restart_state']['scope']['mod_scope']
-    if state != context['restart_state']:
+    # The restore dropped re-earned milestones (c5-v1) from reached; compare against that same state.
+    expected, reearned = migrate_reached(context['restart_state'])
+    if state != expected:
         # An unreached milestone version (c6-v2) may differ; everything reached must match.
         def _reached_only(value):
             reached = set(value.get('reached') or ())
             return {**value, 'milestones': [item for item in value.get('milestones', []) if item.get('id') in reached]}
-        if _reached_only(state) != _reached_only(context['restart_state']):
+        if _reached_only(state) != _reached_only(expected):
             raise ValueError('Restored baseline, history or ownership differs')
     statuses = session.acceptance()
     if 'error' in statuses or not session._history or session._history[-1].tick != metadata['capture_tick']:
@@ -429,7 +434,7 @@ def validate_restored(adapter, session, bundle, *, migration_contract=None):
             'server_start_ticks': Path(f'/proc/{pid}/stat').read_text().split(') ', 1)[1].split()[19],
             'validator_pid': os.getpid(), 'migration_contract_sha256': migration,
             'migration_contract': copy.deepcopy(migration_contract) if migration is not None else None,
-            'ownership_reconstructed': True,
+            'ownership_reconstructed': True, 'strict_reearned': reearned,
             'generation': metadata['generation_id'], 'checkpoint': metadata['checkpoint_id'],
             'manifest_sha256': checkpoints.sha256(Path(bundle) / 'checkpoint.json'),
             'world_sha256': metadata['world']['sha256'],

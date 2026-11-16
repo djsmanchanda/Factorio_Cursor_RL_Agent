@@ -263,6 +263,12 @@ class FactorySnapshot:
     # products_finished, or {"unavailable_reason": ...}. A machine's counter is lifetime, so only
     # increases between consecutive samples on the same recipe count as consumption.
     ac_consumers: Any = None
+    # Plastic telemetry for c5-v2 and c6a-v1, or None when not observed (older snapshots):
+    # {"produced": force plastic-bar production (bars), "declared_target": {"rate", "tick", "source"} or None,
+    #  "capacity": {"machines", "crafting_speed", "products_per_craft", "energy", "rate"},
+    #  "consumers": [{"unit", "recipe", "count"}] or None}. A runner declares the target in the game;
+    # the predicate never invents one.
+    plastic: Any = None
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "FactorySnapshot":
@@ -304,6 +310,7 @@ class FactorySnapshot:
             recipes=recipes,
             science=value.get("science") if isinstance(value.get("science"), Mapping) else None,
             ac_consumers=value.get("ac_consumers"),
+            plastic=value.get("plastic") if isinstance(value.get("plastic"), Mapping) else None,
         )
 
 
@@ -550,6 +557,149 @@ def _c5(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, history: S
     })
 
 
+#: c5-v2: skip this long after the first sample with positive plastic production, then measure over
+#: at least this long; pass at this share of the declared planned rate (owner decision, 16 November 2026).
+C5_SETTLE_TICKS = 30 * 60
+C5_WINDOW_TICKS = 30 * 60
+C5_TARGET_SHARE = 0.75
+
+
+def _plastic_fact(sample: FactorySnapshot, key: str) -> Any:
+    return sample.plastic.get(key) if isinstance(sample.plastic, Mapping) else None
+
+
+def _plastic_produced(sample: FactorySnapshot) -> int | None:
+    return _as_int(_plastic_fact(sample, "produced"))
+
+
+def _declared_target(sample: FactorySnapshot) -> dict[str, Any] | None:
+    """The runner's declared planned plastic rate (bars/s) recorded in the game, or None."""
+    target = _plastic_fact(sample, "declared_target")
+    if not isinstance(target, Mapping):
+        return None
+    rate = target.get("rate")
+    if isinstance(rate, bool) or not isinstance(rate, (int, float)) or not rate > 0:
+        return None
+    return {"rate": float(rate), "tick": _as_int(target.get("tick")), "source": target.get("source")}
+
+
+def _ratio(value: float | None, reference: Any) -> float | None:
+    if value is None or isinstance(reference, bool) or not isinstance(reference, (int, float)) or reference <= 0:
+        return None
+    return round(value / reference, 4)
+
+
+def _c5_windows(samples: Sequence[FactorySnapshot]) -> tuple[int | None, list[dict[str, Any]]]:
+    """Settle start and every shortest post-settle window of at least C5_WINDOW_TICKS, oldest first.
+
+    Each window ends at a sample and starts at the newest earlier post-settle sample that is at least
+    the window length before it; samples without a tick or counter are skipped.
+    """
+    usable = [(s.tick, _plastic_produced(s), s) for s in samples if s.tick is not None and _plastic_produced(s) is not None]
+    start = next((tick for tick, produced, _ in usable if produced > 0), None)
+    if start is None:
+        return None, []
+    settled = [row for row in usable if row[0] >= start + C5_SETTLE_TICKS]
+    windows = []
+    for index, (tick, produced, sample) in enumerate(settled):
+        begin = next((row for row in reversed(settled[:index]) if row[0] <= tick - C5_WINDOW_TICKS), None)
+        if begin is None:
+            continue
+        rate = (produced - begin[1]) * 60 / (tick - begin[0])
+        target = _declared_target(sample)
+        capacity = _plastic_fact(sample, "capacity")
+        installed = capacity.get("rate") if isinstance(capacity, Mapping) else None
+        windows.append({
+            "from_tick": begin[0], "tick": tick, "window_ticks": tick - begin[0],
+            "produced_delta": produced - begin[1], "measured_rate": round(rate, 4),
+            "planned_target": target, "installed_capacity": capacity if isinstance(capacity, Mapping) else None,
+            "ratio_to_target": None if target is None else _ratio(rate, target["rate"]),
+            "ratio_to_capacity": _ratio(rate, installed),
+            "passes": None if target is None else rate >= C5_TARGET_SHARE * target["rate"],
+            "_samples": (begin[2], sample),
+        })
+    return start, windows
+
+
+def c5_proof_samples(samples: Sequence[FactorySnapshot]) -> tuple[FactorySnapshot, ...]:
+    """The samples that prove c5-v2 (settle anchor and the first passing window), or () when none pass.
+
+    History holders keep these when trimming (``checkpoint_evidence.bounded_history``), so a pass stays
+    re-derivable from retained history after the output chest fills and production stops.
+    """
+    start, windows = _c5_windows(samples)
+    passing = next((w for w in windows if w["passes"] is True), None)
+    if passing is None:
+        return ()
+    anchor = next(s for s in samples if s.tick == start and (_plastic_produced(s) or 0) > 0)
+    proof: list[FactorySnapshot] = []
+    for sample in (anchor, *passing["_samples"]):
+        if not any(sample is kept for kept in proof):
+            proof.append(sample)
+    return tuple(proof)
+
+
+def _c5_v2(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, history: Sequence[FactorySnapshot]) -> CheckpointResult:
+    """Plastic made at >= 75% of the runner's declared planned rate over a settled window of >= 30 s.
+
+    Historical: the first passing window is the result for the rest of the run, so a full output chest
+    (production falls to zero) does not retract it. Without a declared target the result is unknown.
+    """
+    samples = tuple(history) + ((snapshot,) if not history or history[-1] is not snapshot else ())
+    start, windows = _c5_windows(samples)
+    passing = next((w for w in windows if w["passes"] is True), None)
+    shown = passing or (windows[-1] if windows else None)
+    targets = [target for target in (_declared_target(s) for s in samples) if target is not None]
+    declared = targets[-1] if targets else None
+    evidence = {
+        "first_production_tick": start,
+        "settle_ticks": C5_SETTLE_TICKS, "min_window_ticks": C5_WINDOW_TICKS, "target_share": C5_TARGET_SHARE,
+        "window_count": len(windows), "sample_count": len(samples),
+        "latest_declared_target": declared,
+        "window": None if shown is None else {k: v for k, v in shown.items() if k != "_samples"},
+        "historical": passing is not None,
+    }
+    produced_now = _plastic_produced(snapshot)
+    # A window without a declared target cannot be judged; it might have passed.
+    unjudged = declared is None or any(w["passes"] is None for w in windows)
+    if passing is not None:
+        status, missing = PredicateStatus.PASSED, ()
+    elif unjudged:
+        status, missing = PredicateStatus.UNKNOWN, ("planned_target",)
+    elif produced_now is None:
+        status, missing = PredicateStatus.UNKNOWN, ("plastic_production_counter",)
+    else:
+        status, missing = PredicateStatus.FAILED, ()
+    checks = {
+        "planned_target_declared": None if declared is None else True,
+        "plastic_production_started": None if produced_now is None and start is None else start is not None,
+        "settled_window_at_least_30_seconds": bool(windows),
+        "rate_at_least_75_percent_of_target": (True if passing is not None else
+                                                None if unjudged or not windows else False),
+    }
+    return _result("C5", "c5-v2", status, {"checks": checks, **evidence}, missing)
+
+
+def _plastic_consumers(samples: Sequence[FactorySnapshot]) -> dict[str, int] | None:
+    """Plastic crafts per recipe by non-chest machines, counted as c6-v3 counts advanced-circuit consumers."""
+    rows = [_plastic_fact(s, "consumers") for s in samples]
+    rows = [r for r in rows if isinstance(r, (list, tuple))]
+    if not rows:
+        return None
+    return _machine_consumption([FactorySnapshot(ac_consumers=r) for r in rows])
+
+
+def _c6a(snapshot: FactorySnapshot, baseline: FactorySnapshot | None, history: Sequence[FactorySnapshot]) -> CheckpointResult:
+    """Plastic used: a non-chest machine whose recipe takes plastic-bar crafted after the baseline."""
+    samples = list(history) if history and history[-1] is snapshot else [*history, snapshot]
+    observed = isinstance(_plastic_fact(snapshot, "consumers"), (list, tuple))
+    consumed = None if baseline is None or not observed else _plastic_consumers(samples)
+    window = sum(isinstance(_plastic_fact(s, "consumers"), (list, tuple)) for s in samples)
+    return _all_checks("C6a", "c6a-v1", {
+        "plastic_consumer_crafted": None if consumed is None else any(v > 0 for v in consumed.values()),
+    }, {"machine_consumption": consumed, "window_samples": window})
+
+
 #: A logistics chest only moves stock; it is not a production consumer. c6-v1 accepted any owned
 #: recipe with advanced circuits among its ingredients, so 83/84 C55 and 56/56 C51 passes were chests.
 C6_LOGISTICS_CHESTS = frozenset({
@@ -698,7 +848,8 @@ DEFAULT_MILESTONES: tuple[MilestoneDefinition, ...] = (
     MilestoneDefinition("C2", "iron_copper_rollout", "c2-v1", _c2),
     MilestoneDefinition("C3", "stone_rollout", "c3-v1", _c3),
     MilestoneDefinition("C4", "first_plastic", "c4-v1", _c4),
-    MilestoneDefinition("C5", "stable_plastic", "c5-v1", _c5),
+    MilestoneDefinition("C5", "plastic_at_planned_rate", "c5-v2", _c5_v2),
+    MilestoneDefinition("C6a", "plastic_consumption", "c6a-v1", _c6a),
     MilestoneDefinition("C6", "advanced_circuit_consumption", "c6-v3", _c6_v3),
     MilestoneDefinition("C7", "chemical_science_research", "c7-v1", _c7),
     MilestoneDefinition("C8", "production_science_research", "c8-v1", _c8),
@@ -707,6 +858,14 @@ DEFAULT_MILESTONES: tuple[MilestoneDefinition, ...] = (
 
 #: Ordered strict checkpoint IDs; CLI choices and reports derive from this, never from a fixed range.
 MILESTONE_IDS: tuple[str, ...] = tuple(item.checkpoint_id for item in DEFAULT_MILESTONES)
+
+#: Milestones added after evidence was already being recorded; older journals, evidence states and
+#: restart bundles may lack them, which means "not measured then", never failed.
+LATER_MILESTONE_IDS: frozenset[str] = frozenset({"C6a"})
+
+#: A restart bundle that reached a milestone under one of these older versions is not refused: the
+#: milestone is dropped from ``reached`` and re-earned under the current version (recorded as such).
+REEARNED_VERSIONS: Mapping[str, frozenset[str]] = {"C5": frozenset({"c5-v1"})}
 
 
 def default_milestones() -> tuple[MilestoneDefinition, ...]:

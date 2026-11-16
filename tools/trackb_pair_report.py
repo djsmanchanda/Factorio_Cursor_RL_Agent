@@ -24,7 +24,21 @@ from collections import Counter
 from math import comb
 from pathlib import Path
 
-MILESTONES = [f"C{i}" for i in range(10)]
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from orchestrator.checkpoint_milestones import MILESTONE_IDS  # noqa: E402
+
+MILESTONES = list(MILESTONE_IDS)  # C0..C9 with sub-milestones (C6a) in order
+
+
+def predicate_versions(jobs: list[dict], milestone: str) -> dict[str, int]:
+    """How many jobs measured ``milestone`` under each predicate version (c5-v1 and c5-v2 must not be pooled)."""
+    counts: Counter = Counter()
+    for job in jobs:
+        version = ((job.get("milestones") or {}).get("predicate_versions") or {}).get(milestone)
+        counts[version or "unrecorded"] += 1
+    return dict(sorted(counts.items()))
 
 
 def read(path: Path) -> dict:
@@ -94,7 +108,7 @@ def summarize(name: str, jobs: list[dict], milestones: list[str]) -> dict:
             false_held = [j for j in terminal if held_at_end(j, milestone) is False]
             unknown = len(terminal) - len(held) - len(false_held)
             print(f"      {milestone}: ever={len(ever)}/{len(terminal)} completed  held={len(held)}"
-                  f" (false={len(false_held)} unknown={unknown})")
+                  f" (false={len(false_held)} unknown={unknown}) versions={predicate_versions(terminal, milestone)}")
     return {"status": status}
 
 

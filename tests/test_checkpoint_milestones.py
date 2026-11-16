@@ -4,7 +4,9 @@ from orchestrator.checkpoint_milestones import (
     C6_V2,
     CheckpointEvaluator,
     FactorySnapshot,
+    MilestoneDefinition,
     PredicateStatus,
+    _c5,
     default_milestones,
     evaluate_milestone,
 )
@@ -32,9 +34,10 @@ def _snapshot(**overrides):
 
 def test_default_registry_is_ordered_and_versioned_with_advanced_circuit_milestone():
     milestones = default_milestones()
-    assert [item.checkpoint_id for item in milestones] == ["C0", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9"]
-    assert [item.predicate_version for item in milestones] == [f"c{i}-v1" for i in range(6)] + ["c6-v3", "c7-v1", "c8-v1", "c9-v1"]
-    assert milestones[6].name == "advanced_circuit_consumption"
+    assert [item.checkpoint_id for item in milestones] == ["C0", "C1", "C2", "C3", "C4", "C5", "C6a", "C6", "C7", "C8", "C9"]
+    assert [item.predicate_version for item in milestones] == [f"c{i}-v1" for i in range(5)] + [
+        "c5-v2", "c6a-v1", "c6-v3", "c7-v1", "c8-v1", "c9-v1"]
+    assert milestones[7].name == "advanced_circuit_consumption"
 
 
 def test_missing_telemetry_is_unknown_not_failed():
@@ -83,13 +86,16 @@ def test_c4_requires_new_plastic_production_and_delivery():
     assert evaluate_milestone("C4", current).unknown
 
 
+C5_V1 = (MilestoneDefinition("C5", "stable_plastic", "c5-v1", _c5),)
+
+
 def test_c5_requires_120_seconds_and_advancing_plastic_evidence():
     def sample(tick, craft, delivered):
         return {"tick": tick, "production": {"plastic-bar": {"craft_count": craft}}, "providers": {"plastic-bar": {"delivered": delivered}}}
 
     history = [sample(0, 1, 1), sample(3600, 2, 2), sample(7200, 3, 3)]
-    assert evaluate_milestone("C5", history[-1], history=history[:-1]).passed
-    assert evaluate_milestone("C5", sample(6000, 3, 3), history=history[:-1]).failed
+    assert evaluate_milestone("C5", history[-1], history=history[:-1], milestones=C5_V1).passed
+    assert evaluate_milestone("C5", sample(6000, 3, 3), history=history[:-1], milestones=C5_V1).failed
 
 
 def test_c5_ignores_preproduction_history_from_c0_lane():
@@ -102,7 +108,7 @@ def test_c5_ignores_preproduction_history_from_c0_lane():
         sample(200, 1, 1),
         sample(3800, 2, 2),
     ]
-    result = evaluate_milestone("C5", sample(7400, 3, 3), history=history)
+    result = evaluate_milestone("C5", sample(7400, 3, 3), history=history, milestones=C5_V1)
     assert result.passed
     assert result.evidence["ignored_preproduction_samples"] == 2
 

@@ -21,7 +21,8 @@ pytestmark = pytest.mark.fast
 def snapshot(tick, count):
     return FactorySnapshot.from_mapping({"tick": tick, "base_valid": True,
         "production": {"plastic-bar": {"produced": count, "craft_count": count}},
-        "providers": {"plastic-bar": {"delivered": count}}})
+        "providers": {"plastic-bar": {"delivered": count}},
+        "plastic": {"produced": count, "declared_target": {"rate": 0.5, "tick": 0, "source": "test"}}})
 
 
 def make_bundle(tmp_path):
@@ -55,8 +56,10 @@ def test_real_evaluator_baseline_history_and_ownership_roundtrip(tmp_path):
     assert state.evaluator.evaluate("C0", FactorySnapshot()).passed
     assert state.evaluator.evaluate("C4", snapshot(200, 2), baseline=state.baseline).passed
     assert not CheckpointEvaluator().evaluate("C4", snapshot(200, 2), baseline=snapshot(100, 2)).passed
-    assert state.evaluator.evaluate("C5", snapshot(7200, 3), history=state.history).passed
-    assert not CheckpointEvaluator().evaluate("C5", snapshot(7200, 3), history=state.history[-1:]).passed
+    # c5-v2 needs the restored settle anchor (tick 0): without it the same window is still settling.
+    later = (*state.history, snapshot(1800, 3), snapshot(3600, 33))
+    assert state.evaluator.evaluate("C5", later[-1], history=later).passed
+    assert not CheckpointEvaluator().evaluate("C5", later[-1], history=later[1:]).passed
     for role, path in sidecar_registry(source, "laya-original").items():
         destination = sidecar_registry(target, "laya-original")[role]
         if not path.exists():

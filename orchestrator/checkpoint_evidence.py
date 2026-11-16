@@ -3,14 +3,35 @@
 from __future__ import annotations
 
 from orchestrator.checkpoint_milestones import (
-    C6_LOGISTICS_CHESTS, DEFAULT_MILESTONES, evaluate_milestone, _plastic_sample,
+    C6_LOGISTICS_CHESTS, DEFAULT_MILESTONES, LATER_MILESTONE_IDS, c5_proof_samples, evaluate_milestone, _plastic_sample,
 )
+
+#: Strict history bound shared by the runner session, the sidecar and restart bundles.
+HISTORY_LIMIT = 20
 
 
 def retained_samples(history):
     """An identical paused observation adds no evidence or sampling boundary."""
     samples = list(history)
     return [sample for i, sample in enumerate(samples) if i == 0 or sample != samples[i - 1]]
+
+
+def bounded_history(history, limit=HISTORY_LIMIT):
+    """The newest ``limit`` retained samples, keeping c5-v2's proof samples when they would fall out.
+
+    c5-v2 is a historical predicate: its first passing window (and the settle anchor before it) stays
+    in history so the stateless predicate keeps passing after production stops on a full chest. At most
+    three samples are kept this way; the rest are the newest samples, in tick order.
+    """
+    samples = retained_samples(history)
+    if len(samples) <= limit:
+        return samples
+    proof = c5_proof_samples(samples)
+    pinned = [any(sample is kept for kept in proof) for sample in samples]
+    unpinned = [i for i, kept in enumerate(pinned) if not kept]
+    room = limit - sum(pinned)
+    newest = set(unpinned[len(unpinned) - room:]) if room > 0 else set()
+    return [sample for i, sample in enumerate(samples) if pinned[i] or i in newest]
 
 
 def project_evidence(baseline, history):
@@ -87,6 +108,12 @@ def new_evidence_state(*, origin="observed"):
             "last_tick": None, "last_statuses": None, "consumer_telemetry": False}
 
 
+def _known_ids(statuses):
+    """Every current milestone id, except that a state older than a later milestone may lack it."""
+    ids = {m.checkpoint_id for m in DEFAULT_MILESTONES}
+    return ids - LATER_MILESTONE_IDS <= set(statuses) <= ids
+
+
 def validate_evidence_state(state):
     import json
     template = new_evidence_state()
@@ -105,7 +132,7 @@ def validate_evidence_state(state):
     if not set(state["events"]) <= {m.checkpoint_id for m in DEFAULT_MILESTONES}:
         raise ValueError("Invalid checkpoint evidence event")
     statuses = state["last_statuses"]
-    if statuses is not None and (not isinstance(statuses, dict) or set(statuses) != {m.checkpoint_id for m in DEFAULT_MILESTONES} or any(v not in ("passed", "failed", "unknown") for v in statuses.values())):
+    if statuses is not None and (not isinstance(statuses, dict) or not _known_ids(statuses) or any(v not in ("passed", "failed", "unknown") for v in statuses.values())):
         raise ValueError("Invalid checkpoint evidence statuses")
     if any(not isinstance(k, str) or not k.isdecimal() or type(v) is not int or v < 0 for k, v in state["generations"].items()):
         raise ValueError("Invalid checkpoint generations")
@@ -139,7 +166,7 @@ def validate_evidence_state(state):
     inherited = state["inherited_start"]
     if inherited is not None and (not isinstance(inherited, dict) or set(inherited) != {"tick", "predicates", "provenance"}
             or inherited["provenance"] != "first_observation_not_earned" or not isinstance(inherited["predicates"], dict)
-            or set(inherited["predicates"]) != {m.checkpoint_id for m in DEFAULT_MILESTONES}
+            or not _known_ids(inherited["predicates"])
             or any(not isinstance(v, dict) or set(v) != {"version", "status"} or not isinstance(v["version"], str)
                    or v["status"] not in ("passed", "failed", "unknown") for v in inherited["predicates"].values())
             or (inherited["tick"] is not None and type(inherited["tick"]) is not int)):
@@ -180,7 +207,11 @@ def evidence_success(state, baseline, history):
     advancing = type(tick) is int and type(state["last_tick"]) is int and tick > state["last_tick"]
     if previous is not None and advancing and not state["gap"]:
         for cid, status in statuses.items():
-            if status == "passed" and previous[cid] == "failed" and cid not in state["events"]:
+            # An event recorded under an older predicate version (a restart bundle's c5-v1) is
+            # superseded by the first transition under the current version.
+            recorded = state["events"].get(cid)
+            if (status == "passed" and previous.get(cid) == "failed"
+                    and (recorded is None or recorded["predicate_version"] != projection["present"][cid]["version"])):
                 state["events"][cid] = {"kind": "predicate_transition", "checkpoint": cid,
                     "predicate_version": projection["present"][cid]["version"], "from_tick": state["last_tick"],
                     "tick": tick, "provenance": "adjacent_successful_observations"}

@@ -449,7 +449,7 @@ class DeterministicSession:
         from orchestrator.checkpoint_milestones import (CheckpointEvaluator, _foundation_ready, evaluate_milestone,
                                                          starter_blocker)
         from orchestrator.checkpoint_observer import LiveCheckpointObservationAdapter, ObservationUnsupported
-        from orchestrator.checkpoint_evidence import new_evidence_state, evidence_failure, evidence_success
+        from orchestrator.checkpoint_evidence import bounded_history, new_evidence_state, evidence_failure, evidence_success
         if not hasattr(self, "_evaluator"):
             self._evaluator, self._baseline, self._history = CheckpointEvaluator(), None, []
             self._evidence_state = new_evidence_state()
@@ -485,7 +485,7 @@ class DeterministicSession:
                                  for plate, name in (("iron-plate", "iron"), ("copper-plate", "copper"),
                                                      ("stone-brick", "stone"))}
         if not self._history or snapshot != self._history[-1]:
-            self._history = (self._history + [snapshot])[-20:]
+            self._history = bounded_history(self._history + [snapshot])
         snapshot = self._history[-1]  # canonical representative for identity-sensitive predicates
         evidence_success(self._evidence_state, self._baseline, self._history)
         # Fresh: the stateless predicates on this sample. The evaluator's latch answers "passed" forever once
