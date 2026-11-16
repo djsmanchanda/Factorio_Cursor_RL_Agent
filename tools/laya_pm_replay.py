@@ -160,6 +160,8 @@ def main(argv=None):
                         help='levels of nested shortage bills to fund in one step (1 = the service bill only)')
     replay.add_argument('--finite-bill-batches', action='store_true',
                         help='select the explicit reuse-only finite operation for supported bill items; journal feasibility')
+    replay.add_argument('--capability-facts', action='store_true',
+                        help='retain native line replies, capability choices and exact owned seed health in invocation receipts')
     replay.add_argument('--restore-sidecars', action='store_true',
                         help="install the bundle's deterministic sidecars and run under its episode id, as a cohort restart does")
     replay.add_argument('--engine-binary', type=Path,
@@ -199,6 +201,7 @@ def main(argv=None):
                            max_steps=args.max_steps, planned=1,
                            max_game_ticks=args.max_game_ticks,
                            mods_source=args.mods_source)
+        plan['capability_facts'] = args.capability_facts
     except ReplayError as error:
         print(json.dumps({'kind': 'laya-pm-replay-blocked-v1', 'blocker': str(error)}, indent=2))
         return 2
@@ -256,7 +259,8 @@ def main(argv=None):
             summary = run_live_replay(
                 reload_info, lambda: LiveWorld(args.root),
                 lambda: DeterministicSession(args.root, emit=_emit,
-                                             origin_episode_id=restored['episode_id'] if restored else None),
+                                             origin_episode_id=restored['episode_id'] if restored else None,
+                                             capture_capability_facts=args.capability_facts),
                 args.root/'evidence/pm-replay.jsonl', max_steps=max(1, args.max_steps),
                 max_game_ticks=args.max_game_ticks,
                 deadline=args.deadline, after_live=sampler.start,
@@ -1057,6 +1061,7 @@ def provenance_receipt(plan: dict, bundle: Path, mods_source: Path, engine: dict
             "engine": engine, "code_revision": code_revision,
             "game_port": plan.get("game_port"), "rcon_port": plan.get("rcon_port"),
             "deadline": plan.get("deadline"), "planned_attempts": planned,
+            "capability_facts": plan.get("capability_facts", False),
             "max_game_ticks": plan.get("max_game_ticks", 108000)}
 
 

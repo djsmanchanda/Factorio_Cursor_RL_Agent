@@ -62,6 +62,21 @@ Receipts must retain transaction identity, selected parameters, typed cause,
 ownership, resource use and observed postconditions. A successful return is not
 by itself proof of delivered output or a standing producer.
 
+For bounded PM diagnostics, `tools.laya_pm_replay replay --capability-facts` records
+native line-query text/replies (including an atomic query tick and force/surface
+identity), production-capability results and the selected chemical rung in the
+operation's durable invocation. A capability fact references its exact query;
+missing/malformed scope or tick metadata explicitly makes that correlation
+unknown while retaining the controller's original boolean. Exact saved steel-seed targets are surveyed
+before submission and after diagnosis, with the plan hash, native drill mining
+area/resource census, machine recipes, lifetime craft counters and local
+inventories. These lifetime counters describe machines, not per-item output.
+Health reads distinguish a value, a successful absent value and a failed read;
+incomplete or inconsistent read-state coverage is rejected. This opt-in evidence
+never clears a dispatch fence, proves ownership of a replacement entity, selects
+a recovery, or changes factory decisions. Maintenance queries are outside the
+selected operation's capture; disabled capture retains the ordinary query path.
+
 Borrowed-cell recovery distinguishes global and allocatable stock from inputs
 physically at the cell. Provider staging is not requester delivery. Missing
 inputs, status or supported gate readback remain unknown. A control refresh

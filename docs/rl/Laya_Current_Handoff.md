@@ -462,3 +462,8 @@ Lifecycle: no active campaign changed. Commit before a short separate frozen
 2.1.24 counter smoke; live candidate evidence remains pending. Research stays
 off, no push, controller freezes untouched. Local evidence:
 `data/laya-orchestration/parent-next-setup-20261116/item_production_helper_runs/`.
+
+
+### 2026-11-17 01:45 IST — optional native steel capability/source evidence verified offline
+
+Native counter smoke09da1aaf is fully assessed/cleaned: recipe retarget credited0, realACoutput credited1, PMunplaced/crafts0. Next steel fact-capture is defaultOFF (`--capability-facts`): exact native line query/reply/scope/tick, actual capability boolean/basis and first missing rung, exact saved steel-plan hash plus native seed/source/recipe/inventory/power read states. Independent review found twoP2 evidence gaps; parent reproduced8failures and corrected correlation and absence/error coverage without a second delegate. Final118focused and2019fastpassed/1skip exit0. No recovery/geometry/gate/cap/loan/persistent/donor/catalog/reclaim/release policy change. Native diagnostic validation pending; no activefreeze changed. Next separate diagnostic will retain missing steel measurements from the same validated version4C4 tick495062/privatepack, bounded60game minutes/200steps and7200s wall. ResearchOFF,standardresearch retained,nopush,controllers untouched.

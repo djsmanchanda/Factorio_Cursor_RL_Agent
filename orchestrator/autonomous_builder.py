@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import time
 from collections.abc import Mapping, Sequence
@@ -12,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from orchestrator import extraction_state, live_base, resource_patches, stage_extraction
+from orchestrator import extraction_state, live_base, operation_facts, resource_patches, stage_extraction
 from orchestrator.build_decisions import (
     _heaviest_source,
     _mineable,
@@ -4286,6 +4287,19 @@ def _verified_iron_pioneer_output(
     return int(contents.get("iron-plate", 0)) > 0
 
 
+def _record_steel_seed_health(client, surface, force, path, plan, phase, *, reused):
+    if not operation_facts.enabled():
+        return
+    evidence = {"phase": phase, "project_id": "conversion_steel-plate", "reused": reused,
+                "plan_path": str(path)}
+    try:
+        evidence["plan_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        evidence["observation"] = live_base.plan_entity_health(client, surface, force, plan)
+    except Exception as error:  # A diagnostic read never selects a remedy or hides the operation's outcome.
+        evidence["unknown"] = f"{type(error).__name__}: {error}"
+    operation_facts.record("owned_steel_seed_health", **evidence)
+
+
 def _build_compact_steel_seed(client, bridge, surface, force, provider, reference_point, emit):
     """Fund and remember a belt-side seed, falling back to direct mining."""
     from planners.steel_bootstrap import steel_seed, VECTORS
@@ -4328,7 +4342,8 @@ def _build_compact_steel_seed(client, bridge, surface, force, provider, referenc
         ledger, _transferable_or_available_stock(client, surface, force), emit,
     )
     path = ledger.path.with_suffix(".steel-seed.json")
-    if path.exists():
+    reused = path.exists()
+    if reused:
         plan = json.loads(path.read_text())
     else:
         x, y = provider
@@ -4377,6 +4392,7 @@ def _build_compact_steel_seed(client, bridge, surface, force, provider, referenc
         assert_affordable(client, surface, force, plan, steel_project, emit, reserve_project=True,
                           reservation_priority=_STEEL_STARTER_RESERVATION_PRIORITY)
         path.write_text(json.dumps(plan, sort_keys=True))
+    _record_steel_seed_health(client, surface, force, path, plan, "before_submit", reused=reused)
     _submit(client, bridge, surface, plan, steel_project, emit,
             stage_coverage=lambda: _ensure_plan_construction_coverage(
                 client, bridge, surface, force, plan, emit,
@@ -4394,6 +4410,7 @@ def _build_compact_steel_seed(client, bridge, surface, force, provider, referenc
         _ensure_power_anchor_on_generated_network(client, bridge, surface, force, pole,
                                                   "compact steel seed", emit)
     stuck = _diagnose_machines(client, surface, furnaces, emit, bridge=bridge, force=force, grace_seconds=60)
+    _record_steel_seed_health(client, surface, force, path, plan, "after_diagnosis", reused=reused)
     if stuck:
         raise ProductionPrerequisiteDeferred(str(stuck), code="steel_seed_output_wait", state="producing")
     return output
@@ -8454,9 +8471,12 @@ def _chemical_capability_started(
         line = live_base.find_line(
             client, surface, force, item, "chemical-plant",
         )
-        return line is not None and (
+        result = line is not None and (
             line.working_count > 0 or line.produced_count > 0
         )
+        operation_facts.record("chemical_capability", item=item, result=result,
+                               basis="sulfuric_acid_line", surface=surface, force=force)
+        return result
     if item in _CHEMICAL_BATCH_TARGETS and _chemical_uses_rotating_batch(
         client, surface, force, item,
     ):
@@ -8474,8 +8494,18 @@ def _chemical_capability_started(
             "embodied": _ladder_embodied(client, surface, force, item, stock),
         }
         _LADDER_CREDIT[item] = parts
-        return sum(parts.values()) >= _CHEMICAL_BATCH_TARGETS[item]
-    return _production_started(client, surface, force, item)
+        result = sum(parts.values()) >= _CHEMICAL_BATCH_TARGETS[item]
+        operation_facts.record("chemical_capability", item=item, result=result,
+                               basis="rotating_batch_credit", parts=parts,
+                               required=_CHEMICAL_BATCH_TARGETS[item], surface=surface, force=force)
+        return result
+    with operation_facts.collect("production_capability") as capability:
+        result = _production_started(client, surface, force, item)
+    operation_facts.record("chemical_capability", item=item, result=result,
+                           basis="production_started", surface=surface, force=force,
+                           query_evidence=capability[0]["query_evidence"] if len(capability) == 1 else {
+                               "query_id": None, "correlation": {"state": "unknown", "reason": "predicate query not retained"}})
+    return result
 
 
 # Last rung credit per ladder item, shown when the rung reopens so a reopen is explainable.
@@ -8619,13 +8649,15 @@ def _unfunded_ladder_ingredient(
 def _missing_chemical_ladder_predecessor(
     client: RconClient, surface: str, force: str, item: str,
 ) -> str | None:
-    return next((
-        predecessor
-        for predecessor in _chemical_ladder_predecessors(item)
-        if not _chemical_capability_started(
-            client, surface, force, predecessor,
-        )
-    ), None)
+    predecessors = _chemical_ladder_predecessors(item)
+    for predecessor in predecessors:
+        if not _chemical_capability_started(client, surface, force, predecessor):
+            operation_facts.record("chemical_ladder_selection", item=item, selected=predecessor,
+                                   predecessors=predecessors, surface=surface, force=force)
+            return predecessor
+    operation_facts.record("chemical_ladder_selection", item=item, selected=None,
+                           predecessors=predecessors, surface=surface, force=force)
+    return None
 
 
 def _defer_steel_blocked_loan(
@@ -11962,25 +11994,40 @@ def _production_started(
     the AM2 bootstrap seam). A tier item whose recipe machines are all active
     loan borrowers proves nothing; a real line does, even years idled.
     """
+    def observed(result, basis, line=None):
+        operation_facts.record("production_capability", item=item, result=result, basis=basis,
+                               surface=surface, force=force, machine=None if spec is None else spec["machine"],
+                               query_evidence={"query_id": queries[0]["query_id"],
+                                               "correlation": queries[0]["correlation"]} if len(queries) == 1 else {
+                                   "query_id": None, "correlation": {"state": "unknown", "reason": "line query not retained"}},
+                               line=None if line is None else {
+                                   key: getattr(line, key, None) for key in (
+                                       "recipe", "machine_count", "working_count", "produced_count",
+                                       "machine_positions", "live_machine_count", "output_blocked_ready_count",
+                                   )})
+        return result
+    queries = []
     spec = LINE_RECIPES.get(item)
     if spec is None:
-        return True
-    line = live_base.find_line(
-        client, surface, force, item, spec["machine"],
-    )
+        return observed(True, "no_catalog_spec")
+    with operation_facts.collect("line_query") as queries:
+        line = live_base.find_line(
+            client, surface, force, item, spec["machine"],
+        )
     if line is None:
-        return False
+        return observed(False, "no_matching_line")
     if item == "advanced-circuit" and not _unborrowed_recipe_positions(client, surface, force, line):
         # A finite seed supplies a bill, not standing production capability.
-        return False
+        return observed(False, "finite_advanced_circuit_borrowers_only", line)
     if getattr(line, "working_count", 0) > 0:
-        return True
+        return observed(True, "working_machine", line)
     produced = getattr(line, "produced_count", 0) > 0
     if not produced:
-        return False
+        return observed(False, "no_working_or_historical_crafts", line)
     if item not in live_base.ASSEMBLER_TIERS:
-        return True
-    return bool(_unborrowed_recipe_positions(client, surface, force, line))
+        return observed(True, "historical_non_tier_crafts", line)
+    return observed(bool(_unborrowed_recipe_positions(client, surface, force, line)),
+                    "unborrowed_tier_positions", line)
 
 
 def _core_mall_producer_ready(client, surface, force, item):

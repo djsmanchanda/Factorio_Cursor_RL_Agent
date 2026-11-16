@@ -19,13 +19,14 @@ become observations instead of crashing the run.  The world must be live
 from __future__ import annotations
 
 import copy
+from contextlib import nullcontext
 from dataclasses import asdict
 import json
 from collections.abc import Callable
 from pathlib import Path
 
 from orchestrator import autonomous_builder as ab
-from orchestrator import construction_coverage, mall_control
+from orchestrator import construction_coverage, mall_control, operation_facts
 from orchestrator.bootstrap_district import BootstrapDistrictLedger
 from orchestrator.bootstrap_work import BootstrapWorkLedger
 from orchestrator.game_bridge import GameBridge, load_json
@@ -92,10 +93,12 @@ class DeterministicSession:
     consumer_choices_enabled = False
     filter_fluid_shortages_enabled = False
     chain_economics_enabled = False
+    capture_capability_facts = False  # Optional diagnostic I/O; never an operation eligibility fact.
 
     def __init__(self, root: Path, *, goal_item: str = "automation-science-pack",
                  reference_point: tuple[float, float] = (0.0, 0.0), emit: Callable[[str], None] = print,
-                 logical_episode_id: str | None = None, origin_episode_id: str | None = None) -> None:
+                 logical_episode_id: str | None = None, origin_episode_id: str | None = None,
+                 capture_capability_facts: bool = False) -> None:
         import json
         if origin_episode_id is not None:  # reject an unsafe restored identity before any session I/O
             from orchestrator.checkpoint_restart_state import validate_episode_id
@@ -108,6 +111,7 @@ class DeterministicSession:
         self.invocations = Invocations(self.script_output, self.episode_id)
         self.reference_point = reference_point
         self.emit = emit
+        self.capture_capability_facts = capture_capability_facts
         self.stock_networks = lambda: None
         ab._BOOTSTRAP_DISTRICT_LEDGER = BootstrapDistrictLedger(
             self.script_output, episode_id=self.episode_id, surface=SURFACE, force=FORCE, bootstrap_profile=PROFILE)
@@ -241,9 +245,13 @@ class DeterministicSession:
         original = self.bridge.build_layout
         self.bridge.build_layout = lambda authorization, plan, *args, **kwargs: self.invocations.submit(
             record, original, authorization, plan, *args, **kwargs)
+        def retain_fact(fact):
+            record.setdefault("facts", []).append(copy.deepcopy(fact))
+            self.invocations.save(record)
         try:
             try:
-                result = self._operations()[operation](**params)
+                with (operation_facts.capture(retain_fact) if self.capture_capability_facts else nullcontext()):
+                    result = self._operations()[operation](**params)
             except WorkStateSignal as signal:
                 outcome = {"ok": False, "operation": operation, "params": params, "code": getattr(signal, "code", None),
                            "classification": getattr(signal, "classification", None),
