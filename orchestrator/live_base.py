@@ -291,6 +291,9 @@ def plan_entity_health(client: RconClient, surface: str, force: str, plan: dict)
         "for _,r in pairs(s.find_entities_filtered{type='resource',area=area}) do "
         "resources[#resources+1]={name=r.name,position=r.position,amount=r.amount} end;"
         "return resources end);read('drop_position',function() return e.drop_position end);end;"
+        "if e.type=='transport-belt' then read('belt_contents',function() local items={};"
+        "for i=1,2 do for _,stack in pairs(e.get_transport_line(i).get_contents()) do "
+        "items[#items+1]={name=stack.name,count=stack.count} end end;return items end);end;"
         "else row.errors.entity='missing exact live identity' end;rows[#rows+1]=row end;"
         "rcon.print(helpers.table_to_json({tick=game.tick,surface=s.name,surface_index=s.index,"
         "force=f.name,force_index=f.index,entities=rows}))"
@@ -314,6 +317,7 @@ def plan_entity_health(client: RconClient, surface: str, force: str, plan: dict)
                 "container": ("contents",), "logistic-container": ("contents",),
                 "inserter": ("hand", "pickup_position", "drop_position"),
                 "mining-drill": ("mining_area", "mining_target", "resources_in_mining_area", "drop_position"),
+                "transport-belt": ("belt_contents",),
             }.get(row.get("type"), ()))
             reads = row.get("reads")
             if not isinstance(row.get("type"), str) or not isinstance(reads, dict) or not required <= reads.keys():

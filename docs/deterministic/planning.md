@@ -25,6 +25,22 @@ These names describe intended responsibilities, not permission to build speculat
   persistence; diagnostics do not relax route legality.
 - Diagnose supply, delivery, inserter throughput, machine speed, and machine count in that order.
 - Repair existing capacity before duplicating it.
+  A constructor-owned direct-mining steel seed whose exact drill has an empty
+  native mining-area census can reuse its steel furnace and provider. A shared
+  belt route uses a side pickup from an observed, pure-iron output terminal to
+  a clear furnace-edge inserter within the existing medium-pole supply. The
+  through terminal and its future splitter seam stay clear for normal district
+  promotion. The source pickup uses the existing funded power-connection
+  operation. The complete additive route, including both new belt endpoints,
+  is funded and persisted inside the existing episode steel-seed sidecar before
+  submission; retries bind the original seed and source unit identities and
+  reuse that route. Unknown census, changed identities/recipes, mixed source
+  contents or blocked intakes defer without selecting a destructive remedy.
+  Submission and observed full construction establish separate baselines;
+  earlier buffered output cannot earn recovery-delivery credit. Increased
+  furnace crafts and increased steel in the exact retained provider are then
+  recorded separately from submission. No seed entity is retired by this feed repair;
+  the later steel-district promotion and its admission gate remain unchanged.
   For a journalled chest-fed assembler row, recovery reads the exact selected
   recipe row and declared feed prototypes from scoped acknowledged invocation
   plans, including construction-shortage outcomes. Constructor-derived endpoint

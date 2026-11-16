@@ -166,6 +166,23 @@ def test_mining_census_includes_all_resource_names_in_the_native_area():
         ("iron-ore", 5), ("copper-ore", 9)]
 
 
+def test_native_belt_health_reads_both_lanes_and_retains_errors():
+    client = NativeClient()
+    client.lua.execute("""
+        belt=add('transport-belt','transport-belt',5.5,10.5,nil,0,1)
+        belt.get_transport_line=function(i) return {get_contents=function()
+            return {{name=i==1 and 'iron-plate' or 'copper-plate',count=i+1}} end} end
+    """)
+    plan = {"phases": [{"name": "source", "actions": [{"action_type": "place_ghost",
+        "entity": "transport-belt", "position": {"x": 5.5, "y": 10.5}}]}]}
+    row = live_base.plan_entity_health(client, "nauvis", "player", plan)["entities"][0]
+    assert row["reads"]["belt_contents"] == "value"
+    assert row["belt_contents"] == [{"name": "iron-plate", "count": 2}, {"name": "copper-plate", "count": 3}]
+    client.lua.execute("belt.get_transport_line=function(i) error('unsupported') end")
+    row = live_base.plan_entity_health(client, "nauvis", "player", plan)["entities"][0]
+    assert row["reads"]["belt_contents"] == "error" and "belt_contents" not in row
+
+
 @pytest.mark.parametrize("diagnostic_error", [False, True])
 def test_saved_seed_retry_preserves_plan_and_original_outcome_with_health_facts(tmp_path, monkeypatch, diagnostic_error):
     client = NativeClient()
@@ -176,6 +193,8 @@ def test_saved_seed_retry_preserves_plan_and_original_outcome_with_health_facts(
     monkeypatch.setattr(ab, "_bootstrap_state", lambda *_: SimpleNamespace(lifecycle_state="released"))
     monkeypatch.setattr(ab, "_adopt_legacy_steel_seed_reservation", lambda *_: None)
     monkeypatch.setattr(ab, "_transferable_or_available_stock", lambda *_: {})
+    # Keep this telemetry-only contract independent of the new source remedy.
+    monkeypatch.setattr(ab, "_recover_steel_seed_source", lambda *_: None)
     monkeypatch.setattr(ab, "bring_stage_up", lambda *_args, **_kw: None)
     monkeypatch.setattr(ab, "_ensure_power_anchor_on_generated_network", lambda *_: None)
     monkeypatch.setattr(ab, "_diagnose_machines", lambda *_args, **_kw: "no ingredients")

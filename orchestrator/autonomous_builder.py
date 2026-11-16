@@ -4300,6 +4300,42 @@ def _record_steel_seed_health(client, surface, force, path, plan, phase, *, reus
     operation_facts.record("owned_steel_seed_health", **evidence)
 
 
+def _recover_steel_seed_source(client, bridge, surface, force, path, plan, provider, state, emit):
+    from orchestrator.steel_seed_recovery import (
+        prepare_seed_refeed, save_seed, note_seed_refeed_submission, SteelSeedRecoveryWait,
+    )
+    from planners.steel_bootstrap import steel_seed_through_handoff
+    reserved = {tile for tiles in getattr(state, "reservations", {}).values() for tile in tiles}
+    try:
+        record = prepare_seed_refeed(client, surface, force, plan, provider, reserved_tiles=reserved)
+    except (SteelSeedRecoveryWait, ValueError) as error:
+        raise ProductionPrerequisiteDeferred(str(error), code="steel_seed_source_wait", state="supply_wait") from error
+    if record is None:
+        return
+    # Persist the selected complete route before affordability/coverage can
+    # yield. The existing seed sidecar already travels with restart bundles.
+    save_seed(path, plan)
+    repair = record["plan"]
+    emit("STEEL SEED SOURCE RECOVERY: reusing the owned furnace/provider with an additive iron belt feed")
+    _submit(client, bridge, surface, repair, "steel_seed_refeed", emit,
+        stage_coverage=lambda: _ensure_plan_construction_coverage(
+            client, bridge, surface, force, repair, emit,
+            reserved_tiles=planned_footprint_tiles(plan) | planned_footprint_tiles(repair)),
+        reservation_priority=_STEEL_STARTER_RESERVATION_PRIORITY, require_funded=True)
+    try:
+        note_seed_refeed_submission(client, surface, force, plan)
+        save_seed(path, plan)
+    except (SteelSeedRecoveryWait, ValueError) as error:
+        raise ProductionPrerequisiteDeferred(str(error), code="steel_seed_source_wait", state="supply_wait") from error
+    source = record["source"]
+    through = steel_seed_through_handoff((source["position"]["x"], source["position"]["y"]), source["direction"])
+    pickup = repair["phases"][0]["actions"][0]["position"]
+    if not extend_power(client, bridge, surface, force, (pickup["x"], pickup["y"]), emit,
+        reserved_tiles=planned_footprint_tiles(plan) | planned_footprint_tiles(repair) | through):
+        raise ProductionPrerequisiteDeferred("steel seed side pickup waits for power",
+            code="steel_seed_source_power_wait", state="power_wait")
+
+
 def _build_compact_steel_seed(client, bridge, surface, force, provider, reference_point, emit):
     """Fund and remember a belt-side seed, falling back to direct mining."""
     from planners.steel_bootstrap import steel_seed, VECTORS
@@ -4392,6 +4428,8 @@ def _build_compact_steel_seed(client, bridge, surface, force, provider, referenc
         assert_affordable(client, surface, force, plan, steel_project, emit, reserve_project=True,
                           reservation_priority=_STEEL_STARTER_RESERVATION_PRIORITY)
         path.write_text(json.dumps(plan, sort_keys=True))
+    if reused:
+        _recover_steel_seed_source(client, bridge, surface, force, path, plan, provider, state, emit)
     _record_steel_seed_health(client, surface, force, path, plan, "before_submit", reused=reused)
     _submit(client, bridge, surface, plan, steel_project, emit,
             stage_coverage=lambda: _ensure_plan_construction_coverage(
@@ -4411,6 +4449,13 @@ def _build_compact_steel_seed(client, bridge, surface, force, provider, referenc
                                                   "compact steel seed", emit)
     stuck = _diagnose_machines(client, surface, furnaces, emit, bridge=bridge, force=force, grace_seconds=60)
     _record_steel_seed_health(client, surface, force, path, plan, "after_diagnosis", reused=reused)
+    if "source_recovery" in plan:
+        from orchestrator.steel_seed_recovery import save_seed, observe_seed_refeed, SteelSeedRecoveryWait
+        try:
+            observe_seed_refeed(client, surface, force, plan)
+        except (SteelSeedRecoveryWait, ValueError) as error:
+            raise ProductionPrerequisiteDeferred(str(error), code="steel_seed_source_wait", state="supply_wait") from error
+        save_seed(path, plan)
     if stuck:
         raise ProductionPrerequisiteDeferred(str(stuck), code="steel_seed_output_wait", state="producing")
     return output

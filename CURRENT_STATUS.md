@@ -760,3 +760,5 @@ off, no push, controller freezes untouched. Local evidence:
 `data/laya-orchestration/parent-next-setup-20261116/item_production_helper_runs/`.
 
 - 2026-11-17 01:45 IST: Optional native steel capability/source evidence verified offline: strict query correlation and explicit health read states, independent review2P2 corrected by parent with8red/green regressions;118focused/2019fastpassed1skip exit0. Native counter smoke fully assessed/cleaned; PM0. Lifecycle: no activefreeze changed; commit then freeze separate bounded diagnostic. ResearchOFF,nopush.
+
+- 2026-11-17 03:49 IST: Owned exhausted steel-seed recovery verified offline: exact empty native census; pure-iron side pickup/shared belt route to retained steel furnace/provider; funded endpoints and separate submission/construction/output baselines; iron through seam preserved for normal promotion. Independent review1P1/2P2 plus conditional promotion objection corrected by parent:11 red regressions,136 focused and2066 fast passed/1skip,exit0. Lifecycle: commit then new frozen disposable replay only; native efficacy pending, controller freezes untouched,researchOFF,nopush.
