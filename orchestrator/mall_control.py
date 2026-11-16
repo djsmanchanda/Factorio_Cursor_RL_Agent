@@ -10,7 +10,7 @@ from planners.mall_layout import generate_mall_stock_gate_update, recipe_group_n
 from planners.stock_gating import gate_matches
 
 
-def observe_cells(client, script_output, surface, force, reference_point, anchors):
+def observe_cells(client, script_output, surface, force, reference_point, anchors, *, intents=None):
     """Require recorded placement ownership, declared topology and live requester tags.
 
     Reservation parsing is deliberately strict: a damaged ownership record makes
@@ -24,8 +24,11 @@ def observe_cells(client, script_output, surface, force, reference_point, anchor
     if path.exists():
         entries.extend(json.loads(path.read_text()))
     cells = []
-    for machine in live_base.mall_gate_survey(client, surface, force):
-        item = machine['recipe']
+    for machine in live_base.mall_gate_survey(client, surface, force, **(
+            {"include_unconfigured": True} if intents else {})):
+        item = machine['recipe'] or (intents or {}).get(tuple(machine['position']))
+        if not item:
+            continue
         located = locate_mall_cell(tuple(machine['position']), reference_point)
         if located is None:
             continue

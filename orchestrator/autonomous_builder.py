@@ -8794,6 +8794,8 @@ def ensure_produced(
     """Returns the item's real output chest position if it's already producing;
     otherwise builds exactly ONE missing stage (the deepest unmet ingredient
     first) and returns None so the caller re-surveys and calls again."""
+    from orchestrator.mall_construction import resume_for_item
+    resume_for_item(client, bridge, surface, force, item, reference_point, emit)
     if item == "steel-plate" and hasattr(client, "command") and _power_generation_capability_started(client, surface, force):
         promoted = _promote_compact_steel(client, bridge, surface, force, reference_point, emit)
         if promoted is not None:

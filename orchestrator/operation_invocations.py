@@ -17,8 +17,15 @@ class ReadbackRequired(RuntimeError):
     """Prior dispatch provenance is unknown; mutation requires correlated readback."""
 
 
-def decode_record(data, name, episode_id):
-    """Validate transferred evidence without treating an uncertain call as returned."""
+def _valid_ack(report):
+    return (isinstance(report, dict)
+            and set(report) == {'ok', 'tick', 'failed_placements', 'recipe_failures'}
+            and type(report['ok']) is bool
+            and all(type(report[key]) is int and report[key] >= 0
+                    for key in ('tick', 'failed_placements', 'recipe_failures')))
+
+
+def _strict_json(data):
     def unique(pairs):
         result = {}
         for key, value in pairs:
@@ -28,7 +35,12 @@ def decode_record(data, name, episode_id):
         return result
     def invalid_constant(value):
         raise ValueError('nonfinite invocation field')
-    record = json.loads(data, object_pairs_hook=unique, parse_constant=invalid_constant)
+    return json.loads(data, object_pairs_hook=unique, parse_constant=invalid_constant)
+
+
+def decode_record(data, name, episode_id):
+    """Validate transferred evidence without treating an uncertain call as returned."""
+    record = _strict_json(data)
     if name == 'legacy-unknown.json':
         if record != {'provenance': 'unknown'}:
             raise ValueError('invalid legacy provenance marker')
@@ -49,6 +61,8 @@ def decode_record(data, name, episode_id):
                 or not isinstance(entry.get('plan'), dict) or entry.get('dispatch') not in ('uncertain', 'returned')
                 or (entry['dispatch'] == 'returned' and not isinstance(entry.get('receipt'), str))):
             raise ValueError('malformed submission')
+        if entry.get('report') is not None and not _valid_ack(entry['report']):
+            raise ValueError('malformed submission acknowledgement')
         if entry['plan'].get('surface') != 'nauvis' or entry['plan'].get('force') != 'player':
             raise ValueError('invalid submission scope')
         validate_build_plan(entry['plan'])
@@ -130,8 +144,36 @@ class Invocations:
         result = call(authorization, plan, *args, **kwargs)
         entry['dispatch'] = 'returned'
         entry['receipt'] = str(result)
+        entry['report'] = self._report(entry['receipt'])
         self.save(record)
         return result
+
+    def _report(self, receipt):
+        """Retain the returned acknowledgement across checkpoint relocation."""
+        try:
+            path = Path(receipt)
+            if path.is_symlink() or not path.resolve().is_relative_to(self.directory.parent.resolve()):
+                return None
+            report = _strict_json(path.read_text())
+            if isinstance(report, dict):
+                compact = {key: report.get(key) for key in
+                           ('ok', 'tick', 'failed_placements', 'recipe_failures')}
+                if _valid_ack(compact):
+                    return compact
+        except (OSError, ValueError, TypeError):
+            pass
+        return None
+
+    def returned_plans(self):
+        """Selected evidence, including construction waits; this never clears a fence."""
+        self.require_clear()
+        for path in sorted(self.directory.glob('*.json')):
+            record = decode_record(path.read_bytes(), path.name, self.episode_id)
+            for index, entry in enumerate(record['submissions']):
+                if entry['dispatch'] == 'returned':
+                    yield {"operation_id": record['operation_id'], "submission": index,
+                           "plan": copy.deepcopy(entry['plan']),
+                           "report": copy.deepcopy(entry.get('report') or self._report(entry['receipt']))}
 
     def observe(self, client):
         for path in sorted(self.directory.glob('*.json')):

@@ -212,18 +212,20 @@ def test_ops_capture_restores_invocation_fence_to_real_constructor(tmp_path, mon
     checkpoint.restore_context(bundle, target)
     calls = []
     monkeypatch.setattr('orchestrator.operation_session.RconClient', lambda *args: object())
-    monkeypatch.setattr('orchestrator.operation_session.GameBridge', lambda **kwargs: object())
+    monkeypatch.setattr('orchestrator.operation_session.GameBridge', lambda **kwargs: SimpleNamespace())
     for name in ('initialize_operation_runtime', '_restore_bootstrap_reservations',
                  '_reconcile_bootstrap_work', '_reserve_plastic_output_chest'):
         monkeypatch.setattr('orchestrator.operation_session.ab.' + name, lambda *args: calls.append('maintenance'))
     restored = DeterministicSession(target, logical_episode_id='logical')
     if kind in ('uncertain', 'legacy'):
         assert calls == []
+        assert not hasattr(restored.bridge, 'operation_invocations')
         assert restored.run('produce', item='advanced-circuit')['code'] == 'readback_required'
         assert calls == []
     else:
         assert calls
         restored.invocations.require_clear()
+        assert restored.bridge.operation_invocations is restored.invocations
 
 
 @pytest.mark.fast

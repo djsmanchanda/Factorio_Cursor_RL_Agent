@@ -2865,7 +2865,7 @@ def requester_logistic_groups(
     return tuple(group for group in raw.split("|") if group)
 
 
-def mall_gate_survey(client: RconClient, surface: str, force: str) -> list[dict]:
+def mall_gate_survey(client: RconClient, surface: str, force: str, *, include_unconfigured=False) -> list[dict]:
     """Read real assembler identity and simple logistic gates; never configure.
 
     Compound, quality-specific and circuit-controlled conditions are ineligible
@@ -2876,12 +2876,14 @@ def mall_gate_survey(client: RconClient, surface: str, force: str) -> list[dict]
         'for _,e in pairs(s.find_entities_filtered{type="assembling-machine",force='
         + json.dumps(force) + '}) do '
         'local r=e.get_recipe();local b=e.get_control_behavior();'
-        'if r then local row={entity=e.name,unit_number=e.unit_number,recipe=r.name,'
+        'if r or ' + ('true' if include_unconfigured else 'false') + ' then '
+        'local row={entity=e.name,unit_number=e.unit_number,recipe=r and r.name or "",'
         'surface=s.name,force=e.force.name,position={e.position.x,e.position.y},circuit_enabled=true};'
         'if b then local ok,v=pcall(function() return b.circuit_enable_disable end);'
         'if ok and type(v)=="boolean" then row.circuit_enabled=v end;'
+        'if b.connect_to_logistic_network==false then row.gate=false end;'
         'local c=b.logistic_condition;c=c and (c.condition or c);'
-        'if b.connect_to_logistic_network and c and c.first_signal and '
+        'if b.connect_to_logistic_network==true and c and c.first_signal and '
         '(not c.first_signal.type or c.first_signal.type=="item") and '
         '(not c.first_signal.quality or c.first_signal.quality=="normal") and '
         'not c.second_signal and c.constant then '

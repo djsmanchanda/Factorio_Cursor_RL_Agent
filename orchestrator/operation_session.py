@@ -57,7 +57,7 @@ def _journal_scalar(value: object) -> bool:
 
 def receipt(operation: str, params: dict, result: object) -> dict:
     """A normal return as a typed receipt: ``ok`` only when the operation's own postcondition holds."""
-    if operation in {"raise_stock_gate", "reserve_steel_seed", "research_select", "research_labs", "reconcile_mall_loan"}:
+    if operation in {"raise_stock_gate", "reserve_steel_seed", "research_select", "research_labs", "reconcile_mall_loan", "resume_mall_cell"}:
         return {"operation": operation, "params": params, **result}
     if operation == "retire_starter":
         done = isinstance(result, dict) and result.get("submitted") is True and result.get("lifecycle") == "released"
@@ -125,6 +125,7 @@ class DeterministicSession:
             self.invocations.require_clear()
         except ReadbackRequired:
             return  # Keep read-only observation available; no constructor maintenance.
+        self.bridge.operation_invocations = self.invocations
         ab.initialize_operation_runtime(self.bridge, SURFACE, FORCE, goal_item, emit)
         ab._restore_bootstrap_reservations()
         ab._reconcile_bootstrap_work(self.client, SURFACE, FORCE)
@@ -134,12 +135,14 @@ class DeterministicSession:
     def _operations(self) -> dict[str, Callable[..., object]]:
         from orchestrator.research_operations import build_labs, select_research, scale_production
         from orchestrator.mall_reconciliation import reconcile
+        from orchestrator.mall_construction import resume
         c, b, ref, emit = self.client, self.bridge, self.reference_point, self.emit
         return {
             "research_select": lambda **params: select_research(b, force=FORCE, **params),
             "research_labs": lambda **params: build_labs(self, **params),
             "scale_production": lambda **params: scale_production(self, **params),
             "reconcile_mall_loan": lambda **params: reconcile(self, **params),
+            "resume_mall_cell": lambda **params: resume(c, b, self.invocations, ref, emit, **params),
             # Direct starter: drills feeding a furnace, no belts or bots (iron, copper, stone).
             "starter": lambda recipe: ab._bootstrap_direct_plate_line(c, b, SURFACE, FORCE, recipe, ref, emit),
             # Opening mine + six-furnace refinery + haul belt, sited by the full transport bill.
@@ -355,6 +358,15 @@ class DeterministicSession:
         except Exception:
             transactions = None
         requester_draws = None
+        owned_mall_resume_guarded = False
+        try:
+            from orchestrator.mall_construction import observe
+            from orchestrator.configuration_preconditions import supports_unconfigured_recipe_preconditions
+            pending_mall_cells = observe(self.client, self.invocations, self.reference_point)
+            if pending_mall_cells:
+                owned_mall_resume_guarded = supports_unconfigured_recipe_preconditions(self.client)
+        except Exception:
+            pending_mall_cells = None
         if self.chain_economics_enabled and projects is not None:
             items = {item for project in projects.values() for item in project["required"]}
             if len(items) <= 128:
@@ -365,7 +377,8 @@ class DeterministicSession:
                     pass
         return {"version": 1, "projects": projects, "loans": loans, "slots": slots, "cells": cells,
                 "guarded_configuration": guarded_configuration, "transactions": transactions,
-                "requester_draws": requester_draws}
+                "requester_draws": requester_draws, "pending_mall_cells": pending_mall_cells,
+                "owned_mall_resume_guarded": owned_mall_resume_guarded}
 
     def _raise_stock_gate(self, item: str, preview: dict) -> dict:
         result = mall_control.execute_raise(item, preview, observe=self._stock_control_observation,

@@ -94,6 +94,25 @@ complete fulfillment or finite-cell release contract. See the
 
 ## Decision facts and rules
 
+Ops observes interrupted paired-mall construction separately from recipe-bearing
+producers. A returned selected plan, persisted executor acknowledgement, placement
+ownership, current requester tags, complete hardware and absence of a shared-cell
+loan can expose `resume_mall_cell`. The shared produce operation also finishes
+this pending configuration before allocating a new cell. It rechecks the selected
+identity and current empty recipe, gate and requester identity atomically in the
+executor, then verifies the resulting recipe. Old executors cannot offer or run
+this operation without the `unconfigured_recipe_preconditions:1` capability.
+
+This covers a ready paired cell whose selected submitted plan includes its
+requester ownership group. New requester ghosts whose settings were deferred
+outside that plan remain outside this recovery scope. Missing or pending support
+hardware produces a typed reconciliation wait; this operation configures only
+complete owned hardware and does not rebuild supports, increase the cap or change
+loan/reclaim policy. The optional compact acknowledgement travels with invocation
+sidecars; missing or unverified acknowledgements cannot authorize a resume. A changed
+Lua mod pack requires a newly captured compatible checkpoint and hash-bound live
+reload validation before replay; no legacy fence or mod-hash bypass is allowed.
+
 The target compact projection keeps facts needed to discriminate available choices:
 
 | Keep in the decision | Preserve outside the decision |

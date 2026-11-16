@@ -560,10 +560,10 @@ local function configuration_precondition_error(surface, force, action)
     local gate, requester = expected.logistic_condition, expected.requester
     if not positive_integer(expected.unit_number) or type(expected.recipe) ~= "string"
       or type(expected.circuit_enabled) ~= "boolean"
-      or not exact_keys(gate, {signal=true, comparator=true, constant=true})
-      or type(gate.signal) ~= "string" or gate.signal == "" or not comparators[gate.comparator]
-      or type(gate.constant) ~= "number" or math.abs(gate.constant) == math.huge
-      or gate.constant ~= math.floor(gate.constant)
+      or (gate ~= false and (not exact_keys(gate, {signal=true, comparator=true, constant=true})
+        or type(gate.signal) ~= "string" or gate.signal == "" or not comparators[gate.comparator]
+        or type(gate.constant) ~= "number" or math.abs(gate.constant) == math.huge
+        or gate.constant ~= math.floor(gate.constant)))
       or not exact_keys(requester, {entity=true, position=true, unit_number=true, groups=true})
       or requester.entity ~= "requester-chest" or not positive_integer(requester.unit_number)
       or not exact_keys(requester.position, {x=true, y=true})
@@ -584,18 +584,24 @@ local function configuration_precondition_error(surface, force, action)
     if not entity or not entity.valid then return "target_missing" end
     if entity.unit_number ~= expected.unit_number then return "unit_number_mismatch" end
     local recipe = entity.get_recipe()
-    if not recipe or recipe.name ~= expected.recipe then return "recipe_mismatch" end
+    -- Empty means explicitly unconfigured, never a wildcard recipe match.
+    if (expected.recipe == "" and recipe ~= nil)
+      or (expected.recipe ~= "" and (not recipe or recipe.name ~= expected.recipe)) then return "recipe_mismatch" end
     local behavior = entity.get_control_behavior()
-    if not behavior or behavior.connect_to_logistic_network ~= true then return "logistic_disabled" end
-    if behavior.circuit_enable_disable ~= expected.circuit_enabled then return "circuit_enabled_mismatch" end
-    local condition = behavior.logistic_condition
-    condition = condition and (condition.condition or condition)
-    local signal = condition and condition.first_signal
-    -- Factorio 2.1 reads item signals back without `type` (SignalID defaults to item).
-    if not signal or (signal.type ~= nil and signal.type ~= "item") or signal.name ~= gate.signal
-      or (signal.quality ~= nil and signal.quality ~= "normal")
-      or condition.second_signal ~= nil or condition.comparator ~= gate.comparator
-      or condition.constant ~= gate.constant then return "logistic_condition_mismatch" end
+    if gate ~= false and (not behavior or behavior.connect_to_logistic_network ~= true) then return "logistic_disabled" end
+    if not behavior or behavior.circuit_enable_disable ~= expected.circuit_enabled then return "circuit_enabled_mismatch" end
+    if gate == false then
+      if behavior.connect_to_logistic_network ~= false then return "logistic_condition_mismatch" end
+    else
+      local condition = behavior.logistic_condition
+      condition = condition and (condition.condition or condition)
+      local signal = condition and condition.first_signal
+      -- Factorio 2.1 reads item signals back without `type` (SignalID defaults to item).
+      if not signal or (signal.type ~= nil and signal.type ~= "item") or signal.name ~= gate.signal
+        or (signal.quality ~= nil and signal.quality ~= "normal")
+        or condition.second_signal ~= nil or condition.comparator ~= gate.comparator
+        or condition.constant ~= gate.constant then return "logistic_condition_mismatch" end
+    end
     local chest = find_exact_entity(surface, force, requester.entity, requester.position)
     if not chest or not chest.valid or chest.unit_number ~= requester.unit_number then
       return "requester_mismatch"
@@ -1214,7 +1220,7 @@ local function execute_build_plan(authorization, build_plan)
   return counts
 end
 commands.add_command("layout_executor_capabilities", "Read executor protocol capabilities.", function()
-  rcon.print('{"configuration_preconditions":1}')
+  rcon.print('{"configuration_preconditions":1,"unconfigured_recipe_preconditions":1}')
 end)
 
 commands.add_command("build_layout_plan", "Execute an authorized BuildPlan with explicit positions on planner-sandbox.", function(command)

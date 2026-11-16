@@ -486,7 +486,9 @@ def with_economics(menu: dict, results: list[dict], economics: Mapping | None, *
             if isinstance(required, Mapping):
                 bills[_key(r)] = {i: int(n) for i, n in required.items()}
     from orchestrator.mall_control import raise_options
+    from orchestrator.mall_construction import options as construction_options
     additions = raise_options(economics)
+    additions += construction_options(economics)
     if reconcile_loans:
         from orchestrator.mall_reconciliation import options as reconciliation_options
         additions += reconciliation_options(economics)
