@@ -49,6 +49,12 @@ These names describe intended responsibilities, not permission to build speculat
   downgrade is legal only when the replacement prototype supports the active
   recipe; completion is observed only after the target prototype is live.
 - Keep mall reserves distinct from sustained intermediate demand. Promote intermediates to full lines when measured demand justifies it.
+  Observed consumer draw uses the summed effective crafting speed of working
+  live machines, retaining counts by prototype. Tier-spanning counts never
+  inherit the recipe's planned machine speed. Missing effective speed remains
+  unknown and defers line planning; ghosts and nonworking machines add no draw.
+  This instantaneous input requirement is distinct from measured delivery or
+  sustained production. Proposed layouts still use their selected tier rates.
   Explicit `produce_finite` can satisfy an absolute bill target through existing
   owned mall loan/vacancy operations without admitting another cell. Its
   `finite_batch_facts` observation reports pending ownership, active loans,

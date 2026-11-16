@@ -4901,6 +4901,12 @@ def _plan_line(
         ),
     )
     demand = live_intermediate_demand(client, surface, force, item)
+    if demand is None:
+        raise ProductionPrerequisiteDeferred(
+            f'{item} consumer demand needs effective crafting-speed observation',
+            code='consumer_demand_unknown', state='supply_wait',
+            details={'item': item, 'reason': 'working_consumer_speed_unknown'},
+        )
     # Every machine busy means this cell cannot go faster, whatever measured
     # demand says -- and measured demand is unreliable here precisely because
     # the consumers this item starves are the ones that would report it.

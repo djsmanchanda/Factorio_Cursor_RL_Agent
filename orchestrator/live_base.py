@@ -44,6 +44,8 @@ class LineState:
     produced_count: int = 0
     live_machine_count: int | None = None
     output_blocked_ready_count: int = 0
+    working_machine_counts: Mapping[str, int] | None = None
+    working_crafting_speed: float | None = None
 
 
 @dataclass(frozen=True)
@@ -90,6 +92,9 @@ def find_line(
     excludes ghosts; ``output_blocked_ready_count`` counts only live, active,
     powered machines with a full output and solid inputs for their next craft.
     These are capacity facts, not measured delivery or production rates.
+    Working counts by prototype and summed effective crafting speed describe
+    observed consumers; a tier-spanning count must not inherit one planned tier.
+    Missing speed readback stays unknown, including legacy survey payloads.
     """
     machine_names = (
         (machine,)
@@ -105,6 +110,7 @@ def find_line(
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
         "local n=0;local w=0;local made=0;local live=0;local blocked=0;local pos={};"
+        "local bytype={};local speed=0;local speedknown=true;"
         "local wanted=" + names + ";local machines={};"
         "for _,name in pairs(wanted) do for _,e in pairs(s.find_entities_filtered{name=name,force=f}) do "
         "machines[#machines+1]=e end end;"
@@ -114,7 +120,11 @@ def find_line(
         "if ok and r and r.name=='" + recipe + "' and ("
         + ("e.type=='entity-ghost' or not e.to_be_upgraded()" if exclude_upgrade_ordered else "true")
         + ") then n=n+1;"
-        "if e.type~='entity-ghost' and e.status==defines.entity_status.working then w=w+1 end;"
+        "if e.type~='entity-ghost' and e.status==defines.entity_status.working then "
+        "w=w+1;bytype[e.name]=(bytype[e.name] or 0)+1;"
+        "local oks,v=pcall(function() return e.crafting_speed end);"
+        "if oks and type(v)=='number' and v>=0 and v<math.huge then speed=speed+v "
+        "else speedknown=false end end;"
         "if e.type~='entity-ghost' then live=live+1;"
         "if e.status==defines.entity_status.full_output and e.active and e.energy>0 then "
         "local inv=e.get_inventory(defines.inventory.crafter_input);local ready=true;"
@@ -125,7 +135,10 @@ def find_line(
         "local okp,p=pcall(function() return e.products_finished end);"
         "if okp and type(p)=='number' then made=made+p end;"
         "pos[#pos+1]=e.position.x..':'..e.position.y end end;"
-        "rcon.print(n..' '..w..' '..table.concat(pos,',')..' '..made..'|'..live..'|'..blocked)"
+        "local tiers={};for name,count in pairs(bytype) do tiers[#tiers+1]=name..':'..count end;"
+        "table.sort(tiers);"
+        "rcon.print(n..' '..w..' '..table.concat(pos,',')..' '..made..'|'..live..'|'..blocked"
+        "..'|'..table.concat(tiers,',')..'|'..(speedknown and tostring(speed) or '?'))"
     )
     observation, *capacity = _sc(client, lua).split('|')
     tokens = observation.split()
@@ -142,6 +155,21 @@ def find_line(
         (float(pair.split(":")[0]), float(pair.split(":")[1]))
         for pair in position_payload.split(",") if pair and ":" in pair
     )
+    working_machine_counts = None
+    working_crafting_speed = None
+    if len(capacity) >= 4:
+        try:
+            pairs = [part.split(':') for part in capacity[2].split(',') if part]
+            counts = {name: int(value) for name, value in pairs}
+            if (len(counts) != len(pairs) or sum(counts.values()) != working
+                    or any(name not in machine_names or value <= 0 for name, value in counts.items())):
+                raise ValueError('inconsistent working-machine counts')
+            working_machine_counts = counts
+            speed = float(capacity[3])
+            if math.isfinite(speed) and speed >= 0:
+                working_crafting_speed = speed
+        except (ValueError, TypeError):
+            pass
     return LineState(
         recipe=recipe, machine_count=count, working_count=working,
         output_position=machines[-1] if machines else None,
@@ -149,6 +177,8 @@ def find_line(
         produced_count=produced_count,
         live_machine_count=int(capacity[0]) if capacity else None,
         output_blocked_ready_count=int(capacity[1]) if capacity else 0,
+        working_machine_counts=working_machine_counts,
+        working_crafting_speed=working_crafting_speed,
     )
 
 
