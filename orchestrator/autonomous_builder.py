@@ -8080,6 +8080,11 @@ def _promotion_upstream_shortfall(
     line consumes 9/s iron plate while six working electric furnaces produce
     far less; building it merely turns an iron shortage into six more waiting
     assemblers and a route from a sealed provider chest.
+
+    Working machines and powered, input-ready machines held by full output
+    both contribute to the capacity estimate. Output backpressure alone is
+    not an extraction deficit. Finite stock and pending machines do not add
+    rate, and the downstream build must still validate its actual feed route.
     """
     stock = live_base.available_items(client, surface, force)
     for ingredient, required_rate in zip(
@@ -8100,7 +8105,8 @@ def _promotion_upstream_shortfall(
             / LINE_RECIPES[extraction]["craft_time"]
         )
         available_rate = (
-            source.working_count * produced_per_machine if source is not None else 0.0
+            (source.working_count + source.output_blocked_ready_count)
+            * produced_per_machine if source is not None else 0.0
         )
         if available_rate + 1e-9 < required_rate:
             return extraction, available_rate, required_rate
@@ -8254,7 +8260,7 @@ def _build_assembled_stage(
             extraction, available_rate, required_rate = upstream
             emit(
                 f"  PROMOTION DEFERRED: {item} would draw {required_rate:.2f}/s "
-                f"of {extraction}, but its live line supplies only "
+                f"of {extraction}, but its ready production capacity is only "
                 f"{available_rate:.2f}/s; expanding {extraction} before adding "
                 "downstream machines"
             )

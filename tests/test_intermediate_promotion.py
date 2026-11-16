@@ -309,7 +309,9 @@ def test_promoted_pipe_defers_to_its_starved_iron_extraction(monkeypatch) -> Non
     )
     monkeypatch.setattr(
         builder.live_base, "find_line",
-        lambda *_args: SimpleNamespace(working_count=6),
+        lambda *_args: builder.live_base.LineState(
+            "iron-plate", 6, 6, None, live_machine_count=6,
+        ),
     )
 
     shortfall = builder._promotion_upstream_shortfall(

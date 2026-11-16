@@ -42,6 +42,8 @@ class LineState:
     output_position: Point | None
     machine_positions: tuple[Point, ...] = ()
     produced_count: int = 0
+    live_machine_count: int | None = None
+    output_blocked_ready_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -80,9 +82,14 @@ def find_line(
     not yet verified working" -- callers decide what to do with a struggling
     line; this just reports what's there).
 
-    Ghosts count by default (pending construction is still capacity), but
+    Ghosts count toward ``machine_count`` by default to track pending work, but
     anchor protection must pass ``include_ghosts=False``: an unbuilt ghost is
     not a producer that remains after borrowing the only real machine.
+
+    ``working_count`` keeps its instantaneous meaning. ``live_machine_count``
+    excludes ghosts; ``output_blocked_ready_count`` counts only live, active,
+    powered machines with a full output and solid inputs for their next craft.
+    These are capacity facts, not measured delivery or production rates.
     """
     machine_names = (
         (machine,)
@@ -97,7 +104,7 @@ def find_line(
     )
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
-        "local n=0;local w=0;local made=0;local pos={};"
+        "local n=0;local w=0;local made=0;local live=0;local blocked=0;local pos={};"
         "local wanted=" + names + ";local machines={};"
         "for _,name in pairs(wanted) do for _,e in pairs(s.find_entities_filtered{name=name,force=f}) do "
         "machines[#machines+1]=e end end;"
@@ -108,12 +115,20 @@ def find_line(
         + ("e.type=='entity-ghost' or not e.to_be_upgraded()" if exclude_upgrade_ordered else "true")
         + ") then n=n+1;"
         "if e.type~='entity-ghost' and e.status==defines.entity_status.working then w=w+1 end;"
+        "if e.type~='entity-ghost' then live=live+1;"
+        "if e.status==defines.entity_status.full_output and e.active and e.energy>0 then "
+        "local inv=e.get_inventory(defines.inventory.crafter_input);local ready=true;"
+        "for _,part in pairs(r.ingredients) do "
+        "if part.type~='item' or not inv or inv.get_item_count(part.name)<part.amount then "
+        "ready=false;break end end;"
+        "if ready then blocked=blocked+1 end end end;"
         "local okp,p=pcall(function() return e.products_finished end);"
         "if okp and type(p)=='number' then made=made+p end;"
         "pos[#pos+1]=e.position.x..':'..e.position.y end end;"
-        "rcon.print(n..' '..w..' '..table.concat(pos,',')..' '..made)"
+        "rcon.print(n..' '..w..' '..table.concat(pos,',')..' '..made..'|'..live..'|'..blocked)"
     )
-    tokens = _sc(client, lua).split()
+    observation, *capacity = _sc(client, lua).split('|')
+    tokens = observation.split()
     count = int(tokens[0])
     if count == 0:
         return None
@@ -132,6 +147,8 @@ def find_line(
         output_position=machines[-1] if machines else None,
         machine_positions=machines,
         produced_count=produced_count,
+        live_machine_count=int(capacity[0]) if capacity else None,
+        output_blocked_ready_count=int(capacity[1]) if capacity else 0,
     )
 
 

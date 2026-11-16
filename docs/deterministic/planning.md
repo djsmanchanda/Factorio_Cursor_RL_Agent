@@ -44,6 +44,14 @@ These names describe intended responsibilities, not permission to build speculat
   grow as two opposing half-rows sharing one same-fluid connector seam instead
   of extending indefinitely in one direction.
 - Base capacity on rates and live game facts, not machine counts alone.
+  Keep current working count, live machine count and output backpressure
+  separate. A powered, active machine with full output and solid ingredients
+  ready for its next craft contributes to a promotion's capacity estimate;
+  ghosts, empty inputs and finite stored output do not add a production rate.
+  This estimate does not establish sustained delivery: promoted lines still
+  require a validated feed route from their actual producing source.
+  The current survey aggregates matching machines across the surface; it does
+  not prove that all credited capacity reaches the selected feed endpoint.
 - Site persistent refineries by the complete transport bill: preserve legal
   input/output flow, minimize ore-belt plus plate-belt length, then prefer the
   output nearer current demand. Reserve the full expansion footprint at that
