@@ -57,7 +57,7 @@ def _journal_scalar(value: object) -> bool:
 
 def receipt(operation: str, params: dict, result: object) -> dict:
     """A normal return as a typed receipt: ``ok`` only when the operation's own postcondition holds."""
-    if operation in {"raise_stock_gate", "reserve_steel_seed", "research_select", "research_labs", "reconcile_mall_loan", "resume_mall_cell"}:
+    if operation in {"raise_stock_gate", "reserve_steel_seed", "research_select", "research_labs", "reconcile_mall_loan", "resume_mall_cell", "produce_finite"}:
         return {"operation": operation, "params": params, **result}
     if operation == "retire_starter":
         done = isinstance(result, dict) and result.get("submitted") is True and result.get("lifecycle") == "released"
@@ -136,6 +136,7 @@ class DeterministicSession:
         from orchestrator.research_operations import build_labs, select_research, scale_production
         from orchestrator.mall_reconciliation import reconcile
         from orchestrator.mall_construction import resume
+        from orchestrator.finite_mall import execute as finite_batch
         c, b, ref, emit = self.client, self.bridge, self.reference_point, self.emit
         return {
             "research_select": lambda **params: select_research(b, force=FORCE, **params),
@@ -143,6 +144,7 @@ class DeterministicSession:
             "scale_production": lambda **params: scale_production(self, **params),
             "reconcile_mall_loan": lambda **params: reconcile(self, **params),
             "resume_mall_cell": lambda **params: resume(c, b, self.invocations, ref, emit, **params),
+            "produce_finite": lambda **params: finite_batch(self, **params),
             # Direct starter: drills feeding a furnace, no belts or bots (iron, copper, stone).
             "starter": lambda recipe: ab._bootstrap_direct_plate_line(c, b, SURFACE, FORCE, recipe, ref, emit),
             # Opening mine + six-furnace refinery + haul belt, sited by the full transport bill.
@@ -262,6 +264,11 @@ class DeterministicSession:
     def observe_invocations(self):
         """Reopen recorded selected plans without issuing any build."""
         return self.invocations.observe(self.client)
+
+    def finite_batch_facts(self, item, stock_target):
+        """Read existing finite-loan feasibility; unknown never means a free slot."""
+        from orchestrator.finite_mall import observe
+        return observe(self, item, stock_target)
 
     def _maintain_mall(self) -> None:
         """After every operation: cap standing gear/cable cells, hand back cells whose loan is already stocked,

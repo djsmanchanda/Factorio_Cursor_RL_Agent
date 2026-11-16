@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, asdict
 import json
@@ -155,6 +156,8 @@ def main(argv=None):
                         help='after a material_shortage, run the existing produce operation for each short item')
     replay.add_argument('--funding-depth', type=int, default=FUNDING_DEPTH,
                         help='levels of nested shortage bills to fund in one step (1 = the service bill only)')
+    replay.add_argument('--finite-bill-batches', action='store_true',
+                        help='select the explicit reuse-only finite operation for supported bill items; journal feasibility')
     replay.add_argument('--restore-sidecars', action='store_true',
                         help="install the bundle's deterministic sidecars and run under its episode id, as a cohort restart does")
     replay.add_argument('--engine-binary', type=Path,
@@ -255,6 +258,7 @@ def main(argv=None):
                 deadline=args.deadline, after_live=sampler.start,
                 message_reader=_read_trail, consumption_probe=sampler.probe,
                 fund_shortages=args.fund_shortages, funding_depth=max(1, args.funding_depth),
+                finite_bill_batches=args.finite_bill_batches,
                 observe_after_placement=True)
         finally:
             sampler.close()
@@ -438,6 +442,7 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
           tick_reader=None, initial_tick=None, max_game_ticks: int = 108000,
           stall_seconds: float = 10.0, monotonic=None, sleep=None,
           fund_shortages: bool = False, funding_depth: int = FUNDING_DEPTH,
+          finite_bill_batches: bool = False,
           observe_after_placement: bool = False) -> dict:
     """Run the existing production_service operation until PM places and consumes.
 
@@ -557,7 +562,7 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
             if fund_shortages and outcome.get("code") == "material_shortage":
                 step["funding"] = _fund_shortage(session, stream, index, step["bill"], message_reader,
                                                  max_depth=funding_depth, budget=budget,
-                                                 stock_reader=stock_reader)
+                                                 stock_reader=stock_reader, finite_bill_batches=finite_bill_batches)
                 if budget.cause is not None:
                     stop_reason = budget.cause
                     break
@@ -632,7 +637,7 @@ def observe_consumption(probe, tick_reader, last_tick: int, *, initial_tick: int
 
 def _fund_shortage(session, stream, index: int, bill: dict, message_reader=None, *,
                    max_depth: int = FUNDING_DEPTH, budget: Budget | None = None,
-                   stock_reader=None) -> list[dict]:
+                   stock_reader=None, finite_bill_batches: bool = False) -> list[dict]:
     """Run the existing ``produce`` operation for each short item of a construction bill.
 
     This mirrors the Laya runner, which turns a material_shortage bill into
@@ -696,14 +701,47 @@ def _fund_shortage(session, stream, index: int, bill: dict, message_reader=None,
                                  + "\n")
                     stream.flush()
                     return
+            operation, feasibility = 'produce', None
+            if finite_bill_batches:
+                try:
+                    feasibility = session.finite_batch_facts(item, level)
+                    if not (isinstance(feasibility, Mapping)
+                            and all(type(feasibility.get(key)) is bool
+                                    for key in ('known', 'supported', 'eligible'))
+                            and feasibility.get('item') == item
+                            and type(feasibility.get('stock_target')) is int
+                            and feasibility['stock_target'] == level
+                            and isinstance(feasibility.get('reason'), str)
+                            and feasibility['reason']):
+                        feasibility = {'known': False, 'reason': 'malformed_finite_batch_facts'}
+                    else:
+                        feasibility = dict(feasibility)
+                except Exception as error:
+                    feasibility = {'known': False, 'reason': f'{type(error).__name__}: {error}'}
+                if feasibility.get('supported') is True and feasibility.get('reason') not in {
+                        'independent_mall', 'pending_owned_configuration'}:
+                    operation = 'produce_finite'
+                if budget is not None:
+                    cause, _ = budget.check()
+                    if cause is not None:
+                        stream.write(json.dumps({'event': 'pm_replay_budget_stop', 'step': index,
+                            'cause': cause, 'before': {'item': item, 'stock_target': level}}) + '\n')
+                        stream.flush()
+                        return
             try:
-                result = session.run("produce", item=item, stock_target=level)
+                if feasibility is not None and feasibility.get('known') is not True:
+                    result = {'code': 'finite_batch_unknown', 'ok': False,
+                              'message': 'finite production feasibility is unknown; no dispatch'}
+                else:
+                    result = session.run(operation, item=item, stock_target=level)
             except Exception as error:  # noqa: BLE001 -- a failed funding attempt is evidence, not a crash
                 result = {"code": "funding_error", "ok": False, "message": f"{type(error).__name__}: {error}"}
             nested = pm_bill(result, stock.network) if result.get("code") == "material_shortage" else None
             row = {"step": index, "item": item, "stock_target": level, "depth": depth, "parent": parent,
                    "outcome": result.get("code"), "ok": result.get("ok"), "state": result.get("state"),
                    "message": result.get("message"), "stock_observation": asdict(stock)}
+            if finite_bill_batches:
+                row.update(operation=operation, finite_batch_feasibility=feasibility)
             if nested is not None:
                 row["bill"] = nested
             journal(row)

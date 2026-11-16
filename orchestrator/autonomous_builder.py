@@ -7077,6 +7077,7 @@ def _borrow_free_mall_cell(
     reference_point: Point, *, allowed_original_recipes: frozenset[str] | None,
     allow_shared_provider: bool, require_stocked_original: bool,
     excluded_origins: set[tuple[float, float]],
+    observations: list[dict] | None = None,
 ) -> tuple[str, Point, tuple[int, int], str, str] | None:
     """Find one borrowable cell outside every active loan's own cell.
 
@@ -7102,12 +7103,17 @@ def _borrow_free_mall_cell(
         recipe,
     ))
     candidates: list[tuple[int, int, int, str, Point, tuple[int, int], str]] = []
+    def note(recipe, reason, position=None):
+        if observations is not None:
+            observations.append({'recipe': recipe, 'reason': reason,
+                                 'position': list(position) if position is not None else None})
     for original_recipe in recipes:
         if original_recipe in CORE_MALL_PRODUCERS:
             # Once a core-mall recipe owns a cell, that cell is reserved for
             # self-sufficiency.  Borrowing it can convert the only permanent
             # assembler-2/fast-inserter/etc. producer back into an unrelated
             # temporary recipe and recreate the bootstrap deadlock.
+            note(original_recipe, 'protected_core_producer')
             continue
         spec = LINE_RECIPES.get(original_recipe)
         if spec is None:
@@ -7130,6 +7136,7 @@ def _borrow_free_mall_cell(
         if line is None:
             continue
         if require_stocked_original and stock.get(original_recipe, 0) < 1:
+            note(original_recipe, 'original_stock_missing')
             continue
         anchor_minimum = _MALL_RECIPE_ANCHORS.get(original_recipe, 0)
         if original_recipe in _recipe_ingredient_closure(target_item):
@@ -7142,15 +7149,18 @@ def _borrow_free_mall_cell(
             # Counts are real machines only: borrowing the sole working cell
             # while an unbuilt ghost poses as its duplicate strands the
             # recipe (2026-09-04 cable collapse).
+            note(original_recipe, 'protected_anchor_or_ingredient_producer')
             continue
         for machine_position in reversed(line.machine_positions):
             located = locate_mall_cell(machine_position, reference_point)
             if located is None:
+                note(original_recipe, 'outside_owned_mall', machine_position)
                 continue
             origin, side = located
             if origin in excluded_origins:
                 # This cell already hosts a concurrent loan on its shared
                 # provider; borrowing its other half would mix products.
+                note(original_recipe, 'active_loan_origin', machine_position)
                 continue
             if not allow_shared_provider and mall_slot_uses_shared_provider(
                 client, surface, machine_position, reference_point,
@@ -7173,6 +7183,7 @@ def _borrow_free_mall_cell(
                 not machine or machine["name"] not in live_base.ASSEMBLER_TIERS
                 or not requester or requester["name"] != "requester-chest"
             ):
+                note(original_recipe, 'machine_or_requester_missing', machine_position)
                 continue
             provider_position = (
                 origin[0] + 4.5,
@@ -7185,6 +7196,7 @@ def _borrow_free_mall_cell(
                 # shared-provider cell) would die later at submit time with
                 # configure_target_missing (2026-09-04: ended a run), so
                 # only complete halves are borrowable.
+                note(original_recipe, 'provider_missing', machine_position)
                 continue
             # Prefer an actually spare duplicate. Non-anchor recipes may still
             # lend a stocked sole producer; anchor recipes were filtered above.
@@ -7194,13 +7206,14 @@ def _borrow_free_mall_cell(
                 shared_rank, spare_rank, stock_rank, original_recipe,
                 machine_position, origin, side,
             ))
+            note(original_recipe, 'eligible_lender', machine_position)
     if not candidates:
         if allowed_original_recipes is not None or not hasattr(client, "command"):
             # A caller naming its lender recipes wants that cell; offline fixtures have no vacancy survey.
             return None
         # Shared-provider halves stay eligible, as they do for configured lenders (ranked, not excluded).
         return _vacant_mall_half(client, surface, force, target_item, reference_point,
-                                 excluded_origins=excluded_origins)
+                                 excluded_origins=excluded_origins, observations=observations)
     (_shared, _spare, _stocked, original_recipe, machine_position, origin,
      side) = min(candidates)
     machine_entity = live_base.entity_at(client, surface, machine_position)
@@ -7215,6 +7228,7 @@ def _borrow_free_mall_cell(
 def _vacant_mall_half(
     client: RconClient, surface: str, force: str, target_item: str, reference_point: Point, *,
     excluded_origins: set[tuple[float, float]],
+    observations: list[dict] | None = None,
 ) -> tuple[str, Point, tuple[int, int], str, str] | None:
     """A complete owned mall half whose finite batch was released (recipe cleared, its requests gone).
 
@@ -7231,6 +7245,9 @@ def _vacant_mall_half(
         name = unset.get(tuple(position))
         if name is None:
             continue
+        fact = {'recipe': None, 'position': list(position), 'reason': 'support_missing'}
+        if observations is not None:
+            observations.append(fact)
         requester_position = (origin[0] + 4.5, origin[1] + 1.5)
         provider_position = (origin[0] + 4.5, origin[1] + 1.5 + (-1.0 if side == "left" else 1.0))
         requester = live_base.entity_at(client, surface, requester_position)
@@ -7241,7 +7258,9 @@ def _vacant_mall_half(
         other = "right" if side == "left" else "left"
         groups = live_base.requester_logistic_groups(client, surface, requester_position)
         if any(f":{other}" not in group or f":{side}" in group for group in groups):
+            fact['reason'] = 'requester_owned'
             continue  # A request section still names this half (or no half): another owner, not a vacancy.
+        fact['reason'] = 'eligible_released_half'
         return (target_item, tuple(position), origin, side, name)
     return None
 
@@ -9461,12 +9480,13 @@ def _bootstrap_reserve_machine_target(
 def _missing_rotating_input(
     client: RconClient, surface: str, force: str, item: str,
     target: int, *, loan: MallBootstrapLoan | None = None,
+    stock: tuple[dict[str, int], dict[str, int]] | None = None,
 ) -> tuple[str, int] | None:
     """Find a missing direct ingredient that another rotating batch can make."""
     spec = LINE_RECIPES.get(item)
     if spec is None:
         return None
-    actual, usable = _bootstrap_loan_stock(client, surface, force, item)
+    actual, usable = stock if stock is not None else _bootstrap_loan_stock(client, surface, force, item)
     if loan is not None:
         actual, usable = _bootstrap_loan_credited_stock(loan, actual, usable)
     missing = max(0, target - int(actual.get(item, 0)))
@@ -9492,7 +9512,7 @@ def _missing_rotating_input(
 def _rationed_mall_batch(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     item: str, target: int, reference_point: Point,
-    emit: Callable[[str], None], *, force_temporary: bool = False,
+    emit: Callable[[str], None], *, force_temporary: bool = False, reuse_only: bool = False,
 ) -> bool:
     """Make a finite construction batch in a borrowed cell when necessary.
 
@@ -9501,6 +9521,8 @@ def _rationed_mall_batch(
     not chest identity, decide when the batch is complete. ``force_temporary``
     is used by the belt-prep checkpoint: a producer is required even when the
     opening starter already has enough belts for its first craft.
+    ``reuse_only`` exposes the same loan/vacancy machinery as an explicit
+    finite operation; it never chooses new demand-owned cell admission.
     """
     pipe_batch = item == "pipe" and _pipe_is_temporary_batch(
         client, surface, force,
@@ -9540,11 +9562,17 @@ def _rationed_mall_batch(
     # credits. Reconsider the parent's inputs only once its own recipe is live;
     # restoring here would discard an unfinished step before it can be serviced.
     if own_loan is not None and (own_loan.step_recipe or own_loan.current_recipe) == item:
+        input_stock = _bootstrap_loan_stock(client, surface, force, item) if reuse_only else None
         missing_input = _missing_rotating_input(
-            client, surface, force, item, target, loan=own_loan,
+            client, surface, force, item, target, loan=own_loan, stock=input_stock,
         )
         if missing_input is not None:
             prerequisite, required = missing_input
+            if reuse_only:
+                _, credited_usable = _bootstrap_loan_credited_stock(own_loan, *input_stock)
+                raise MaterialShortage(
+                    f'finite_batch_{item}', {prerequisite: required}, credited_usable,
+                )
             _restore_bootstrap_loan(
                 client, bridge, surface, force, own_loan, emit,
                 reference_point=reference_point,
@@ -9572,6 +9600,8 @@ def _rationed_mall_batch(
         actual, usable = _bootstrap_loan_stock(
             client, surface, force, item,
         )
+        if reuse_only and own_loan is not None:
+            actual, usable = _bootstrap_loan_credited_stock(own_loan, actual, usable)
         external = next((
             shortage
             for shortage in bootstrap_external_shortages(
@@ -9582,6 +9612,17 @@ def _rationed_mall_batch(
             )
         ), None)
         if external is not None:
+            if reuse_only:
+                # Return the bill to the caller; this operation may configure
+                # existing halves, but cannot establish another producer.
+                # External counts are deficits after allocatable stock, not
+                # absolute requirements. Keep both sides in that same scope;
+                # the caller adds the deficit to failure-time network stock.
+                raise MaterialShortage(
+                    f'finite_batch_{item}',
+                    {external.item: int(usable.get(external.item, 0)) + external.count},
+                    usable,
+                )
             own = next(
                 (loan for loan in active if loan.target_item == item), None,
             )
@@ -9636,10 +9677,10 @@ def _rationed_mall_batch(
             return True
     slot_claim = None
     own_loan = any(loan.target_item == item for loan in active)
-    if not active or (
+    if not reuse_only and (not active or (
         not own_loan
         and _metal_starter_transition_complete(client, surface, force)
-    ):
+    )):
         spec = LINE_RECIPES[item]
         existing = live_base.find_line(
             client, surface, force, item, str(spec["machine"]),

@@ -49,6 +49,19 @@ These names describe intended responsibilities, not permission to build speculat
   downgrade is legal only when the replacement prototype supports the active
   recipe; completion is observed only after the target prototype is live.
 - Keep mall reserves distinct from sustained intermediate demand. Promote intermediates to full lines when measured demand justifies it.
+  Explicit `produce_finite` can satisfy an absolute bill target through existing
+  owned mall loan/vacancy operations without admitting another cell. Its
+  `finite_batch_facts` observation reports pending ownership, active loans,
+  candidate rejection reasons and selected complete hardware; unknown surveys
+  cannot authorize reuse. It retains the existing temporary-item catalog,
+  producer/anchor protections, origin exclusion and release semantics. Standing
+  persistent-producer choices and the bootstrap cap are unchanged.
+  Long-handed inserters remain unsupported by this batch catalog. PM replays
+  opt in with `--finite-bill-batches`; ordinary funding remains the default.
+  Prerequisite bills compare complete requirements against allocatable stock,
+  retaining completed loan credits. Recursive funding adds only the resulting
+  deficit to the failure-time network level. Feasibility is re-observed before
+  dispatch; it is not an atomic configuration guard or evidence of delivery.
 - Treat fluids as type-safe networks; never mix fluids through an implicit shared pipe.
   Opening oil links use bounded land, underground-bypass, wider-land, then
   water-crossing attempts. Reuse the validated route for both placements and
