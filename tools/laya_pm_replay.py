@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+from dataclasses import dataclass, asdict
 import json
 from pathlib import Path
 import sys
@@ -252,7 +253,6 @@ def main(argv=None):
                                              origin_episode_id=restored['episode_id'] if restored else None),
                 args.root/'evidence/pm-replay.jsonl', max_steps=max(1, args.max_steps),
                 deadline=args.deadline, after_live=sampler.start,
-                stock_reader=lambda s: ((s.economics() or {}).get('stock') or {}).get('network') or {},
                 message_reader=_read_trail, consumption_probe=sampler.probe,
                 fund_shortages=args.fund_shortages, funding_depth=max(1, args.funding_depth),
                 observe_after_placement=True)
@@ -312,15 +312,52 @@ def pm_bill(outcome: dict, stock: dict | None = None) -> dict:
                       if int(count) > int((details.get("available") or {}).get(name, 0))}}
 
 
-def _read_stock(reader, session) -> dict | None:
-    """Network stock now, or None when no reader was supplied or the read failed."""
+@dataclass(frozen=True)
+class StockObservation:
+    network: dict | None
+    tick: int | None = None
+    source: str = "stock_reader"
+    scope: str = "logistic_networks"
+
+
+def _valid_stock(stock) -> bool:
+    return isinstance(stock, dict) and all(
+        isinstance(item, str) and bool(item) and type(count) is int and count >= 0
+        for item, count in stock.items())
+
+
+def _survey_stock(adapter) -> StockObservation:
+    """Read the same network survey/projection as the ops runner, never bill affordability."""
+    from orchestrator.operation_observation import economics_observation
+
+    tick = None
+    try:
+        facts = adapter.query()
+        if isinstance(facts, dict) and type(facts.get("tick")) is int and facts["tick"] >= 0:
+            tick = facts["tick"]
+            networks = facts.get("networks")
+            if isinstance(networks, dict) and all(
+                    isinstance(network, dict) and _valid_stock(network.get("items"))
+                    for network in networks.values()):
+                stock = economics_observation(None, networks)["stock"]["network"]
+                return StockObservation(stock, tick, "saved_world_survey")
+    except Exception:  # noqa: BLE001 -- a failed survey is not an empty network
+        pass
+    return StockObservation(None, tick, "saved_world_survey")
+
+
+def _read_stock(reader, session) -> StockObservation:
+    """Keep failed/malformed reads unknown; injected dict readers have no survey tick."""
     if reader is None:
-        return None
+        return StockObservation(None)
     try:
         stock = reader(session)
     except Exception:  # noqa: BLE001 -- unknown stock stays unknown
-        return None
-    return dict(stock) if isinstance(stock, dict) else None
+        return StockObservation(None)
+    if not isinstance(stock, StockObservation):
+        stock = StockObservation(stock)
+    return StockObservation(dict(stock.network) if _valid_stock(stock.network) else None,
+                            stock.tick, stock.source, stock.scope)
 
 
 class Budget:
@@ -382,6 +419,8 @@ def run_live_replay(reload_info, adapter_factory, session_factory, evidence_path
             start_tick = adapter.tick()
             if start_tick != reload_info["observed_tick"]:
                 raise ReplayError("paused reload tick changed before live startup")
+            session.stock_networks = lambda: adapter.query().get("networks")
+            kwargs.setdefault("stock_reader", lambda _session: _survey_stock(adapter))
             adapter.go_live()
             if after_live is not None:
                 after_live()  # baseline sample of the running world, before any attempt
@@ -445,7 +484,10 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
             if stop_reason != "attempt_budget_exhausted":
                 break
             stock_before = _read_stock(stock_reader, session)
-            before = dict(stock_before or {})
+            cause, _ = budget.check()
+            if cause is not None:
+                stop_reason = cause
+                break
             try:
                 outcome = session.run("production_service", item=PM_ITEM, stock_target=1,
                                       minimum_machines=1, upgrade_bootstrap=True,
@@ -455,15 +497,18 @@ def drive(session, evidence_path: Path, *, max_steps: int = 40,
                 raise
             trail = _drain_messages(message_reader)
             _journal_messages(stream, index, trail)
-            after = dict(_read_stock(stock_reader, session) or {})
+            stock_after = _read_stock(stock_reader, session)
             cells = pm_cells(session.economics())
             step = {"step": index, "tick": last_tick, "operation": "production_service", "item": PM_ITEM,
                     "outcome": outcome.get("code"), "ok": outcome.get("ok"),
                     "classification": outcome.get("classification"),
                     "state": outcome.get("state"),
                     "details": outcome.get("details"),
-                    "message": outcome.get("message"), "bill": pm_bill(outcome, stock_before),
-                    "stock_delta": stock_delta(before, after), "messages": len(trail),
+                    "message": outcome.get("message"), "bill": pm_bill(outcome, stock_before.network),
+                    "stock_observations": {"before": asdict(stock_before), "after": asdict(stock_after)},
+                    "stock_delta": (stock_delta(stock_before.network, stock_after.network)
+                                    if stock_before.network is not None and stock_after.network is not None
+                                    else None), "messages": len(trail),
                     "pm_cells": len(cells),
                     "pm_machines": sum(int(cell.get("machines") or 0) for cell in cells)}
             steps.append(step)
@@ -643,14 +688,22 @@ def _fund_shortage(session, stream, index: int, bill: dict, message_reader=None,
                     return
             targets[item] = level
             stock = _read_stock(stock_reader, session)
+            if budget is not None:
+                cause, _ = budget.check()
+                if cause is not None:
+                    stream.write(json.dumps({"event": "pm_replay_budget_stop", "step": index,
+                                             "cause": cause, "before": {"item": item, "stock_target": level}})
+                                 + "\n")
+                    stream.flush()
+                    return
             try:
                 result = session.run("produce", item=item, stock_target=level)
             except Exception as error:  # noqa: BLE001 -- a failed funding attempt is evidence, not a crash
                 result = {"code": "funding_error", "ok": False, "message": f"{type(error).__name__}: {error}"}
-            nested = pm_bill(result, stock) if result.get("code") == "material_shortage" else None
+            nested = pm_bill(result, stock.network) if result.get("code") == "material_shortage" else None
             row = {"step": index, "item": item, "stock_target": level, "depth": depth, "parent": parent,
                    "outcome": result.get("code"), "ok": result.get("ok"), "state": result.get("state"),
-                   "message": result.get("message")}
+                   "message": result.get("message"), "stock_observation": asdict(stock)}
             if nested is not None:
                 row["bill"] = nested
             journal(row)

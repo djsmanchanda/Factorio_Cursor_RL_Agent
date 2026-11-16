@@ -2,7 +2,7 @@
 
 # C4-to-PM diagnostic replay
 
-Use the c6-v3 candidate branch containing the feed-contract repair. Recovery
+Use a reviewed integration tip with current-version restart state. Recovery
 reconstructs both positions and chest prototypes from the normal line
 constructor. Belt-feed steel chests are valid when that constructor specifies
 them; a different endpoint is still rejected before transport work.
@@ -17,9 +17,12 @@ them; a different endpoint is still rejected before transport work.
 Preflight checks bundle hashes, the C4 origin predicate and bound disposable
 reload receipts. Existing regression-only sources remain regression-only even
 when these checks pass. It does not establish a fresh reload on the candidate
-code/mods. The known local diagnostic candidate is generation
-`laya-f33dd24b9c04408797c719d31213b70a` in the mixed-checkpoint-after-c46-20261028
-bank: C4 at tick 514525, one validated receipt, acceptance_eligible false.
+code/mods. Legacy checkpoint bundles may carry unknown dispatch/retry provenance;
+never clear their fences to enable a replay. The fresh diagnostic bundle
+`laya-8ff36fe1e751460d9bd931413a2e69cb` in
+`data/laya-orchestration/c4-fresh-c987-20261116/checkpoint-bank` has restart
+version 4, C4 at tick 530756 and a hash-bound native reload receipt. It remains
+regression-only evidence.
 
 The host resident cohorts are not a blocker by themselves: a replay boots when
 its own game/rcon ports are free (distinct from every cohort base) and at least
@@ -34,6 +37,19 @@ failure; do not add a priority rule from an unfunded-bill label alone. The C95b
 reference s84000 trace demonstrates AM1 batch -> LH prerequisite advance -> six
 LH delivered, while its PM attempts return chemical_capability_wait. That
 trace does not justify an LH-priority fix.
+
+The live replay reads network stock from its owned world adapter through the
+shared economics observation projection. Raw session economics has no stock
+field. Missing, failed or malformed surveys leave stock unknown and do not
+authorize funding; a valid empty network survey establishes zero stock. Before
+each service or funding operation, the replay reads the survey tick, scope,
+source and network counts and records them with the returned outcome. An
+interrupted operation may therefore lack that journal observation. These counts differ from the bill's transferable
+`available` items and requester WIP. Funding keeps each failed bill's absolute
+target fixed at pre-operation network stock plus its shortfall; later reads
+cannot raise that target. Nested bills receive their own pre-operation survey.
+Unknown before/after stock produces an unknown delta. The budget is rechecked
+after surveys so an expensive observation cannot authorize a late dispatch.
 
 The mechanism gate requires a PM placement receipt and subsequent positive
 `machine_consumption["productivity-module"]` under a passing c6-v3 sample.

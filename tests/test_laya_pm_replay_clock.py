@@ -179,7 +179,121 @@ def test_existing_world_is_never_prepared_or_stopped(tmp_path, monkeypatch):
 
 
 def test_regressing_clock_is_distinct_and_cleans_up(tmp_path):
-    result, events = run(tmp_path, [100, 101, 99])
+    result, events = run(tmp_path, [100, 101, 101, 99])
     assert result['outcome'] == 'clock_not_advancing'
     assert events.count('production') == 1
     assert events[-2:] == ['session_close', 'adapter_close']
+
+
+def stock_run(tmp_path, survey, *, required=None, available=None, deadline=100):
+    """Exercise live composition without injecting a corrected stock_reader."""
+    events, calls = [], []
+    time = Time()
+
+    class World(Adapter):
+        def __init__(self):
+            super().__init__(events, range(530756, 531000))
+
+        def query(self):
+            return survey(time) if callable(survey) else survey
+
+    class FundingSession(Session):
+        def run(self, operation, **params):
+            calls.append((operation, params))
+            if operation == 'produce':
+                return {'code': 'temporary_mall_batch', 'ok': True}
+            return {'code': 'material_shortage', 'ok': False, 'details': {
+                'required': required or {'passive-provider-chest': 2, 'transport-belt': 188},
+                'available': available or {'passive-provider-chest': 1, 'transport-belt': 75}}}
+
+    session = FundingSession(events)
+    assert 'stock' not in session.economics()
+    result = replay.run_live_replay(
+        {'reload_verified': True, 'observed_tick': 530756}, World, lambda: session,
+        tmp_path / 'journal', max_steps=1, fund_shortages=True,
+        clock=lambda: time.now, monotonic=lambda: time.now, sleep=time.sleep, deadline=deadline)
+    assert events[-2:] == ['session_close', 'adapter_close']
+    return result, calls, session
+
+
+def test_live_stock_reader_preserves_recorded_initial_survey_shape(tmp_path):
+    # Compact initial-capture survey, not a claim about stock at the later failed bills.
+    survey = {'tick': 530756, 'networks': {'2': {'items': {
+        'passive-provider-chest': 2, 'transport-belt': 75}, 'reserved': {}}}}
+    result, calls, session = stock_run(tmp_path, survey)
+    step, = result['steps']
+    before = step['stock_observations']['before']
+    assert before == {'tick': 530756, 'scope': 'logistic_networks', 'source': 'saved_world_survey',
+                      'network': {'passive-provider-chest': 2, 'transport-belt': 75}}
+    assert step['bill']['levels'] == {'passive-provider-chest': 3, 'transport-belt': 188}
+    assert step['stock_delta'] == {}
+    assert session.stock_networks() == survey['networks']
+    assert [p['stock_target'] for op, p in calls if op == 'produce'] == [3, 188]
+
+
+@pytest.mark.parametrize('required, available', [
+    ({'passive-provider-chest': 2, 'transport-belt': 188},
+     {'passive-provider-chest': 1, 'transport-belt': 75}),
+    ({'passive-provider-chest': 4, 'transport-belt': 208},
+     {'passive-provider-chest': 3, 'transport-belt': 109}),
+])
+def test_live_funding_keeps_bill_aligned_fixture_absolute_targets(tmp_path, required, available):
+    # Explicit bill-aligned fixtures; historical failure-time network stock is unknown.
+    survey = {'tick': 540000, 'networks': {'2': {'items': available}}}
+    result, calls, _ = stock_run(tmp_path, survey, required=required, available=available)
+    assert result['steps'][0]['bill']['levels'] == required
+    assert {p['item']: p['stock_target'] for op, p in calls if op == 'produce'} == required
+
+
+@pytest.mark.parametrize('survey', [
+    None, {}, {'tick': 530756}, {'tick': 530756, 'networks': None},
+    {'tick': 530756, 'networks': {'2': {}}},
+    {'tick': 530756, 'networks': []},
+    {'networks': {'2': {'items': {}}}},
+    *[{'tick': 530756, 'networks': {'2': {'items': {'transport-belt': count}}}}
+      for count in (-1, True, '75', 1.5)],
+])
+def test_live_missing_or_malformed_stock_never_funds(tmp_path, survey):
+    result, calls, _ = stock_run(tmp_path, survey)
+    step, = result['steps']
+    assert step['bill']['stock_at'] is None and step['bill']['levels'] == {}
+    assert step['stock_observations']['before']['network'] is None
+    assert step['stock_delta'] is None
+    assert all(row['outcome'] == 'stock_unknown' for row in step['funding'])
+    assert [op for op, _ in calls] == ['production_service']
+
+
+def test_live_failed_survey_is_unknown(tmp_path):
+    def fail(_time):
+        raise RuntimeError('survey unavailable')
+    result, calls, _ = stock_run(tmp_path, fail)
+    assert result['steps'][0]['bill']['stock_at'] is None
+    assert [op for op, _ in calls] == ['production_service']
+
+
+@pytest.mark.parametrize('networks', [{}, {'2': {'items': {}}}])
+def test_live_successful_empty_survey_is_known_zero(tmp_path, networks):
+    result, calls, _ = stock_run(tmp_path, {'tick': 530756, 'networks': networks})
+    step, = result['steps']
+    assert step['stock_observations']['before']['network'] == {}
+    assert step['bill']['levels'] == {'passive-provider-chest': 1, 'transport-belt': 113}
+    assert [op for op, _ in calls] == ['production_service', 'produce', 'produce']
+
+
+def test_live_network_stock_sums_networks_and_is_not_requester_wip(tmp_path):
+    survey = {'tick': 540000, 'networks': {
+        '2': {'items': {'transport-belt': 50}, 'reserved': {'transport-belt': 500}},
+        '3': {'items': {'transport-belt': 25, 'passive-provider-chest': 1}}},
+        'machines': [{'input_inventory': {'transport-belt': 900}}]}
+    result, _, _ = stock_run(tmp_path, survey)
+    assert result['steps'][0]['bill']['stock_at'] == {
+        'passive-provider-chest': 1, 'transport-belt': 75}
+
+
+def test_live_survey_cannot_dispatch_past_deadline(tmp_path):
+    def slow(time):
+        time.now = 101
+        return {'tick': 530756, 'networks': {}}
+    result, calls, _ = stock_run(tmp_path, slow)
+    assert result['outcome'] == 'deadline_reached'
+    assert calls == []
