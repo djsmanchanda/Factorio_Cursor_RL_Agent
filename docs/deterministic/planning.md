@@ -25,6 +25,22 @@ These names describe intended responsibilities, not permission to build speculat
   persistence; diagnostics do not relax route legality.
 - Diagnose supply, delivery, inserter throughput, machine speed, and machine count in that order.
 - Repair existing capacity before duplicating it.
+  For a journalled chest-fed assembler row, recovery reads the exact selected
+  recipe row and declared feed prototypes from scoped acknowledged invocation
+  plans, including construction-shortage outcomes. Constructor-derived endpoint
+  identities resolve the selected per-ingredient modes; current demand and the
+  chest found live cannot change that choice. The mode is retained through both
+  endpoint validation and transport execution. Missing, conflicting, uncertain
+  or superseded provenance stays unresolved; upstream work triggers a recheck.
+  Recovery proves constructor feeder/lane/inserter positions and directions,
+  and rejects later removals, rotations and incompatible ingredient requests.
+  Compatible requester count/cap updates do not change the selected feed.
+  This recovery covers the default fast-inserter/transport-belt, three-tile
+  east-flow chest-fed topology. Other inserter tiers that change feeder counts
+  remain unresolved. It does not reinterpret sideload/full-bus layouts, missing recipe declarations, or a legacy
+  dispatch fence. Non-journalled deterministic callers retain the existing
+  constructor-default validation. Successful routing and craft recovery remain
+  runtime evidence, separate from choosing the correct contract.
 - Change the tier of an owned machine through Factorio's native upgrade order,
   never an overlapping ghost or a destroy-and-rebuild pair. Scope every order
   to the explicit surface and force, require the expected source prototype at

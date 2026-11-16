@@ -129,7 +129,7 @@ def test_existing_starved_stage_repairs_declared_transport(monkeypatch) -> None:
     assert calls == [((
         "iron-gear-wheel", "iron-plate", (-10.5, -10.5),
         (-29.5, -27.5), 2, ANY,
-    ), {"reuse_existing": True})]
+    ), {"reuse_existing": True, "mode": "belt"})]
 
 
 def test_existing_starved_stage_waits_for_missing_upstream(monkeypatch) -> None:
