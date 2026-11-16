@@ -327,8 +327,16 @@ def test_an_idle_gap_resumes_the_measured_sweet_spot_instead_of_climbing():
 
 
 def test_a_world_still_preparing_is_not_counted_unstable(tmp_path):
+    import os
+    import time
     world = tmp_path / "world"
     (world / "logs").mkdir(parents=True)
-    assert _world_unstable(world, 600)  # no heartbeat and no fresh log
-    (world / "logs/laya-runner.log").write_text("starting\n", encoding="utf-8")
+    # Just admitted: no heartbeat and no runner log yet, but the world directory is fresh.
     assert not _world_unstable(world, 600)
+    old = time.time() - 3600
+    os.utime(world / "logs", (old, old))
+    os.utime(world, (old, old))
+    assert _world_unstable(world, 600)  # no heartbeat, nothing written for an hour
+    (world / "logs/laya-runner.log").write_text("starting\n", encoding="utf-8")
+    os.utime(world, (old, old))
+    assert not _world_unstable(world, 600)  # a fresh runner log means it is starting

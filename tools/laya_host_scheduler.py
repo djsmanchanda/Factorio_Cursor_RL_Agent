@@ -223,10 +223,11 @@ def _world_unstable(world: Path, window_s: float) -> bool:
     if not heartbeat.exists():
         # A world that is still preparing has no heartbeat yet; treating that
         # as instability collapsed the host target to min_slots at every
-        # cohort start and forced a ~9 min/slot climb. A recently written
-        # runner log means it is starting, not sick.
+        # cohort start and forced a ~9 min/slot climb. A world directory or
+        # runner log written in the last ten minutes means it is starting,
+        # not sick; preparation runs before the runner log exists.
         try:
-            if log.exists() and time.time() - log.stat().st_mtime < 600:
+            if any(path.exists() and time.time() - path.stat().st_mtime < 600 for path in (log, world)):
                 return False
         except OSError:
             pass
