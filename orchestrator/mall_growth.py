@@ -29,9 +29,12 @@ VERSION = "mall-growth-v1"
 SIX_DRILL_MINIMUM = 6
 #: Every plate whose six-drill checkpoint guards mall growth.
 PLATE_ITEMS = ("iron-plate", "copper-plate", "stone-brick")
-#: Exact useful seed for one future paired/dense slot plus its long-handed
-#: supports: a small reserve, never an unbounded stockpile.
-SEED_RESERVE = {"assembling-machine-1": 1, "long-handed-inserter": 2}
+#: Exact useful seed for one future slot: a small reserve, never a stockpile.
+#: Long-handed supports are not in it: the bay seeds them in a paired cell
+#: after admission, and each dense cell checks its own support stock. Waiting
+#: for them before admission was circular (merged main 2026-11-18: 0/6 Laya
+#: runs ever held one, so the mall never grew past eight slots).
+SEED_RESERVE = {"assembling-machine-1": 1}
 
 
 def six_drill_checkpoint(observed_drills: Mapping[str, int | None]) -> bool:

@@ -142,6 +142,56 @@ def test_builder_dense_expansion_needs_demand_and_a_funded_seed(monkeypatch):
     assert not builder._dense_bootstrap_mall_enabled(object(), "nauvis", "player")
 
 
+_SIX_DRILLS = {"iron-plate": 6, "copper-plate": 6, "stone-brick": 6}
+
+
+def _long_handed_recipe(monkeypatch):
+    monkeypatch.setitem(
+        builder.LINE_RECIPES, "long-handed-inserter",
+        {"machine": "assembling-machine-1", "ingredients": ["iron-plate"],
+         "amounts": [1], "product_amount": 1, "craft_time": 0.5},
+    )
+
+
+def test_dense_expansion_does_not_wait_for_long_handed_stock_it_seeds_itself(monkeypatch):
+    """Long-handed supports are seeded in a paired cell after admission.
+
+    Merged main 2026-11-18: no Laya run ever held a long-handed inserter before
+    the bay existed (0/6 runs), so a long-handed admission seed kept the mall at
+    eight slots forever; integrate grew to twelve in 85/107 runs.
+    """
+    _long_handed_recipe(monkeypatch)
+    _install_checkpoint(monkeypatch, _SIX_DRILLS, stock={"assembling-machine-1": 1})
+    assert builder._dense_bootstrap_mall_enabled(object(), "nauvis", "player")
+
+
+def test_open_ledger_bill_is_growth_demand_without_the_deterministic_survey(
+    monkeypatch, tmp_path,
+):
+    """An operation session never runs the survey that names blocking items.
+
+    The open material bill is the same demand the deterministic survey promotes
+    into its blocking set, so it must count in both runtimes. A fully funded
+    bill is not demand.
+    """
+    from orchestrator.material_reservations import MaterialReservationLedger
+
+    _long_handed_recipe(monkeypatch)
+    _install_checkpoint(
+        monkeypatch, _SIX_DRILLS, demand=False,
+        stock={"assembling-machine-1": 1, "inserter": 5},
+    )
+    ledger = MaterialReservationLedger(
+        tmp_path / "script-output", episode_id="growth", surface="nauvis", force="player",
+    )
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", ledger)
+    ledger.declare("funded", {"inserter": 1}, {"inserter": 5})
+    assert not builder._dense_bootstrap_mall_enabled(object(), "nauvis", "player")
+
+    ledger.declare("modular_copper-plate_refinery", {"inserter": 12}, {"inserter": 5})
+    assert builder._dense_bootstrap_mall_enabled(object(), "nauvis", "player")
+
+
 def test_managed_drill_counts_reports_unknown_for_unqueryable_clients():
     assert builder._managed_drill_counts(object(), "nauvis", "player") == {
         "iron-plate": None, "copper-plate": None, "stone-brick": None,

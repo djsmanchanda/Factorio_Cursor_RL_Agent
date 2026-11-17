@@ -468,9 +468,13 @@ gated separately and is not changed by the release.
   six-drill mine is verified and there is demand, the reserved dense expansion
   bank may join it, growing the shared ceiling to twelve without the six
   requesters six ordinary pairs would need. Growth is demand-driven: a measured
-  plate surplus over measured mall consumption, or an explicit blocked item,
-  plus a funded small assembling-machine-1 and long-handed-inserter seed
-  reserve. Unknown six-drill readiness does not pass, and consumption is a rate
+  plate surplus over measured mall consumption, or an explicit blocked item
+  (including any open material-ledger bill, which an operation session never
+  promotes through the deterministic survey), plus a funded small
+  assembling-machine-1 seed reserve. Long-handed supports are seeded in a
+  paired cell after admission and checked per dense cell; requiring them first
+  was circular (merged main 2026-11-18: 0/6 Laya runs ever held one, so the
+  mall never grew past eight). Unknown six-drill readiness does not pass, and consumption is a rate
   from the engine's counters, never a stock delta. This protects finite seed
   logistics items while the complete future chemical/coverage bill is unknown.
   Plastic alone cannot release the ceiling: chests, electric furnaces,

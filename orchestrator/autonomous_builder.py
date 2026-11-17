@@ -3916,13 +3916,27 @@ def _mall_growth_facts(
             stock = _MATERIAL_RESERVATION_LEDGER.allocatable_stock(stock)
     except Exception:
         stock = None
+    # An open material bill is explicit unmet demand. The deterministic survey
+    # promotes it into _BLOCKING_MALL_ITEMS; an operation session never runs
+    # that survey, so read the ledger directly for both runtimes.
+    ledger = _MATERIAL_RESERVATION_LEDGER
+    open_bill = ledger is not None and any(
+        ledger.project_is_active(project_id)
+        and any(
+            int(count) > int(project.reserved.get(item, 0))
+            for item, count in project.required.items()
+        )
+        for project_id, project in ledger.projects.items()
+    )
     return mall_growth.mall_growth_facts(
         observed_drills=_managed_drill_counts(client, surface, force),
         committed_slots=committed,
         slot_limit=DEMAND_MALL_SLOT_TARGET,
         production_per_s={},
         mall_consumption_per_s={},
-        unmet_demand=bool(_BLOCKING_MALL_ITEMS or _BOOTSTRAP_SHARED_PROVIDER_ITEMS),
+        unmet_demand=bool(
+            _BLOCKING_MALL_ITEMS or _BOOTSTRAP_SHARED_PROVIDER_ITEMS or open_bill
+        ),
         stock=stock,
     )
 
@@ -3933,7 +3947,7 @@ def _dense_bootstrap_mall_enabled(
     """Whether the top/bottom dense expansion bay may grow.
 
     Growth is demand-driven and admitted only once every plate's initial
-    six-drill mine is verified and the small AM1 + long-handed seed is funded.
+    six-drill mine is verified and the small AM1 seed is funded.
     The long-handed recipe must exist because the dense bay's vertical
     transfers are long-handed; a recipe present in the live catalog is the
     capability signal (waiting for an item made *by* the bay would be
