@@ -522,3 +522,8 @@ move to `docs/archive/status/<YYYY-MM>.md` (currently everything before 2026-09-
 - What: `laya-trackb-b-repaired-runtime-screen-2x-20261116` 20/20 completed, cleanup verified. C4 8/10 control vs 9/10 repaired, paired 1W/0L/8T/1 both-false, exact p=1.000 — null. Repaired C6 9/10 are all `legacy_latch_reached` with empty `milestone_evidence` (no PM consumption/placement), not PM success. Median decisions 217.5 vs 463; median server seconds 4,051 vs 26,110 (6.4x). C4 latches at ~2.1-2.7 ks from load in both arms, so the repaired tail is after C4.
 - Evidence: `data/laya-experiments/laya-trackb-b-repaired-runtime-screen-2x-20261116/` (job-status, logs); handoff `docs/handoffs/2026-11-12-controller-b-trackb.md`.
 - Lifecycle: not adopted. Next is a cost-envelope cohort (6,000 s / 720,000 ticks) to compare C4/C5 at equal cost. No push; no timers.
+
+## [2026-11-17 17:50 IST] Cost-envelope successor launched after the null C4 / 6.4x screen
+- What: `laya-trackb-b-repaired-runtime-cost-2x-20261117` frozen and launched: 20 jobs (10 seeds 84910-84919 x control `aaaa699e` / repaired `7de28e0c`), shared matched pack `6a9cf02a`, B home save, patience48, ports 65510/64510, host-adaptive. Both arms are capped at 6,000 s / 720,000 ticks to compare C4/C5 at equal cost. 20 queued at launch; A's 120-job cohort holds the host budget.
+- Evidence: `data/laya-experiments/laya-trackb-b-repaired-runtime-cost-2x-20261117/` (freeze, job-status) and `logs/cost-screen-rationale-20261117.md`.
+- Lifecycle: screen result recorded as null C4 / 6.4x cost, not adopted. Merged-pack cohort remains held on the B-side water/offshore-pump observation fix. No push; no timers.
