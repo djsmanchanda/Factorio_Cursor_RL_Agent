@@ -358,3 +358,8 @@ def test_a_world_whose_runner_has_ended_is_finishing_not_unstable(tmp_path):
     assert not _world_unstable(world, 600)  # it finished; the job is stopping the server
     log.write_text(log.read_text() + "+3490s RUN START: a second segment\n", encoding="utf-8")
     assert _world_unstable(world, 600)  # only a trailing RUN END counts
+
+
+def test_an_admitted_world_not_yet_created_by_prepare_is_starting(tmp_path):
+    # Caught live: a reserved job's world directory did not exist yet, and each admission was cut back.
+    assert not _world_unstable(tmp_path / "not-created-yet", 600)
