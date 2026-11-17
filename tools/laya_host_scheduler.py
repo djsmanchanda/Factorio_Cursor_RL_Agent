@@ -217,9 +217,21 @@ def world_ups(world: Path, window_s: float) -> float | None:
     return (recent[-1][1] - recent[0][1]) / span
 
 
+#: The runner's last log line (training/laya_run_log.py). After it the job is shutting the world down.
+RUN_END = re.compile(r"^\+\d+s RUN END\s*\Z", re.M)
+
+
 def _world_unstable(world: Path, window_s: float) -> bool:
     log = world / "logs/laya-runner.log"
     heartbeat = world / "laya-runner.heartbeat.json"
+    # A runner that wrote RUN END has finished; its heartbeat stops while the job stops the server and
+    # collects evidence. Counting that as instability cut the target by one at every job completion
+    # (22 of 23 runner_unstable cuts on 17 November came within 10 minutes of a runner exit).
+    try:
+        if log.exists() and RUN_END.search(_tail(log).rstrip() + "\n"):
+            return False
+    except OSError:
+        pass
     if not heartbeat.exists():
         # A world that is still preparing has no heartbeat yet; treating that
         # as instability collapsed the host target to min_slots at every

@@ -340,3 +340,21 @@ def test_a_world_still_preparing_is_not_counted_unstable(tmp_path):
     (world / "logs/laya-runner.log").write_text("starting\n", encoding="utf-8")
     os.utime(world, (old, old))
     assert not _world_unstable(world, 600)  # a fresh runner log means it is starting
+
+
+def test_a_world_whose_runner_has_ended_is_finishing_not_unstable(tmp_path):
+    import os
+    import time
+    world = tmp_path / "world"
+    (world / "logs").mkdir(parents=True)
+    log = world / "logs/laya-runner.log"
+    heartbeat = world / "laya-runner.heartbeat.json"
+    log.write_text("+10s DECISION 1 need=x tick=600\n+3481s SUMMARY: stop=stalled\n", encoding="utf-8")
+    heartbeat.write_text('{"elapsed_s": 3481}', encoding="utf-8")
+    old = time.time() - 300
+    os.utime(heartbeat, (old, old))
+    assert _world_unstable(world, 600)  # stale heartbeat while the runner should still be running
+    log.write_text(log.read_text() + "+3481s RUN END\n", encoding="utf-8")
+    assert not _world_unstable(world, 600)  # it finished; the job is stopping the server
+    log.write_text(log.read_text() + "+3490s RUN START: a second segment\n", encoding="utf-8")
+    assert _world_unstable(world, 600)  # only a trailing RUN END counts
