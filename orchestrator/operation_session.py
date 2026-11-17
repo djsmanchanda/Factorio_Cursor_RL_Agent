@@ -229,7 +229,9 @@ class DeterministicSession:
         state = ab._bootstrap_state(recipe)
         if state is None or state.replacement_origin is None:
             return {"lifecycle": getattr(state, "lifecycle_state", None), "submitted": False}
-        ab._reconcile_submitted_bootstrap_replacement(self.client, self.bridge, SURFACE, FORCE, state, self.emit)
+        # The one operation that may start a retirement in a session (other operations only resume one).
+        ab._reconcile_submitted_bootstrap_replacement(self.client, self.bridge, SURFACE, FORCE, state, self.emit,
+                                                      retirement_selected=True)
         return {"lifecycle": ab._bootstrap_state(recipe).lifecycle_state, "submitted": True}
 
     def run(self, operation: str, **params) -> dict:

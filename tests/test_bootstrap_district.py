@@ -33,7 +33,7 @@ def test_first_delivery_retires_before_remaining_ghost_wait(monkeypatch):
     monkeypatch.setattr(builder.live_base, "entity_status_name", lambda *_a: "working")
     monkeypatch.setattr(builder, "_ensure_power_anchor_on_generated_network", lambda *_a: None)
     events = []
-    monkeypatch.setattr(builder, "_retire_standing_bootstrap_cells", lambda *_a: events.append("retire"))
+    monkeypatch.setattr(builder, "_retire_standing_bootstrap_cells", lambda *_a, **_k: events.append("retire"))
     def wait(*args, **kwargs):
         kwargs["on_observation"]()
         events.append("unfinished_drills_and_inserters")

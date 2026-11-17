@@ -315,3 +315,88 @@ def test_version_one_district_reads_as_version_two_and_schema_accepts_retained(t
 
     with pytest.raises(BootstrapLifecycleError):
         BootstrapDistrictState.from_json(json.dumps(dict(payload, lifecycle_state="provisioning")))
+
+
+# Who decides retirement: the deterministic loop on first delivery; in a Laya session
+# (the bridge carries the selected operation's invocation journal) only retire_starter.
+def _reconcile_world(tmp_path, monkeypatch, *, session: bool):
+    ledger = _ledger(tmp_path)
+    monkeypatch.setattr(builder, "_BOOTSTRAP_DISTRICT_LEDGER", ledger)
+    world = _World(tmp_path)
+    if session:
+        world.operation_invocations = object()
+    _live(monkeypatch, world)
+    monkeypatch.setattr(builder.live_base, "direct_plate_starter",
+                        lambda *_a, **_k: STARTER if STARTER.drill_position in world.entities else None)
+    monkeypatch.setattr(builder, "_ensure_power_anchor_on_generated_network", lambda *_a, **_k: None)
+    monkeypatch.setattr(builder, "_bring_modular_refinery_up", lambda *_a, **_k: None)
+    return ledger, world
+
+
+def _reconcile(world, ledger, messages=None) -> None:
+    builder._reconcile_submitted_bootstrap_replacement(
+        _Client(), world, "nauvis", "player", ledger.load("iron-plate"),
+        (messages if messages is not None else []).append,
+    )
+
+
+def _laya_retire_starter(world):
+    from orchestrator.operation_session import DeterministicSession
+
+    session = object.__new__(DeterministicSession)
+    session.client, session.bridge, session.emit = _Client(), world, lambda _m: None
+    return session._retire_starter("iron-plate")
+
+
+def test_laya_operation_with_measured_replacement_keeps_the_pioneer(tmp_path, monkeypatch):
+    # Smoke2 s85381: an unselected `foundation iron-plate` released the pioneer before steel.
+    ledger, world = _reconcile_world(tmp_path, monkeypatch, session=True)
+    messages: list[str] = []
+
+    _reconcile(world, ledger, messages)
+
+    assert world.ordered == []
+    assert world.entities == _starter_world()
+    assert ledger.load("iron-plate").lifecycle_state == "provisioning"
+    assert any("retire_starter" in m for m in messages)
+
+
+def test_deterministic_loop_still_retires_on_first_delivery(tmp_path, monkeypatch):
+    ledger, world = _reconcile_world(tmp_path, monkeypatch, session=False)
+
+    _reconcile(world, ledger)
+
+    state = ledger.load("iron-plate")
+    assert state.lifecycle_state == "released"
+    assert state.retained_providers == (_starter_chest(),)
+    assert world.entities.get(_starter_chest()) == CHEST
+
+
+def test_laya_retire_starter_retires_and_keeps_the_provider(tmp_path, monkeypatch):
+    ledger, world = _reconcile_world(tmp_path, monkeypatch, session=True)
+
+    result = _laya_retire_starter(world)
+
+    assert result == {"lifecycle": "released", "submitted": True}
+    state = ledger.load("iron-plate")
+    assert state.retained_providers == (_starter_chest(),)
+    assert world.entities.get(_starter_chest()) == CHEST
+    assert world.ordered and all(CHEST not in order for order in world.ordered)
+
+
+def test_selected_teardown_resumes_on_a_later_laya_operation(tmp_path, monkeypatch):
+    # retire_starter already decided and persisted the teardown; any later Laya pass may finish it.
+    ledger, world = _reconcile_world(tmp_path, monkeypatch, session=True)
+    ledger.mark_validating("iron-plate", 1)
+    ledger.mark_retiring(
+        "iron-plate",
+        starter_geometry={"drill_position": [1.5, 2.5], "output_direction": "north", "pole_side": 1},
+        retained_providers=[_starter_chest()],
+    )
+
+    _reconcile(world, ledger)
+
+    state = ledger.load("iron-plate")
+    assert state.lifecycle_state == "released"
+    assert state.retained_providers == (_starter_chest(),)
+    assert world.entities.get(_starter_chest()) == CHEST

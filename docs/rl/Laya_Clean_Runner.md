@@ -175,7 +175,9 @@ Ops exports episode-scoped bootstrap district lifecycle and submission facts
 in the brief, menu features and recorded decision state. A submitted replacement
 remains a `retire_starter` reconciliation alternative until its district is
 released, including after satisfied rates, later proxy phases and shortage
-returns. Local foundation receipts provide a fallback when no district fact
+returns. No other operation starts a retirement, even when it reconciles the same
+submitted replacement after its first delivery; it may only resume a teardown
+that `retire_starter` already persisted as `retiring`. Local foundation receipts provide a fallback when no district fact
 is available; a scoped district fact takes precedence. Submission does not
 certify readiness. The existing tool still checks owned geometry, construction,
 replacement output in its provider and bot deconstruction. New starter,

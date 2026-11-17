@@ -593,9 +593,14 @@ def _ensure_power_anchor_on_generated_network(
 
 def _reconcile_submitted_bootstrap_replacement(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
-    state: BootstrapDistrictState, emit: Callable[[str], None],
+    state: BootstrapDistrictState, emit: Callable[[str], None], *,
+    retirement_selected: bool = False,
 ) -> Point:
-    """Finish and validate one submitted district without billing it again."""
+    """Finish and validate one submitted district without billing it again.
+
+    ``retirement_selected`` is Laya's ``retire_starter`` choice; see
+    ``_retire_standing_bootstrap_cells`` for who decides retirement.
+    """
     if (
         state.replacement_origin is None
         or state.replacement_provider is None
@@ -658,16 +663,18 @@ def _reconcile_submitted_bootstrap_replacement(
             _retire_standing_bootstrap_cells(
                 client, bridge, surface, force, state.recipe, state.ore,
                 state.transport_source, emit,
+                retirement_selected=retirement_selected,
             )
     _bring_modular_refinery_up(
         client, bridge, surface, force, state.recipe, plan,
         state.replacement_furnaces, state.replacement_origin, emit,
         feed_grace_seconds=transport_grace_seconds(_DEFAULT_BELT, belt_tiles),
         variant="basic", vertical_mirror=vertical_mirror,
+        retirement_selected=retirement_selected,
     )
     _retire_standing_bootstrap_cells(
         client, bridge, surface, force, state.recipe, state.ore,
-        state.transport_source, emit,
+        state.transport_source, emit, retirement_selected=retirement_selected,
     )
     return state.replacement_provider
 
@@ -1877,6 +1884,7 @@ def _bring_modular_refinery_up(
     recipe: str, plan: dict, furnace_count: int, origin: Point,
     emit: Callable[[str], None], *, feed_grace_seconds: float = 0.0,
     variant: str = "standard", vertical_mirror: bool = False,
+    retirement_selected: bool = False,
 ) -> None:
     """Power, cover, and diagnose the complete modular refinery footprint."""
     interface = refinery_interfaces(
@@ -1897,7 +1905,8 @@ def _bring_modular_refinery_up(
         _ensure_power_anchor_on_generated_network(client, bridge, surface, force,
             interface.power_anchor, "first-output replacement", emit)
         _retire_standing_bootstrap_cells(client, bridge, surface, force, recipe,
-            state.ore, state.transport_source, emit)
+            state.ore, state.transport_source, emit,
+            retirement_selected=retirement_selected)
     support_positions = {
         (action["position"]["x"], action["position"]["y"])
         for phase in plan["phases"] for action in phase["actions"]
@@ -2563,7 +2572,8 @@ def _retire_unused_starter_power_branch(
 
 def _retire_standing_bootstrap_cells(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
-    recipe: str, ore: str, ore_output: Point, emit: Callable[[str], None],
+    recipe: str, ore: str, ore_output: Point, emit: Callable[[str], None], *,
+    retirement_selected: bool = False,
 ) -> int:
     """Retire temporary producers after replacement craft and chest evidence.
 
@@ -2571,8 +2581,18 @@ def _retire_standing_bootstrap_cells(
     the temporary path until then preserves the only working plate source when
     construction or bring-up fails. Legacy requester cells are also recognized
     so an old save can migrate without opening another temporary path.
+
+    Starting a retirement is a decision. The deterministic loop makes it here
+    on first delivery. A Laya operation session (its bridge carries the
+    selected operation's invocation journal) leaves it to ``retire_starter``,
+    which passes ``retirement_selected``; other operations only resume a
+    teardown that is already ``retiring``.
     """
     removed = 0
+    held = (
+        getattr(bridge, "operation_invocations", None) is not None
+        and not retirement_selected
+    )
     ledger = _BOOTSTRAP_DISTRICT_LEDGER
     lifecycle = _bootstrap_state(recipe)
     try:
@@ -2610,6 +2630,12 @@ def _retire_standing_bootstrap_cells(
                     f"{recipe} pioneer cannot retire before replacement provisioning"
                 )
                 raise _bootstrap_lifecycle_stuck(recipe, error) from error
+            if held and lifecycle.lifecycle_state != "retiring":
+                emit(
+                    f"BOOTSTRAP DISTRICT: keeping the {recipe} pioneer; retiring it "
+                    "is Laya's retire_starter decision"
+                )
+                return 0
             measured = _measured_bootstrap_replacement_output(
                 client, surface, recipe, lifecycle,
             )
@@ -2653,6 +2679,12 @@ def _retire_standing_bootstrap_cells(
             removed += _finish_direct_starter_retirement(
                 client, bridge, surface, force, lifecycle, emit,
             )
+    if starter is not None and held:
+        emit(
+            f"BOOTSTRAP DISTRICT: keeping the unmanaged {recipe} starter; retiring "
+            "it is Laya's retire_starter decision"
+        )
+        return removed
     if starter is not None:
         # Unmanaged compatibility path: no ledger would remember a retained
         # provider, so the whole stack is removed as before.

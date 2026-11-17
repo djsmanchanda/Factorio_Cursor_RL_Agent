@@ -151,7 +151,10 @@ gated separately and is not changed by the release.
   item is observed in its exact provider chest, with generated power verified.
   Remaining drills, furnaces, or inserters need not be complete; their ghosts,
   reservations, and mall bills remain active. Check delivery during construction
-  polling, not only after the full blueprint finishes. Persist the exact drill
+  polling, not only after the full blueprint finishes. The deterministic loop
+  starts this retirement itself; in a Laya operation session only the selected
+  `retire_starter` starts it, and other operations only resume a `retiring`
+  teardown. Persist the exact drill
   position, output direction, and pole side before ordering any teardown, so a
   bot timeout leaves the district `retiring` and the next pass re-issues the
   same orders instead of failing. Then the starter drill, furnace, and inserter
