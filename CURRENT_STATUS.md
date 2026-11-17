@@ -1251,3 +1251,9 @@ off, no push, controller freezes untouched. Local evidence:
 - 2026-11-17 01:45 IST: Optional native steel capability/source evidence verified offline: strict query correlation and explicit health read states, independent review2P2 corrected by parent with8red/green regressions;118focused/2019fastpassed1skip exit0. Native counter smoke fully assessed/cleaned; PM0. Lifecycle: no activefreeze changed; commit then freeze separate bounded diagnostic. ResearchOFF,nopush.
 
 - 2026-11-17 03:49 IST: Owned exhausted steel-seed recovery verified offline: exact empty native census; pure-iron side pickup/shared belt route to retained steel furnace/provider; funded endpoints and separate submission/construction/output baselines; iron through seam preserved for normal promotion. Independent review1P1/2P2 plus conditional promotion objection corrected by parent:11 red regressions,136 focused and2066 fast passed/1skip,exit0. Lifecycle: commit then new frozen disposable replay only; native efficacy pending, controller freezes untouched,researchOFF,nopush.
+
+
+## [2026-11-17] Retained steel seed can use a stocked logistic input
+- What: after the completed replay proved protected source-pickup conflicts, added the shared one-furnace logistic alternative without relaxing district reservations. Execution's allocator gates the requester; retries cannot manufacture it recursively. Normal seed retirement recovers the owned feed after replacement delivery.
+- Evidence: independent review2P2 corrected by parent;5red/green regressions;119 focused and2086 fast passed,1skipped,exit0. Old replay200attempts/153sourcewaits/0plans/PMunplaced is fully assessed and physically cleaned; no candidate native delivery or adoption evidence yet.
+- Lifecycle: commit then fresh frozen disposable diagnostic; existing active campaign freezes unchanged. C5-v3 inherited, earlier C5-v2 kept separate. Research off; no push.

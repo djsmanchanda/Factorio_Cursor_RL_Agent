@@ -4621,12 +4621,19 @@ def _recover_steel_seed_source(client, bridge, surface, force, path, plan, provi
     # yield. The existing seed sidecar already travels with restart bundles.
     save_seed(path, plan)
     repair = record["plan"]
-    emit("STEEL SEED SOURCE RECOVERY: reusing the owned furnace/provider with an additive iron belt feed")
-    _submit(client, bridge, surface, repair, "steel_seed_refeed", emit,
-        stage_coverage=lambda: _ensure_plan_construction_coverage(
-            client, bridge, surface, force, repair, emit,
-            reserved_tiles=planned_footprint_tiles(plan) | planned_footprint_tiles(repair)),
-        reservation_priority=_STEEL_STARTER_RESERVATION_PRIORITY, require_funded=True)
+    emit(f"STEEL SEED SOURCE RECOVERY: reusing the owned furnace/provider with an additive {record.get('transport_mode', 'belt')} iron feed")
+    try:
+        _submit(client, bridge, surface, repair, "steel_seed_refeed", emit,
+            stage_coverage=lambda: _ensure_plan_construction_coverage(
+                client, bridge, surface, force, repair, emit,
+                reserved_tiles=planned_footprint_tiles(plan) | planned_footprint_tiles(repair)),
+            reservation_priority=_STEEL_STARTER_RESERVATION_PRIORITY, require_funded=True)
+    except MaterialShortage as shortage:
+        if record.get("transport_mode") == "logistic" and "requester-chest" in shortage.required:
+            raise ProductionPrerequisiteDeferred(
+                "steel seed source waits for its existing allocatable requester; chest manufacture is not a recovery prerequisite",
+                code="steel_seed_source_stock_wait", state="supply_wait") from shortage
+        raise
     try:
         note_seed_refeed_submission(client, surface, force, plan)
         save_seed(path, plan)
@@ -4634,6 +4641,12 @@ def _recover_steel_seed_source(client, bridge, surface, force, path, plan, provi
         raise ProductionPrerequisiteDeferred(str(error), code="steel_seed_source_wait", state="supply_wait") from error
     source = record["source"]
     through = steel_seed_through_handoff((source["position"]["x"], source["position"]["y"]), source["direction"])
+    if record.get("transport_mode") == "logistic":
+        requesters = [(a["position"]["x"], a["position"]["y"])
+                      for phase in repair["phases"] for a in phase["actions"]
+                      if a.get("entity") == "requester-chest"]
+        ensure_logistic_coverage(client, bridge, surface, force, [provider, *requesters], emit,
+            reserved_tiles=reserved | planned_footprint_tiles(plan) | planned_footprint_tiles(repair) | through)
     pickup = repair["phases"][0]["actions"][0]["position"]
     if not extend_power(client, bridge, surface, force, (pickup["x"], pickup["y"]), emit,
         reserved_tiles=planned_footprint_tiles(plan) | planned_footprint_tiles(repair) | through):
@@ -4882,6 +4895,11 @@ def _promote_compact_steel(client, bridge, surface, force, reference_point, emit
             else:
                 removal.append({"action_type":"remove_entity", "entity":action["entity"], "position":action["position"]})
     if not record.get("seed_retired"):
+        from orchestrator.steel_seed_recovery import logistic_refeed_retirement_actions, SteelSeedRecoveryWait
+        try:
+            removal.extend(logistic_refeed_retirement_actions(seed))
+        except SteelSeedRecoveryWait as error:
+            raise ProductionPrerequisiteDeferred(str(error), code="steel_seed_source_wait", state="supply_wait") from error
         retire_entities_via_bots(client, bridge, surface, force,
             {"surface":surface,"force":force,"phases":[{"name":"retire_steel_seed","actions":removal}]}, "retire_steel_seed", emit)
         _retire_unused_starter_power_branch(client, bridge, surface, force, poles, "steel-plate", emit)
