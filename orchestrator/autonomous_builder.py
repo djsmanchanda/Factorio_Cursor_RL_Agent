@@ -6006,6 +6006,8 @@ def _refresh_owned_standing_gates(client, bridge, surface, force, emit, *, reque
         spec = LINE_RECIPES.get(item, {})
         if not str(spec.get("machine", "")).startswith("assembling-machine"):
             continue
+        if item in _MALL_RECIPE_ANCHORS:
+            continue  # Gear/cable anchors are bounded by their own-chest cap, not a network gate.
         existing = live_base.find_line(client, surface, force, item, spec["machine"])
         if existing is None or not existing.machine_positions:
             continue
@@ -9620,7 +9622,12 @@ def ensure_produced(
         _ensure_automation_science_transition(
             client, bridge, surface, force, reference_point, emit,
         )
-    if stock_gate_target is None and not upgrade_bootstrap and str(LINE_RECIPES[item]["machine"]).startswith("assembling-machine"):
+    # A standing cell with no named gate gets the demand-derived default -- except the
+    # gear/cable anchors, whose None means "own-chest cap only" (produce_to_demand and
+    # production prep pass None on purpose). A network gate at the bare reserve stopped
+    # both anchors at ~24/~92 and C1's per-second goals never registered (merge smoke 2026-11-17).
+    if (stock_gate_target is None and not upgrade_bootstrap and item not in _MALL_RECIPE_ANCHORS
+            and str(LINE_RECIPES[item]["machine"]).startswith("assembling-machine")):
         stock_gate_target = _standing_mall_stock_target(client, surface, force, item, stock_target)
     stock_gate_target = _effective_mall_stock_gate(
         client, surface, force, item,

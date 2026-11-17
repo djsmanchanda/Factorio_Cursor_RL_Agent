@@ -126,11 +126,12 @@ def test_gate_reapplies_a_previous_target_after_intervening_demand(monkeypatch):
 
 
 def test_registered_owned_cell_follows_open_bill_changes_without_new_build(monkeypatch):
-    demanded = {'copper-cable': 80}
+    # A non-anchor standing cell: gear/cable anchors are capped by their own chest, not this gate.
+    demanded = {'inserter': 80}
     monkeypatch.setattr(builder, '_MATERIAL_RESERVATION_LEDGER', SimpleNamespace(stock_targets=lambda: demanded))
     monkeypatch.setattr(builder, '_released_request_multiple', lambda _c,_s,_f,n: n)
     monkeypatch.setattr(builder, '_rationed_mall_wip_gap', lambda *_:0)
-    monkeypatch.setattr(builder, '_MALL_STOCK_GATE_FLOORS', {('nauvis','player','copper-cable'):600})
+    monkeypatch.setattr(builder, '_MALL_STOCK_GATE_FLOORS', {('nauvis','player','inserter'):600})
     machine = (10.5,10.5)
     monkeypatch.setattr(builder.live_base, 'find_line', lambda *_: SimpleNamespace(machine_positions=(machine,)))
     monkeypatch.setattr(builder.live_base, 'entity_names_at', lambda *_: {machine:'assembling-machine-1'})
@@ -138,7 +139,7 @@ def test_registered_owned_cell_follows_open_bill_changes_without_new_build(monke
     monkeypatch.setattr(builder, '_submit', lambda _c,_b,_s,p,_n,_e:submitted.append(p))
     client = SimpleNamespace(command=lambda _: '')
     for needed in [80, 0, 80]:
-        demanded['copper-cable'] = needed
+        demanded['inserter'] = needed
         builder._refresh_owned_standing_gates(client, object(), 'nauvis','player',lambda _:None)
     targets = [next(a['logistic_condition']['constant'] for a in actions(p) if 'logistic_condition' in a) for p in submitted]
     assert len(targets) == 3 and targets[0] == targets[2] > targets[1]
@@ -197,3 +198,64 @@ def test_standing_refresh_still_gates_owned_cells_beside_a_loan(monkeypatch) -> 
     }
 
     assert gated == {(42.5, 30.5)}
+
+
+def _laya_mall_slot_gate(monkeypatch, item):
+    """Drive ensure_produced with Laya's mall_slot arguments; return the gate handed to the cell refresh."""
+    import orchestrator.mall_construction as mall_construction
+
+    captured = []
+
+    class _Stop(Exception):
+        pass
+
+    def refresh(*_a, stock_gate_target=None, **_k):
+        captured.append(stock_gate_target)
+        raise _Stop
+
+    monkeypatch.setattr(mall_construction, "resume_for_item", lambda *_a, **_k: None)
+    monkeypatch.setattr(builder, "MANAGED_INTERMEDIATE_SOURCES", {})
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", None)
+    monkeypatch.setattr(builder, "_MALL_STOCK_GATE_FLOORS", {})
+    monkeypatch.setattr(builder, "_ensure_chemical_ladder_predecessor", lambda *_a, **_k: None)
+    monkeypatch.setattr(builder, "_copper_cable_consumers_active", lambda *_a: False)
+    monkeypatch.setattr(builder, "_is_pre_core_temporary_mall_item", lambda *_a: False)
+    monkeypatch.setattr(builder, "_released_request_multiple", lambda _c, _s, _f, n: n)
+    monkeypatch.setattr(builder, "_startup_mall_item_cap", lambda *_a: None)
+    monkeypatch.setattr(builder, "_plan_line", lambda *_a, **_k: SimpleNamespace())
+    monkeypatch.setattr(builder, "_refresh_mall_cell", refresh)
+    with pytest.raises(_Stop):
+        builder.ensure_produced(object(), object(), "nauvis", "player", item, (0, 0), lambda _m: None,
+                                upgrade_bootstrap=False, stock_target=1, minimum_machines=1,
+                                allow_promotion=False)
+    return captured[0]
+
+
+@pytest.mark.parametrize("anchor", ["iron-gear-wheel", "copper-cable"])
+def test_gear_and_cable_anchors_get_no_default_network_gate(monkeypatch, anchor):
+    """Merge smoke 2026-11-17: a default standing gate (<24 gears, <92 cable) disabled
+    the anchors, so C1's 0.25/0.5 per-second goals read 0 and Laya stalled on waits.
+    Anchors are bounded by their own-chest cap instead (851bc923)."""
+    assert _laya_mall_slot_gate(monkeypatch, anchor) is None
+
+
+def test_non_anchor_standing_cell_keeps_its_default_gate(monkeypatch):
+    assert _laya_mall_slot_gate(monkeypatch, "transport-belt") >= 200
+
+
+def test_owned_gate_reconciliation_skips_anchors(monkeypatch):
+    monkeypatch.setattr(builder, '_MATERIAL_RESERVATION_LEDGER', SimpleNamespace(stock_targets=lambda: {}))
+    monkeypatch.setattr(builder, '_released_request_multiple', lambda _c,_s,_f,n: n)
+    monkeypatch.setattr(builder, '_rationed_mall_wip_gap', lambda *_:0)
+    monkeypatch.setattr(builder, 'active_bootstrap_loans', lambda *_: ())
+    monkeypatch.setattr(builder, '_MALL_STOCK_GATE_FLOORS',
+                        {('nauvis','player','copper-cable'): 47, ('nauvis','player','inserter'): 30})
+    machine = (10.5,10.5)
+    monkeypatch.setattr(builder.live_base, 'find_line', lambda *_: SimpleNamespace(machine_positions=(machine,)))
+    monkeypatch.setattr(builder.live_base, 'entity_names_at', lambda *_: {machine:'assembling-machine-1'})
+    submitted = []
+    monkeypatch.setattr(builder, '_submit', lambda _c,_b,_s,p,_n,_e:submitted.append(p))
+    builder._refresh_owned_standing_gates(SimpleNamespace(command=lambda _: ''), object(), 'nauvis', 'player',
+                                          lambda _:None, requested={'iron-gear-wheel': 1})
+    gated = {a['recipe'] for p in submitted for a in actions(p) if 'logistic_condition' in a}
+    assert gated == {'inserter'}
