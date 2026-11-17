@@ -7,8 +7,10 @@ import math
 import os
 
 from orchestrator import live_base, operation_facts
-from orchestrator.stage_services import StuckError
-from orchestrator.stage_transport import _plan_belt_transport, _through_belt_source
+from orchestrator.construction_coverage import assert_affordable
+from orchestrator.parts_mall import MaterialShortage
+from orchestrator.stage_services import StuckError, _LOGISTIC_REQUEST
+from orchestrator.stage_transport import _plan_belt_transport, _through_belt_source, _transport_mode
 from orchestrator.work_state import WorkStateSignal
 from planners.belt_bridge import DIRECTION_VECTORS
 from planners.plan_validation import entity_footprint_tiles, validate_build_plan, validate_no_collisions
@@ -117,12 +119,44 @@ def _terminal(client, surface, force, provider):
     raise SteelSeedRecoveryWait("steel seed waits for an unused verified iron-output terminal")
 
 
+def _logistic_feed(surface, force, endpoint, inserter):
+    return {"surface": surface, "force": force, "phases": [{"name": "steel_seed_iron_refeed",
+        "actions": [inserter, {"action_type": "place_ghost", "entity": "requester-chest",
+            "position": {"x": endpoint[0], "y": endpoint[1]},
+            "logistic_request": {"name": "iron-plate", "count": _LOGISTIC_REQUEST}}]}]}
+
+
+def _stocked_requester(client, surface, force, repair):
+    try:
+        # Use execution's transferable stock, pending-ghost accounting and
+        # allocator. Requester WIP and another project's chest are not stock.
+        assert_affordable(client, surface, force, repair, "steel_seed_refeed", lambda _: None)
+    except MaterialShortage as shortage:
+        return "requester-chest" not in shortage.required
+    return True
+
+
+def logistic_refeed_retirement_actions(plan):
+    record = plan.get("source_recovery", {})
+    if record.get("transport_mode") != "logistic":
+        return []
+    repair = record.get("plan")
+    if record.get("plan_sha256") != _hash(repair) or not any(
+        repair == _logistic_feed(plan["surface"], plan["force"], endpoint, inserter)
+        for endpoint, _, inserter in steel_seed_intakes(plan)
+    ):
+        raise SteelSeedRecoveryWait("steel seed logistic retirement ownership changed")
+    return [{"action_type": "remove_entity", "entity": a["entity"], "position": a["position"]}
+            for phase in repair["phases"] for a in phase["actions"]]
+
+
 def prepare_seed_refeed(client, surface, force, plan, provider, *, reserved_tiles=()):
     """Observe viability, then return one durable additive transport transaction.
 
     Ownership comes from the episode seed plan; native unit identities bind a
     persisted repair to those same entities on retries. No historical recipe
-    fallback, new furnace, requester, provider, removal or gate change is used.
+    fallback, new furnace, provider, removal or gate change is used. A stocked
+    requester can serve this one furnace when no legal belt connection fits.
     """
     interfaces = mined_seed_interfaces(plan)
     if interfaces is None:
@@ -169,17 +203,25 @@ def prepare_seed_refeed(client, surface, force, plan, provider, *, reserved_tile
         repair = record["plan"]
         validate_build_plan(repair)
         validate_no_collisions([("seed", plan), ("refeed", repair)])
+        mode = record.get("transport_mode", "belt")
+        allowed = {"inserter", "transport-belt", "underground-belt"} if mode == "belt" else {"inserter", "requester-chest"}
         if (repair.get("surface") != surface or repair.get("force") != force
-                or any(a.get("action_type") != "place_ghost" or a.get("entity") not in {
-                    "inserter", "transport-belt", "underground-belt"}
+                or mode not in {"belt", "logistic"}
+                or any(a.get("action_type") != "place_ghost" or a.get("entity") not in allowed
                     for phase in repair["phases"] for a in phase["actions"])):
             raise SteelSeedRecoveryWait("steel seed recovery must remain additive in its owned scope")
+        if mode == "logistic" and not any(
+            repair == _logistic_feed(surface, force, endpoint, inserter)
+            for endpoint, _, inserter in steel_seed_intakes(plan)
+        ):
+            raise SteelSeedRecoveryWait("steel seed logistic feed differs from its furnace intake")
         _source_health(client, surface, force, record["source"],
                        expected_unit=record["source_unit"], allow_empty=True)
         return record
     tail, source, source_unit = _terminal(client, surface, force, provider)
     centre = interfaces["furnace"]["position"]
-    blocked = set(reserved_tiles)
+    reserved = set(reserved_tiles)
+    blocked = set(reserved)
     for phase in plan["phases"]:
         for action in phase["actions"]:
             blocked.update(entity_footprint_tiles(action))
@@ -188,8 +230,12 @@ def prepare_seed_refeed(client, surface, force, plan, provider, *, reserved_tile
         (min(centre["x"], tail[0]) - 5, min(centre["y"], tail[1]) - 5),
         (max(centre["x"], tail[0]) + 5, max(centre["y"], tail[1]) + 5)) | blocked
     candidates = []
+    tap_observations = []
+    route_attempts = 0
     for tap, tap_heading, tap_actions in steel_seed_source_taps(tail, source["direction"]):
         tap_tiles = {tile for action in tap_actions for tile in entity_footprint_tiles(action)}
+        tap_observations.append({"position": tap, "reserved": sorted(tap_tiles & reserved),
+                                 "blocked": sorted(tap_tiles & nearby)})
         if tap_tiles & nearby:
             continue
         for endpoint, heading, inserter in steel_seed_intakes(plan):
@@ -197,6 +243,7 @@ def prepare_seed_refeed(client, surface, force, plan, provider, *, reserved_tile
             if (entity_footprint_tiles(inserter) | {endpoint_tile}) & (nearby | tap_tiles):
                 continue
             try:
+                route_attempts += 1
                 actions, _, _ = _plan_belt_transport(client, surface, force, "iron-plate", tap, endpoint,
                     reuse_existing=False, max_belt_route_tiles=256,
                     additional_blocked=blocked | tap_tiles | set(entity_footprint_tiles(inserter)),
@@ -220,10 +267,25 @@ def prepare_seed_refeed(client, surface, force, plan, provider, *, reserved_tile
             except WorkStateSignal as error:
                 if error.code != "direct_belt_approach_wait":
                     raise
+    operation_facts.record("steel_seed_refeed_options", source=source, source_unit=source_unit,
+                          taps=tap_observations, belt_route_attempts=route_attempts, belt_plans=len(candidates))
+    mode = "belt"
+    if not candidates and _transport_mode("steel-plate", "iron-plate", 1) == "logistic":
+        # A one-furnace repair can use the shared low-demand bot contract.
+        # Require an existing chest: making a new logistic chest can depend on
+        # this very steel/advanced-circuit ladder. Funding still owns the bill.
+        for endpoint, _, inserter in steel_seed_intakes(plan):
+            repair = _logistic_feed(surface, force, endpoint, inserter)
+            tiles = {tile for a in repair["phases"][0]["actions"] for tile in entity_footprint_tiles(a)}
+            if not tiles & nearby and _stocked_requester(client, surface, force, repair):
+                validate_build_plan(repair)
+                validate_no_collisions([("seed", plan), ("refeed", repair)])
+                candidates.append(repair)
+        mode = "logistic"
     if not candidates:
-        raise SteelSeedRecoveryWait("steel seed has no legal powered belt intake from its iron source")
+        raise SteelSeedRecoveryWait("steel seed has no legal source pickup/belt route or stocked low-demand logistic intake")
     repair = min(candidates, key=lambda p: len(p["phases"][0]["actions"]))
-    record = {"version": 1, "seed_sha256": _seed_hash(plan), "units": units,
+    record = {"version": 1, "transport_mode": mode, "seed_sha256": _seed_hash(plan), "units": units,
               "source": source, "source_unit": source_unit, "plan": repair,
               "plan_sha256": _hash(repair), "baseline": _baseline(health, interfaces),
               "submission": None, "built_baseline": None, "delivery_observed": False}

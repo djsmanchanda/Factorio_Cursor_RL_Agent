@@ -41,6 +41,19 @@ These names describe intended responsibilities, not permission to build speculat
   furnace crafts and increased steel in the exact retained provider are then
   recorded separately from submission. No seed entity is retired by this feed repair;
   the later steel-district promotion and its admission gate remain unchanged.
+  If reservations or occupancy prevent a complete belt route, the shared
+  low-demand transport rule can admit a requester beside the same one-furnace
+  intake. This option requires an existing requester in transferable,
+  uncommitted, allocatable stock, so
+  manufacturing a logistic chest cannot recurse into its own steel dependency.
+  The requester and powered inserter use the same funded, persisted recovery
+  transaction, logistic-coverage operation, construction witness and later
+  craft/provider-delivery baselines. Funding retries also keep the stock-only
+  constraint; a missing requester yields without requesting its manufacture.
+  Normal seed retirement recovers the owned logistic feed through bots after
+  replacement steel delivery is proven. Existing belt selections remain bound
+  across restart. Candidate facts distinguish source pickup conflicts from
+  downstream route attempts; district reservations stay protected.
   For a journalled chest-fed assembler row, recovery reads the exact selected
   recipe row and declared feed prototypes from scoped acknowledged invocation
   plans, including construction-shortage outcomes. Constructor-derived endpoint
