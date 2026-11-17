@@ -32,8 +32,8 @@ def c5(samples):
 
 def test_c5_passes_at_ninety_percent_of_planned_rate_after_settle_and_records_both_references():
     # First production at tick 0; settled from 1800; window 1800 -> 5400 makes 27 bars in 60 s = 0.45/s.
-    result = c5([sample(0, 10), sample(1800, 20), sample(5400, 47)])
-    assert result.passed and result.predicate_version == "c5-v2"
+    result = c5([sample(-60, 0), sample(0, 10), sample(1800, 20), sample(5400, 47)])
+    assert result.passed and result.predicate_version == "c5-v3"
     window = result.evidence["window"]
     assert window["measured_rate"] == 0.45 and window["window_ticks"] == 3600
     assert window["planned_target"] == {"rate": 0.5, "tick": 10, "source": TARGET["source"]}
@@ -42,25 +42,25 @@ def test_c5_passes_at_ninety_percent_of_planned_rate_after_settle_and_records_bo
 
 
 def test_c5_fails_at_sixty_percent_of_planned_rate():
-    result = c5([sample(0, 10), sample(1800, 20), sample(5400, 38)])  # 0.3/s
+    result = c5([sample(-60, 0), sample(0, 10), sample(1800, 20), sample(5400, 38)])  # 0.3/s
     assert result.failed and result.evidence["window"]["ratio_to_target"] == 0.6
 
 
 def test_production_during_the_settle_does_not_count():
     # 490 bars inside the settle period, then nothing: the only settled window measures 0/s.
-    result = c5([sample(0, 10), sample(1700, 500), sample(1800, 500), sample(5400, 500)])
+    result = c5([sample(-60, 0), sample(0, 10), sample(1700, 500), sample(1800, 500), sample(5400, 500)])
     assert result.failed and result.evidence["window"]["measured_rate"] == 0
     # A window that starts before the settle ends is never formed.
-    assert c5([sample(0, 10), sample(1799, 500), sample(3600, 520)]).failed
+    assert c5([sample(-60, 0), sample(0, 10), sample(1799, 500), sample(3600, 520)]).failed
 
 
 def test_missing_planned_target_is_unknown_never_guessed():
-    result = c5([sample(0, 10, target=None), sample(1800, 20, target=None), sample(5400, 200, target=None)])
+    result = c5([sample(-60, 0, target=None), sample(0, 10, target=None), sample(1800, 20, target=None), sample(5400, 200, target=None)])
     assert result.status is PredicateStatus.UNKNOWN and result.missing == ("planned_target",)
 
 
 def test_full_chest_after_earning_keeps_c5_through_bounded_history_and_the_sidecar():
-    earned = [sample(0, 10), sample(1800, 20), sample(5400, 47)]
+    earned = [sample(-60, 0), sample(0, 10), sample(1800, 20), sample(5400, 47)]
     flat = [sample(5400 + 600 * i, 47) for i in range(1, 41)]  # chest full: production stops for 40 polls
     measurement = Measurement({})
     for item in earned + flat:
@@ -71,7 +71,7 @@ def test_full_chest_after_earning_keeps_c5_through_bounded_history_and_the_sidec
     assert row["predicate_evidence"]["C5"]["evidence"]["historical"] is True
     # Trimming without the pinned proof would lose it.
     assert c5((earned + flat)[-20:]).failed
-    assert [s.tick for s in bounded_history(earned + flat)[:3]] == [0, 1800, 5400]
+    assert [s.tick for s in bounded_history(earned + flat)[:4]] == [-60, 0, 1800, 5400]
 
 
 def test_plastic_collector_normalizes_capacity_and_empty_consumers():
@@ -120,12 +120,12 @@ def test_readers_order_c6a_and_accept_journals_with_and_without_it():
     assert MILESTONE_IDS.index("C5") < MILESTONE_IDS.index("C6a") < MILESTONE_IDS.index("C6")
     old = [{"event": "strict_current", "tick": t, "statuses": {"C5": s, "C6": False}} for t, s in ((1, False), (2, True))]
     new = [{"event": "strict_current", "tick": t, "statuses": {"C5": s, "C6a": s, "C6": False},
-            "predicate_evidence": {"C5": {"predicate_version": "c5-v2"}, "C6a": {"predicate_version": "c6a-v1"}}}
+            "predicate_evidence": {"C5": {"predicate_version": "c5-v3"}, "C6a": {"predicate_version": "c6a-v1"}}}
            for t, s in ((1, False), (2, True))]
     assert report.from_journal_rows(old)["earned"] == ["C5"]
     block = report.from_journal_rows(new)
     assert block["earned"] == ["C5", "C6a"]
-    assert block["predicate_versions"] == {"C5": "c5-v2", "C6a": "c6a-v1"}
+    assert block["predicate_versions"] == {"C5": "c5-v3", "C6a": "c6a-v1"}
 
 
 def test_evidence_state_written_before_c6a_is_still_valid_and_advances():
@@ -133,9 +133,9 @@ def test_evidence_state_written_before_c6a_is_still_valid_and_advances():
     statuses = {cid: "failed" for cid in MILESTONE_IDS if cid != "C6a"}
     state.update(last_statuses=statuses, last_tick=0, current_available=True, gap=False)
     validate_evidence_state(state)
-    samples = [sample(0, 10), sample(1800, 20), sample(5400, 47)]
+    samples = [sample(-60, 0), sample(0, 10), sample(1800, 20), sample(5400, 47)]
     evidence_success(state, samples[0], samples)
-    assert "C6a" in state["last_statuses"] and state["events"]["C5"]["predicate_version"] == "c5-v2"
+    assert "C6a" in state["last_statuses"] and state["events"]["C5"]["predicate_version"] == "c5-v3"
 
 
 def old_bundle(tmp_path, reached):
@@ -154,7 +154,7 @@ def test_restart_bundle_that_reached_c5_v1_drops_it_to_be_reearned(tmp_path):
     bundle = old_bundle(tmp_path, {"C0", "C4", "C5"})
     state = import_restart_state(copy.deepcopy(bundle), tmp_path / "target", episode_id="episode", mod_scope="mods")
     assert state.evaluator.reached == {"C0", "C4"}
-    assert state.reearned == ({"id": "C5", "from_version": "c5-v1", "to_version": "c5-v2"},)
+    assert state.reearned == ({"id": "C5", "from_version": "c5-v1", "to_version": "c5-v3"},)
     expected, records = migrate_reached(bundle)
     again = export_restart_state(tmp_path / "target", "episode", "mods", state.baseline, list(state.history), state.evaluator)
     assert again["reached"] == expected["reached"] == ["C0", "C4"] and records == list(state.reearned)
@@ -164,3 +164,31 @@ def test_restart_bundle_that_reached_c5_v1_drops_it_to_be_reearned(tmp_path):
     changed["milestones"] = [{**m, "predicate_version": "c4-v0"} if m["id"] == "C4" else m for m in changed["milestones"]]
     with pytest.raises(ValueError, match="Strict milestone definitions differ"):
         import_restart_state(changed, tmp_path / "other-target", episode_id="episode", mod_scope="mods")
+
+
+def test_a_lifetime_counter_carried_by_the_save_is_not_production():
+    # Live tip-c3-120 shape (17 November): the C0 save loads with a positive plastic counter and no plants.
+    flat = [sample(238_626 + 1800 * i, 466) for i in range(6)]
+    result = c5(flat)
+    assert result.failed and result.evidence["first_production_tick"] is None
+    assert result.evidence["checks"]["plastic_production_started"] is False
+    # Production starts at the first rise, not at the first positive sample.
+    rising = flat + [sample(250_000, 470), sample(252_000, 500), sample(254_000, 540)]
+    assert c5(rising).evidence["first_production_tick"] == 250_000
+
+
+def test_windows_before_the_declaration_are_judged_so_c5_reads_failed_then_is_credited():
+    # The runner declared its target after the first windows; v2 stayed unknown until a pass and was never credited.
+    late = {**TARGET, "tick": 7200}
+    rows = ([sample(-60, 0, target=None), sample(0, 10, target=None), sample(1800, 12, target=None),
+             sample(3600, 14, target=None), sample(7200, 16, target=late)]
+            + [sample(9000, 16, target=late), sample(10_800, 50, target=late)])
+    early = c5(rows[:4])
+    assert early.status is PredicateStatus.UNKNOWN and early.missing == ("planned_target",)
+    stalled = c5(rows[:6])
+    assert stalled.failed and stalled.evidence["window"]["target_declared_after_window"] is False
+    assert c5(rows[:5]).evidence["window"]["planned_target"] == late
+    measurement = Measurement({})
+    for item in rows:
+        measurement.add(item)
+    assert measurement.summary("stopped")["strict_reached"].get("C5") == 10_800

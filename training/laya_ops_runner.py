@@ -815,7 +815,7 @@ def planned_plastic_rate(board: Mapping | None) -> float | None:
 
 
 def declare_plastic_target(session: Any, board: Mapping | None, declared: dict) -> None:
-    """Record the planned plastic rate in the game for strict C5 (c5-v2); measurement only, never fatal.
+    """Record the planned plastic rate in the game for strict C5 (c5-v2 and later); measurement only, never fatal.
 
     ``declared`` holds the last rate written by this process so an unchanged plan costs no RCON write.
     """

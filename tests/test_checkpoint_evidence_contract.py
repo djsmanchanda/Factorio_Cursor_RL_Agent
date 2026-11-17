@@ -27,7 +27,7 @@ def test_runner_and_sidecar_share_projection_with_flat_recovery_and_same_tick():
     assert evidence['_contract'] == row['predicate_evidence']['_contract']
     intervals = evidence['_contract']['sampled_plastic']['intervals']
     assert [x['craft_delta'] for x in intervals] == [1, 0, 1]
-    assert row['predicate_evidence']['C5']['predicate_version'] == 'c5-v2'
+    assert row['predicate_evidence']['C5']['predicate_version'] == 'c5-v3'
     assert evidence['_contract']['coverage']['complete_history'] is False
 
 

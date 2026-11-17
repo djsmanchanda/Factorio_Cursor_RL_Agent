@@ -186,8 +186,8 @@ def _snapshot_record(snapshot: FactorySnapshot) -> dict:
 def reearned_milestones(bundle_milestones, reached) -> list[dict]:
     """Reached milestones whose recorded version the current code re-earns instead of refusing.
 
-    A bundle that reached C5 under c5-v1 keeps every other reached milestone; C5 must be earned again
-    under c5-v2. Returns one ``{id, from_version, to_version}`` record per dropped milestone.
+    A bundle that reached C5 under c5-v1 or c5-v2 keeps every other reached milestone; C5 must be earned again
+    under the current C5 version (c5-v3). Returns one ``{id, from_version, to_version}`` record per dropped milestone.
     """
     current = {item.checkpoint_id: item.predicate_version for item in CheckpointEvaluator().milestones}
     recorded = {item.get("id"): item.get("predicate_version") for item in bundle_milestones or ()
@@ -380,7 +380,7 @@ def import_restart_state(bundle: dict, script_output: Path, *, episode_id: str, 
         raise ValueError("Restart version or scope mismatch")
     evaluator = CheckpointEvaluator()
     current = _milestones(evaluator)
-    # A milestone reached under a version the current code re-earns (c5-v1 -> c5-v2) is dropped from
+    # A milestone reached under a version the current code re-earns (c5-v1 or c5-v2 -> c5-v3) is dropped from
     # reached here and recorded on the state; any other reached difference is still refused below.
     bundle, reearned = migrate_reached(bundle)
     if bundle["milestones"] != current:
