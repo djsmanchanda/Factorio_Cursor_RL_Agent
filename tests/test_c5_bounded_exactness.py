@@ -135,3 +135,35 @@ def test_a_bundle_that_reached_c5_v3_re_earns_it_under_c5_v4():
     bundle = {"reached": ["C4", "C5"], "milestones": [{"id": "C5", "predicate_version": "c5-v3"}]}
     migrated, records = migrate_reached(bundle)
     assert migrated["reached"] == ["C4"] and records == [{"id": "C5", "from_version": "c5-v3", "to_version": "c5-v4"}]
+
+
+@pytest.mark.parametrize("restart_at", [(), (1,), (2,), (3,)])
+def test_a_rollback_seen_without_a_plastic_counter_still_ends_open_windows(tmp_path, restart_at):
+    # Review of 0d3ce49d (P1): the counterless sample at tick 1000 reveals a reloaded save; 2000 -> 3900
+    # must not form a window across it.
+    rows = [sample(0, 0), sample(60, 10), sample(2000, 50), sample(1000, None), sample(3900, 80)]
+    assert replay(rows, tmp_path, restart_at) is None
+    assert not c5(rows).passed
+
+
+def test_pre_declaration_record_windows_are_capped_and_then_unknown(tmp_path):
+    # Review of 0d3ce49d (P2): ever-faster undeclared production grew the ledger without bound.
+    from orchestrator.checkpoint_milestones import C5_PENDING_LIMIT, c5_ledger
+    rows = [sample(0, 0, target=None)] + [sample(1800 * i, i * i, target=None) for i in range(1, 120)]
+    late = {**TARGET, "rate": 10_000.0, "tick": 1800 * 120}
+    rows += [sample(1800 * 120, 120 * 120, target=late), sample(1800 * 121, 120 * 120, target=late)]
+    ledger = c5_ledger(rows)
+    assert ledger["pending"] == [] and ledger["pending_overflow"] is True
+    assert len(c5_ledger(rows[:110])["pending"]) == C5_PENDING_LIMIT
+    result = c5(rows)
+    assert result.status.value == "unknown" and result.missing == ("pre_declaration_windows",)
+    replay(rows, tmp_path, restart_at=(50, 115))
+
+
+def test_a_ledger_written_before_the_clock_field_still_validates():
+    from orchestrator.checkpoint_milestones import c5_ledger, validate_c5_ledger
+    ledger = c5_ledger([sample(0, 0), sample(60, 10), sample(2000, 50)])
+    older = {k: v for k, v in ledger.items() if k not in ("clock", "pending_overflow")}
+    assert validate_c5_ledger(older) == {**older, "clock": None, "pending_overflow": False}
+    with pytest.raises(ValueError):
+        validate_c5_ledger({k: v for k, v in older.items() if k != "begins"})
