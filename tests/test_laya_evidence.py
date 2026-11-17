@@ -68,3 +68,15 @@ def test_arm_summary_counts_completed_jobs_over_planned():
     assert (reference["planned"], reference["completed"]) == (2, 1)
     assert (reference["any"]["C5"], reference["held"]["C5"]) == (1, 0)
     assert reference["versions"] == {"c6-v2": 1}
+
+
+def test_c6a_plastic_used_is_reported_after_c4():
+    # Live tip-c3-120 shape: C6a (plastic used, c6a-v1) reached and held; C6 not reached.
+    job = {"arm": "control", "status": "completed",
+           "strict_reached": {"C0": 238550, "C2": 365472, "C3": 504347, "C4": 555048, "C6a": 640000},
+           "strict_current_at_end": {"C0": True, "C2": True, "C3": True, "C4": True, "C5": True, "C6a": True, "C6": False},
+           "strict_current": []}
+    c6a = milestone_evidence(job)["C6a"]
+    assert c6a["reached_ordered"] is True and c6a["held_at_end"] is True and c6a["first_tick"] == 640000
+    job["strict_reached"].pop("C4")
+    assert milestone_evidence(job)["C6a"]["reached_ordered"] is False
