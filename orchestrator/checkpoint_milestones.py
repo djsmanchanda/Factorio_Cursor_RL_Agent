@@ -730,18 +730,26 @@ def _production_anchor(samples: Sequence[FactorySnapshot]) -> tuple[FactorySnaps
 
 
 def c5_proof_samples(samples: Sequence[FactorySnapshot]) -> tuple[FactorySnapshot, ...]:
-    """The samples that prove C5 (production-start pair and the first passing window), or () when none pass.
+    """The samples C5 needs to stay re-derivable from bounded history, or () before production starts.
 
-    History holders keep these when trimming (``checkpoint_evidence.bounded_history``), so a pass stays
-    re-derivable from retained history after the output chest fills and production stops.
+    History holders keep these when trimming (``checkpoint_evidence.bounded_history``), at most six:
+    - the production-start pair, so the settle anchor never moves forward;
+    - the first settled sample, so a window of at least C5_WINDOW_TICKS can always form, however densely
+      the run samples (without it, 20 samples inside the settle period kept moving the start forward);
+    - the first sample that declared a target, which judges windows that ended before any declaration;
+    - the first passing window's endpoints, so a pass survives the output chest filling.
     """
-    start, windows = _c5_windows(samples)
-    passing = next((w for w in windows if w["passes"] is True), None)
-    if passing is None:
+    anchor = _production_anchor(samples)
+    if not anchor:
         return ()
+    usable = [s for s in samples if s.tick is not None and _plastic_produced(s) is not None]
+    settled = next((s for s in usable if s.tick >= anchor[1].tick + C5_SETTLE_TICKS), None)
+    declared = next((s for s in usable if _declared_target(s) is not None), None)
+    _, windows = _c5_windows(samples)
+    passing = next((w for w in windows if w["passes"] is True), None)
     proof: list[FactorySnapshot] = []
-    for sample in (*_production_anchor(samples), *passing["_samples"]):
-        if not any(sample is kept for kept in proof):
+    for sample in (*anchor, settled, declared, *(passing["_samples"] if passing else ())):
+        if sample is not None and not any(sample is kept for kept in proof):
             proof.append(sample)
     return tuple(proof)
 

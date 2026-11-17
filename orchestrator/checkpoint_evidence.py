@@ -17,11 +17,12 @@ def retained_samples(history):
 
 
 def bounded_history(history, limit=HISTORY_LIMIT):
-    """The newest ``limit`` retained samples, keeping c5-v2's proof samples when they would fall out.
+    """The newest ``limit`` retained samples, keeping C5's proof samples when they would fall out.
 
-    c5-v2 is a historical predicate: its first passing window (and the settle anchor before it) stays
-    in history so the stateless predicate keeps passing after production stops on a full chest. At most
-    three samples are kept this way; the rest are the newest samples, in tick order.
+    C5 is a historical predicate measured over a settled window: its production-start pair, first settled
+    sample, first target declaration and first passing window stay in history (``c5_proof_samples``, at
+    most six), so the stateless predicate can form a window under dense sampling and keeps passing after
+    production stops on a full chest. The rest are the newest samples, in tick order.
     """
     samples = retained_samples(history)
     if len(samples) <= limit:

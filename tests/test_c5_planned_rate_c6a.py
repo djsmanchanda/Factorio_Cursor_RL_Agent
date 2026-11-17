@@ -192,3 +192,47 @@ def test_windows_before_the_declaration_are_judged_so_c5_reads_failed_then_is_cr
     for item in rows:
         measurement.add(item)
     assert measurement.summary("stopped")["strict_reached"].get("C5") == 10_800
+
+
+def _incremental(rows):
+    history = []
+    for row in rows:
+        history = bounded_history([*history, row])
+    return history
+
+
+def test_dense_sampling_still_forms_a_settled_window():
+    # Review P1: 100 samples one second apart; bounded to 20, the start used to move forward forever.
+    rows = [sample(60 * i, i) for i in range(100)]
+    assert c5(rows).passed
+    history = _incremental(rows)
+    assert len(history) <= 20 + 6 and c5(history).passed
+    assert c5(history).evidence["first_production_tick"] == 60
+
+
+def test_a_late_declared_target_stays_pinned_when_the_target_changes():
+    # Review P2: the pass was judged against a target declared after its window; a later 10/s target
+    # and trimming must not re-judge it.
+    first = {**TARGET, "tick": 4000}
+    later = {**TARGET, "rate": 10.0, "tick": 6000}
+    rows = ([sample(-60, 0, target=None), sample(0, 1, target=None), sample(1800, 10, target=None),
+             sample(3600, 30, target=None), sample(4000, 30, target=first)]
+            + [sample(6000 + 600 * i, 30, target=later) for i in range(30)])
+    assert c5(rows[:5]).passed
+    history = _incremental(rows)
+    result = c5(history)
+    assert result.passed and result.evidence["window"]["planned_target"] == first
+    assert result.evidence["window"]["target_declared_after_window"] is True
+
+
+def test_a_restart_before_the_first_pass_keeps_the_settle_anchor(tmp_path):
+    # Captured mid-settle under dense sampling; the restored history must still earn C5 afterwards.
+    rows = [sample(60 * i, i) for i in range(40)]
+    history = _incremental(rows)
+    assert not c5(history).passed
+    evaluator = CheckpointEvaluator()
+    bundle = export_restart_state(tmp_path / "source", "episode", "mods", rows[0], history, evaluator)
+    state = import_restart_state(copy.deepcopy(bundle), tmp_path / "target", episode_id="episode", mod_scope="mods")
+    resumed = _incremental([*state.history, *(sample(60 * i, i) for i in range(40, 100))])
+    result = c5(resumed)
+    assert result.passed and result.evidence["first_production_tick"] == 60
