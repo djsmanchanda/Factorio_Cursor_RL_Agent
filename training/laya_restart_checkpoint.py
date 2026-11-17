@@ -383,7 +383,7 @@ def restore(bundle, root, *, migration_contract=None):
         episode_id=state['scope']['episode_id'], mod_scope=mod_scope(manifest),
         extra_writes=auxiliary_files(bundle, root, metadata))
     context = {**context, 'migration_contract_sha256': migration,
-               # Reached milestones dropped to be re-earned under a newer predicate version (c5-v1 or c5-v2 -> c5-v3).
+               # Reached milestones dropped to be re-earned under a newer predicate version (c5-v1, c5-v2 or c5-v3 -> c5-v4).
                'strict_reearned': [dict(item) for item in restored.reearned]}
     return restored, context
 
