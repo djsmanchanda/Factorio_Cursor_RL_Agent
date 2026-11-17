@@ -130,7 +130,10 @@ def test_host_gate_pauses_and_resumes_real_batch_admission(tmp_path, monkeypatch
 
     monkeypatch.setattr("tools.run_laya_batch.time.time", lambda: 1002)
     report = cycle(config, {"target": 0}, registry=registry, root=host, now=1002)
-    assert report["target_slots"] == 24
+    # Merge note (O1): the harness scheduler (4818e4a7) lifts an expired zero ceiling without forcing
+    # the old target back; unmeasured recovery bootstraps one safe slot and climbs from there
+    # (test_zero_ceiling_recovery_bootstraps_only_safe_queued_work).
+    assert report["manual_target"] is None and report["target_slots"] >= 1
     assert batch.submit(_PendingPool(), job, 0) is not None
     saved = json.loads((batch.root / "job-status.json").read_text())
     assert saved["jobs"][0]["admission_reserved"] is True

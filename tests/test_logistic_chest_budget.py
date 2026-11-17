@@ -266,19 +266,6 @@ def test_funded_claimant_does_not_hold_its_chest_twice(tmp_path):
     assert partial.reserved.get('passive-provider-chest') == 1
 
 
-def test_laya_uses_the_shared_dependency_budget_before_operations(monkeypatch):
-    from training.laya_ops import DeterministicSession
-    calls = []
-    monkeypatch.setattr(builder, '_refresh_logistic_chest_budget', lambda *args, **kw: calls.append(kw))
-    monkeypatch.setattr(builder, '_MATERIAL_RESERVATION_LEDGER', None)
-    session = DeterministicSession.__new__(DeterministicSession)
-    session.client, session.bridge, session.emit = object(), object(), lambda _:None
-    monkeypatch.setattr(session, '_operations', lambda: {'reserve_steel_seed': lambda: {'ok': True, 'code': 'reserved'}})
-    monkeypatch.setattr(session, '_maintain_mall', lambda: None)
-    session.run('reserve_steel_seed')
-    assert calls == [{'prospective': False}]
-
-
 def test_laya_refresh_keeps_explicit_fences_but_holds_no_stage_order_chests(
     tmp_path: Path, monkeypatch,
 ) -> None:

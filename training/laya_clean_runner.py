@@ -41,7 +41,7 @@ from training.laya_site_plan import (base_zones, draw_command, load_plan, plan_o
                                     ring_expand_candidates, save_plan)
 from training.laya_lines import line_candidates
 from training.laya_starters import STARTER_ORE, starter_bill, starter_candidates
-from training.laya_saved_world import SavedWorldAdapter, SavedWorldError, compile_candidates, decision_state, speed_status
+from training.laya_saved_world import SavedWorldAdapter, SavedWorldError, compile_candidates, decision_state
 from training import laya_mall_slots as mall_slots
 from training.laya_mall_block import mall_cell_candidates
 
@@ -66,18 +66,15 @@ class Settings:
     rate_window_ticks: int = 7200
     until_phase: str | None = None
     max_game_ticks: int | None = None
-    # A natural goal run ignores ``stall_decisions`` and ends a stall only when
-    # its relevant useful state is unchanged across this whole window.  None
-    # disables the guard entirely.
-    stall_observation_ticks: int | None = 18000
-    # The verified research goal.  When set, proxy rate completion (C6/science
-    # rates/queued research) never ends the run.
-    goal_technology: str | None = None
     request_multiplier: int | None = None
     dependency_context: bool = False
     # Gated, rotating mall slots (training/laya_mall_slots.py). Default since 2026-10-05: C2 was
     # 0/141 and 0/186 without them, 40/173 with them (data/laya-experiments/variety-20261005).
     mall_slots: bool = True
+    # Treatment switch: offer a permanent C6 advanced-circuit consumer service (default off).
+    production_service: bool = True
+    # Treatment switch: offer one permanent copper-cable capacity cell when the AC cell is input-starved.
+    cable_capacity: bool = True
     land_model: str = "patch"  # "grid": 64-tile parcels on a corridor lattice (training/laya_land_grid.py)
     mall_gate_scale: float = 1.0
     mall_buildable_multiplier: int = 5
@@ -93,6 +90,7 @@ class Settings:
     decision_wait_sqrt_minutes: float = 20.0
     decision_wait_max_multiplier: float = 4.0
     decision_wait_min_ticks: int = 60
+
     # Independent experiment factors; none changes the adopted decision policy.
     ops_consumer_choices: bool = False
     ops_solid_fluid_filter: bool = False
@@ -146,11 +144,7 @@ class LiveWorld(SavedWorldAdapter):
         # Export big poles and iron sticks too, so they can become stock needs.
         if RECIPE_LIST_END not in self.lua_source:
             raise SavedWorldError("saved-world helper changed; recipe list end not found")
-        from training.laya_mission import PHASES
-        # Observe every mission output, including fluids-backed recipes which
-        # are absent from the geometry recipe catalog. Counters drive rates.
-        observed_items = dict.fromkeys((*EXTRA_RECIPES, *(item for phase in PHASES for item in phase["targets"])))
-        extra = "".join(f',"{name}"' for name in observed_items)
+        extra = "".join(f',"{name}"' for name in EXTRA_RECIPES)
         self.lua_source = self.lua_source.replace(RECIPE_LIST_END, RECIPE_LIST_END[:-1] + extra + "}")
         self.extra_recipes: tuple[str, ...] = ()
         if RECIPE_LINE not in self.lua_source:
@@ -920,8 +914,7 @@ def run(adapter: Any, policy: Policy, *, journal: Path, decisions: int | None, m
                                         "guidelines": state["guidelines"], "authority": policy.authority,
                                         "decisions": summary["decisions"], "failures": summary["failures"],
                                         "site_plan": site_plan,
-                                        "measured_per_s": record.get("measured_per_s"),
-                                        "speed": speed_status(adapter)})
+                                        "measured_per_s": record.get("measured_per_s")})
             no_legal_build = not any(o["family"] != "wait" for o in menu["options"])
             training = {"run_id": run_id, "index": index, "tick": facts["tick"], "phase": phase["phase_id"],
                         "no_legal_build": no_legal_build,

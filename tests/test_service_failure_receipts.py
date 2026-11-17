@@ -8,7 +8,7 @@ from training.laya_ops import DeterministicSession
 pytestmark = [pytest.mark.deterministic, pytest.mark.fast]
 
 
-def test_unroutable_power_keeps_typed_geometry_evidence_and_submits_nothing(monkeypatch):
+def test_unroutable_power_keeps_typed_geometry_evidence_and_submits_nothing(monkeypatch, tmp_path):
     monkeypatch.setattr(services.live_base, "pole_network_id", lambda *_a: 3)
     monkeypatch.setattr(services.live_base, "nearest_powered_pole",
                         lambda *_a, **_k: ((0.5, 0.5), "medium-electric-pole"))
@@ -23,8 +23,11 @@ def test_unroutable_power_keeps_typed_geometry_evidence_and_submits_nothing(monk
     monkeypatch.setattr(services, "_power_bridge_hops", no_route)
     monkeypatch.setattr(services, "_submit", lambda *_a, **_k: pytest.fail("blocked route must not submit"))
     session = DeterministicSession.__new__(DeterministicSession)
+    from orchestrator.operation_invocations import Invocations
+    from types import SimpleNamespace
+    session.invocations = Invocations(tmp_path, 'test')
+    session.bridge = SimpleNamespace(build_layout=lambda *args: pytest.fail('unexpected build'))
     monkeypatch.setattr(session, "_maintain_mall", lambda: None)
-    monkeypatch.setattr(session, "_prepare_operation", lambda: None)
     monkeypatch.setattr(session, "_operations", lambda: {
         "coverage": lambda **_k: services.extend_power(
             object(), object(), "nauvis", "player", (40.5, 0.5), lambda _: None,

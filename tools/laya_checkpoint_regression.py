@@ -13,12 +13,66 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools.laya_regression_scheduler import enqueue, read, run_one, run_campaign, recover, TERMINAL
+from tools import laya_experiment_contract, laya_manipulation_check
 from training.laya_restart_checkpoint import load
+from orchestrator.checkpoint_milestones import MILESTONE_IDS
 
 
 def report(root):
     """Account for every planned job; current observations are distinct from latches."""
-    status, spec = read(root/'job-status.json'), read(root/'regression.json')
+    spec = read(root/'regression.json')
+    try:
+        status = read(root/'job-status.json')
+        if not isinstance(status, dict) or not isinstance(status.get('jobs'), list):
+            raise ValueError('invalid status projection')
+    except (OSError, ValueError) as error:
+        status = {'name': spec.get('name', root.name), 'jobs': [], 'evidence_error': str(error)}
+    freeze = {}
+    try:
+        freeze = read(root/'freeze.json')
+        declaration = laya_experiment_contract.verify(root, spec, freeze)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        declaration = {'state': 'invalid', 'reference': None, 'error': str(error)}
+    denominator = {'state': 'legacy_status_only'}
+    try:
+        # The bound plan survives damage to its mutable on-disk projection.
+        if freeze.get('experiment_contract') is not None:
+            planned = laya_experiment_contract.load_binding(root, freeze['experiment_contract'])['planned_jobs']
+            denominator = {'state': 'bound_plan'}
+        else:
+            planned = read(root/'planned-jobs.json')['jobs']
+            denominator = {'state': 'planned_jobs_file'}
+        if (not isinstance(planned, list)
+                or any(not isinstance(job, dict) or not isinstance(job.get('id'), str) for job in planned)
+                or len({job['id'] for job in planned}) != len(planned)):
+            raise ValueError('invalid planned job identities')
+    except (OSError, KeyError, TypeError, ValueError) as error:
+        if freeze.get('experiment_contract') is not None:
+            denominator = {'state': 'unavailable', 'error': str(error)}
+            status['jobs'] = []
+        else:
+            denominator = {'state': 'legacy_status_only', 'error': str(error)}
+    else:
+        observed = {}
+        for row in status['jobs']:
+            if isinstance(row, dict) and isinstance(row.get('id'), str):
+                observed.setdefault(row['id'], []).append(row)
+        projected = []
+        for job in planned:
+            candidates = observed.get(job['id'], [])
+            row = candidates[0] if len(candidates) == 1 else None
+            try:
+                conflict = row is not None and any(
+                    k in row and laya_experiment_contract.canonical(row[k]) != laya_experiment_contract.canonical(v)
+                    for k, v in job.items() if k not in ('status', 'admission_reserved'))
+            except (TypeError, ValueError):
+                conflict = True
+            if row is None or conflict:
+                projected.append({**job, 'status': 'unknown',
+                                  'status_evidence': 'conflicting' if candidates else 'missing'})
+            else:
+                projected.append({**job, **row, 'status': row.get('status', 'unknown')})
+        status['jobs'] = projected
     groups = {}
     for job in status['jobs']:
         origin = job.get('origin', job.get('checkpoint', 'unknown'))
@@ -27,7 +81,7 @@ def report(root):
         group = groups.setdefault(key, {'origin': origin, 'checkpoint': origin, 'arm': job['arm'],
             'generation': generation, 'conditioning': 'full_origin' if origin == 'C0' else 'restart_conditioned',
             'planned': 0, 'started': 0, 'terminal': 0, 'observed_successors': 0, 'unknown': 0, 'timeouts': 0,
-            'research': {'target':spec.get('research_target'), 'observed':0, 'earned':0,
+            'research': {'target':(spec.get('arms') or {}).get(job['arm'], {}).get('research_target') or spec.get('research_target'), 'observed':0, 'earned':0,
                          'progressed':0, 'unknown':0},
             'strict_reach': {}, 'held_at_end': {}, 'classifications': {}, 'faults': {},
             'latency': {'time_seconds': [], 'ticks': [], 'decisions': [], 'server_seconds': [],
@@ -50,17 +104,25 @@ def report(root):
         observations = job.get('strict_current')
         observations = observations if isinstance(observations, list) else []
         loaded = job.get('loaded_tick')
-        index = int(origin[1:]) if origin in {f'C{i}' for i in range(7)} else 6
-        for stage in (f'C{i}' for i in (index + 1, index + 2) if i <= 6):
+        index = MILESTONE_IDS.index(origin) if origin in MILESTONE_IDS else len(MILESTONE_IDS) - 1
+        versions = ((job.get('milestones') or {}).get('predicate_versions') or {})
+        for stage in MILESTONE_IDS[index + 1:]:
             rows = [row for row in observations if isinstance(row, dict) and
                     type(row.get('tick')) is int and type(loaded) is int and row['tick'] > loaded and
                     isinstance(row.get('statuses'), dict) and row['statuses'].get(stage) is True]
+            reached = (job.get('strict_reached') or {}).get(stage)
+            reached = reached if type(reached) is int and type(loaded) is int and reached > loaded else None
             bucket = group['strict_reach'].setdefault(stage, {'reached': 0, 'not_observed': 0, 'ticks_from_load': []})
-            bucket['reached' if rows else 'not_observed'] += 1
-            if rows:
-                bucket['ticks_from_load'].append(min(row['tick'] for row in rows) - loaded)
-                first = min(rows,key=lambda row:row['tick'])
-                bucket.setdefault('time_seconds_from_load', []).append(first.get('elapsed_seconds'))
+            bucket['reached' if rows or reached is not None else 'not_observed'] += 1
+            # Counts under different predicate versions (c5-v1, c5-v2) are labelled, never silently pooled.
+            label = versions.get(stage) or 'unrecorded'
+            bucket.setdefault('predicate_versions', {})[label] = bucket.get('predicate_versions', {}).get(label, 0) + 1
+            if reached is not None or rows:
+                first = (job.get('stage_latency') or {}).get(stage, {})
+                if rows:
+                    first = min(rows,key=lambda row:row['tick'])
+                bucket['ticks_from_load'].append(reached - loaded if reached is not None else first['tick'] - loaded)
+                bucket.setdefault('time_seconds_from_load', []).append(first.get('elapsed_seconds', first.get('time_seconds')))
                 bucket.setdefault('decisions_from_load', []).append(first.get('decisions'))
             final = job.get('strict_current_at_end')
             held = group['held_at_end'].setdefault(stage, {'true': 0, 'false': 0, 'unknown': 0})
@@ -95,15 +157,18 @@ def report(root):
     signals = [{'origin':j.get('origin',j.get('checkpoint')), 'arm':j['arm'], 'generation':j.get('generation_id'),
                 'latency':j.get('progress_latency')} for j in status['jobs'] if j.get('progress_latency')]
     comparisons = []
-    for stage in (f'C{i}' for i in range(1,7)):
+    for stage in MILESTONE_IDS[1:]:
         by_origin = {}
         for origin in (f'C{i}' for i in range(7)):
             rows = [j for j in status['jobs'] if j.get('origin',j.get('checkpoint')) == origin]
             if rows:
                 by_origin[origin] = {'planned':len(rows), 'observed_post_load':sum(stage in j.get('strict_reached',{}) for j in rows)}
         comparisons.append({'stage':stage,'origins':by_origin})
-    return {'kind': 'laya-restart-segment-v1', 'name': status['name'], 'groups': list(groups.values()),
-            'planned': len(status['jobs']), 'jobs': status['jobs'], 'until': spec.get('until'),
+    result = {'experiment_contract': declaration, 'exposure_evidence': 'unknown',
+            'effective_intervention_evidence': 'unknown', 'inference_eligibility': 'unknown',
+            'kind': 'laya-restart-segment-v1', 'name': status['name'], 'groups': list(groups.values()),
+            'planned': None if denominator['state'] == 'unavailable' else len(status['jobs']),
+            'denominator_evidence': denominator, 'jobs': status['jobs'], 'until': spec.get('until'),
             'legacy_successor_fields_are_latches': True,
             'strict_evidence': 'post-load strict_current observations only; absent evidence is not failure',
             'proxy_phase_success': 'not inferred from strict evidence',
@@ -115,11 +180,19 @@ def report(root):
             'interpretation': 'A/A measures wiring, not policy improvement, adoption, or significance; restart outcomes are conditional.',
             'full_run_acceptance_gate': 'not_evaluated', 'automatic_adoption': False,
             'same_seed_is_counterfactual': False, 'exact_continuation': False}
+    # Only cohorts that declare a manipulation check gain these fields.
+    checks = laya_manipulation_check.summarize(spec, status, TERMINAL)
+    if checks is not None:
+        result['manipulation_check'] = checks
+        result['exposure_evidence'] = 'declared_manipulation_check'
+    return result
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['enqueue', 'step', 'run', 'cleanup', 'report', 'catalog', 'validate'])
+    parser.add_argument('--adaptive-workers', action='store_true',
+                        help='use host admission instead of the frozen dispatch-pool cap; records an operational override')
     parser.add_argument('--spec', type=Path)
     parser.add_argument('--root', type=Path)
     parser.add_argument('--registry', type=Path, default=ROOT/'data/laya-experiments')
@@ -158,7 +231,7 @@ def main(argv=None):
     elif args.action == 'report':
         print(json.dumps(report(root), indent=2))
     else:
-        state = run_one(root) if args.action == 'step' else run_campaign(root)
+        state = run_one(root) if args.action == 'step' else run_campaign(root, adaptive=args.adaptive_workers)
         print(json.dumps({'time':time.time(),'state':state}),flush=True)
     return 0
 

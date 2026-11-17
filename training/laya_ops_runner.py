@@ -20,6 +20,9 @@ logs, ledger and helper are shared.  Sequencing lives in the docs, not here.
 
 from __future__ import annotations
 
+from training.laya_operation_outcome import normalize, summarize_records
+from training import laya_milestone_report as milestone_report
+
 from orchestrator.operation_observation import economics_observation, item_service_observation
 
 import math
@@ -27,29 +30,25 @@ import time
 import dataclasses
 import copy
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
 from orchestrator.laya_knowledge import load_guideline_context
 from training.laya_clean_runner import (ROOT, Settings, _append, _goal_gap, _status_line, _training_record,
                                         _write_status, rolling_measurement)
-from training.laya_saved_world import speed_status
-from training.laya_mall_slots import FLUIDS, RAW, obtainable
+from training.laya_factory_status import STATUS_BUCKETS, compact_status, compile_status
+from training.laya_mall_slots import obtainable
+from training.laya_mission import PHASES, current_phase
+from training.laya_mall_slots import FLUIDS
 from training.laya_chain_facts import (ConsumerObservation, consumer_choices,
                                       committed_chain_facts, production_service_items)
-from training.laya_mission import current_phase, phase_reached
-from training.laya_goal import (
-    GOAL_VERSION, goal_evidence, observation_window, research_goal_satisfied, useful_state,
-)
-from training.laya_factory_status import STATUS_BUCKETS, compact_status, compile_status
-from training.laya_mission import PHASES
 from training.laya_phase_acceptance import LayaC6Acceptance, ops_phase_reached
 
 PLATES = {"iron-plate": "iron-ore", "copper-plate": "copper-ore", "stone-brick": "stone"}
 # The tooling is already making it (a mall batch or loan in progress, a borrow queued): wait, and it is progress.
 IN_PROGRESS = {"temporary_mall_batch", "production_prerequisite_deferred", "rationed_mall_borrow_deferred",
-               "rotating_mall_prerequisite_handoff", "prerequisite_advanced", "retirement_pending",
+               "rotating_mall_prerequisite_handoff", "prerequisite_advanced",
                # The ore's plate system is still being built by bots (stage_extraction.PendingSystemDeferred).
                "pending_system_construction"}
 # Machine statuses of a recipe waiting on a fluid ingredient (laya_factory_status's "starved" bucket).
@@ -76,10 +75,6 @@ BORROW_CODES = {"temporary_mall_batch", "rationed_mall_borrow_deferred"}
 def in_progress(code: str | None) -> bool:
     return bool(code) and (code.endswith("_wait") or code in IN_PROGRESS)
 WAIT_TICKS = (300, 1800)
-# Bootstrap-district lifecycle states where a replacement plan has already claimed the plate's
-# immutable pioneer identity: a fresh starter recomputes a different plan the tooling rejects as a
-# lifecycle conflict (episode 20261010T102842Z-68b348c2). The district is reconciled, not re-opened.
-ACTIVE_DISTRICT_STATES = frozenset({"provisioning", "validating", "retiring"})
 # Rules for operations: the general mission rules plus mission.ops-*, quoting the same strategy doc
 # (the full catalog's geometry rules -- power variants, line sites, quad slots -- do not apply here).
 OPS_CATALOG = "docs/rl/laya_ops_guidelines.json"
@@ -102,180 +97,28 @@ def plate_stages(results: list[dict]) -> dict[str, str]:
 def retired(results: list[dict], plate: str) -> bool:
     """The tooling reported the plate's starter retired (its district released)."""
     return any(r.get("ok") and r["operation"] == "retire_starter" and (r.get("params") or {}).get("recipe") == plate
-               and isinstance(r.get("result"), Mapping) and r["result"].get("lifecycle") == "released" for r in results)
+               and (r.get("result") or {}).get("lifecycle") == "released" for r in results)
 
 
-def pending_retirements(results: list[dict], districts: Mapping | None = None) -> set[str]:
-    """Submitted replacements need reconciliation until released, independent of rate demand.
-
-    Scoped ledger facts take precedence over local receipts: a shortage can return
-    after submission, and bots can complete that work without another successful call.
-    Offering reconciliation does not certify readiness or authorize early removal.
-    """
-    pending = {plate for plate, stage in plate_stages(results).items()
-               if stage == "foundation" and not retired(results, plate)}
-    for plate, state in (districts or {}).items():
-        if plate in PLATES:
-            pending.discard(plate)
-            if (state.get("replacement_submitted") is True
-                    and state.get("lifecycle_state") in ACTIVE_DISTRICT_STATES):
-                pending.add(plate)
-    return pending
-
-
-def unchanged_failures(results: list[dict], stock: Mapping[str, int],
-                       allocation: Mapping[str, tuple] | None = None,
-                       layout: Sequence[int] | None = None) -> set[tuple]:
-    """Attempts whose required stock/allocation or refused layout has not changed.
+def unchanged_failures(results: list[dict], stock: Mapping[str, int]) -> set[tuple]:
+    """(operation, parameter) whose latest attempt was short of materials none of which has since increased.
 
     Retrying such an operation changes nothing in the world except, in the tooling's mall path, another
-    power bridge to another abandoned slot.  ``allocation`` is the current owner-attributed claim per
-    item (training/laya_ops_runner.reservation_allocation); when a required item's claim moved since the
-    failure was recorded, its allocation changed, so the failure is no longer unchanged.
+    power bridge to another abandoned slot.
     """
     latest: dict[tuple, dict] = {}
-    current_allocation = _canonical_claims(allocation) if allocation is not None else None
     for r in results:
         params = r.get("params") or {}
-        latest[(r["operation"], params.get("recipe") or params.get("item") or params.get("technology"))] = r
+        latest[(r["operation"], params.get("recipe") or params.get("item"))] = r
     stuck = set()
     for key, r in latest.items():
-        if outcome_category(r) == "no_geometry":
-            seen_layout = r.get("layout_at")
-            moved = (layout is not None and seen_layout is not None
-                     and tuple(layout) != tuple(seen_layout))
-            if not moved and not _layout_changed_since(results, r):
-                stuck.add(key)
-            continue
         for bill in _demand_bills(r):
             seen = bill.get("stock_at", r.get("stock_at"))
             required = bill.get("required") or {}
             if seen is not None and required and all(
                     int(stock.get(item, 0)) <= int(seen.get(item, 0)) for item in required):
-                if current_allocation is not None:
-                    recorded = _canonical_claims(r.get("allocation_at"))
-                    if any(
-                        current_allocation.get(item, ()) != recorded.get(item, ())
-                        for item in required
-                    ):
-                        continue  # the reservation owner/claim moved: worth reconsidering
                 stuck.add(key)
     return stuck
-
-
-def layout_signature(facts: Mapping) -> tuple[int, int] | None:
-    """Built machines and poles: completed construction changes it, a queued request does not."""
-    if not isinstance(facts.get("machines"), list) or not isinstance(facts.get("poles"), list):
-        return None
-    return len(facts["machines"]), len(facts["poles"])
-
-
-def _changes_layout(result: Mapping) -> bool:
-    """A successful receipt that built or removed something: a submitted plan or a shape-changing operation."""
-    if (not result.get("ok") or result.get("operation") in {"wait", "research"}
-            or result.get("progress") is False):
-        return False
-    return bool(result.get("progress")) or result.get("operation") in MAJOR
-
-
-def _layout_changed_since(results: list[dict], attempt: Mapping) -> bool:
-    """Whether a layout-changing receipt followed ``attempt`` (the layout it saw may have changed)."""
-    last = max((i for i, r in enumerate(results) if r is attempt), default=-1)
-    return any(_changes_layout(r) for r in results[last + 1:])
-
-
-def _canonical_claims(claims: Mapping | None) -> dict[str, tuple[tuple[str, int], ...]]:
-    """Compare ledger claims consistently before or after a JSON round trip."""
-    canonical = {}
-    for item, entries in (claims or {}).items():
-        if entries is None:
-            continue
-        canonical[item] = tuple(sorted((str(owner), int(count)) for owner, count in entries))
-    return canonical
-
-
-# The tooling found no batch it can build next (terminal); nothing is under construction.
-NO_GEOMETRY = {"district_expansion_unbuildable"}
-
-
-def outcome_category(result: Mapping | None) -> str:
-    """One category for an operation's last result (the runner contract, not its raw code).
-
-    Distinguishes a wait on construction, a terminal no-geometry refusal, a delivery
-    (a build/producer), and a material failure.  A missing result or code stays
-    "unknown": unknown is never rendered as a failure.
-    """
-    if result is None:
-        return "unknown"
-    if result.get("ok"):
-        return "delivery"
-    code = result.get("code")
-    if not code:
-        return "unknown"
-    if in_progress(code) or result.get("state") == "constructing":
-        return "constructing"
-    if code in NO_GEOMETRY or code.endswith("_unbuildable"):
-        return "no_geometry"
-    if code == "material_shortage":
-        return "material_failure"
-    return "failed"
-
-
-def option_outcomes(results: list[dict]) -> dict[tuple, str]:
-    """Categorical last outcome per (operation, main parameter); unrelated waits are ignored."""
-    latest: dict[tuple, dict] = {}
-    for r in results:
-        if r.get("operation") == "wait":
-            continue
-        key = (r["operation"], (r.get("params") or {}).get("recipe") or (r.get("params") or {}).get("item"))
-        latest[key] = r
-    return {key: outcome_category(r) for key, r in latest.items()}
-
-
-def reservation_allocation(economics: Mapping | None) -> dict[str, tuple]:
-    """item -> sorted ``(owner, reserved count)`` claims from the active material ledger.
-
-    This is the owner-attributed allocation ``unchanged_failures`` compares: a moved
-    claim (shrank, grew, or changed owner) clears an otherwise-unchanged material failure.
-    """
-    claims: dict[str, list[tuple[str, int]]] = {}
-    for owner, project in ((economics or {}).get("projects") or {}).items():
-        for item, count in (project.get("reserved") or {}).items():
-            if int(count) > 0:
-                claims.setdefault(item, []).append((owner, int(count)))
-    return {item: tuple(sorted(values)) for item, values in claims.items()}
-
-
-def shorts_of(results: list[dict]) -> dict[tuple, dict]:
-    """Per option, preserve the bill and missing items observed at its last short attempt."""
-    bills: dict[tuple, dict] = {}
-    for r in results:
-        if r.get("ok") or r.get("code") != "material_shortage":
-            continue
-        details = r.get("details") or {}
-        required = details.get("required")
-        available = details.get("available")
-        if not isinstance(required, Mapping):
-            continue
-        bill = {name: int(count) for name, count in required.items()}
-        historical_missing = None
-        historical_available = None
-        if isinstance(available, Mapping):
-            historical_available = {
-                name: int(available.get(name, 0)) for name in bill
-            }
-            historical_missing = {
-                name: count - int(available.get(name, 0))
-                for name, count in bill.items()
-                if count > int(available.get(name, 0))
-            }
-        bills[_key(r)] = {
-            "bill": bill, "last_attempt_missing": historical_missing,
-            "last_attempt_available": historical_available,
-            "reported_owner": details.get("project_id") or details.get("claimant"),
-            "reported_stage": details.get("stage"),
-        }
-    return bills
 
 
 def last_codes(results: list[dict], tick: int | None = None) -> dict[tuple, str]:
@@ -437,7 +280,6 @@ USES = {"GOAL": ("mission.goal", "mission.science"),
         "TRIED": ("mission.ops-no-blind-retry", "mission.ops-no-idle-loans"),
         "MALL": ("mission.ops-no-idle-loans", "mission.ops-one-batch"),
         "RESERVED": ("mission.ops-shortage",),
-        "LIFECYCLE": ("mission.ops-retire-starter", "mission.phase-goals-first"),
         "CAPACITY": ("mission.rotating-mall", "mission.ops-no-idle-loans"),
         "STARTERS": ("mission.ops-starters-before-foundations",),
         "BLOCKED": ("mission.ops-history-no-repeat", "mission.ops-no-blind-retry"),
@@ -543,9 +385,6 @@ def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, pha
             tried[name] = [attempts, r.get("code") or ("ok" if r.get("ok") else "error")]
     sections["TRIED"] = [f"{name} {n}x last {code}" for name, (n, code) in tried.items()]
     if economics is not None:
-        sections["LIFECYCLE"] = [f"{plate} replacement submitted; reconcile before starter release"
-                                 for plate in sorted(pending_retirements(
-                                     results, economics.get("bootstrap_districts")))]
         value = lambda n: "?" if n is None else str(n)
         loans = economics.get("loans")
         sections["MALL"] = (["loans unknown (survey failed)"] if loans is None else
@@ -633,25 +472,23 @@ def brief(results: list[dict], board: Mapping | None, phase: Mapping | None, pha
     return text
 
 
-def with_economics(menu: dict, results: list[dict], economics: Mapping | None,
-                   *, stock: Mapping[str, int] | None = None, reconcile_loans: bool = False) -> dict:
+def with_economics(menu: dict, results: list[dict], economics: Mapping | None, *, reconcile_loans: bool = False) -> dict:
     """Attach what each option is known to cost and displace (audit finding 3).
 
-    ``bill`` and ``last_attempt_missing_items`` preserve the last reported shortage.
-    ``missing_items``/``inputs_missing`` describe current availability only when the
-    attempt's reported project, current network stock, and active reservations make
-    that calculation knowable. Otherwise they are None. ``reservation_owner`` names
-    only the reported claimant. ``demand_point``/``demand_distance`` relay the shared
-    demand-siting fact. ``cell_lent`` means the item's own mall cell is lent elsewhere.
+    ``bill`` is the item bill the operation last reported short of; without one, ``bill_known`` is False, so a
+    missing bill never reads as "costs nothing" (the policy's scarce/starves_goal facts come from the bill).
+    ``cell_lent``: the item's own mall cell is lent to make something else, so producing it waits on that loan.
     """
-    transaction_bills = {}
+    bills = {}
     for r in material_results(results, (economics or {}).get("transactions")):
         for demand in _demand_bills(r):
             required = demand.get("required")
             if isinstance(required, Mapping):
-                transaction_bills[_key(r)] = {i: int(n) for i, n in required.items()}
+                bills[_key(r)] = {i: int(n) for i, n in required.items()}
     from orchestrator.mall_control import raise_options
+    from orchestrator.mall_construction import options as construction_options
     additions = raise_options(economics)
+    additions += construction_options(economics)
     if reconcile_loans:
         from orchestrator.mall_reconciliation import options as reconciliation_options
         additions += reconciliation_options(economics)
@@ -666,10 +503,6 @@ def with_economics(menu: dict, results: list[dict], economics: Mapping | None,
     lent = {loan["lender"] for loan in loans or ()}
     capacity = (economics or {}).get("capacity") or {}
     starters = (economics or {}).get("starters")
-    bills = shorts_of(results)
-    loans_by_making = {loan.get("making"): loan for loan in loans or ()}
-    projects = (economics or {}).get("projects")
-    demand = (economics or {}).get("demand") or {}
     for option in menu["options"]:
         if option["family"] in PLATE_OPERATIONS and option.get("product") in PLATES:
             starter = None if starters is None else starters.get(PLATES[option["product"]].removesuffix("-ore"))
@@ -684,73 +517,7 @@ def with_economics(menu: dict, results: list[dict], economics: Mapping | None,
             option["features"]["bill_known"] = True  # Existing-cell transaction, not a construction bill.
             continue
         params = option["params"]
-        key = (option["family"], params.get("recipe") or params.get("item"))
-        short = bills.get(key)
-        option["features"]["bill_known"] = short is not None
-        if short is not None:
-            option["bill"] = dict(short["bill"])
-            option["features"]["last_attempt_missing_items"] = (
-                None if short["last_attempt_missing"] is None
-                else dict(short["last_attempt_missing"])
-            )
-            option["features"]["last_attempt_available_items"] = (
-                None if short["last_attempt_available"] is None
-                else dict(short["last_attempt_available"])
-            )
-            claim = short["reported_owner"]
-            if claim is None and isinstance(projects, Mapping):
-                stage = short["reported_stage"]
-                claim = stage if stage in projects else None
-            claim = str(claim) if claim else None
-            claim_owners = (
-                {item: [claim] for item in short["bill"]}
-                if claim else None
-            )
-            option["features"]["reservation_owner"] = claim_owners
-            current_available = None
-            current_missing = None
-            if claim and isinstance(stock, Mapping) and isinstance(projects, Mapping):
-                foreign_reserved: Counter = Counter()
-                for project_id, project in projects.items():
-                    if project_id != claim:
-                        foreign_reserved.update(project.get("reserved") or {})
-                current_available = {
-                    item: max(0, int(stock.get(item, 0)) - int(foreign_reserved.get(item, 0)))
-                    for item in short["bill"]
-                }
-                current_missing = {
-                    item: required - current_available[item]
-                    for item, required in short["bill"].items()
-                    if required > current_available[item]
-                }
-            option["features"]["available_items"] = current_available
-            option["features"]["missing_items"] = current_missing
-            option["features"]["inputs_missing"] = (
-                None if current_missing is None else bool(current_missing)
-            )
-        else:
-            option["features"]["last_attempt_available_items"] = None
-            option["features"]["last_attempt_missing_items"] = None
-            option["features"]["available_items"] = None
-            option["features"]["missing_items"] = None
-            option["features"]["inputs_missing"] = None
-            option["features"]["reservation_owner"] = None
-        fact = demand.get(option.get("product")) or demand.get(params.get("recipe") or params.get("item"))
-        point = (fact or {}).get("point")
-        option["features"]["demand_point"] = list(point) if point else None
-        option["features"]["demand_distance"] = (float(fact["distance"])
-                                                 if fact and "distance" in fact else None)
-        if option["family"] in ("produce", "mall_slot"):
-            option["features"]["cell_lent"] = None if loans is None else option["product"] in lent
-            # Generic batch facts: the item's own active loan, when it has one.
-            # Unknown (no loan / failed survey) stays None, never "unchanged".
-            loan = loans_by_making.get(option["product"])
-            option["features"]["batch_status"] = (loan or {}).get("status")
-            option["features"]["batch_step"] = (loan or {}).get("step_recipe")
-            option["features"]["batch_crafts"] = (loan or {}).get("crafts_done")
-            option["features"]["batch_remaining_bill"] = (loan or {}).get("remaining_bill")
-            option["features"]["batch_missing_inputs"] = (loan or {}).get("missing_inputs")
-        bill = transaction_bills.get(key)
+        bill = bills.get((option["family"], params.get("recipe") or params.get("item")))
         for tid, transaction in ((economics or {}).get("transactions") or {}).items():
             if (not transaction.get("error") and "remaining" in transaction
                     and option["family"] == "produce" and params.get("item") == transaction.get("target_item")):
@@ -758,12 +525,11 @@ def with_economics(menu: dict, results: list[dict], economics: Mapping | None,
                 option["bill_owner"] = tid
         if bill is not None:
             option["bill"] = bill
-            option["features"]["bill_known"] = True
+        option["features"]["bill_known"] = bill is not None
         if option["family"] in ("produce", "mall_slot"):
+            option["features"]["cell_lent"] = None if loans is None else option["product"] in lent
             option["features"]["borrow_blocked"] = bool(capacity.get("borrow_blocked")) if capacity else None
             option["features"]["lendable_cells"] = capacity.get("lendable")
-    # Free mall-slot capacity, where the survey knows it (main integrates the growth operation itself).
-    menu.setdefault("facts", {})["free_slots"] = (economics or {}).get("free_slots")
     return menu
 
 
@@ -884,6 +650,42 @@ def repeat_fails(results: list[dict], key: tuple) -> int:
     return min(count, 3)
 
 
+# Outcome details fields that name an item the outcome lacks or waits on (single names / bills).
+BLOCKER_ITEM_FIELDS = ("item", "rung", "prerequisite", "predecessor", "target")
+BLOCKER_BILL_FIELDS = ("required", "missing")
+
+
+def blocker_items(result: Mapping) -> list[str]:
+    """Items a refused or deferred outcome names in its own details (what it lacks or waits on)."""
+    details = result.get("details") or {}
+    items = {details[f] for f in BLOCKER_ITEM_FIELDS if isinstance(details.get(f), str)}
+    for bill in [details.get(f) for f in BLOCKER_BILL_FIELDS] + [(details.get("slot_claim") or {}).get("required")]:
+        if isinstance(bill, Mapping):
+            items.update(bill)
+    return sorted(items)
+
+
+def blocker_unchanged(results: list[dict], key: tuple, stock: Mapping[str, int]) -> bool:
+    """This option's latest attempt was refused or deferred and nothing it depended on has changed since.
+
+    The remembered signature is the outcome's code plus the network stock of the items its details named
+    (``blocker_stock``, recorded at the failure). The fact clears when any named item gained stock, when any
+    operation since succeeded or put something into the world (tiles, power, slots and loans may have
+    changed), or when the option itself succeeded. A failure recorded without ``blocker_stock`` (older
+    checkpoint) cannot be re-derived and is not marked.
+    """
+    last = None
+    for back, r in enumerate(reversed(results)):
+        if r["operation"] != "wait" and _key(r) == key:
+            last, later = r, results[len(results) - back:]
+            break
+    if last is None or last.get("ok") or last.get("code") in BUILT or "blocker_stock" not in last:
+        return False
+    if any(int(stock.get(item, 0)) > int(seen) for item, seen in last["blocker_stock"].items()):
+        return False
+    return not any((r.get("ok") and r["operation"] != "wait") or r.get("code") in BUILT for r in later)
+
+
 def history_features(results: list[dict], key: tuple, family: str) -> dict:
     """What Laya's recent decisions say about one option (rules in docs/rl/laya_ops_guidelines.json weigh them)."""
     last = next((r for r in reversed(results) if r["operation"] != "wait"), None)
@@ -923,14 +725,116 @@ def saturated_feedstock(machines: list[Mapping], recipes: Mapping, stock: Mappin
     return found
 
 
+def service_construction_blocks(results: list[dict], stock: Mapping[str, int]) -> dict[str, dict]:
+    """Production services whose last attempt was short of its construction bill and has not progressed.
+
+    Re-picking a blocked service only re-enters the same bill. Hold it while the bill is unstocked
+    *and* nothing improved since the failure; release as soon as any missing item gains stock. The
+    missing items themselves are already offered by ``shortages``.
+    """
+    latest = {}
+    for result in results:
+        if result.get("operation") == "production_service":
+            latest[(result.get("params") or {}).get("item")] = result
+    blocked = {}
+    for item, result in latest.items():
+        if not item or result.get("ok") or result.get("code") != "material_shortage":
+            continue
+        details = result.get("details") or {}
+        available = details.get("available") or {}
+        missing = {name: int(count) - int(available.get(name, 0))
+                   for name, count in (details.get("required") or {}).items()}
+        missing = {name: count for name, count in missing.items() if count > 0}
+        if not missing:
+            continue
+        if any(int(stock.get(name, 0)) > int(available.get(name, 0)) for name in missing):
+            continue  # the bill is being funded: retry
+        blocked[item] = missing
+    return blocked
+
+
+def add_cable_capacity_option(menu: dict, board: Mapping, phase: Mapping, facts: Mapping,
+                              results: list[dict] | None = None,
+                              stock: Mapping[str, int] | None = None) -> dict:
+    """Offer one permanent copper-cable capacity cell when the AC cell is input-starved on cable."""
+    if phase.get("phase_id") not in {"C6", "S1"}:
+        return menu
+    need = next((n for n in board.get("needs") or () if n.get("item") == "advanced-circuit"), None)
+    if not need or need.get("condition") != "input_starved":
+        return menu
+    if "copper-cable" not in (facts.get("recipes") or {}):
+        return menu
+    option_id = "op.production_service.copper-cable"
+    if any(option["option_id"] == option_id for option in menu["options"]):
+        return menu
+    if "copper-cable" in service_construction_blocks(results or [], stock or {}):
+        return menu
+    menu["options"].append({"option_id": option_id, "family": "production_service",
+        "product": "copper-cable", "need_id": "service:copper-cable",
+        "params": {"item": "copper-cable", "stock_target": 40, "minimum_machines": 6,
+                   "upgrade_bootstrap": True, "allow_promotion": True},
+        "summary": "add a permanent copper-cable capacity cell",
+        "features": {"goal_need": True, "bill_known": False, "sustained_service_verified": False}})
+    menu["needs"].append({"need_id": "service:copper-cable", "condition": "available",
+                          "options": [option_id]})
+    return menu
+
+
+def add_c6_consumer_options(menu: dict, phase: Mapping, facts: Mapping) -> dict:
+    """Offer the permanent consumer service while the C6 advanced-circuit goal is active."""
+    if phase.get("phase_id") not in {"C6", "S1"}:
+        return menu
+    catalog = facts.get("recipe_observations")
+    recipe = catalog.get("productivity-module") if isinstance(catalog, Mapping) else None
+    if not isinstance(recipe, Mapping) or recipe.get("enabled") is not True:
+        return menu
+    option_id = "op.production_service.productivity-module"
+    # The generic service helper may have added this item first; replace it with the compact C6 cell
+    # (one machine, no promotion, outside the bootstrap cap), or the params never reach the operation.
+    menu["options"] = [option for option in menu["options"] if option["option_id"] != option_id]
+    menu["options"].append({"option_id": option_id, "family": "production_service",
+        "product": "productivity-module", "need_id": "service:productivity-module",
+        "params": {"item": "productivity-module", "stock_target": 1, "minimum_machines": 1,
+                   "upgrade_bootstrap": True, "allow_promotion": False,
+                   "zero_provider": True, "machine_cap": 1},
+        "summary": "build a permanent productivity-module consumer line",
+        "features": {"goal_need": True, "bill_known": False, "sustained_service_verified": False}})
+    menu["needs"].append({"need_id": "service:productivity-module", "condition": "available",
+                          "options": [option_id]})
+    return menu
+
+
+PLANNED_PLASTIC_SOURCE = "laya_ops_runner.status_board.required_per_s"
+
+
+def planned_plastic_rate(board: Mapping | None) -> float | None:
+    """The plastic-bar rate (bars/s) the status board plans for, as STATUS prints it; None when not planned."""
+    need = next((n for n in (board or {}).get("needs", ()) if n.get("item") == "plastic-bar"), None)
+    rate = None if need is None else need.get("required_per_s")
+    return round(float(rate), 4) if isinstance(rate, (int, float)) and not isinstance(rate, bool) and rate > 0 else None
+
+
+def declare_plastic_target(session: Any, board: Mapping | None, declared: dict) -> None:
+    """Record the planned plastic rate in the game for strict C5 (c5-v2 and later); measurement only, never fatal.
+
+    ``declared`` holds the last rate written by this process so an unchanged plan costs no RCON write.
+    """
+    rate, client = planned_plastic_rate(board), getattr(session, "client", None)
+    if rate is None or client is None or declared.get("rate") == rate:
+        return
+    from orchestrator.checkpoint_observer import declare_planned_rate
+    try:
+        if declare_planned_rate(client, "plastic-bar", rate, PLANNED_PLASTIC_SOURCE) is not None:
+            declared["rate"] = rate
+    except Exception:  # noqa: BLE001 -- a failed declaration leaves C5 unknown, never stops the run
+        pass
+
+
 def compile_options(board: Mapping, results: list[dict], tick: int | None = None, recipes: Mapping | None = None,
                     stock: Mapping[str, int] | None = None, machines: list[Mapping] | None = None,
                     growable: tuple[str, ...] = (), enabled_recipes: Mapping | None = None,
-                    transactions: Mapping | None = None, foundations: Mapping | None = None, *,
-                    bootstrap_districts: Mapping | None = None, allocation: Mapping[str, tuple] | None = None,
-                    measurement: Mapping | None = None, research_goal: str | None = None,
-                    goal_status: Mapping | None = None, labs: int | None = None,
-                    layout: Sequence[int] | None = None, filter_fluid_shortages: bool = False) -> dict:
+                    transactions: Mapping | None = None, foundations: Mapping | None = None,
+                    *, filter_fluid_shortages: bool = False) -> dict:
     """Operations worth offering now, each tagged with the need it serves and the facts rules weigh.
 
     ``foundations`` (plate -> observed ready) advances a plate past "starter" when the world shows its foundation
@@ -938,17 +842,13 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     """
     unmet = {n["item"] for n in board["needs"] if n["condition"] != "satisfied"}
     goal = {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
-    goal_rate = {n["item"]: float(n.get("goal_required_per_s") or 0) for n in board["needs"]}
-    pending = pending_retirements(results, bootstrap_districts)
     current_materials = material_results(results, transactions)
-    stuck = unchanged_failures(current_materials, stock or {}, allocation, layout)
+    stuck = unchanged_failures(current_materials, stock or {})
     sources: dict[str, set] = {}
     stages, codes, short = plate_stages(results), last_codes(results, tick), shortages(current_materials, sources)
     for plate, ready in (foundations or {}).items():
         if ready is True and stages.get(plate) == "starter":
             stages[plate] = "foundation"
-            if not retired(results, plate):
-                pending.add(plate)
     prerequisites = named_prerequisites(results)
     for item, demand in prerequisites.items():
         sources.setdefault(item, set()).update(parent.split(":", 1)[1] for parent in demand["parents"])
@@ -974,37 +874,28 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     # the starters before any mine-to-refinery foundation).
     starters_done = {"iron-plate", "copper-plate"} <= {p for p, s in stages.items() if s != "none"}
     for plate in PLATES:
-        district_state = ((bootstrap_districts or {}).get(plate) or {}).get("lifecycle_state")
-        # New capacity follows demand; finishing owned work survives rate/phase changes.
-        legal = ()
-        if plate in unmet or PLATES[plate] in unmet:
-            legal = {"none": ("starter",), "starter": ("foundation",) if starters_done else (),
-                     "foundation": ("extend",)}[stages.get(plate, "none")]
-        # A district whose replacement is already reserved/validating/retiring has claimed this
-        # plate's pioneer identity; a fresh starter would recompute a plan the tooling rejects as
-        # a lifecycle conflict. Skip it and let the policy reconcile or serve other work instead.
-        if district_state in ACTIVE_DISTRICT_STATES:
-            legal = tuple(operation for operation in legal if operation != "starter")
-        if plate in pending:
-            legal += ("retire_starter",)
+        # Hard lifecycle order of the tooling (its ledgers break otherwise): starter -> foundation -> extend,
+        # and retiring the starter once the foundation stands.
+        legal = {"none": ("starter",), "starter": ("foundation",) if starters_done else (),
+                 "foundation": ("extend",) + (() if retired(results, plate) else ("retire_starter",))}[stages.get(plate, "none")]
+        if plate not in unmet and PLATES[plate] not in unmet:
+            # Retiring a starter is lifecycle cleanup, not production, so it outlives the plate's goal (live
+            # 2026-10-15: once C4's board held only plastic, the iron starter was never retired).
+            legal = tuple(operation for operation in legal if operation == "retire_starter")
         for operation in legal:
-            lifecycle_pending = operation == "retire_starter"
+            features = {"plate_stage": stages.get(plate, "none"), "last_code": codes.get((operation, plate), "new"),
+                        "goal_need": plate in goal,
+                        # The tooling said it waits on bots or coverage: retry after a wait, not at once.
+                        "waiting": in_progress(codes.get((operation, plate))),
+                        "unchanged_failure": (operation, plate) in stuck}
+            cause = unbuildable_cause(results, operation, plate)
+            if cause is not None:
+                # Typed and terminal for this district: re-picking it cannot change the outcome.
+                features["unbuildable_cause"] = cause
             options.append({
                 "option_id": f"op.{operation}.{plate}", "family": operation, "product": plate,
-                "need_id": f"{'lifecycle' if lifecycle_pending else 'item'}:{plate}",
-                "summary": f"{operation} {plate}", "params": {"recipe": plate},
-                "features": {"plate_stage": stages.get(plate, "none"), "last_code": codes.get((operation, plate), "new"),
-                             "goal_need": plate in goal or lifecycle_pending,
-                             "lifecycle_pending": lifecycle_pending,
-                             "lifecycle_state": district_state,
-                             # The tooling said it waits on bots or coverage: retry after a wait, not at once.
-                             "waiting": in_progress(codes.get((operation, plate))),
-                             "unchanged_failure": (operation, plate) in stuck}})
-        for option in options:
-            if option["params"].get("recipe") == plate:
-                cause = unbuildable_cause(results, option["family"], plate)
-                if cause is not None:
-                    option["features"]["unbuildable_cause"] = cause
+                "need_id": f"item:{plate}", "summary": f"{operation} {plate}", "params": {"recipe": plate},
+                "features": features})
     # Steel: the poles every foundation and power bridge needs are made from it. Fence the seed's poles first,
     # then build the seed once the iron foundation stands (the tooling's own order).
     steel_made = any(r.get("ok") and r["operation"] == "steel" for r in results)
@@ -1022,49 +913,31 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     from orchestrator.baseline_production import baseline_build_order
     started = {plate for plate, stage in stages.items() if stage != "none"}
     goal_blocked = any(src & goal for src in sources.values())
-
-    def mall_slot(item: str) -> None:
-        growth = board.get("mall_growth") or {}
-        options.append({
-            "option_id": f"op.mall_slot.{item}", "family": "mall_slot", "product": item, "need_id": f"stock:{item}",
-            "summary": f"mall slot for {item}", "params": {"item": item},
-            "features": {"last_code": codes.get(("mall_slot", item), "new"),
-                         "waiting": in_progress(codes.get(("mall_slot", item))),
-                         "unchanged_failure": ("mall_slot", item) in stuck, "batch_active": batch_active,
-                         "shortage": short.get(item, 0),
-                         # Demand/capacity facts Laya weighs when choosing growth, in the
-                         # same shape the deterministic admission uses.
-                         "plate_surplus_per_s": growth.get("plate_surplus_per_s"),
-                         "seed_ready": growth.get("seed_ready"),
-                         "borrows": next((r.get("code") for r in reversed(results)
-                                          if _key(r) == ("mall_slot", item)), None) in BORROW_CODES,
-                         "goal_need": goal_blocked or bool(sources.get(item, set()) & goal)}})
-
     for item in baseline_build_order():
         chain = plates_in(item, recipes or {})
         if codes.get(("mall_slot", item)) != "ok" and chain and chain <= started and (
                 not recipes or obtainable(recipes, item, stock or {})):
-            mall_slot(item)
+            options.append({
+                "option_id": f"op.mall_slot.{item}", "family": "mall_slot", "product": item, "need_id": f"stock:{item}",
+                "summary": f"mall slot for {item}", "params": {"item": item},
+                "features": {"last_code": codes.get(("mall_slot", item), "new"),
+                             "waiting": in_progress(codes.get(("mall_slot", item))),
+                             "unchanged_failure": ("mall_slot", item) in stuck, "batch_active": batch_active,
+                             "shortage": short.get(item, 0),
+                             "borrows": next((r.get("code") for r in reversed(results)
+                                              if _key(r) == ("mall_slot", item)), None) in BORROW_CODES,
+                             "goal_need": goal_blocked or bool(sources.get(item, set()) & goal)}})
     # Borrowing a slot to batch an item needs standing slots to borrow from.
     slots = any(code == "ok" for (operation, _), code in codes.items() if operation == "mall_slot")
     # Producing an item whose chain needs an unstarted plate would make the tooling open that plate's
     # foundation ahead of its starter (bootstrap_lifecycle_conflict): not legal yet.
     # Nor an item whose chain needs something nothing can make yet (requester chests need advanced circuits,
     # so plastic): its loan never finishes and blocks every other batch (chemical_capability_handoff).
-    # ``produce`` runs ``ensure_produced``, which needs an assembler or dedicated cell.  A raw
-    # resource (ore, stone, coal, wood) has neither -- it is mined by a starter/mine/foundation,
-    # never assembled -- so it is never a produce target even when goal_demand lists it as a
-    # dependency (episode 20261010T101241Z-a476f94f offered op.produce.iron-ore, which raised
-    # untyped_stuck at decision 0).
-    producible = {i: m for i, m in short.items() if i not in RAW and plates_in(i, recipes or {}) <= started
+    producible = {i: m for i, m in short.items() if plates_in(i, recipes or {}) <= started
                   and obtainable(recipes, i, stock or {})} if recipes else short
     if filter_fluid_shortages:
         producible = {item: missing for item, missing in producible.items()
                       if item not in FLUIDS and (recipes or {}).get(item, {}).get("product_type") != "fluid"}
-    core = set(baseline_build_order())
-    for item in sorted(producible):
-        if item not in RAW and item not in core and codes.get(("mall_slot", item)) != "ok" and plates_in(item, recipes or {}):
-            mall_slot(item)
     levels = shortage_levels(current_materials)
     # A small construction blocker is still a legal choice beside larger unrelated bills.
     demands = {item: {"target": levels.get(item, int((stock or {}).get(item, 0)) + missing),
@@ -1112,16 +985,7 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
                 and plates_in(item, recipes or {}) <= started):
             demand = demands.setdefault(item, {"target": 1, "missing": 0, "parents": []})
             demand["capability"] = True
-    if recipes:
-        for item in sorted(goal):
-            if item in PLATES or item in RAW or codes.get(("produce", item)) == "ok":
-                continue
-            if item not in demands:
-                target = max(1, math.ceil(goal_rate.get(item, 0) * 60))
-                demands[item] = {"target": target, "missing": target, "capability": True, "parents": []}
     for item, demand in demands.items():
-        if item in RAW:
-            continue
         # The tooling's stock_target is a network level (the mall's stock gate), not a delta: asking for the
         # bare shortage gated a drill cell at 4 while the network held 6 and the starter needed 8.
         have = int((stock or {}).get(item, 0))
@@ -1155,116 +1019,34 @@ def compile_options(board: Mapping, results: list[dict], tick: int | None = None
     for option in options:  # Laya's own recent decisions, per option and per need
         params = option["params"]
         key = (option["family"], params.get("recipe") or params.get("item"))
-        option["features"].update(history_features(results, key, option["family"]))
+        option["features"].update(history_features(results, key, option["family"]),
+                                  blocker_unchanged=blocker_unchanged(results, key, stock or {}))
         mine = [r for r in results if r["operation"] != "wait" and _key(r) == key]
+        if option["family"] == "extend" and mine:
+            latest = mine[-1]
+            details = latest.get("details") or {}
+            coverage = details.get("search_coverage")
+            if (details.get("refusal_code") == "managed_extension_infrastructure_conflict"
+                    and isinstance(coverage, Mapping)):
+                option["extension_search"] = {
+                    "state": "last_attempt_unrevalidated", "tick": latest.get("tick"),
+                    "refusal_code": details["refusal_code"],
+                    "search_coverage": copy.deepcopy(coverage),
+                    "first_validator_refusal": details.get("first_validator_refusal"),
+                    "collision_tiles": copy.deepcopy(details.get("collision_tiles")),
+                }
         served = [r for r in results if r["operation"] != "wait" and r.get("need_id") == option["need_id"]]
         # Capped like repeat_fails so catalog rules can match exact values; the brief shows the full count.
         option["features"].update(no_progress=min(no_progress(mine), NO_PROGRESS_CAP) if mine else 0,
                                   need_no_progress=min(no_progress(served), NO_PROGRESS_CAP) if served else 0)
-    # Research and lab options for a goal run, authorized by the live research prerequisites: the tooling
-    # only accepts a technology the force has enabled. A blind queue (unknown status) is not offered.
-    if research_goal:
-        technology = (goal_status or {}).get("technology") if isinstance(goal_status, Mapping) else None
-        technology = technology if isinstance(technology, Mapping) else {}
-        state = technology.get("state")
-        candidate = research_goal if state in ("available", "current") else None
-        if (state == "future" and technology.get("enabled") is True
-                and isinstance(technology.get("current_level"), int)
-                and isinstance(technology.get("requested_level"), int)
-                and technology["current_level"] < technology["requested_level"]):
-            candidate = technology.get("canonical_name")
-        if candidate and not research_goal_satisfied(goal_status):
-            options.append({
-                "option_id": f"op.research.{candidate}", "family": "research", "product": candidate,
-                "need_id": f"research:{candidate}", "summary": f"research {candidate} toward {research_goal}",
-                "params": {"technology": candidate},
-                "features": {"last_code": codes.get(("research", candidate), "new"),
-                             "waiting": in_progress(codes.get(("research", candidate))), "goal_need": True}})
-        # Provision a lab through the shared toolkit when the live fact says none exists yet.
-        if labs == 0 and codes.get(("produce", "lab")) != "ok":
-            options.append({
-                "option_id": "op.produce.lab", "family": "produce", "product": "lab", "need_id": "stock:lab",
-                "summary": "produce lab", "params": {"item": "lab", "stock_target": 1},
-                "features": {"last_code": codes.get(("produce", "lab"), "new"),
-                             "waiting": in_progress(codes.get(("produce", "lab"))),
-                             "unchanged_failure": ("produce", "lab") in stuck, "batch_active": batch_active,
-                             "goal_need": True}})
-    outcomes = option_outcomes(results)
-    for option in options:  # Laya's own recent decisions, per option
-        params = option["params"]
-        key = (option["family"], params.get("recipe") or params.get("item"))
-        option["features"].update(history_features(results, key, option["family"]))
-        category = outcomes.get(key, "unknown")
-        if category == "material_failure" and option["features"].get("unchanged_failure"):
-            category = "unchanged_material_failure"
-        option["features"]["last_outcome"] = category
     stuck = since_build(results) >= STUCK_DECISIONS
     for ticks in WAIT_TICKS:
         options.append({"option_id": f"wait.{ticks}", "family": "wait", "need_id": "wait", "wait_ticks": ticks,
                         "summary": f"Wait {ticks / 60:g} game seconds", "features": {"constructing": waiting, "stuck": stuck}})
     needs = sorted({o["need_id"] for o in options})
-    # Facts for slot-growth decisions (main integrates growth itself): measured force rates remain
-    # per-item unknown when the observation did not include that item.
-    measured = measurement or {}
-    production = measured.get("production") or {}
-    consumption = measured.get("consumption") or {}
-    def measured_rate(source: Mapping, item: str) -> float | None:
-        record = source.get(item)
-        if not isinstance(record, Mapping) or record.get("per_second") is None:
-            return None
-        return round(float(record["per_second"]), 4)
-
-    plate_net = None
-    force_consumption = None
-    if measurement is not None:
-        plate_net = {}
-        force_consumption = {}
-        for plate in PLATES:
-            produced = measured_rate(production, plate)
-            consumed = measured_rate(consumption, plate)
-            plate_net[plate] = None if produced is None or consumed is None else round(produced - consumed, 4)
-            force_consumption[plate] = consumed
-    facts = {
-        "measured_plate_net": plate_net,
-        "measured_force_consumption": force_consumption,
-        "shortfall_feasible": (None if not recipes else {item: item in producible for item in short}),
-    }
     return {"needs": [{"need_id": n, "condition": "available", "options": [o["option_id"] for o in options
                                                                           if o["need_id"] == n]} for n in needs],
-            "options": options, "shortfalls": short, "facts": facts}
-
-
-def _lab_count(facts: Mapping | None) -> int | None:
-    """Observed lab count from the live facts; ``None`` when the observation cannot say."""
-    facts = facts if isinstance(facts, Mapping) else {}
-    counts = facts.get("infrastructure_counts")
-    if isinstance(counts, Mapping):
-        return int(counts.get("lab", 0))
-    machines = facts.get("machines")
-    if isinstance(machines, list):
-        return sum(1 for machine in machines if isinstance(machine, Mapping) and machine.get("name") == "lab")
-    labs = facts.get("labs")
-    return labs if isinstance(labs, int) else None
-
-
-def _goal_status(session: Any, technology: str) -> Mapping | None:
-    """Read the goal's live research state; an unsupported or failed read is unknown, never success."""
-    reader = getattr(session, "goal_status", None)
-    if not callable(reader):
-        return None
-    try:
-        return reader(technology)
-    except Exception as error:  # noqa: BLE001 -- observation must never stop the run
-        return {"error": f"{type(error).__name__}: {error}"[:200]}
-
-
-def _live_tick(adapter, fallback: int) -> int:
-    """Read the execution boundary without taking a full factory snapshot."""
-    tick = getattr(adapter, "tick", None)
-    try:
-        return int(tick() if callable(tick) else tick) if tick is not None else fallback
-    except (TypeError, ValueError, RuntimeError):
-        return fallback
+            "options": options, "shortfalls": short}
 
 
 # What a restarted controller must know about the world it inherits: which plates have starters, foundations or
@@ -1295,29 +1077,23 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         status_path: Path | None = None, settings: Settings = Settings(), session: Any = None,
         carried: list[dict] = (), recovery: dict | None = None,
         checkpoint_dir: Path | None = None, checkpoint_ticks: int = 54000,
-        recovery_wall_seconds: float = 0, until_accepted: str | None = None, goal: str | None = None,
-        initial_reached=(), strict_target=None, checkpoint_callback=None, loaded_tick=None) -> dict:
+        recovery_wall_seconds: float = 0, initial_reached=(), strict_target=None, checkpoint_callback=None, loaded_tick=None, objective_mode=None) -> dict:
     """Observe -> board -> operations -> choose -> run one -> record, until the mission ends or stalls.
 
     ``carried`` seeds the history with an earlier segment's lifecycle receipts when a fresh controller is
     restarted on the same world; everything else starts fresh.
     """
+    from training.laya_mission_capabilities import ELIGIBILITY_VERSION, FAMILIES, observe_start_and_research, refusal_message, validate_mode
+    validate_mode(objective_mode, settings.research_target)
     from training.laya_ops import DeterministicSession
-    goal = goal or settings.goal_technology
-    if recovery:
-        terminal = recovery.get("terminal", {})
-        if ((goal is not None and goal != terminal.get("goal"))
-                or (until_accepted is not None and until_accepted != terminal.get("until_accepted"))):
-            raise ValueError("ops recovery terminal objective differs")
-        goal, until_accepted = terminal.get("goal"), terminal.get("until_accepted")
-    if goal and settings.research_target:
-        raise ValueError("choose one research objective: goal or measured research target")
     journal.parent.mkdir(parents=True, exist_ok=True)
     active_started = time.monotonic()
     if recovery:
         recovery = copy.deepcopy(recovery)
     if recovery and carried:
         raise ValueError("exact ops recovery cannot be mixed with jumpstart receipts")
+    if recovery and recovery.get("objective_mode") != objective_mode:
+        raise ValueError("ops recovery objective mode differs")
     if checkpoint_ticks < 300:
         raise ValueError("checkpoint interval must be >=300 ticks")
     if checkpoint_dir is not None and (not settings.max_game_ticks or not settings.max_wall_seconds
@@ -1326,10 +1102,6 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     if recovery and (recovery["settings"] != dataclasses.asdict(settings) or recovery["run_id"] != run_id
                      or recovery["decision_limit"] != decisions):
         raise ValueError("ops recovery settings/logical run mismatch")
-    session = session or DeterministicSession(adapter.root, emit=lambda line: emit(f"  TOOL {line}"),
-                                              logical_episode_id=recovery["session"]["episode_id"] if recovery else None)
-    session.chain_economics_enabled = settings.ops_chain_economics
-    session.stock_networks = lambda: adapter.query().get("networks")
     records = journal.parent / "decision-states.jsonl"
     reached: list[str] = list(initial_reached)
     results: list[dict] = list(carried)
@@ -1339,19 +1111,41 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     samples: list = []
     measurement = None
     summary: dict = {"decisions": 0, "failures": 0, "phases_reached": reached, "stop": "decision_budget",
-                     "objective_version": (GOAL_VERSION if goal else "laya-research-consumption-v1"
-                                           if settings.research_target else "legacy-science-readiness-v1")}
+                     "objective_version": "laya-research-consumption-v1" if settings.research_target else "legacy-science-readiness-v1"}
     stall = {"since": 0, "best_gap": math.inf, "tick": None, "machines": 0, "missing": math.inf, "made": {},
              "batches": {}, "installed": {}, "network": None, "rungs": None, "mark": None, "mark_tick": None}
-    stall.update(idle_ticks=0, tool_ticks=0, last_tick=None, last_state=None, changed_tick=None)
     c6 = LayaC6Acceptance(run_id)
-    consumer_observation = ConsumerObservation("advanced-circuit")
     from training.laya_research import ResearchObjective, SUPPORT, add_research_options
     from training.laya_mission import research_phase
     from orchestrator.research_operations import collect_research_reports, research_observation
     objective = (ResearchObjective(settings.research_target, progressive=settings.research_progressive,
                                   sustain_ticks=settings.research_sustain_ticks,
                                   state=recovery.get("research") if recovery else None) if settings.research_target else None)
+    effective_mission = {"objective_mode": objective_mode or "legacy_unspecified",
+                         "eligibility_version": ELIGIBILITY_VERSION,
+                         "research_target": settings.research_target,
+                         "operation_families": FAMILIES if settings.research_target else []}
+    summary["effective_mission"] = effective_mission
+    from orchestrator.runtime_component_manifest import build_manifest, install_manifest
+    from training.laya_ops_checkpoint import VERSION as OPS_RESTART_VERSION
+    from training.laya_operation_outcome import VERSION as OUTCOME_VERSION
+    manifest_ref = install_manifest(
+        journal.with_name(journal.name + ".components.json"),
+        build_manifest(entrypoint="training.laya_ops_runner.run", mission={**effective_mission, "objective_version": summary["objective_version"]},
+                       world_root=getattr(adapter, "root", None), episode={"run_id": run_id, "seed": seed},
+                       runner_contracts={"ops_restart": OPS_RESTART_VERSION, "typed_operation_outcome": OUTCOME_VERSION}),
+        legacy=bool(recovery) or (journal.exists() and journal.stat().st_size > 0))
+    summary["runtime_components"] = manifest_ref
+    session = session or DeterministicSession(adapter.root, emit=lambda line: emit(f"  TOOL {line}"),
+                                              logical_episode_id=recovery["session"]["episode_id"] if recovery else None)
+    session.chain_economics_enabled = settings.ops_chain_economics
+    session.stock_networks = lambda: adapter.query().get("networks")
+    _append(journal, {"run_id": run_id, "event": "runtime_components", "runtime_components": manifest_ref})
+    if not objective and objective_mode:
+        _append(journal, {"run_id": run_id, "event": "mission_start", **summary["effective_mission"],
+                          "initial_eligibility": None})
+    if objective and recovery and "initial_eligibility" not in objective.state:
+        objective.state["initial_eligibility"] = {"state": "unknown", "target": settings.research_target}
     research = {}
     summary["laya_acceptance"] = {"C6": c6.snapshot()}
 
@@ -1364,15 +1158,13 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     from training.laya_segment_evidence import current_predicates, stop_classification
     import os
     summary['loaded_tick'] = loaded_tick
+    consumer_observation = ConsumerObservation("advanced-circuit")
     summary['seed'] = seed
     accept = getattr(session, "acceptance", None)
-    acceptance_samples = int(recovery.get("acceptance_samples", 0)) if recovery else 0
-    last_phase = PHASES[-1] if recovery and recovery.get("reached") else None
-    goal_status = None
+    declared_plastic: dict = {}
 
     def check_acceptance(event: str) -> None:
         """Deterministic milestone predicates beside the rate proxies (audit finding 7)."""
-        nonlocal acceptance_samples
         if accept is None:
             return
         try:
@@ -1382,27 +1174,6 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         summary["acceptance"] = statuses
         passed = [c for c, status in statuses.items() if status == "passed"]
         summary["accepted"] = sorted(set(summary.get("accepted", [])) | set(passed))
-        details = getattr(session, "acceptance_details", None)
-        reference = None
-        if details is not None:
-            from training.laya_acceptance import summary_details
-            directory = journal.parent / "acceptance" / run_id
-            directory.mkdir(parents=True, exist_ok=True)
-            path = directory / f"{acceptance_samples:04d}.json"
-            acceptance_samples += 1
-            import json
-            with path.open("x", encoding="utf-8") as out:
-                json.dump({**details, "run_id": run_id, "at": event}, out, sort_keys=True)
-                out.write("\n")
-            reference = str(path.resolve())
-            summary["acceptance_details"] = summary_details(details, reference)
-            c1 = details["results"]["C1"]
-            checks = c1["evidence"]["checks"]
-            failed = [name for name, value in checks.items() if value is False]
-            unknown = [name for name, value in checks.items() if value is None]
-            emit(f"C1 CHECK [{event}]: current={c1['status']} failed={failed} unknown={unknown} evidence={reference}")
-        else:
-            summary.pop("acceptance_details", None)
         summary["accepted_ever"] = list(summary["accepted"])
         # Final means passing on the latest sample (stateless predicates), not the latched history; a session
         # without fresh statuses reports unknown rather than echoing the latch.
@@ -1410,19 +1181,21 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         summary["accepted_final"] = (None if "error" in statuses or fresh is None
                                      else sorted(c for c, status in fresh.items() if status == "passed"))
         _append(journal, {"run_id": run_id, "event": "acceptance", "at": event, "statuses": statuses,
-                          "details_path": reference, "fresh": fresh,
-                          "tick": getattr(session, "acceptance_tick", None),
-                          "evidence": getattr(session, "acceptance_evidence", None),
-                          "checks": getattr(session, "acceptance_checks", None),
+                          "fresh": fresh, "checks": getattr(session, "acceptance_checks", None),
                           "production_service": summary.get("production_service"),
                           "foundations": getattr(session, "foundation_observations", None)})
         tick = session._history[-1].tick if getattr(session, '_history', None) else None
-        current, evidence = current_predicates(session) if 'error' not in statuses else ({}, {})
+        proxy = {"version": "laya-runner-phase-v1", "reached": list(reached)}
+        current, evidence = (current_predicates(session, proxy_phase=proxy)
+                             if 'error' not in statuses or getattr(session, '_evidence_state', None) is not None
+                             else ({}, {}))
         row = {'event':'strict_current', 'run_id':run_id, 'at':event, 'tick':tick,
                'loaded_tick':summary['loaded_tick'], 'statuses':current, 'predicate_evidence':evidence,
                'decisions':summary['decisions'], 'elapsed_seconds':time.monotonic()-active_started}
         summary.setdefault('strict_current', []).append(row)
         summary['strict_current_at_end'] = current
+        # Earned / holds-now / inherited from the evidence contract; ``phases_reached`` is only the goal-ladder proxy.
+        summary['milestones'] = milestone_report.from_contract(evidence.get('_contract'), summary.get('loaded_tick'))
         _append(journal,row)
         if checkpoint_callback is not None and 'error' not in statuses:
             summary['_checkpoint_boundary'] = {'pid':os.getpid(), 'run_id':run_id,
@@ -1457,6 +1230,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         last_checkpoint = recovery["checkpoint_tick"]
         _append(journal, {"run_id": run_id, "event": "ops_recovery", "index": index,
                           "cumulative_wall_seconds": elapsed_before})
+        summary["effective_mission"] = effective_mission
+        summary["runtime_components"] = manifest_ref
 
     def save_checkpoint(tick, *, final=False):
         nonlocal last_checkpoint
@@ -1464,8 +1239,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             return
         from training.laya_ops_checkpoint import capture
         controller = {"run_id": run_id, "seed": seed, "settings": dataclasses.asdict(settings), "decision_limit": decisions, "reached": reached,
-                      "terminal": {"goal": goal, "until_accepted": until_accepted},
-                      "acceptance_samples": acceptance_samples,
+                      "objective_mode": objective_mode,
                       "results": results, "samples": samples, "measurement": measurement, "summary": summary,
                       "stall": stall, "c6": c6.snapshot(), "previous_service_facts": previous_service_facts,
                       "research": objective.snapshot() if objective else None,
@@ -1481,9 +1255,6 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
 
     while decisions is None or index + 1 < decisions:
         index += 1
-        if until_accepted and until_accepted in summary.get("accepted", []):
-            summary["stop"] = "accepted_window_reached"
-            break
         if strict_target and summary.get('strict_current_at_end', {}).get(strict_target) is True:
             summary['stop'] = 'strict_target_reached'
             break
@@ -1501,14 +1272,38 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             packs = ((reports.get("research") or {}).get("technology") or {}).get("science_packs", {})
             adapter.extra_recipes = (*adapter.extra_recipes, *packs, "lab")
         facts = adapter.query()
+        if hasattr(session, "observe_invocations"):
+            for operation_id, observation in session.observe_invocations():
+                _append(journal.parent / "clean-decisions.jsonl", {"event": "operation_observation", "run_id": run_id,
+                        "operation_id": operation_id, "tick": facts["tick"], "outcome": observation})
         if objective:
             research = research_observation(reports, tick=facts["tick"], surface="nauvis", force="player", requested=settings.research_target)
             support_board = compile_status(facts, objective.targets(research), measurement) if objective.targets(research) else None
             service_ok = bool(support_board and all(n["condition"] == "satisfied" for n in support_board["needs"]
                                                    if n["item"] in SUPPORT))
-            evidence = objective.observe(research, facts, service_ok=service_ok,
-                                         clean=not results or results[-1].get("classification") not in {"bug", "safety"})
+            first, eligibility, evidence = observe_start_and_research(
+                objective, research, facts, target=settings.research_target, service_ok=service_ok,
+                clean=not results or results[-1].get("classification") not in {"bug", "safety"})
+            if first:
+                _append(journal, {"run_id": run_id, "event": "mission_start", **summary["effective_mission"],
+                                  "initial_eligibility": eligibility})
+            summary["effective_mission"]["initial_eligibility"] = eligibility
             summary["research_acceptance"] = evidence
+            if first and eligibility["state"] == "inherited":
+                # A target the save already completed can never be earned: refuse before any decision.
+                import json
+                try:
+                    manifest = json.loads((Path(getattr(adapter, "root", None)) / "manifest.json").read_text())
+                except (OSError, TypeError, ValueError):
+                    manifest = {}
+                message = refusal_message(settings.research_target, manifest, tick=facts["tick"],
+                                          evidence="first live research observation")
+                _append(journal, {"run_id": run_id, "event": "mission_refused",
+                                  "reason": "research_target_already_complete", "message": message})
+                emit("MISSION REFUSED: " + message)
+                summary["stop"] = "research_target_already_complete"
+                summary["refusal"] = message
+                break
             if evidence["earned"]:
                 if "R1" not in reached:
                     reached.append("R1")
@@ -1529,19 +1324,10 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         if settings.max_game_ticks and facts["tick"] - (loaded_tick if loaded_tick is not None else samples[0][0]) >= settings.max_game_ticks:
             summary["stop"] = "window_timeout"
             break
-        # The verified goal is a completed research target, never a rate proxy: check live research first.
-        if goal:
-            goal_status = _goal_status(session, goal)
-            if research_goal_satisfied(goal_status):
-                summary["stop"] = "goal_completed"
-                summary["goal"] = goal_evidence(goal_status)
-                emit(f"GOAL COMPLETE: {goal} verified target_completed")
-                break
         get_phase = lambda: research_phase(reached, objective.targets(research)) if objective else current_phase(reached)
         phase = get_phase()
         board = compile_status(facts, phase["targets"], measurement) if phase else None
         while phase and phase["phase_id"] != "R1" and ops_phase_reached(phase, board, c6.snapshot()):
-            last_phase = phase
             reached.append(phase["phase_id"])
             summary.setdefault("phase_ticks", {})[phase["phase_id"]] = facts["tick"] - samples[0][0]
             _append(journal, {"run_id": run_id, "event": "phase_reached", "phase": phase["phase_id"], "tick": facts["tick"],
@@ -1552,34 +1338,21 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
             stall.update(since=0, best_gap=math.inf)
             phase = get_phase()
             board = compile_status(facts, phase["targets"], measurement) if phase else None
-        if phase is not None:
-            last_phase = phase
-        if until_accepted and until_accepted in summary.get("accepted", []):
-            summary["stop"] = "accepted_window_reached"
-            break
         if strict_target and summary.get('strict_current_at_end', {}).get(strict_target) is True:
             summary['stop'] = 'strict_target_reached'
             break
         if phase is None:
-            if not goal:
-                summary["stop"] = "proxy_mission_complete_without_acceptance" if until_accepted else "mission_complete"
-                break
-            # A goal run keeps the final rate scope as an observation surface; the ladder is not the goal.
-            if last_phase is None:
-                summary["stop"] = "mission_complete"
-                break
-            phase = last_phase
-            board = compile_status(facts, phase["targets"], measurement)
+            summary["stop"] = "phase_ladder_complete"
+            summary["research_completion_verified"] = False
+            break
         if settings.until_phase and settings.until_phase in reached:
             summary["stop"] = "window_reached"
             break
+        declare_plastic_target(session, board, declared_plastic)
         stock: dict[str, int] = {}
         for network in (facts.get("networks") or {}).values():
             for name, count in (network.get("items") or {}).items():
                 stock[name] = stock.get(name, 0) + int(count)
-        economics = session.economics() if hasattr(session, "economics") else None
-        districts = (economics or {}).get("bootstrap_districts")
-        allocation = reservation_allocation(economics) if economics is not None else None
         economics = economics_observation(economics, facts.get("networks"))
         economics["capacity"] = mall_capacity(economics, results)
         from orchestrator.operation_observation import assembler_utilization
@@ -1590,15 +1363,17 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                               enabled_recipes=facts.get("enabled_recipes"),
                                               transactions=(economics or {}).get("transactions"),
                                               foundations=getattr(session, "foundation_facts", None),
-                                              bootstrap_districts=districts, allocation=allocation,
-                                              measurement=measurement, research_goal=goal,
-                                              goal_status=goal_status, labs=_lab_count(facts),
-                                              layout=layout_signature(facts),
                                               filter_fluid_shortages=(settings.ops_solid_fluid_filter or
                                                   getattr(session, "filter_fluid_shortages_enabled", False))),
-                              results, economics, stock=stock, reconcile_loans=settings.mall_loan_reconciliation)
+                              results, economics, reconcile_loans=settings.mall_loan_reconciliation)
+        if settings.production_service:
+            menu = add_c6_consumer_options(menu, phase, facts)
+        if settings.cable_capacity:
+            menu = add_cable_capacity_option(menu, board, phase, facts, results, stock)
         if objective:
             menu = add_research_options(menu, board, research, facts, objective)
+        if hasattr(session, "preview_options"):
+            menu = session.preview_options(menu, economics)
         from training.laya_decision_pacing import apply_waits, multiplier
         elapsed_game_ticks = facts["tick"] - samples[0][0]
         menu = apply_waits(menu, settings, elapsed_game_ticks)
@@ -1627,8 +1402,7 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                         "transactions": (economics or {}).get("transactions", {}),
                                         "saved_world": {"provider_stock": {"network": stock},
                                                         "source_networks": facts.get("networks", {}),
-                                                        "reserved_stock": {"network": dict(reserved)},
-                                                        "bootstrap_districts": districts}},
+                                                        "reserved_stock": {"network": dict(reserved)}}},
                  "guidelines": rules}
         if objective:
             state["observation_digest"]["research"] = {"observation": research, "objective": objective.brief()}
@@ -1650,11 +1424,9 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         emit(f"  STATUS: {status}")
         record = {"run_id": run_id, "event": "decision", "index": index, "tick": facts["tick"],
                   "phase": phase["phase_id"], "choice": {k: choice[k] for k in ("option_id", "need_id", "probability")},
-                  "summary": chosen["summary"]}
+                  "summary": chosen["summary"], "operation_preview": chosen.get("operation_preview"),
+                  "extension_search": chosen.get("extension_search")}
         _append(journal, record)
-        if chosen["family"] == "retire_starter":
-            check_acceptance(f"before retirement {index}")
-        tool_start_tick = _live_tick(adapter, facts["tick"])
         # Fresh baseline after selection, immediately before execution; never reuse a rate-window baseline.
         try:
             choice_facts = adapter.query() if c6.explicit_choice(chosen) else facts
@@ -1670,26 +1442,25 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                 result["params"]["base_ticks"] = chosen["base_wait_ticks"]
         else:
             try:
+                if hasattr(session, "last_operation_id"):
+                    session.last_operation_id = None
                 result = session.run(chosen["family"], **chosen["params"])
             except Exception as error:  # A tooling bug is recorded and the run continues; three in a row stop it.
                 result = {"ok": False, "operation": chosen["family"], "params": chosen["params"],
                           "code": "tool_error", "classification": "bug", "state": "failed",
                           "message": f"{type(error).__name__}: {error}"[:400]}
+                if getattr(session, "last_operation_id", None):
+                    result["operation_id"] = session.last_operation_id
                 summary["failures"] += 1
         operation_seconds = time.monotonic() - operation_started
         result["tick"] = facts["tick"]
-        result["need_id"] = chosen["need_id"]
-        if result.get("code") == "material_shortage":  # Preserve known snapshots for retry comparison.
-            required = (result.get("details") or {}).get("required") or {}
-            result["stock_at"] = ({item: stock.get(item, 0) for item in required}
-                                   if economics is not None else None)
-            result["allocation_at"] = ({item: allocation.get(item, ()) for item in required}
-                                       if allocation is not None else None)
-        if outcome_category(result) == "no_geometry":
-            signature = layout_signature(facts)
-            result["layout_at"] = list(signature) if signature is not None else None
+        result["need_id"] = chosen["need_id"]  # per-need no-progress facts
+        if result.get("code") == "material_shortage":  # What was in stock when it failed, to see change later.
+            result["stock_at"] = {item: stock.get(item, 0) for item in ((result.get("details") or {}).get("required") or {})}
+        if chosen["family"] != "wait" and not result.get("ok") and result.get("code") not in BUILT:
+            # The blocker's signature: stock of the items the refusal names, to see later whether it changed.
+            result["blocker_stock"] = {item: int(stock.get(item, 0)) for item in blocker_items(result)}
         results.append(result)
-        tool_end_tick = _live_tick(adapter, tool_start_tick)
         after = adapter.query()
         if c6.explicit_choice(chosen):
             c6.outcome(result)
@@ -1700,10 +1471,10 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
              + (f" -- {result.get('message', '')[:200]}" if not result.get("ok") else ""))
         _training_record(records, run_id=run_id, index=index, tick=facts["tick"], phase=phase["phase_id"],
                          state=state, options=[{k: o.get(k) for k in ("option_id", "family", "need_id", "product",
-                                                                      "params", "features", "bill", "bill_owner",
+                                                                      "params", "features", "bill", "bill_owner", "operation_preview", "extension_search",
                                                                       "wait_ticks", "base_wait_ticks", "consumer_input_bill")} for o in menu["options"]],
                          distribution=choice["distribution"], choice=choice,
-                         outcome={**{k: result.get(k) for k in ("ok", "code", "classification", "state", "details",
+                         outcome={**{k: result.get(k) for k in ("ok", "code", "classification", "state", "details", "operation_id",
                                                                  "message", "result")},
                                   **({'configuration_receipt': {
                                       k: result[k] for k in ('submitted', 'submission_attempted', 'verified',
@@ -1712,8 +1483,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                   **({'reconciliation_receipt': {
                                       k: result[k] for k in ('attempted', 'configuration_changed', 'observed', 'error')
                                       if k in result}} if chosen['family'] == 'reconcile_mall_loan' else {}),
-                                  "progress": bool(result.get("progress")),
                                   "ticks": after["tick"] - facts["tick"], "material_transactions": after_transactions,
+                                  "typed_outcome": normalize(result, chosen["family"]),
                                   "timing": {"policy_wall_seconds": policy_seconds,
                                              "operation_wall_seconds": operation_seconds,
                                              "model_client_seconds": choice.get("client_latency_s")}})
@@ -1735,11 +1506,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                     "mall_utilization": summary["mall_utilization"],
                                     "decision_timing": summary["decision_timing"],
                                     "decisions": index + 1, "failures": summary["failures"],
-                                    "authority": policy.authority, "speed": speed_status(adapter)})
-        summary["decisions"] = index + 1
-        if chosen["family"] == "retire_starter":
-            check_acceptance(f"after retirement {index}")
-        elif checkpoint_callback is not None or summary["decisions"] % 10 == 0:
+                                    "authority": policy.authority})
+        if checkpoint_callback is not None or summary["decisions"] % 10 == 0:
             check_acceptance(f"decision {index}")
         gap = _goal_gap(compile_status(after, phase["targets"], measurement))
         # Progress is measurable change, not a busy signal (a loan that never finishes once kept a run alive for
@@ -1784,14 +1552,8 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
         progress_signals = {"research_units": bool(objective and objective.state.get("progressed")),
                             "machines": machines > stall["machines"], "missing_materials": missing < stall["missing"],
                             "goal_gap": gap < stall["best_gap"] * .95, "material_crafts": crafted,
-                            "owned_batch": advancing, "installed": delivered, "network": extended, "ladder": climbed,
-                            "funded_plan": bool(result.get("progress"))}
-        # A newly funded, committed construction plan may progress before an incomplete return.
-        # Repeating a construction status or merely reserving a ready bill is not progress.
-        submitted = bool(result.get("progress"))
-        working = False  # A repeated wait code alone is not observed progress.
-        progressed = (machines > stall["machines"] or missing < stall["missing"] or crafted
-                      or gap < stall["best_gap"] * 0.95 or submitted or working or any(progress_signals.values()))
+                            "owned_batch": advancing, "installed": delivered, "network": extended, "ladder": climbed}
+        progressed = any(progress_signals.values())
         stall["machines"], stall["missing"] = max(stall["machines"], machines), min(stall["missing"], missing)
         stall["best_gap"] = min(stall["best_gap"], gap)
         if progressed or stall["tick"] is None:
@@ -1800,62 +1562,10 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
                                   "material_obligations": finite_credits}
         summary["progress_guard"] = {"last_reset": stall.get("last_reset"), "observed_tick": after["tick"],
                                      "stall_after_ticks": STALL_TICKS, "remaining_shortages": short}
-        stall["tool_ticks"] = max(0, tool_end_tick - tool_start_tick)
-        if goal:
-            # Measured complete stall: the whole relevant, productive state is unchanged across the
-            # declared observation window. A pending status alone does not reset it.
-            relevant = set(short) | set((board.get("construction") or {}).get("shortfall") or {})
-            relevant |= {n["item"] for n in board["needs"] if (n.get("goal_required_per_s") or 0) > 0}
-            after_stock: dict[str, int] = {}
-            for network in (after.get("networks") or {}).values():
-                for name, count in (network.get("items") or {}).items():
-                    after_stock[name] = after_stock.get(name, 0) + int(count)
-            # Tool calls may take minutes while research and loan steps advance.
-            # Re-read them before deciding that the whole window was unchanged.
-            goal_status = _goal_status(session, goal)
-            after_economics = session.economics() if hasattr(session, "economics") else economics
-            signature = useful_state(after, relevant_items=sorted(relevant), stock=after_stock,
-                                     goal_status=goal_status, economics=after_economics)
-            if signature != stall["last_state"]:
-                stall["last_state"], stall["changed_tick"] = signature, after["tick"]
-                stall["since"], stall["idle_ticks"] = 0, 0
-            else:
-                stall["since"] += 1
-                base = stall["changed_tick"] if stall["changed_tick"] is not None else samples[0][0]
-                stall["idle_ticks"] = max(0, after["tick"] - base)
-            window = observation_window(settings)
-            summary["stall"] = {"idle_ticks": stall["idle_ticks"], "decisions": stall["since"],
-                                "tool_ticks": stall["tool_ticks"], "version": "useful-state-window-v1",
-                                "observation_ticks": window, "changed_tick": stall["changed_tick"],
-                                "useful": signature}
-            if window and stall["idle_ticks"] >= window:
-                summary["stop"] = "stalled"
-                emit(f"STALLED: useful state unchanged over {stall['idle_ticks']} game ticks "
-                     f"(declared window {window})")
-                break
-        else:
-            # The stall budget is decision-idle game time, not tool execution: one blocking deterministic call
-            # can spend most of a window on real work (live 2026-10-10: one foundation call ate ~12k of 18k).
-            prior_tick = stall["last_tick"] if stall["last_tick"] is not None else facts["tick"]
-            elapsed = max(0, after["tick"] - prior_tick)
-            stall["last_tick"] = after["tick"]
-            stall["idle_ticks"] += max(0, elapsed - (0 if chosen["family"] == "wait" else stall["tool_ticks"]))
-            if progressed:
-                stall["idle_ticks"], stall["since"] = 0, 0
-            else:
-                stall["since"] += 1
-            # Choice frequency varies with host speed and retry latency. C38's 12-choice
-            # cutoff ended before the declared idle window; geometry alone uses that setting.
-            if stall["idle_ticks"] >= STALL_TICKS:
-                summary["stop"] = "stalled"
-                emit(f"STALLED: {stall['idle_ticks']} idle game ticks / {stall['since']} decisions without a "
-                     "funded submission, work in progress or goal progress")
-                break
-        if goal and (result.get("code") in {"tool_error", "untyped_stuck"}
-                     or (result.get("classification") == "bug" and result.get("state") == "failed")):
-            summary["stop"] = "hard_failure"
-            summary["hard_failure"] = {"code": result.get("code"), "message": result.get("message"),
-                                       "operation": result.get("operation"), "params": result.get("params")}
+        # Operations decide in seconds of game time, so the stall limit is game time, not a decision count.
+        if after["tick"] - stall["tick"] >= STALL_TICKS:
+            summary["stop"] = "stalled"
+            emit(f"STALLED: {STALL_TICKS} ticks without a built operation, work in progress or goal progress")
             break
         # Busy is not progress either: the mission must reach a new phase or acceptance within the budget.
         mark = (len(reached), len(summary.get("accepted", [])))
@@ -1876,23 +1586,16 @@ def run(adapter: Any, policy: Any, *, journal: Path, decisions: int | None, meas
     if checkpoint_dir is not None and samples:
         save_checkpoint(adapter.query()["tick"], final=True)
     summary["cumulative_wall_seconds"] = elapsed_before + time.monotonic() - active_started
-    if until_accepted and until_accepted in summary.get("accepted", []):
-        summary["stop"] = "accepted_window_reached"
     session.close()
     # Typed outcomes, not only caught exceptions: an untyped_stuck is a tool fault even when nothing raised.
     summary["codes"] = dict(Counter(r.get("code") or "error" for r in results if not r.get("ok")))
+    summary["classifications"] = dict(Counter(r.get("classification") or "unclassified"
+                                               for r in results if not r.get("ok")))
     summary["faults"] = operation_faults(results)
-    if not goal:
-        summary["stall"] = {"idle_ticks": stall["idle_ticks"], "decisions": stall["since"],
-                            "tool_ticks": stall["tool_ticks"], "version": "decision-idle-v3",
-                            "idle_tick_limit": STALL_TICKS, "decision_limit": None}
-    elif "goal" not in summary:
-        # Expose version and stall evidence even when the run ended on the decision budget or a failure.
-        summary["goal"] = goal_evidence(goal_status) if goal_status is not None else {"version": GOAL_VERSION,
-                                                                                     "verified": False}
-    summary["classifications"] = dict(Counter(r.get("classification") or "unclassified" for r in results if not r.get("ok")))
+    summary.update(summarize_records(records))
     _append(journal, {"run_id": run_id, "event": "summary", **summary})
     emit(f"SUMMARY: stop={summary['stop']} decisions={summary['decisions']} failures={summary['failures']} "
-         f"phases={','.join(reached) or 'none'} accepted={','.join(summary.get('accepted', [])) or 'none'} "
-         f"accepted_final={'unknown' if summary.get('accepted_final') is None else ','.join(summary['accepted_final']) or 'none'}")
+         f"{milestone_report.text(summary.get('milestones'))} "
+         f"proxy_phases={','.join(reached) or 'none'} latch_accepted={','.join(summary.get('accepted', [])) or 'none'} "
+         f"latch_final={'unknown' if summary.get('accepted_final') is None else ','.join(summary['accepted_final']) or 'none'}")
     return summary

@@ -39,29 +39,22 @@ from training.laya_clean_runner import ExplorationPolicy, LiveWorld, Settings, r
 from training.laya_guided_policy import GuidedPolicy, load_preferences
 from training.laya_variants import apply as apply_variant, load_variant, variant_hash
 from training.laya_run_log import RunLog
-from training.laya_saved_world import SavedWorldAdapter, file_hash, owned_root, speed_status
+from training.laya_saved_world import SavedWorldAdapter, file_hash, owned_root
 from training.laya_checkpoint import load_bundle, export_bundle, restore_context
 
 SOURCE_SAVE = ROOT / "saves/mod_playground.zip"
 
 
 def saved_world(action: str, root: Path, *extra: str) -> str:
+    # stdout is the result; stderr is passed through so a failed prepare/stop leaves its cause in the job log.
     return subprocess.run([sys.executable, str(ROOT / "tools/run_laya_saved_world.py"), action, "--root", str(root), *extra],
-                          check=True, capture_output=True, text=True).stdout.strip()
+                          check=True, stdout=subprocess.PIPE, stderr=None, text=True).stdout.strip()
 
 
 def runner_paths(root: Path) -> dict[str, Path]:
     return {"log": root / "logs/laya-runner.log", "pid": root / "laya-runner.pid.json",
             "heartbeat": root / "laya-runner.heartbeat.json", "journal": root / "evidence/clean-decisions.jsonl",
             "status": root / "evidence/latest-status.json"}
-
-
-def _game_tick(adapter) -> int | None:
-    """Current game tick, or None if it cannot be read (a report field, never a run failure)."""
-    try:
-        return adapter.tick()
-    except Exception:
-        return None
 
 
 def main(argv=None) -> int:
@@ -83,11 +76,6 @@ def main(argv=None) -> int:
                    help="guided: doc-rule preferences + exploration floor; exploration: uniform")
     p.add_argument("--variant", type=Path, help="Variant JSON (docs/rl/laya_variants/); default: the current workflow")
     p.add_argument("--until-phase", help="Experiment window: stop once this phase is reached")
-    p.add_argument("--until-accepted", choices=[f"C{i}" for i in range(7)],
-                   help="Ops only: stop after the shared checkpoint predicate passes")
-    p.add_argument("--research-goal",
-                   help="Natural goal run: end only when this technology's target_completed is verified "
-                        "(no rate-proxy or decision-count stall cutoff)")
     p.add_argument("--max-game-ticks", type=int, help="Experiment window: stop after this many game ticks")
     p.add_argument("--research-target", help="Opt-in level-aware research objective (for example mining-productivity-4)")
     p.add_argument("--fixed-science-target", action="store_true", help="Research contrast: keep the initial 0.25 units/s target")
@@ -105,23 +93,10 @@ def main(argv=None) -> int:
     p.add_argument("--nice", type=int, default=0, help="Lower this server's CPU priority by 0..19")
     p.add_argument("--resume-bundle", type=Path, help="Hash-verified earned C1 checkpoint")
     p.add_argument("--export-checkpoint", type=Path, help="Save an earned C1 checkpoint after a successful run")
-    p.add_argument("--restart-checkpoint", type=Path, help="Earned restart-conditioned ops bundle; fresh policy RNG")
-    p.add_argument("--checkpoint-catalog", type=Path, help="Publish earned ops restart bundles between operations")
-    p.add_argument("--capture-checkpoints", nargs='+', choices=[f'C{i}' for i in range(1, 7)],
-                   help="Limit setup capture to these strict checkpoints")
-    p.add_argument("--strict-target", choices=[f"C{i}" for i in range(1, 7)])
-    p.add_argument("--validate-reload-only", action="store_true")
-    p.add_argument("--reload-receipt", type=Path)
-    p.add_argument("--checkpoint-bank", type=Path)
-    p.add_argument("--mod-migration-contract", type=Path)
     p.add_argument("--jumpstart", action="store_true",
                    help="Restart a fresh controller on this already-running world after a stall or failure "
                         "(experiment): carry only earlier segments' lifecycle receipts")
     args = p.parse_args(argv)
-    if args.research_goal and args.research_target:
-        p.error("choose one research objective: --research-goal or --research-target")
-    if args.until_accepted and (args.actions != "deterministic" or args.until_phase):
-        p.error("until-accepted requires deterministic actions and cannot be combined with until-phase")
     root = owned_root(args.root)
     ops_resume = None
     ops_meta = None
@@ -130,21 +105,7 @@ def main(argv=None) -> int:
         ops_meta, ops_resume = load_ops_bundle(args.ops_resume_bundle)
         if args.resume_bundle or args.jumpstart or args.export_checkpoint:
             p.error("ops recovery cannot be mixed with geometry bundles or jumpstart")
-    migration = json.loads(args.mod_migration_contract.read_text()) if args.mod_migration_contract else None
-    if args.validate_reload_only and not args.restart_checkpoint:
-        p.error("reload validation requires --restart-checkpoint")
     resume=load_bundle(args.resume_bundle) if args.resume_bundle else None
-    if args.restart_checkpoint and (args.resume_bundle or args.ops_resume_bundle or args.jumpstart
-                                    or args.actions != "deterministic" or args.stepped):
-        p.error("Restart checkpoints require live deterministic operations and no other resume mode")
-    if args.checkpoint_catalog and (args.actions != "deterministic" or args.stepped):
-        p.error("Ops checkpoint publication requires live deterministic operations")
-    if args.capture_checkpoints and not args.checkpoint_catalog:
-        p.error("Checkpoint selection requires a publication catalog")
-    restart_meta = None
-    if args.restart_checkpoint:
-        from training.laya_restart_checkpoint import load as load_restart
-        restart_meta, restart_context = load_restart(args.restart_checkpoint)
     if args.action == "prepare":
         extra = ["--mods-source", str(args.mods_source)] if args.mods_source else []
         if args.update_threads is not None:
@@ -153,22 +114,10 @@ def main(argv=None) -> int:
             extra += ["--cpu-affinity", args.cpu_affinity]
         if args.nice:
             extra += ["--nice", str(args.nice)]
-        source=(args.ops_resume_bundle/'source.zip' if ops_resume else args.restart_checkpoint/'world.zip' if restart_meta else
-                args.resume_bundle/'source.zip' if resume else args.source_save)
+        source=(args.ops_resume_bundle/'source.zip' if ops_resume else args.resume_bundle/'source.zip' if resume else args.source_save)
         preparation_started = time.monotonic()
         print(saved_world("prepare", root, "--source-save", str(source),
                           "--game-port", str(args.game_port), "--rcon-port", str(args.rcon_port), *extra))
-        from tools.checkpoint_catalog import atomic_json
-        manifest = json.loads((root / 'manifest.json').read_text())
-        if restart_meta:
-            lineage = {'origin': 'segment', 'source_sha256': restart_meta['world']['sha256'],
-                       'parent_generation': restart_meta['generation_id'],
-                       'ancestry': restart_context.get('lineage')}
-        elif manifest['source_sha256'] == file_hash(SOURCE_SAVE):
-            lineage = {'origin': 'C0', 'source_sha256': manifest['source_sha256']}
-        else:
-            lineage = {'origin': 'unverified', 'source_sha256': manifest['source_sha256']}
-        atomic_json(root / 'manifest.json', {**manifest, 'checkpoint_lineage': lineage})
         if resume:restore_context(args.resume_bundle,root)
         if ops_resume:
             from training.laya_ops_checkpoint import restore_context as restore_ops_context
@@ -188,7 +137,6 @@ def main(argv=None) -> int:
     variant = load_variant(args.variant)
     settings, policy_options, runtime = apply_variant(variant)
     settings = dataclasses.replace(settings, until_phase=args.until_phase or settings.until_phase,
-                                   goal_technology=args.research_goal or settings.goal_technology,
                                    max_game_ticks=args.max_game_ticks or settings.max_game_ticks,
                                    research_target=args.research_target,
                                    research_progressive=not args.fixed_science_target,
@@ -197,7 +145,6 @@ def main(argv=None) -> int:
     if ops_resume:
         saved_settings = Settings(**ops_resume["settings"])
         if ((args.max_game_ticks is not None and args.max_game_ticks != saved_settings.max_game_ticks)
-                or (args.research_goal is not None and args.research_goal != saved_settings.goal_technology)
                 or (args.max_wall_seconds is not None and args.max_wall_seconds != saved_settings.max_wall_seconds)
                 or (args.research_target is not None and args.research_target != saved_settings.research_target)):
             p.error("ops recovery cannot reset or replace its frozen objective/budgets")
@@ -215,8 +162,6 @@ def main(argv=None) -> int:
         p.error("research requires deterministic actions and a sustain window >=300 ticks")
     if args.actions != "deterministic" and (settings.mall_loan_reconciliation or settings.decision_wait_schedule != "off"):
         p.error("loan reconciliation and decision wait schedules require deterministic actions")
-    if args.fixed_science_target and not args.research_target:
-        p.error('fixed science target requires --research-target')
     speed = float(runtime.get("speed", args.speed))
     tag = {"variant_id": variant["variant_id"], "variant_hash": variant_hash(variant), "experiment": args.experiment}
     paths = runner_paths(root)
@@ -224,57 +169,31 @@ def main(argv=None) -> int:
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
-    source_save = args.source_save.resolve()
-    source_hash = file_hash(source_save)
+    source_hash = file_hash(SOURCE_SAVE)
     run_id = f"{root.name}-s{args.seed}-{int(time.time())}"
     if ops_resume:
         run_id = ops_resume["run_id"]
     mode = "stepped" if args.stepped else "live"
-    frozen_identity = ROOT.parent / "freeze.json"
-    commit = (json.loads(frozen_identity.read_text())["revision"] if frozen_identity.exists() else
-              subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip())
-    wall_started = time.monotonic()
-    if args.max_wall_seconds is not None and args.max_wall_seconds <= 0:
-        p.error("max-wall-seconds must be positive")
-    def should_stop():
-        return stop.is_set() or (args.max_wall_seconds is not None and time.monotonic() - wall_started >= args.max_wall_seconds)
+    commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
     started = local_stamp()
     log = RunLog(paths["log"], paths["heartbeat"])
     summary = {"decisions": 0, "failures": 0, "phases_reached": [], "stop": "runner_error"}
-    runner_error = None
     with runner_pid_record(paths["pid"]):
         adapter = SavedWorldAdapter(root) if args.stepped else LiveWorld(root, speed)
-        from training.laya_restart_checkpoint import ownership_complete, ownership_defect, persist_rebalanced_material
-        adapter.checkpoint_ownership_complete = lambda session: ownership_complete(adapter, session)
-        adapter.checkpoint_ownership_defect = lambda session: ownership_defect(adapter, session)
-        adapter.checkpoint_sync_ownership = persist_rebalanced_material
         manifest = json.loads((root / "manifest.json").read_text())
-        live_error = None
-        # Unpause before RUN START so the log shows the speed the game runs at; a restart
-        # checkpoint stays paused until its strict baseline and ownership are restored.
-        if not args.stepped and not restart_meta:
-            try:
-                adapter.go_live()
-            except Exception as error:  # Re-raised inside the try below, so RUN END is still written.
-                live_error = error
-        adapter.observe_speed()
-        start_tick = _game_tick(adapter)
         log.start(command="run", runner="laya-clean", run_id=run_id, commit=commit, mode=mode, speed=speed,
-                  requested_speed="paused" if args.stepped else f"{speed:g}", observed_speed=adapter.observed_speed,
                   decisions=args.decisions or "unlimited", policy=args.policy, seed=args.seed,
                   variant=f"{tag['variant_id']} {tag['variant_hash'][:19]}", experiment=args.experiment or "-",
-                  window=f"goal={args.research_goal or settings.goal_technology or '-'} proxy={settings.until_phase or '-'} accepted={args.until_accepted or '-'} max_ticks={settings.max_game_ticks or '-'}",
+                  window=f"until={settings.until_phase or '-'} max_ticks={settings.max_game_ticks or '-'}",
                   game=f"127.0.0.1:{manifest['game_port']}", root=root, log=paths["log"])
         if not args.no_helper:  # Live observer from RUN START; it writes the final review after RUN END.
             log("LAYA HELPER: observing " + launch_helper(run_id, paths["log"], root.resolve()))
         try:
-            if live_error is not None:
-                raise live_error
-
             if ops_resume:
                 from training.laya_ops_checkpoint import verify_restored
                 verify_restored(adapter, args.ops_resume_bundle)
-            if not args.stepped and not restart_meta:
+            if not args.stepped:
+                adapter.go_live()
                 log(f"LIVE: game unpaused at speed {speed:g}; decisions are taken while the factory runs")
             policy = (GuidedPolicy(args.seed, preferences=load_preferences(ROOT / settings.catalog), **policy_options)
                       if args.policy == "guided" else ExplorationPolicy(args.seed))
@@ -290,119 +209,33 @@ def main(argv=None) -> int:
                 from training.laya_ops_runner import lifecycle_receipts, run as run_ops
                 carried = (lifecycle_receipts(paths["journal"].parent / "decision-states.jsonl")
                            if args.jumpstart else [])
-                session, context = None, {}
-                if restart_meta:
-                    from training.laya_restart_checkpoint import restore as restore_restart
-                    from training.laya_ops import DeterministicSession
-                    restored, context = restore_restart(args.restart_checkpoint, root, migration_contract=migration)
-                    session = DeterministicSession(root, origin_episode_id=restored.episode_id, emit=log)
-                    session.restore_restart_acceptance(restored)
-                    carried = context["lifecycle"]
-                    from training.laya_restart_checkpoint import validate_restored
-                    from tools.checkpoint_catalog import atomic_json
-                    receipt = validate_restored(adapter, session, args.restart_checkpoint, migration_contract=migration)
-                    atomic_json(args.reload_receipt or root / 'evidence/reload-receipt.json', receipt)
-                    if args.checkpoint_bank:
-                        from tools.laya_checkpoint_bank import record_validation
-                        record_validation(args.checkpoint_bank, restart_meta['generation_id'], receipt)
-                    if args.validate_reload_only:
-                        print(json.dumps(receipt))
-                        return 0
-                if restart_meta:
-                    adapter.go_live()
-                    log("RESTART BENCHMARK: restored strict baseline and ownership; fresh controller/RNG")
-                published = set()
-                capture_set = set(args.capture_checkpoints or [f'C{i}' for i in range(1, 7)])
-                def publish(adapter, session, statuses, summary, results):
-                    from training.laya_restart_checkpoint import capture as capture_restart, paused_candidates
-                    from training.laya_segment_evidence import current_predicates
-                    import shutil
-                    current, _ = current_predicates(session)
-                    if not any(k in capture_set and v is True and k not in published for k, v in current.items()):
-                        return
-                    with paused_candidates(adapter, session, summary, run_id) as current:
-                        for checkpoint, passed in current.items():
-                            if checkpoint not in capture_set or passed is not True or checkpoint in published:
-                                continue
-                            published.add(checkpoint)  # Never retry an unexplained capture failure.
-                            capture_started = time.monotonic()
-                            event = {'checkpoint':checkpoint, 'run_id':run_id, 'status':'failed',
-                                     'started_at':local_stamp(), 'decisions':summary['decisions']}
-                            try:
-                                bundle = capture_restart(adapter, session, checkpoint, summary, results,
-                                                         run_id=run_id, already_paused=True)
-                                target = args.checkpoint_catalog / bundle.name
-                                args.checkpoint_catalog.mkdir(parents=True, exist_ok=True)
-                                staging = target.with_name("."+target.name+".staging")
-                                shutil.copytree(bundle, staging)
-                                staging.rename(target)
-                                if args.checkpoint_bank:
-                                    from tools.laya_checkpoint_bank import register
-                                    register(args.checkpoint_bank, target)
-                                log(f"CHECKPOINT: {checkpoint} {target}")
-                                event.update(status='captured_candidate', generation=bundle.name, bundle=str(target))
-                            except Exception as error:
-                                log(f"CHECKPOINT FAILED: {checkpoint} {type(error).__name__}: {error}")
-                                event['error'] = f'{type(error).__name__}: {error}'
-                                stop.set()  # A new setup needs diagnosis before any further capture.
-                                break
-                            finally:
-                                event['duration_seconds'] = time.monotonic()-capture_started
-                                with (root/'evidence/capture-events.jsonl').open('a') as stream:
-                                    stream.write(json.dumps(event)+'\n')
                 summary = run_ops(adapter, policy, journal=paths["journal"], decisions=args.decisions or None,
                                   measure_ticks=args.measure_ticks, seed=args.seed, run_id=run_id, emit=log,
-                                  should_stop=should_stop, status_path=paths["status"], settings=settings,
-                                  until_accepted=args.until_accepted, goal=args.research_goal or settings.goal_technology,
+                                  should_stop=stop.is_set, status_path=paths["status"], settings=settings,
                                   carried=carried, recovery=ops_resume, checkpoint_dir=args.ops_checkpoint_dir,
                                   checkpoint_ticks=args.ops_checkpoint_ticks,
                                   recovery_wall_seconds=(ops_meta["capture_seconds"] +
-                                      manifest.get("ops_recovery", {}).get("preparation_wall_seconds", 0)) if ops_resume else 0,
-                                  session=session, initial_reached=tuple(context.get("phases_reached", ())),
-                                  strict_target=args.strict_target,
-                                  loaded_tick=(restart_meta['capture_tick'] if restart_meta else
-                                               json.loads((root / 'initial-state.json').read_text())['tick']
-                                               if not ops_resume and (root / 'initial-state.json').exists() else None),
-                                  checkpoint_callback=publish if args.checkpoint_catalog else None)
+                                      manifest.get("ops_recovery", {}).get("preparation_wall_seconds", 0)) if ops_resume else 0)
             else:
                 summary = run(adapter, policy, journal=paths["journal"],
                               decisions=args.decisions or None, measure_ticks=args.measure_ticks, seed=args.seed,
-                              run_id=run_id, emit=log, should_stop=should_stop, status_path=paths["status"],
+                              run_id=run_id, emit=log, should_stop=stop.is_set, status_path=paths["status"],
                               settings=settings, initial_reached=resume['phases_reached'] if resume else ())
             if args.export_checkpoint:
                 export_bundle(adapter,args.export_checkpoint,summary)
-            if args.max_wall_seconds is not None and time.monotonic() - wall_started >= args.max_wall_seconds:
-                summary["stop"] = "wall_budget"
-                log(f"WALL LIMIT: declared {args.max_wall_seconds:g}s budget reached; current operation finished")
             if stop.is_set():
                 log("STOP REQUESTED: runner stopped after its current decision; Factorio keeps running")
-        except Exception as error:
-            runner_error = error
-            summary["stop"] = "runner_error"
-            summary["error"] = f"{type(error).__name__}: {error}"
-            log(f"FAILURE: runner_error: {summary['error']}")
         finally:
-            end_tick = _game_tick(adapter)
             adapter.close()
-            if file_hash(source_save) != source_hash:
+            if file_hash(SOURCE_SAVE) != source_hash:
                 log("SOURCE SAVE CHANGED during the run")
-            log(log.elapsed(start_tick, end_tick))
             log.end()
     # Index the run for later comparisons, then start the read-only post-run review.
     RUN_INDEX.parent.mkdir(parents=True, exist_ok=True)
     index = {"run_id": run_id, "root": str(root.resolve()), "commit": commit, "mode": mode, "started": started,
-             "ended": local_stamp(), "summary": summary, "seed": args.seed, "speed": speed,
-             "speed_status": speed_status(adapter), **tag,
-             "window": {"research_goal": args.research_goal or settings.goal_technology,
-                        "until_phase": settings.until_phase, "until_accepted": args.until_accepted,
-                        "max_game_ticks": settings.max_game_ticks}}
+             "ended": local_stamp(), "summary": summary, "seed": args.seed, "speed": speed, **tag,
+             "window": {"until_phase": settings.until_phase, "max_game_ticks": settings.max_game_ticks}}
     if resume:index['resume_checkpoint']={'path':str(args.resume_bundle),'save_sha256':resume['files']['source.zip']}
-    if restart_meta:
-        index['restart_checkpoint'] = {'path': str(args.restart_checkpoint),
-            'generation': restart_meta['generation_id'], 'origin': restart_meta['checkpoint_id'],
-            'loaded_tick': restart_meta['capture_tick'], 'world_sha256': restart_meta['world']['sha256'],
-            'continuation_choices': context['continuation_choices'],
-            'migration_contract_sha256': context.get('migration_contract_sha256')}
     with RUN_INDEX.open("a") as out:
         out.write(json.dumps(index) + "\n")
     try:
@@ -410,8 +243,8 @@ def main(argv=None) -> int:
         print(f"RUN LEDGER: {entry['outcome']} highest={entry['highest_milestone']} -> {LEDGER}")
     except Exception as error:  # The ledger is bookkeeping; it never fails a run.
         print(f"RUN LEDGER: not recorded: {error}")
-    print(json.dumps({"run_id": run_id, "journal": str(paths["journal"]), "speed": speed_status(adapter), **summary}))
-    return 1 if runner_error else 0
+    print(json.dumps({"run_id": run_id, "journal": str(paths["journal"]), **summary}))
+    return 0
 
 
 if __name__ == "__main__":

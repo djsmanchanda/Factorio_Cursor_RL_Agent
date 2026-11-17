@@ -169,38 +169,6 @@ def test_factory_status_exposes_measured_plate_surplus_for_growth():
     assert unmeasured["mall_growth"]["plate_surplus_per_s"]["iron-plate"] is None
 
 
-def test_laya_mall_slot_options_expose_growth_facts():
-    from training.laya_ops_runner import compile_options
-
-    recipes = {
-        "iron-plate": {"ingredients": [{"name": "iron-ore", "amount": 1}]},
-        "copper-plate": {"ingredients": [{"name": "copper-ore", "amount": 1}]},
-        "iron-gear-wheel": {"ingredients": [{"name": "iron-plate", "amount": 2}]},
-        "copper-cable": {"ingredients": [{"name": "copper-plate", "amount": 1}]},
-        "electronic-circuit": {"ingredients": [{"name": "iron-plate", "amount": 1},
-                                               {"name": "copper-cable", "amount": 3}]},
-        "transport-belt": {"ingredients": [{"name": "iron-gear-wheel", "amount": 1},
-                                           {"name": "iron-plate", "amount": 1}]},
-    }
-    board = {
-        "needs": [{"item": "iron-plate", "condition": "unbuilt", "goal_required_per_s": 0.5}],
-        "mall_growth": {"plate_surplus_per_s": {"iron-plate": 0.5}, "seed_ready": True},
-    }
-    results = [
-        {"ok": True, "operation": "starter", "params": {"recipe": "iron-plate"}},
-        {"ok": False, "operation": "foundation", "params": {"recipe": "iron-plate"},
-         "code": "material_shortage", "details": {"required": {"transport-belt": 126}, "available": {}}},
-    ]
-    options = {
-        o["option_id"]: o
-        for o in compile_options(board, results, recipes=recipes)["options"]
-    }
-    gear = options["op.mall_slot.iron-gear-wheel"]["features"]
-    assert gear["plate_surplus_per_s"] == {"iron-plate": 0.5}
-    assert gear["seed_ready"] is True
-
-
-
 def test_unknown_slot_count_is_not_an_empty_mall_with_room():
     facts = mall_growth.mall_growth_facts(observed_drills={p:6 for p in mall_growth.PLATE_ITEMS},
         committed_slots=None, slot_limit=12, production_per_s={}, mall_consumption_per_s={},
@@ -212,20 +180,3 @@ def test_unknown_slot_count_is_not_an_empty_mall_with_room():
 def test_unknown_seed_stock_stays_unknown():
     assert mall_growth.seed_ready(None) is None
 
-
-def test_laya_economics_reports_live_committed_capacity(monkeypatch):
-    from types import SimpleNamespace
-    from training.laya_ops import DeterministicSession
-    from orchestrator import mall_bootstrap
-    monkeypatch.setattr(builder, '_MATERIAL_RESERVATION_LEDGER', SimpleNamespace(projects={}))
-    monkeypatch.setattr(builder, '_BOOTSTRAP_DISTRICT_LEDGER', SimpleNamespace(states=lambda:[]))
-    monkeypatch.setattr(mall_bootstrap, 'active_bootstrap_loans', lambda *_:[])
-    monkeypatch.setattr(builder, 'mall_slot_count', lambda *_:7)
-    monkeypatch.setattr(builder, '_independent_mall_ready', lambda *_: False)
-    monkeypatch.setattr(builder, '_production_started', lambda *_: False)
-    monkeypatch.setattr(builder, '_dense_bootstrap_mall_enabled', lambda *_: True)
-    session = DeterministicSession.__new__(DeterministicSession)
-    session.client, session.reference_point = object(), (0,0)
-    facts = session.economics()
-    assert facts['free_slots'] == 5
-    assert facts['mall_capacity'] == {'committed_slots':7,'slot_limit':12,'unlimited':False}

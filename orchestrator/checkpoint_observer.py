@@ -15,7 +15,8 @@ import json
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 
-from orchestrator.checkpoint_milestones import FactorySnapshot
+from orchestrator.checkpoint_milestones import FactorySnapshot, ITEM_PRODUCTION_BASIS
+from tools.rcon_client import RconError
 from orchestrator import live_base
 from orchestrator.baseline_production import BASELINE_MACHINES
 from orchestrator.bootstrap_district import (
@@ -23,7 +24,6 @@ from orchestrator.bootstrap_district import (
 )
 from planners.bootstrap_smelting import direct_smelter_positions
 from planners.recipe_data import LINE_RECIPES
-from tools.rcon_client import RconError
 
 
 class ObservationUnsupported(RuntimeError):
@@ -202,7 +202,6 @@ class LiveCheckpointObservationAdapter:
         force: str = "player",
         reference_point: tuple[float, float] = (0.0, 0.0),
         bootstrap_profile: str = "reduced-v1",
-        startup_unavailable_reason: str | None = None,
     ) -> None:
         self.client = client
         self.bridge = bridge
@@ -210,7 +209,6 @@ class LiveCheckpointObservationAdapter:
         self.force = force
         self.reference_point = reference_point
         self.bootstrap_profile = bootstrap_profile
-        self.startup_unavailable_reason = startup_unavailable_reason
 
     def bind(self, client: Any, bridge: Any | None = None) -> "LiveCheckpointObservationAdapter":
         """Bind a runner's already-open read-only clients and return self."""
@@ -469,9 +467,6 @@ class LiveCheckpointObservationAdapter:
                 "healthy": all(self._status_healthy(status) is True for status in status_values),
                 "producing": any(status == "working" for status in status_values),
                 "output_count": int(sum(counters.get(position, 0.0) for position in furnace_positions)),
-                "machines": [{"position": {"x": position[0], "y": position[1]},
-                              "status": statuses.get(position), "craft_count": counters.get(position)}
-                             for position in furnace_positions],
             }
 
         mall: list[dict[str, Any]] = []
@@ -498,8 +493,6 @@ class LiveCheckpointObservationAdapter:
                 status = statuses.get(position)
                 mall.append({
                     "recipe": recipe,
-                    "position": {"x": position[0], "y": position[1]},
-                    "status": status,
                     "working": None if status is None else status == "working",
                     "healthy": self._status_healthy(status),
                     "producing": None if status is None else status == "working",
@@ -508,7 +501,7 @@ class LiveCheckpointObservationAdapter:
                     "status": status,
                 })
 
-        production: dict[str, dict[str, int]] = {}
+        production = self._item_production(client)
         try:
             available_items = live_base.available_items(
                 client, self.surface, self.force,
@@ -520,21 +513,6 @@ class LiveCheckpointObservationAdapter:
             ) from error
         providers: dict[str, dict[str, int]] = {}
         for item in ("plastic-bar", "advanced-circuit"):
-            spec = LINE_RECIPES.get(item)
-            line = None
-            if spec is not None:
-                try:
-                    line = live_base.find_line(
-                        client, self.surface, self.force, item, spec["machine"],
-                        include_ghosts=False,
-                    )
-                except Exception as error:
-                    raise ObservationUnsupported(
-                        f"production telemetry request failed for {item}: {type(error).__name__}: {error}",
-                        evidence={"adapter": type(self).__name__, "survey": "production", "item": item},
-                    ) from error
-            produced = int(line.produced_count) if line is not None else 0
-            production[item] = {"produced": produced}
             # Force production statistics are not provider delivery.  Keep
             # the structured inventory aggregate under its honest field name.
             provider_evidence: dict[str, int] = {
@@ -573,15 +551,91 @@ class LiveCheckpointObservationAdapter:
             "production": production,
             "providers": providers,
             "recipes": recipes,
-            "plastic_startup": self._plastic_startup(client),
             "science": self._science(client),
+            "ac_consumers": self._ac_consumers(client),
+            "plastic": self._plastic(client),
         }
-        try:
-            snapshot["tick_end"] = live_base.game_tick(client)
-        except Exception as error:
-            raise ObservationUnsupported(f"checkpoint ending tick unavailable: {error}",
-                                         evidence={"survey": "game_tick_end"}) from error
         return _normalize(snapshot, source="live-rcon-structured")
+
+    def _item_production(self, client: Any) -> dict[str, dict[str, Any]]:
+        """Item output totals, not the lifetime crafts of machines currently on an item's recipe."""
+        lua = (
+            f"local s=game.surfaces[{json.dumps(self.surface)}];local f=game.forces[{json.dumps(self.force)}];"
+            "local stats=f.get_item_production_statistics(s);local counts={};"
+            "for _,item in ipairs({'plastic-bar','advanced-circuit'}) do counts[item]=stats.get_input_count(item) end;"
+            "rcon.print(helpers.table_to_json({tick=game.tick,surface=s.index,force=f.index,counts=counts}))"
+        )
+        try:
+            result = json.loads(client.command("/sc " + lua))
+            if (not isinstance(result, dict)
+                    or any(type(result.get(key)) is not int or result[key] < (0 if key == "tick" else 1)
+                           for key in ("tick", "surface", "force"))
+                    or not isinstance(result.get("counts"), dict)
+                    or any(type(result["counts"].get(item)) is not int or result["counts"][item] < 0
+                           for item in ("plastic-bar", "advanced-circuit"))):
+                raise ValueError("invalid item counter response")
+        except (ValueError, TypeError, OSError, RconError) as error:
+            raise ObservationUnsupported(
+                f"item production survey failed: {type(error).__name__}",
+                evidence={"adapter": type(self).__name__, "survey": "item-production"},
+            ) from error
+        scope = json.dumps([self.surface, result["surface"], self.force, result["force"]], separators=(",", ":"))
+        return {item: {"produced": result["counts"][item], "counter_basis": ITEM_PRODUCTION_BASIS,
+                       "counter_scope": scope, "counter_generation": 0, "sample_tick": result["tick"]}
+                for item in ("plastic-bar", "advanced-circuit")}
+
+    def _plastic(self, client: Any) -> Any:
+        """Plastic telemetry for c5-v2 and c6a-v1 in one read; None when the read fails (both stay unknown).
+
+        ``produced`` is the force's plastic-bar production statistic (bars). ``capacity`` is the installed
+        plant capacity: plants on the plastic recipe x their crafting speed x bars per craft / recipe time
+        (productivity bonus not included). ``declared_target`` is the planned rate a runner recorded in
+        the game with ``declare_planned_rate``; absent when no runner declared one. ``consumers`` lists
+        every assembler whose current recipe takes plastic-bar (unit, recipe, products_finished).
+        """
+        lua = (
+            f"local s=game.surfaces[{json.dumps(self.surface)}];local f=game.forces[{json.dumps(self.force)}];"
+            "local o={consumers={}};o.produced=f.get_item_production_statistics(s).get_input_count('plastic-bar');"
+            "local r=f.recipes['plastic-bar'];local per=0;"
+            "if r then for _,p in pairs(r.products) do if p.name=='plastic-bar' then "
+            "per=per+(p.amount or ((p.amount_min+p.amount_max)/2))*(p.probability or 1) end end end;"
+            "local n=0;local speed=0;"
+            "for _,e in pairs(s.find_entities_filtered{force=f,type='assembling-machine'}) do "
+            "local q=e.get_recipe();if q then "
+            "if q.name=='plastic-bar' then n=n+1;speed=speed+e.crafting_speed end;"
+            "for _,i in pairs(q.ingredients) do if i.name=='plastic-bar' then "
+            "o.consumers[#o.consumers+1]={unit=e.unit_number,recipe=q.name,count=e.products_finished};break end end "
+            "end end;"
+            "o.capacity={machines=n,crafting_speed=speed,products_per_craft=per,energy=r and r.energy or nil};"
+            "local d=storage.laya_planned_rates and storage.laya_planned_rates['plastic-bar'];"
+            "if d then o.declared_target={rate=d.rate,tick=d.tick,source=d.source} end;"
+            "rcon.print(helpers.table_to_json(o))"
+        )
+        try:
+            result = json.loads(client.command("/sc " + lua))
+        except (ValueError, TypeError, OSError, RconError):
+            return None
+        return normalize_plastic(result)
+
+    def _ac_consumers(self, client: Any) -> Any:
+        """Every assembler whose current recipe takes advanced circuits: unit, recipe, products_finished.
+
+        One read for c6-v3. A failed read leaves the C6 consumer leg unknown, never failed.
+        """
+        lua = (
+            f"local s=game.surfaces[{json.dumps(self.surface)}];local f=game.forces[{json.dumps(self.force)}];local o={{}};"
+            "for _,e in pairs(s.find_entities_filtered{force=f,type='assembling-machine'}) do "
+            "local r=e.get_recipe();if r then for _,i in pairs(r.ingredients) do "
+            "if i.name=='advanced-circuit' then o[#o+1]={unit=e.unit_number,recipe=r.name,count=e.products_finished};break end "
+            "end end end;rcon.print(helpers.table_to_json(o))"
+        )
+        try:
+            result = json.loads(client.command("/sc " + lua))
+        except (ValueError, TypeError, OSError, RconError):
+            return None
+        if result == {}:  # Factorio encodes an empty Lua table as {}
+            return []
+        return result if isinstance(result, list) else None
 
     _SCIENCE_PACKS = ("automation-science-pack", "logistic-science-pack",
                       "chemical-science-pack", "production-science-pack")
@@ -617,39 +671,52 @@ class LiveCheckpointObservationAdapter:
             return {"unavailable_reason": "science_read_malformed"}
         return dict(result)
 
-    def _plastic_startup(self, client: Any, *, arm: bool = False) -> Mapping[str, Any] | None:
-        """Arm/read the bounded game-clock sampler for this logical episode.
 
-        Missing sampler evidence affects C5 alone. Observing an old freeze
-        cannot retroactively invent its startup rates.
-        """
-        if self.startup_unavailable_reason is not None:
-            return {"unavailable_reason": self.startup_unavailable_reason}
-        run_id = getattr(self.bridge, "episode_id", None)
-        if not run_id:
-            return None
-        args = ",".join(json.dumps(value) for value in
-                        (self.surface, self.force, "plastic-bar", run_id))
-        method = "production_startup_arm" if arm else "production_startup_read"
-        interface = json.dumps(getattr(self.bridge, "remote_interface", "factorio_cursor_rl_agent"))
-        command = (f'/sc if remote.interfaces[{interface}] and '
-                   f'remote.interfaces[{interface}].{method} then '
-                   f'local value=remote.call({interface},"{method}",'
-                   + args + '); if value==nil then rcon.print("null") '
-                   + 'else rcon.print(helpers.table_to_json(value)) end '
-                   + 'else rcon.print("null") end')
-        try:
-            result = json.loads(client.command(command))
-        except (ValueError, TypeError, OSError, RconError):
-            return None
-        if not isinstance(result, Mapping):
-            return None
-        if (result.get("surface"), result.get("force"), result.get("run_id")) != (self.surface, self.force, run_id):
-            return None
-        # Factorio encodes an empty Lua table as {}, not necessarily [].
-        if result.get("samples") == {}:
-            result["samples"] = []
-        return result
+def normalize_plastic(result: Any) -> dict[str, Any] | None:
+    """The collector's JSON with Lua's empty-table encoding and the derived capacity rate."""
+    if not isinstance(result, Mapping):
+        return None
+    out = dict(result)
+    consumers = out.get("consumers")
+    out["consumers"] = [] if consumers == {} else consumers if isinstance(consumers, list) else None
+    capacity = out.get("capacity")
+    if isinstance(capacity, Mapping):
+        capacity = dict(capacity)
+        speed, per, energy = (capacity.get(k) for k in ("crafting_speed", "products_per_craft", "energy"))
+        numbers = all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (speed, per, energy))
+        capacity["rate"] = round(speed * per / energy, 4) if numbers and energy > 0 else None
+        capacity["basis"] = "plants_x_crafting_speed_x_products_per_craft_per_recipe_seconds_no_productivity"
+        out["capacity"] = capacity
+    else:
+        out["capacity"] = None
+    out.setdefault("declared_target", None)
+    return out
+
+
+def declare_planned_rate(client: Any, item: str, rate: float, source: str) -> Mapping[str, Any] | None:
+    """Record a runner's planned production rate (items/s) for ``item`` in the game's script storage.
+
+    The one write in this module, and evidence only: it changes no entity. The strict observers read it
+    back with the game tick at which the declaration last changed, so the target a predicate compares
+    against is a declared, tick-stamped input rather than something the predicate invents. Re-declaring
+    an unchanged rate and source keeps the original tick. Returns the stored declaration, or None.
+    """
+    if (isinstance(rate, bool) or not isinstance(rate, (int, float)) or not rate > 0 or rate != rate
+            or rate == float("inf") or not isinstance(source, str) or not source):
+        raise ValueError("A positive finite rate and a source are required")
+    lua = (
+        "storage.laya_planned_rates=storage.laya_planned_rates or {};"
+        f"local item={json.dumps(item)};local rate={float(rate)!r};local source={json.dumps(source[:200])};"
+        "local o=storage.laya_planned_rates[item];"
+        "if not o or o.rate~=rate or o.source~=source then "
+        "storage.laya_planned_rates[item]={rate=rate,tick=game.tick,source=source} end;"
+        "rcon.print(helpers.table_to_json(storage.laya_planned_rates[item]))"
+    )
+    try:
+        result = json.loads(client.command("/sc " + lua))
+    except (ValueError, TypeError, OSError, RconError):
+        return None
+    return result if isinstance(result, Mapping) else None
 
 
 __all__ = [
@@ -661,4 +728,6 @@ __all__ = [
     "ObservationUnsupported",
     "StructuredObservation",
     "UnsupportedObservationAdapter",
+    "declare_planned_rate",
+    "normalize_plastic",
 ]

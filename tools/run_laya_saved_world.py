@@ -66,7 +66,8 @@ def prepare(args):
     for script in ("manage_linux_deterministic_server.sh", "factorio_runtime_config.sh"):
         shutil.copy2(ROOT / "scripts" / script, frozen / "scripts")
     # Both runtime mods are staged so the Laya server enables the identical mod
-    # set as every deterministic server; the Laya mod is the active namespace.
+    # set as every deterministic server. The Laya runner drives the deterministic
+    # namespace, so the staged Laya mod stays at its inactive default.
     for source_name, folder in [
         ("factorio_cursor_rl_agent", "factorio_mod"),
         ("factorio_laya_agent", "factorio_laya_agent"),
@@ -106,12 +107,6 @@ def prepare(args):
         return {"root": str(root), "status": "mall_host_prepared"}
     adapter = SavedWorldAdapter(root)
     try:
-        # Select the Laya runtime namespace in the save (runtime-global data
-        # setting, no reload): activate the Laya mod and deactivate the
-        # deterministic mod, then persist so a later restart keeps the choice.
-        adapter.bridge.command('/laya_activate_runtime')
-        adapter.bridge.command('/deactivate_runtime')
-        adapter.bridge.command('/server-save')
         adapter.bridge.command('/sc game.tick_paused=true; game.ticks_to_run=0; rcon.print("saved-world-paused")')
         facts = adapter.query()
         (root / "initial-state.json").write_text(json.dumps(facts, indent=2) + "\n")

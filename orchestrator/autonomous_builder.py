@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import time
 from collections.abc import Mapping, Sequence
@@ -12,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from orchestrator import extraction_state, live_base, resource_patches, stage_extraction
+from orchestrator import extraction_state, live_base, operation_facts, resource_patches, stage_extraction
 from orchestrator.build_decisions import (
     _heaviest_source,
     _mineable,
@@ -22,6 +23,9 @@ from orchestrator.build_decisions import (
     may_consume_stocked_inputs,
 )
 from orchestrator.bootstrap_work import BootstrapWorkLedger
+from orchestrator.loan_gate_retries import (
+    GateRetries, identity as gate_retry_identity, LIMIT as _LOAN_GATE_REFRESH_LIMIT,
+)
 from orchestrator.build_diagnostics import _diagnose_blockage, _side_sample_plate_output
 from orchestrator.bootstrap_district import (
     BootstrapDistrictLedger, BootstrapDistrictState, BootstrapLifecycleError,
@@ -85,6 +89,7 @@ from orchestrator.mall_bootstrap import (
     bootstrap_loan_facts,
     bootstrap_loan_plan,
     next_bootstrap_step,
+    preserve_bootstrap_step,
     promote_bootstrap_loan_plan,
     release_bootstrap_loan_plan,
     restore_bootstrap_loan_plan,
@@ -1693,7 +1698,10 @@ def _plate_expansion_foundation(
         raise StuckError(
             f"{recipe} refinery extension intersects real infrastructure at "
             f"{collision[:3]} ({', '.join(named)}); refusing to expand its mine ahead of that conflict",
-            details={"blockers": [{"entity": name, "position": [x, y], "tile": list(tile)}
+            code="managed_extension_infrastructure_conflict",
+            details={"first_validator_refusal": "occupied_infrastructure",
+                     "collision_tiles": [list(tile) for tile in collision[:3]],
+                     "blockers": [{"entity": name, "position": [x, y], "tile": list(tile)}
                                   for (name, x, y), tile in blockers.items()]},
         )
     water = sorted(footprint & live_base.water_tiles(client, surface, minimum, maximum))
@@ -2139,13 +2147,24 @@ def _assert_atomic_plate_expansion_affordable(
                 "target_furnaces": target_machines,
             },
         ) from error
-    foundation = _plate_expansion_foundation(
-        client, surface, force, recipe, smelter_delta,
-        own_action_positions=_planned_entity_positions(
-            smelter_delta,
-            *( [extraction.build_plan] if extraction.build_plan is not None else [] ),
-        ) | live_refinery_placements(client, surface, force, state),
-    )
+    try:
+        foundation = _plate_expansion_foundation(
+            client, surface, force, recipe, smelter_delta,
+            own_action_positions=_planned_entity_positions(
+                smelter_delta,
+                *( [extraction.build_plan] if extraction.build_plan is not None else [] ),
+            ) | live_refinery_placements(client, surface, force, state),
+        )
+    except StuckError as error:
+        if error.code == "managed_extension_infrastructure_conflict":
+            error.details["search_coverage"] = {
+                "scope": "standing_managed_refinery_delta",
+                "origin": list(state.origin), "variant": state.variant,
+                "vertical_mirror": state.vertical_mirror,
+                "current_furnaces": state.furnace_count,
+                "target_furnaces": target_machines, "candidates_tested": 1,
+            }
+        raise
     plans = [smelter_delta]
     if foundation is not None:
         plans.insert(0, foundation)
@@ -3393,9 +3412,12 @@ def build_mining_stage(
                 allow_unfunded_ghosts=earmark_unfunded,
             )
         except StuckError as error:
-            if "refinery extension intersects real infrastructure" not in str(error):
+            if (error.code != "managed_extension_infrastructure_conflict"
+                    and "refinery extension intersects real infrastructure" not in str(error)):
                 raise
-            raise ProductionPrerequisiteDeferred(str(error)) from error
+            raise ProductionPrerequisiteDeferred(
+                str(error), details={**error.details, "refusal_code": error.code},
+            ) from error
     if expand:
         _log_mining_expansion(extraction, emit)
     emit(
@@ -4100,6 +4122,7 @@ def _conversion_feed_plan(
     belt_type: str, flow_direction: str, emit: Callable[[str], None], *,
     allow_logistic_inputs: bool, max_belt_route_tiles: int | None,
     direct_sideload_feeds: Mapping[str, tuple[Point, str]] | None = None,
+    force_belt_inputs: bool = False,
 ) -> tuple[dict, dict, dict, bool]:
     """Decide how each ingredient reaches this line, and preflight the routes.
 
@@ -4112,9 +4135,13 @@ def _conversion_feed_plan(
     # drawing 0.30 copper-plate/s -- a tenth of what bots carry -- demanded a
     # 128-tile belt corridor, could not afford any belt tier, and killed the run.
     # allow_logistic_inputs still forces bots for callers that must avoid belts.
+    # force_belt_inputs is the chest-free contract: a permanent cell may not
+    # fall back to requester chests just because its throughput is small. C82's
+    # PM consumer needed 6-12 requesters (unproducible before logistic science)
+    # and never built.
     modes = {
         ingredient: (
-            "belt" if recipe == "steel-plate"
+            "belt" if force_belt_inputs or recipe == "steel-plate"
             else "logistic" if allow_logistic_inputs
             else _transport_mode(recipe, ingredient, machine_count)
         )
@@ -4565,6 +4592,55 @@ def _verified_iron_pioneer_output(
     return int(contents.get("iron-plate", 0)) > 0
 
 
+def _record_steel_seed_health(client, surface, force, path, plan, phase, *, reused):
+    if not operation_facts.enabled():
+        return
+    evidence = {"phase": phase, "project_id": "conversion_steel-plate", "reused": reused,
+                "plan_path": str(path)}
+    try:
+        evidence["plan_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        evidence["observation"] = live_base.plan_entity_health(client, surface, force, plan)
+    except Exception as error:  # A diagnostic read never selects a remedy or hides the operation's outcome.
+        evidence["unknown"] = f"{type(error).__name__}: {error}"
+    operation_facts.record("owned_steel_seed_health", **evidence)
+
+
+def _recover_steel_seed_source(client, bridge, surface, force, path, plan, provider, state, emit):
+    from orchestrator.steel_seed_recovery import (
+        prepare_seed_refeed, save_seed, note_seed_refeed_submission, SteelSeedRecoveryWait,
+    )
+    from planners.steel_bootstrap import steel_seed_through_handoff
+    reserved = {tile for tiles in getattr(state, "reservations", {}).values() for tile in tiles}
+    try:
+        record = prepare_seed_refeed(client, surface, force, plan, provider, reserved_tiles=reserved)
+    except (SteelSeedRecoveryWait, ValueError) as error:
+        raise ProductionPrerequisiteDeferred(str(error), code="steel_seed_source_wait", state="supply_wait") from error
+    if record is None:
+        return
+    # Persist the selected complete route before affordability/coverage can
+    # yield. The existing seed sidecar already travels with restart bundles.
+    save_seed(path, plan)
+    repair = record["plan"]
+    emit("STEEL SEED SOURCE RECOVERY: reusing the owned furnace/provider with an additive iron belt feed")
+    _submit(client, bridge, surface, repair, "steel_seed_refeed", emit,
+        stage_coverage=lambda: _ensure_plan_construction_coverage(
+            client, bridge, surface, force, repair, emit,
+            reserved_tiles=planned_footprint_tiles(plan) | planned_footprint_tiles(repair)),
+        reservation_priority=_STEEL_STARTER_RESERVATION_PRIORITY, require_funded=True)
+    try:
+        note_seed_refeed_submission(client, surface, force, plan)
+        save_seed(path, plan)
+    except (SteelSeedRecoveryWait, ValueError) as error:
+        raise ProductionPrerequisiteDeferred(str(error), code="steel_seed_source_wait", state="supply_wait") from error
+    source = record["source"]
+    through = steel_seed_through_handoff((source["position"]["x"], source["position"]["y"]), source["direction"])
+    pickup = repair["phases"][0]["actions"][0]["position"]
+    if not extend_power(client, bridge, surface, force, (pickup["x"], pickup["y"]), emit,
+        reserved_tiles=planned_footprint_tiles(plan) | planned_footprint_tiles(repair) | through):
+        raise ProductionPrerequisiteDeferred("steel seed side pickup waits for power",
+            code="steel_seed_source_power_wait", state="power_wait")
+
+
 def _build_compact_steel_seed(client, bridge, surface, force, provider, reference_point, emit):
     """Fund and remember a belt-side seed, falling back to direct mining."""
     from planners.steel_bootstrap import steel_seed, VECTORS
@@ -4607,7 +4683,8 @@ def _build_compact_steel_seed(client, bridge, surface, force, provider, referenc
         ledger, _transferable_or_available_stock(client, surface, force), emit,
     )
     path = ledger.path.with_suffix(".steel-seed.json")
-    if path.exists():
+    reused = path.exists()
+    if reused:
         plan = json.loads(path.read_text())
     else:
         x, y = provider
@@ -4656,6 +4733,9 @@ def _build_compact_steel_seed(client, bridge, surface, force, provider, referenc
         assert_affordable(client, surface, force, plan, steel_project, emit, reserve_project=True,
                           reservation_priority=_STEEL_STARTER_RESERVATION_PRIORITY)
         path.write_text(json.dumps(plan, sort_keys=True))
+    if reused:
+        _recover_steel_seed_source(client, bridge, surface, force, path, plan, provider, state, emit)
+    _record_steel_seed_health(client, surface, force, path, plan, "before_submit", reused=reused)
     _submit(client, bridge, surface, plan, steel_project, emit,
             stage_coverage=lambda: _ensure_plan_construction_coverage(
                 client, bridge, surface, force, plan, emit,
@@ -4673,6 +4753,14 @@ def _build_compact_steel_seed(client, bridge, surface, force, provider, referenc
         _ensure_power_anchor_on_generated_network(client, bridge, surface, force, pole,
                                                   "compact steel seed", emit)
     stuck = _diagnose_machines(client, surface, furnaces, emit, bridge=bridge, force=force, grace_seconds=60)
+    _record_steel_seed_health(client, surface, force, path, plan, "after_diagnosis", reused=reused)
+    if "source_recovery" in plan:
+        from orchestrator.steel_seed_recovery import save_seed, observe_seed_refeed, SteelSeedRecoveryWait
+        try:
+            observe_seed_refeed(client, surface, force, plan)
+        except (SteelSeedRecoveryWait, ValueError) as error:
+            raise ProductionPrerequisiteDeferred(str(error), code="steel_seed_source_wait", state="supply_wait") from error
+        save_seed(path, plan)
     if stuck:
         raise ProductionPrerequisiteDeferred(str(stuck), code="steel_seed_output_wait", state="producing")
     return output
@@ -4944,10 +5032,13 @@ def build_conversion_stage(
     ingredient_sources: dict[str, Point], reference_point: Point, emit: Callable[[str], None],
     *, placement_origin: Point | None = None,
     machine_count: int = _DEFAULT_MACHINE_COUNT,
+    zero_provider: bool = False,
     max_belt_route_tiles: int | None = None,
     belt_type: str = _DEFAULT_BELT,
     inserter_type: str | None = None,
     allow_logistic_inputs: bool = False,
+    terminal_provider_only: bool = False,
+    force_belt_inputs: bool = False,
     flow_direction: str = "east",
     side_tap_output: bool = False,
     direct_sideload_ingredients: frozenset[str] = frozenset(),
@@ -5022,12 +5113,16 @@ def build_conversion_stage(
             )
         elif power_anchor == "substation":
             emit("  STEEL STARTER POWER: using the stocked substation; no new pole recipe required")
-    _publish_output_chest(plan)
+    _publish_output_chest(
+        plan,
+        limit=0 if zero_provider else (1 if terminal_provider_only else None),
+    )
     modes, feed_positions, preflighted, direct_belt_input = _conversion_feed_plan(
         client, bridge, surface, force, recipe, plan, ingredient_sources,
         machine_count, belt_type, flow_direction, emit,
         allow_logistic_inputs=allow_logistic_inputs,
         max_belt_route_tiles=max_belt_route_tiles,
+        force_belt_inputs=force_belt_inputs,
         direct_sideload_feeds=direct_sideload_feeds,
     )
     machine = LINE_RECIPES[recipe]["machine"]
@@ -5222,6 +5317,12 @@ def _plan_line(
         ),
     )
     demand = live_intermediate_demand(client, surface, force, item)
+    if demand is None:
+        raise ProductionPrerequisiteDeferred(
+            f'{item} consumer demand needs effective crafting-speed observation',
+            code='consumer_demand_unknown', state='supply_wait',
+            details={'item': item, 'reason': 'working_consumer_speed_unknown'},
+        )
     # Every machine busy means this cell cannot go faster, whatever measured
     # demand says -- and measured demand is unreliable here precisely because
     # the consumers this item starves are the ones that would report it.
@@ -6216,11 +6317,15 @@ _DYNAMIC_BELT_BORROWERS = frozenset({"copper-cable"})
 _BOOTSTRAP_LOAN_PROGRESS_REVISION = 0
 # Configuration changes require re-observation even when they do not prove output.
 _BOOTSTRAP_LOAN_CONFIGURATION_REVISION = 0
-#: Consecutive gate refreshes per loan step without craft progress. A
-#: bill-frozen gate refreshes and continues; only a step that ignores
-#: repeated refreshes raises mall_loan_gate_mismatch.
-_LOAN_GATE_REFRESH_ATTEMPTS: dict[tuple[str, str, int], int] = {}
-_LOAN_GATE_REFRESH_LIMIT = 3
+
+
+def _loan_gate_retry_store(bridge, surface, force):
+    """Reopen the episode-owned budget; process initialization cannot replenish it."""
+    if not getattr(bridge, 'episode_id', None) or not getattr(bridge, 'script_output', None):
+        return None  # Unscoped callers cannot establish a restart-safe repair budget.
+    return GateRetries(bridge.script_output, bridge.episode_id, surface, force)
+
+
 _BOOTSTRAP_SHARED_PROVIDER_ITEMS: set[str] = set()
 _MALL_REFRESH_SIGNATURES: set[tuple[object, ...]] = set()
 _MALL_PROVIDER_CAPACITY_FLOORS: dict[tuple[str, str, str, Point], int] = {}
@@ -6355,22 +6460,93 @@ def _bootstrap_loan_stock(
     return actual, usable
 
 
-def _loan_step_cell_fed(
+@dataclass(frozen=True)
+class LoanInputEvidence:
+    """Independent observations; None means the API did not establish a fact."""
+
+    global_stock: Mapping[str, int] | None
+    allocatable_stock: Mapping[str, int] | None
+    requester: Mapping[str, int] | None
+    local_inputs: Mapping[str, int] | None
+    incoming: Mapping[str, int] | None
+    electrical_network_id: int | None
+    logistic_network_id: int | None
+    power: bool | None
+    recipe: str | None
+    gate: Mapping[str, object] | None
+    crafts: int | None
+    fed: bool | None
+
+
+def _loan_input_evidence(
+    client, surface, force, loan, step, crafts=None,
+) -> LoanInputEvidence:
+    try:
+        spec = LINE_RECIPES[step.recipe]
+        needs = dict(zip(spec["ingredients"], spec["amounts"], strict=True))
+        if not needs:
+            needs = None
+    except (KeyError, TypeError, ValueError):
+        needs = None
+    try:
+        global_stock, allocatable = _bootstrap_loan_stock(client, surface, force, loan.target_item)
+    except Exception:
+        global_stock = allocatable = None
+    try:
+        requester = live_base.chest_contents(client, surface, loan.requester_position)
+    except Exception:
+        requester = None
+    try:
+        local = {item: live_base.loan_cell_item_count(
+            client, surface, loan.requester_position, loan.machine_position, item,
+        ) for item in needs} if needs else None
+    except Exception:
+        local = None
+    try:
+        electrical = live_base.pole_network_id(client, surface, loan.requester_position)
+    except Exception:
+        electrical = None
+    try:
+        rows = live_base.mall_gate_survey(client, surface, force)
+        row = next(row for row in rows if tuple(row.get("position", ())) == tuple(loan.machine_position))
+        recipe = row.get("recipe")
+        gate = row.get("gate") if row.get("circuit_enabled") is False else None
+    except Exception:
+        recipe = gate = None
+    fed = (all(local.get(item, 0) >= amount for item, amount in needs.items())
+           if local is not None and needs else None)
+    return LoanInputEvidence(global_stock, allocatable, requester, local, None,
+                             electrical, None, None, recipe, gate, crafts, fed)
+
+
+def _loan_step_cell_fed(client, surface, force, loan, step) -> bool | None:
+    """Whether one craft is physically in the cell, independently of source stock."""
+    return _loan_input_evidence(client, surface, force, loan, step).fed
+
+
+def _loan_machine_status(client, surface, position) -> str | None:
+    """Keep failed or unsupported status reads distinct from a resumed cell."""
+    try:
+        status = live_base.entity_status_name(client, surface, position)
+    except Exception:
+        return None
+    if not isinstance(status, str) or not status or status.startswith("unknown_status_"):
+        return None
+    return status
+
+
+def _loan_step_requester_unreachable(
     client: RconClient, surface: str, force: str,
     loan: MallBootstrapLoan, step,
 ) -> bool:
-    """Whether the stalled loan cell could run one craft right now.
+    """Whether the loan cell's own requester is short and its network cannot feed it.
 
-    A disabled gate with deliverable ingredients is configuration drift (or
-    a genuine stall); a disabled gate with nothing deliverable is supply
-    starvation, and re-applying the gate cannot help (2026-09-11: an AM2
-    loan's e-circuit step sat disabled through 3 refreshes with cable net
-    4, requester 0, crafts 0/2, on the same cell/shape as the 2026-09-03
-    and 2026-09-04 gate_mismatch terminals). Spendable transferable stock
-    plus what already sits in the cell's requester is the honest scope:
-    available stock includes requester/buffer WIP locked inside other
-    consumers. Unknown telemetry fails open to the legacy counting path
-    so dry harnesses keep their behavior.
+    C92/C4 replay: the requester held 0 plastic/cable/circuits while the base
+    held 1,693 cable and 74 circuits, and ``network_item_count`` at the
+    requester read none. Spendable stock elsewhere is not deliverable there;
+    the gate-refresh loop then raised mall_loan_gate_mismatch. This predicate
+    names that state so the caller can use the existing cell delivery instead
+    of counting a configuration refresh that cannot help.
     """
     try:
         spec = LINE_RECIPES.get(step.recipe, {})
@@ -6382,28 +6558,25 @@ def _loan_step_cell_fed(
             )
         ]
     except Exception:
-        return True
+        return False
     if not needs:
-        return True
+        return False
     try:
-        spendable = live_base.transferable_items(client, surface, force)
+        held = live_base.chest_contents(client, surface, loan.requester_position)
     except Exception:
-        return True
-    try:
-        held = live_base.chest_contents(
-            client, surface, loan.requester_position,
-        )
-    except Exception:
-        held = {}
-    for item, amount in needs:
+        return False
+    short = [(item, amount) for item, amount in needs if float(held.get(item, 0)) < amount]
+    if not short:
+        return False
+    for item, _amount in short:
         try:
-            if (
-                float(spendable.get(item, 0)) + float(held.get(item, 0))
-                < float(amount)
-            ):
-                return False
+            local = live_base.network_item_count(
+                client, surface, force, loan.requester_position, item,
+            )
         except Exception:
-            return True
+            return False
+        if local is not None and local > 0:
+            return False
     return True
 
 
@@ -6710,15 +6883,10 @@ def _emit_loan_cell_telemetry(
             f"@({holder.machine_position[0]:.1f},{holder.machine_position[1]:.1f})"
             for holder in loans
         ) or "-"
-        # Run 3 (2026-09-18) froze 100 passes with transferable=18 circuits
-        # beside a loan whose requester held 0: the verdict telemetry named
-        # the item but could not say whether the units were reachable in the
-        # requester's own logistic network or live beyond a coverage gap --
-        # the two live mechanisms that both end in bots never delivering.
-        # Counting the same ingredient network-wide AT the requester turns
-        # that ambiguity into one number: network>0 means a bot-delivery
-        # fault, network==0 means a coverage/segmentation fault.
+        # Reachable item counts and electrical identity are distinct facts;
+        # neither identifies assigned cargo or proves requester receipt.
         far = "?"
+        near_network = "?"
         if probe != "-":
             try:
                 network_count = live_base.network_item_count(
@@ -6726,8 +6894,14 @@ def _emit_loan_cell_telemetry(
                 )
             except Exception:  # noqa: BLE001 -- diagnostic only
                 network_count = None
-            if network_count is not None:
-                far = f"{probe}={network_count}"
+            far = f"{probe}=?" if network_count is None else f"{probe}={network_count}"
+            try:
+                network_id = live_base.pole_network_id(
+                    client, surface, loan.requester_position,
+                )
+            except Exception:  # noqa: BLE001 -- diagnostic only
+                network_id = None
+            near_network = "unknown" if network_id is None else str(network_id)
         emit(
             f"  LOAN CELL TELEMETRY: {step.recipe} at {loan.machine_position} "
             f"bill {int(actual.get(loan.target_item, 0))}/{loan.target_count}"
@@ -6738,9 +6912,56 @@ def _emit_loan_cell_telemetry(
             f"| pool {pool} free | loans {table}"
             + (f" | starved {starved}" if missing == "-" and starved != "-" else "")
             + (f" | reachable {far}" if far != "?" else "")
+            + (f" | electrical_network {near_network}" if near_network != "?" else "")
         )
     except Exception as error:
         emit(f"  LOAN CELL TELEMETRY skipped: {error}")
+
+
+def _bootstrap_loan_step_decision(loan, actual, usable, products_finished):
+    """Pure proposed step before live preemption, admission and release guards.
+
+    Execution and previews share the same stock/credit/persisted-step calculation.
+    The result grants no allocation, configuration or release authority.
+    """
+    minimum_fulfilled = _bootstrap_loan_minimum_fulfilled(
+        loan, actual, products_finished,
+    )
+    completed_prerequisite = bool(
+        loan.step_recipe is not None
+        and loan.step_recipe != loan.target_item
+        and (
+            (
+                loan.step_baseline_finished is not None
+                and loan.step_required_crafts is not None
+                and products_finished is not None
+                and products_finished - loan.step_baseline_finished
+                >= loan.step_required_crafts
+            )
+            or (
+                loan.step_target_count is not None
+                and int(actual.get(loan.step_recipe, 0)) >= loan.step_target_count
+            )
+        )
+    )
+    if completed_prerequisite:
+        persisted = _bootstrap_loan_persisted_step(loan, actual)
+        assert persisted is not None
+        loan = loan.credit_completed_step(
+            persisted.recipe, persisted.target_count,
+        )
+    planning_actual, planning_usable = _bootstrap_loan_credited_stock(
+        loan, actual, usable,
+    )
+    planning_target = (
+        loan.production_target if minimum_fulfilled else loan.target_count
+    )
+    step = next_bootstrap_step(
+        loan.target_item, planning_target, planning_usable, planning_actual,
+    )
+    persisted = _bootstrap_loan_persisted_step(loan, actual) if loan.step_recipe is not None else None
+    step = preserve_bootstrap_step(step, persisted, completed=completed_prerequisite)
+    return loan, minimum_fulfilled, completed_prerequisite, planning_target, step
 
 
 def _submit_bootstrap_loan(
@@ -6755,6 +6976,7 @@ def _submit_bootstrap_loan(
     count is stocked, skipping spare production: nothing else asks for more.
     """
     global _BOOTSTRAP_LOAN_PROGRESS_REVISION, _BOOTSTRAP_LOAN_CONFIGURATION_REVISION
+    gate_retries = _loan_gate_retry_store(bridge, surface, force)
     if loan.releasing:
         _restore_bootstrap_loan(client, bridge, surface, force, loan, emit,
                                 reason="finish pending WIP recovery", reference_point=reference_point)
@@ -6804,32 +7026,12 @@ def _submit_bootstrap_loan(
         _bootstrap_loan_products_finished(client, surface, loan)
         if loan.step_recipe is not None else None
     )
-    minimum_fulfilled = _bootstrap_loan_minimum_fulfilled(
-        loan, actual, products_finished,
-    )
-    completed_prerequisite = bool(
-        loan.step_recipe is not None
-        and loan.step_recipe != loan.target_item
-        and (
-            (
-                loan.step_baseline_finished is not None
-                and loan.step_required_crafts is not None
-                and products_finished is not None
-                and products_finished - loan.step_baseline_finished
-                >= loan.step_required_crafts
-            )
-            or (
-                loan.step_target_count is not None
-                and int(actual.get(loan.step_recipe, 0)) >= loan.step_target_count
-            )
-        )
+    loan, minimum_fulfilled, completed_prerequisite, planning_target, step = _bootstrap_loan_step_decision(
+        loan, actual, usable, products_finished,
     )
     if completed_prerequisite:
         persisted = _bootstrap_loan_persisted_step(loan, actual)
         assert persisted is not None
-        loan = loan.credit_completed_step(
-            persisted.recipe, persisted.target_count,
-        )
         crafts_done = (
             products_finished - loan.step_baseline_finished
             if products_finished is not None and loan.step_baseline_finished is not None
@@ -6840,23 +7042,6 @@ def _submit_bootstrap_loan(
             f"target {persisted.target_count} reached ({crafts_done} crafted); "
             "advancing the durable loan"
         )
-    planning_actual, planning_usable = _bootstrap_loan_credited_stock(
-        loan, actual, usable,
-    )
-    planning_target = (
-        loan.production_target if minimum_fulfilled else loan.target_count
-    )
-    step = next_bootstrap_step(
-        loan.target_item, planning_target, planning_usable, planning_actual,
-    )
-    if not completed_prerequisite and loan.step_recipe is not None:
-        persisted = _bootstrap_loan_persisted_step(loan, actual)
-        if (
-            persisted is not None
-            and step is not None
-            and step.recipe != loan.step_recipe
-        ):
-            step = persisted
     if step is not None and products_finished is None:
         products_finished = _bootstrap_loan_products_finished(
             client, surface, loan,
@@ -7097,13 +7282,8 @@ def _submit_bootstrap_loan(
     # time, while the loan's ambition advances to the spare ceiling without
     # reconfiguring (2026-09-03 drill stall: gate stayed at the bill of 6
     # while the step grew to 8, so the machine disabled at 6 and the loan
-    # died on gate_mismatch). A drifted gate is configuration, not progress:
-    # resubmit so the gate follows the step.
-    gate_refresh_needed = bool(
-        step is not None
-        and loan.step_target_count is not None
-        and step.target_count != loan.step_target_count
-    )
+    # died on gate_mismatch). A changed target alone does not prove drift;
+    # below, observe a disabled, fed cell's gate before spending a refresh.
     if (
         loan.current_recipe != step.recipe
         or loan.step_recipe != step.recipe
@@ -7111,7 +7291,6 @@ def _submit_bootstrap_loan(
         or loan.step_required_crafts is None
         or starting_spare_phase
         or completed_prerequisite
-        or gate_refresh_needed
     ):
         if products_finished is None:
             raise StuckError(
@@ -7135,6 +7314,8 @@ def _submit_bootstrap_loan(
             ),
         )
         plan["surface"], plan["force"] = surface, force
+        if gate_retries is not None:
+            gate_retries.start(gate_retry_identity(loan, step), products_finished, proposed=loan.proposed)
         _submit(
             client, bridge, surface, plan,
             f"bootstrap_loan_{loan.target_item}", emit,
@@ -7166,18 +7347,36 @@ def _submit_bootstrap_loan(
             loan.machine_position, emit,
             loan.requester_position,
         )
+        try:
+            before_tick = live_base.game_tick(client)
+        except Exception:
+            before_tick = None
         consume_wait(f"bootstrap_loan_{loan.target_item}")
         time.sleep(_BOOTSTRAP_LOAN_POLL_SECONDS)
         after = _bootstrap_loan_products_finished(client, surface, loan)
+        try:
+            after_tick = live_base.game_tick(client)
+        except Exception:
+            after_tick = None
+        refresh_key = gate_retry_identity(loan, step)
+        retry_observation = gate_retries is not None and gate_retries.observe(
+            refresh_key, products_finished, after, before_tick, after_tick)
         if after is not None and products_finished is not None and after > products_finished:
+            if gate_retries is not None and not retry_observation:
+                emit(f"  MALL BOOTSTRAP LOAN OBSERVATION WAIT: {step.recipe} "
+                     "craft or clock evidence regressed behind the durable observation")
+                return f"borrowed {loan.original_recipe} cell waits for {step.recipe} observation"
             _BOOTSTRAP_LOAN_PROGRESS_REVISION += 1
             emit(
                 f"  MALL BOOTSTRAP LOAN PROGRESS: {step.recipe} craft count "
                 f"advanced {products_finished} -> {after}"
             )
-        elif live_base.entity_status_name(
+        elif (status := _loan_machine_status(
             client, surface, loan.machine_position,
-        ) == "disabled_by_control_behavior":
+        )) is None:
+            emit(f"  MALL BOOTSTRAP LOAN OBSERVATION WAIT: {step.recipe} status unknown")
+            return f"borrowed {loan.original_recipe} cell waits for {step.recipe} observation"
+        elif status == "disabled_by_control_behavior":
             # Re-read after the bounded poll. The machine may have reached its
             # gate during the sleep, and prerequisite steps gate their own
             # recipe rather than the loan's final target item.
@@ -7190,23 +7389,19 @@ def _submit_bootstrap_loan(
                 # the batch, so a stale disabled reading must not end the run
                 # on its own: re-read once, and only fail a still-disabled
                 # machine that is still short.
-                try:
-                    still_disabled = (
-                        live_base.entity_status_name(
-                            client, surface, loan.machine_position,
-                        ) == "disabled_by_control_behavior"
-                    )
-                except Exception:
-                    still_disabled = True
-                if not still_disabled:
+                confirmed_status = _loan_machine_status(client, surface, loan.machine_position)
+                if confirmed_status is None:
+                    emit(f"  MALL BOOTSTRAP LOAN OBSERVATION WAIT: {step.recipe} status unknown")
+                    return f"borrowed {loan.original_recipe} cell waits for {step.recipe} observation"
+                if confirmed_status != "disabled_by_control_behavior":
                     emit(
-                        f"  MALL BOOTSTRAP LOAN RESUMED: {step.recipe} at "
-                        f"{loan.machine_position} re-enabled after stock "
-                        f"moved; continuing toward {step.target_count}"
+                        f"  MALL BOOTSTRAP LOAN STATUS CHANGED: {step.recipe} at "
+                        f"{loan.machine_position} is {confirmed_status}; "
+                        f"waiting for crafts toward {step.target_count}"
                     )
                     return (
-                        f"borrowed {loan.original_recipe} cell is producing "
-                        f"temporary {step.recipe} for the {loan.target_item} seed"
+                        f"borrowed {loan.original_recipe} cell waits for "
+                        f"{step.recipe} production for the {loan.target_item} seed"
                     )
                 # A bill-frozen gate is configuration drift, not a bug: the
                 # step target advanced but the machine still carries the old
@@ -7223,25 +7418,31 @@ def _submit_bootstrap_loan(
                 # requester 0, crafts 0/2). Wait for supply without consuming
                 # refresh budget; only a fed cell that ignores refreshes is
                 # genuinely stuck.
-                if not _loan_step_cell_fed(client, surface, force, loan, step):
-                    emit(
-                        f"  MALL BOOTSTRAP LOAN SUPPLY WAIT: {step.recipe} "
-                        f"at {loan.machine_position} is disabled below "
-                        f"{step.target_count} with no deliverable "
-                        "ingredients; yielding to mall production without "
-                        "consuming gate-refresh budget"
-                    )
-                    return (
-                        f"borrowed {loan.original_recipe} cell waits for "
-                        f"{step.recipe} ingredients for the "
-                        f"{loan.target_item} seed"
-                    )
-                refresh_key = (
-                    live_loan_group, step.recipe, step.target_count,
-                )
-                attempts = _LOAN_GATE_REFRESH_ATTEMPTS.get(refresh_key, 0) + 1
-                _LOAN_GATE_REFRESH_ATTEMPTS[refresh_key] = attempts
-                if attempts > _LOAN_GATE_REFRESH_LIMIT:
+                evidence = _loan_input_evidence(client, surface, force, loan, step, after)
+                # A source transfer is only a possible route, not delivery. A
+                # delayed or unobservable cell must retain its obligation.
+                if evidence.fed is not True:
+                    emit(f"  MALL BOOTSTRAP LOAN SUPPLY WAIT: {step.recipe} "
+                         f"local inputs {'short' if evidence.fed is False else 'unknown'}")
+                    return (f"borrowed {loan.original_recipe} cell waits for "
+                            f"{step.recipe} ingredients for the {loan.target_item} seed")
+                gate = evidence.gate
+                constant = gate.get("constant") if isinstance(gate, Mapping) else None
+                mismatch = (evidence.recipe == step.recipe and isinstance(gate, Mapping)
+                            and gate.get("signal") == step.recipe
+                            and gate.get("comparator") == "<"
+                            and type(constant) in (int, float)
+                            and -(2 ** 31) <= constant < 2 ** 31
+                            and constant == int(constant)
+                            and constant != step.target_count)
+                if not retry_observation or not mismatch:
+                    emit(f"  MALL BOOTSTRAP LOAN OBSERVATION WAIT: {step.recipe} "
+                         "requires a known durable budget, advancing time, monotonic crafts and known mismatched control readback")
+                    return f"borrowed {loan.original_recipe} cell waits for {step.recipe} observation"
+                attempts = gate_retries.charge(refresh_key, after_tick)
+                if attempts is None:
+                    return f"borrowed {loan.original_recipe} cell waits for {step.recipe} observation"
+                if attempts == 0:
                     raise StuckError(
                         f"bootstrap loan step {step.recipe} is disabled below "
                         f"its stock target {step.target_count} after "
@@ -7382,6 +7583,7 @@ def _borrow_free_mall_cell(
     reference_point: Point, *, allowed_original_recipes: frozenset[str] | None,
     allow_shared_provider: bool, require_stocked_original: bool,
     excluded_origins: set[tuple[float, float]],
+    observations: list[dict] | None = None,
 ) -> tuple[str, Point, tuple[int, int], str, str] | None:
     """Find one borrowable cell outside every active loan's own cell.
 
@@ -7407,12 +7609,17 @@ def _borrow_free_mall_cell(
         recipe,
     ))
     candidates: list[tuple[int, int, int, str, Point, tuple[int, int], str]] = []
+    def note(recipe, reason, position=None):
+        if observations is not None:
+            observations.append({'recipe': recipe, 'reason': reason,
+                                 'position': list(position) if position is not None else None})
     for original_recipe in recipes:
         if original_recipe in CORE_MALL_PRODUCERS:
             # Once a core-mall recipe owns a cell, that cell is reserved for
             # self-sufficiency.  Borrowing it can convert the only permanent
             # assembler-2/fast-inserter/etc. producer back into an unrelated
             # temporary recipe and recreate the bootstrap deadlock.
+            note(original_recipe, 'protected_core_producer')
             continue
         spec = LINE_RECIPES.get(original_recipe)
         if spec is None:
@@ -7435,6 +7642,7 @@ def _borrow_free_mall_cell(
         if line is None:
             continue
         if require_stocked_original and stock.get(original_recipe, 0) < 1:
+            note(original_recipe, 'original_stock_missing')
             continue
         anchor_minimum = _MALL_RECIPE_ANCHORS.get(original_recipe, 0)
         if original_recipe in _recipe_ingredient_closure(target_item):
@@ -7447,15 +7655,18 @@ def _borrow_free_mall_cell(
             # Counts are real machines only: borrowing the sole working cell
             # while an unbuilt ghost poses as its duplicate strands the
             # recipe (2026-09-04 cable collapse).
+            note(original_recipe, 'protected_anchor_or_ingredient_producer')
             continue
         for machine_position in reversed(line.machine_positions):
             located = locate_mall_cell(machine_position, reference_point)
             if located is None:
+                note(original_recipe, 'outside_owned_mall', machine_position)
                 continue
             origin, side = located
             if origin in excluded_origins:
                 # This cell already hosts a concurrent loan on its shared
                 # provider; borrowing its other half would mix products.
+                note(original_recipe, 'active_loan_origin', machine_position)
                 continue
             if not allow_shared_provider and mall_slot_uses_shared_provider(
                 client, surface, machine_position, reference_point,
@@ -7478,6 +7689,7 @@ def _borrow_free_mall_cell(
                 not machine or machine["name"] not in live_base.ASSEMBLER_TIERS
                 or not requester or requester["name"] != "requester-chest"
             ):
+                note(original_recipe, 'machine_or_requester_missing', machine_position)
                 continue
             provider_position = (
                 origin[0] + 4.5,
@@ -7490,6 +7702,7 @@ def _borrow_free_mall_cell(
                 # shared-provider cell) would die later at submit time with
                 # configure_target_missing (2026-09-04: ended a run), so
                 # only complete halves are borrowable.
+                note(original_recipe, 'provider_missing', machine_position)
                 continue
             # Prefer an actually spare duplicate. Non-anchor recipes may still
             # lend a stocked sole producer; anchor recipes were filtered above.
@@ -7499,13 +7712,14 @@ def _borrow_free_mall_cell(
                 shared_rank, spare_rank, stock_rank, original_recipe,
                 machine_position, origin, side,
             ))
+            note(original_recipe, 'eligible_lender', machine_position)
     if not candidates:
         if allowed_original_recipes is not None or not hasattr(client, "command"):
             # A caller naming its lender recipes wants that cell; offline fixtures have no vacancy survey.
             return None
         # Shared-provider halves stay eligible, as they do for configured lenders (ranked, not excluded).
         return _vacant_mall_half(client, surface, force, target_item, reference_point,
-                                 excluded_origins=excluded_origins)
+                                 excluded_origins=excluded_origins, observations=observations)
     (_shared, _spare, _stocked, original_recipe, machine_position, origin,
      side) = min(candidates)
     machine_entity = live_base.entity_at(client, surface, machine_position)
@@ -7520,6 +7734,7 @@ def _borrow_free_mall_cell(
 def _vacant_mall_half(
     client: RconClient, surface: str, force: str, target_item: str, reference_point: Point, *,
     excluded_origins: set[tuple[float, float]],
+    observations: list[dict] | None = None,
 ) -> tuple[str, Point, tuple[int, int], str, str] | None:
     """A complete owned mall half whose finite batch was released (recipe cleared, its requests gone).
 
@@ -7536,6 +7751,9 @@ def _vacant_mall_half(
         name = unset.get(tuple(position))
         if name is None:
             continue
+        fact = {'recipe': None, 'position': list(position), 'reason': 'support_missing'}
+        if observations is not None:
+            observations.append(fact)
         requester_position = (origin[0] + 4.5, origin[1] + 1.5)
         provider_position = (origin[0] + 4.5, origin[1] + 1.5 + (-1.0 if side == "left" else 1.0))
         requester = live_base.entity_at(client, surface, requester_position)
@@ -7546,7 +7764,9 @@ def _vacant_mall_half(
         other = "right" if side == "left" else "left"
         groups = live_base.requester_logistic_groups(client, surface, requester_position)
         if any(f":{other}" not in group or f":{side}" in group for group in groups):
+            fact['reason'] = 'requester_owned'
             continue  # A request section still names this half (or no half): another owner, not a vacancy.
+        fact['reason'] = 'eligible_released_half'
         return (target_item, tuple(position), origin, side, name)
     return None
 
@@ -8392,6 +8612,11 @@ def _promotion_upstream_shortfall(
     line consumes 9/s iron plate while six working electric furnaces produce
     far less; building it merely turns an iron shortage into six more waiting
     assemblers and a route from a sealed provider chest.
+
+    Working machines and powered, input-ready machines held by full output
+    both contribute to the capacity estimate. Output backpressure alone is
+    not an extraction deficit. Finite stock and pending machines do not add
+    rate, and the downstream build must still validate its actual feed route.
     """
     stock = live_base.available_items(client, surface, force)
     for ingredient, required_rate in zip(
@@ -8412,7 +8637,8 @@ def _promotion_upstream_shortfall(
             / LINE_RECIPES[extraction]["craft_time"]
         )
         available_rate = (
-            source.working_count * produced_per_machine if source is not None else 0.0
+            (source.working_count + source.output_blocked_ready_count)
+            * produced_per_machine if source is not None else 0.0
         )
         if available_rate + 1e-9 < required_rate:
             return extraction, available_rate, required_rate
@@ -8424,6 +8650,8 @@ def _build_assembled_stage(
     reference_point: Point, emit: Callable[[str], None], plan: _LinePlan,
     mall_provider: Point | None, *, upgrade_bootstrap: bool,
     stock_gate_target: int | None = None,
+    machine_count: int = _DEFAULT_MACHINE_COUNT,
+    zero_provider: bool = False,
 ) -> None:
     """Build one stage for an assembled item, once its inputs have sources."""
     # The pre-advanced-circuit budget is global. Previously only optional demand cells
@@ -8564,7 +8792,7 @@ def _build_assembled_stage(
             extraction, available_rate, required_rate = upstream
             emit(
                 f"  PROMOTION DEFERRED: {item} would draw {required_rate:.2f}/s "
-                f"of {extraction}, but its live line supplies only "
+                f"of {extraction}, but its ready production capacity is only "
                 f"{available_rate:.2f}/s; expanding {extraction} before adding "
                 "downstream machines"
             )
@@ -8671,6 +8899,13 @@ def _build_assembled_stage(
         build_conversion_stage(
             client, bridge, surface, force, item, sources, reference_point, emit,
             allow_logistic_inputs=not upgrade_bootstrap,
+            terminal_provider_only=upgrade_bootstrap,
+            force_belt_inputs=upgrade_bootstrap,
+            # The service sized this cell (minimum_machines); the conversion
+            # default of 2 silently doubled it. C86c's PM consumer billed 4
+            # AM2 and 14 poles for a 1-machine request and never built.
+            machine_count=max(1, int(machine_count)),
+            zero_provider=zero_provider,
         )
     return None
 
@@ -8724,9 +8959,12 @@ def _chemical_capability_started(
         line = live_base.find_line(
             client, surface, force, item, "chemical-plant",
         )
-        return line is not None and (
+        result = line is not None and (
             line.working_count > 0 or line.produced_count > 0
         )
+        operation_facts.record("chemical_capability", item=item, result=result,
+                               basis="sulfuric_acid_line", surface=surface, force=force)
+        return result
     if item in _CHEMICAL_BATCH_TARGETS and _chemical_uses_rotating_batch(
         client, surface, force, item,
     ):
@@ -8744,8 +8982,18 @@ def _chemical_capability_started(
             "embodied": _ladder_embodied(client, surface, force, item, stock),
         }
         _LADDER_CREDIT[item] = parts
-        return sum(parts.values()) >= _CHEMICAL_BATCH_TARGETS[item]
-    return _production_started(client, surface, force, item)
+        result = sum(parts.values()) >= _CHEMICAL_BATCH_TARGETS[item]
+        operation_facts.record("chemical_capability", item=item, result=result,
+                               basis="rotating_batch_credit", parts=parts,
+                               required=_CHEMICAL_BATCH_TARGETS[item], surface=surface, force=force)
+        return result
+    with operation_facts.collect("production_capability") as capability:
+        result = _production_started(client, surface, force, item)
+    operation_facts.record("chemical_capability", item=item, result=result,
+                           basis="production_started", surface=surface, force=force,
+                           query_evidence=capability[0]["query_evidence"] if len(capability) == 1 else {
+                               "query_id": None, "correlation": {"state": "unknown", "reason": "predicate query not retained"}})
+    return result
 
 
 # Last rung credit per ladder item, shown when the rung reopens so a reopen is explainable.
@@ -8889,13 +9137,15 @@ def _unfunded_ladder_ingredient(
 def _missing_chemical_ladder_predecessor(
     client: RconClient, surface: str, force: str, item: str,
 ) -> str | None:
-    return next((
-        predecessor
-        for predecessor in _chemical_ladder_predecessors(item)
-        if not _chemical_capability_started(
-            client, surface, force, predecessor,
-        )
-    ), None)
+    predecessors = _chemical_ladder_predecessors(item)
+    for predecessor in predecessors:
+        if not _chemical_capability_started(client, surface, force, predecessor):
+            operation_facts.record("chemical_ladder_selection", item=item, selected=predecessor,
+                                   predecessors=predecessors, surface=surface, force=force)
+            return predecessor
+    operation_facts.record("chemical_ladder_selection", item=item, selected=None,
+                           predecessors=predecessors, surface=surface, force=force)
+    return None
 
 
 def _pending_startup_dependencies(
@@ -9181,11 +9431,14 @@ def ensure_produced(
     minimum_machines: int = 1, allow_promotion: bool = True,
     stock_gate_target: int | None = None, storage_limit: int | None = None,
     fill_provider: bool = False, blocking_stock_target: int | None = None,
-    temporary_mall: bool = False,
+    temporary_mall: bool = False, zero_provider: bool = False,
+    machine_cap: int | None = None,
 ) -> Point | None:
     """Returns the item's real output chest position if it's already producing;
     otherwise builds exactly ONE missing stage (the deepest unmet ingredient
     first) and returns None so the caller re-surveys and calls again."""
+    from orchestrator.mall_construction import resume_for_item
+    resume_for_item(client, bridge, surface, force, item, reference_point, emit)
     if item == "steel-plate" and hasattr(client, "command") and _power_generation_capability_started(client, surface, force):
         promoted = _promote_compact_steel(client, bridge, surface, force, reference_point, emit)
         if promoted is not None:
@@ -9412,10 +9665,17 @@ def ensure_produced(
                 client, surface, force, item, plan, stock_gate_target, emit,
                 bridge=bridge, reference_point=reference_point,
             )
+        if machine_cap is not None:
+            # A consumer service names its own size. A reserve target elsewhere
+            # in this function can raise minimum_machines; a 1-machine PM cell
+            # was being built as a 7-machine district.
+            minimum_machines = min(minimum_machines, max(1, int(machine_cap)))
         _build_assembled_stage(
             client, bridge, surface, force, item, reference_point, emit, plan,
             mall_provider, upgrade_bootstrap=upgrade_bootstrap,
             stock_gate_target=stock_gate_target,
+            machine_count=max(1, int(minimum_machines)),
+            zero_provider=zero_provider,
         )
         return None
     build_mining_stage(client, bridge, surface, force, item, reference_point, emit)
@@ -9850,12 +10110,13 @@ def _bootstrap_reserve_machine_target(
 def _missing_rotating_input(
     client: RconClient, surface: str, force: str, item: str,
     target: int, *, loan: MallBootstrapLoan | None = None,
+    stock: tuple[dict[str, int], dict[str, int]] | None = None,
 ) -> tuple[str, int] | None:
     """Find a missing direct ingredient that another rotating batch can make."""
     spec = LINE_RECIPES.get(item)
     if spec is None:
         return None
-    actual, usable = _bootstrap_loan_stock(client, surface, force, item)
+    actual, usable = stock if stock is not None else _bootstrap_loan_stock(client, surface, force, item)
     if loan is not None:
         actual, usable = _bootstrap_loan_credited_stock(loan, actual, usable)
     missing = max(0, target - int(actual.get(item, 0)))
@@ -9881,7 +10142,7 @@ def _missing_rotating_input(
 def _rationed_mall_batch(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     item: str, target: int, reference_point: Point,
-    emit: Callable[[str], None], *, force_temporary: bool = False,
+    emit: Callable[[str], None], *, force_temporary: bool = False, reuse_only: bool = False,
 ) -> bool:
     """Make a finite construction batch in a borrowed cell when necessary.
 
@@ -9890,6 +10151,8 @@ def _rationed_mall_batch(
     not chest identity, decide when the batch is complete. ``force_temporary``
     is used by the belt-prep checkpoint: a producer is required even when the
     opening starter already has enough belts for its first craft.
+    ``reuse_only`` exposes the same loan/vacancy machinery as an explicit
+    finite operation; it never chooses new demand-owned cell admission.
     """
     pipe_batch = item == "pipe" and _pipe_is_temporary_batch(
         client, surface, force,
@@ -9929,11 +10192,17 @@ def _rationed_mall_batch(
     # credits. Reconsider the parent's inputs only once its own recipe is live;
     # restoring here would discard an unfinished step before it can be serviced.
     if own_loan is not None and (own_loan.step_recipe or own_loan.current_recipe) == item:
+        input_stock = _bootstrap_loan_stock(client, surface, force, item) if reuse_only else None
         missing_input = _missing_rotating_input(
-            client, surface, force, item, target, loan=own_loan,
+            client, surface, force, item, target, loan=own_loan, stock=input_stock,
         )
         if missing_input is not None:
             prerequisite, required = missing_input
+            if reuse_only:
+                _, credited_usable = _bootstrap_loan_credited_stock(own_loan, *input_stock)
+                raise MaterialShortage(
+                    f'finite_batch_{item}', {prerequisite: required}, credited_usable,
+                )
             _restore_bootstrap_loan(
                 client, bridge, surface, force, own_loan, emit,
                 reference_point=reference_point,
@@ -9961,6 +10230,8 @@ def _rationed_mall_batch(
         actual, usable = _bootstrap_loan_stock(
             client, surface, force, item,
         )
+        if reuse_only and own_loan is not None:
+            actual, usable = _bootstrap_loan_credited_stock(own_loan, actual, usable)
         external = next((
             shortage
             for shortage in bootstrap_external_shortages(
@@ -9971,6 +10242,17 @@ def _rationed_mall_batch(
             )
         ), None)
         if external is not None:
+            if reuse_only:
+                # Return the bill to the caller; this operation may configure
+                # existing halves, but cannot establish another producer.
+                # External counts are deficits after allocatable stock, not
+                # absolute requirements. Keep both sides in that same scope;
+                # the caller adds the deficit to failure-time network stock.
+                raise MaterialShortage(
+                    f'finite_batch_{item}',
+                    {external.item: int(usable.get(external.item, 0)) + external.count},
+                    usable,
+                )
             own = next(
                 (loan for loan in active if loan.target_item == item), None,
             )
@@ -10025,10 +10307,10 @@ def _rationed_mall_batch(
             return True
     slot_claim = None
     own_loan = any(loan.target_item == item for loan in active)
-    if not active or (
+    if not reuse_only and (not active or (
         not own_loan
         and _metal_starter_transition_complete(client, surface, force)
-    ):
+    )):
         spec = LINE_RECIPES[item]
         existing = live_base.find_line(
             client, surface, force, item, str(spec["machine"]),
@@ -10994,7 +11276,16 @@ def _deliver_cell_ingredients(
             local = live_base.network_item_count(
                 client, surface, force, chest, ingredient,
             )
-            if local is not None and local >= amount * 2:
+            # Network-wide stock is not requester stock. The 2026-11-14 replay
+            # had the AC requester at 0 with 8 plastic in a provider ~370 tiles
+            # away in the same network: the old skip saw 8 >= 2*2, moved
+            # nothing, and the gate-refresh loop raised mall_loan_gate_mismatch.
+            # Skip only when this chest already holds enough.
+            try:
+                held = live_base.chest_contents(client, surface, chest)
+            except Exception:  # noqa: BLE001 -- delivery is opportunistic
+                held = {}
+            if float(held.get(ingredient, 0)) >= amount * 2:
                 continue
             provider = live_base.nearest_container(
                 client, surface, force, chest,
@@ -11003,17 +11294,40 @@ def _deliver_cell_ingredients(
             if provider is not None and math.dist(provider, chest) <= 10.0:
                 destination = provider
             else:
-                spots = live_base.chained_clear_spots(
-                    client, surface,
-                    [("passive-provider-chest", 1), ("medium-electric-pole", 1)],
-                    chest,
-                )
+                # The borrowed cell can sit inside a dense belt cluster where a
+                # six-tile search finds nothing. Widen the search before giving
+                # up, and use the clear pole spot instead of a fixed offset. A
+                # silent skip here was the 2026-11-14 replay's first hard
+                # failure: the requester was fed and outside any network, the
+                # delivery moved nothing, and the gate-refresh loop then raised
+                # mall_loan_gate_mismatch as if the gate were wrong.
+                spots = []
+                for radius in (6.0, 10.0, 14.0):
+                    spots = live_base.chained_clear_spots(
+                        client, surface,
+                        [("passive-provider-chest", 1), ("medium-electric-pole", 1)],
+                        chest, step_radius=radius,
+                    )
+                    if len(spots) >= 2:
+                        break
                 spot = next(
                     (s for s in spots if s[0] == "passive-provider-chest"), None,
                 )
                 if spot is None:
+                    emit(
+                        f"  CELL DELIVERY BLOCKED: no clear provider/pole spot "
+                        f"within 14 tiles of the {item} requester at {chest}; "
+                        "cannot feed an unreachable cell"
+                    )
                     continue
                 destination = (spot[1], spot[2])
+                pole = next(
+                    (s for s in spots if s[0] == "medium-electric-pole"), None,
+                )
+                pole_position = (
+                    (pole[1], pole[2]) if pole is not None
+                    else (destination[0] + 2.0, destination[1])
+                )
                 plan = {"phases": [{
                     "name": f"deliver_{ingredient}",
                     "actions": [
@@ -11022,7 +11336,7 @@ def _deliver_cell_ingredients(
                          "position": {"x": destination[0], "y": destination[1]}},
                         {"action_type": "place_entity",
                          "entity": "medium-electric-pole",
-                         "position": {"x": destination[0] + 2.0, "y": destination[1]}},
+                         "position": {"x": pole_position[0], "y": pole_position[1]}},
                     ],
                 }]}
                 plan["surface"], plan["force"] = surface, force
@@ -12272,25 +12586,40 @@ def _production_started(
     the AM2 bootstrap seam). A tier item whose recipe machines are all active
     loan borrowers proves nothing; a real line does, even years idled.
     """
+    def observed(result, basis, line=None):
+        operation_facts.record("production_capability", item=item, result=result, basis=basis,
+                               surface=surface, force=force, machine=None if spec is None else spec["machine"],
+                               query_evidence={"query_id": queries[0]["query_id"],
+                                               "correlation": queries[0]["correlation"]} if len(queries) == 1 else {
+                                   "query_id": None, "correlation": {"state": "unknown", "reason": "line query not retained"}},
+                               line=None if line is None else {
+                                   key: getattr(line, key, None) for key in (
+                                       "recipe", "machine_count", "working_count", "produced_count",
+                                       "machine_positions", "live_machine_count", "output_blocked_ready_count",
+                                   )})
+        return result
+    queries = []
     spec = LINE_RECIPES.get(item)
     if spec is None:
-        return True
-    line = live_base.find_line(
-        client, surface, force, item, spec["machine"],
-    )
+        return observed(True, "no_catalog_spec")
+    with operation_facts.collect("line_query") as queries:
+        line = live_base.find_line(
+            client, surface, force, item, spec["machine"],
+        )
     if line is None:
-        return False
+        return observed(False, "no_matching_line")
     if item == "advanced-circuit" and not _unborrowed_recipe_positions(client, surface, force, line):
         # A finite seed supplies a bill, not standing production capability.
-        return False
+        return observed(False, "finite_advanced_circuit_borrowers_only", line)
     if getattr(line, "working_count", 0) > 0:
-        return True
+        return observed(True, "working_machine", line)
     produced = getattr(line, "produced_count", 0) > 0
     if not produced:
-        return False
+        return observed(False, "no_working_or_historical_crafts", line)
     if item not in live_base.ASSEMBLER_TIERS:
-        return True
-    return bool(_unborrowed_recipe_positions(client, surface, force, line))
+        return observed(True, "historical_non_tier_crafts", line)
+    return observed(bool(_unborrowed_recipe_positions(client, surface, force, line)),
+                    "unborrowed_tier_positions", line)
 
 
 def _core_mall_producer_ready(client, surface, force, item):
@@ -13859,7 +14188,6 @@ def initialize_operation_runtime(
     _STARTUP_MALL_LIMITS_RELEASED = False
     _STARTUP_MALL_LIMITS_FALLBACK_PROBED = False
     _BOOTSTRAP_LOAN_PROGRESS_REVISION = 0
-    _LOAN_GATE_REFRESH_ATTEMPTS.clear()
     _CRAFT_PROOF_CONSUMED.clear()
     _POST_STARTER_TRANSITION_ANNOUNCED = False
     catalog = load_json(bridge.export_recipe_catalog(force=force))

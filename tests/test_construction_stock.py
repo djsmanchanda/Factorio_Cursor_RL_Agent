@@ -2412,7 +2412,7 @@ def test_twin_feedstock_cell_stays_borrowable(monkeypatch) -> None:
         assert borrowed[0] == "copper-cable"
 
 
-def _stalled_gate_loan(monkeypatch):
+def _stalled_gate_loan(monkeypatch, tmp_path):
     """A drill loan whose circuit step sits disabled at 11/18 (the 2026-09-04
     +503s shape)."""
     from orchestrator.mall_bootstrap import MallBootstrapLoan
@@ -2428,7 +2428,17 @@ def _stalled_gate_loan(monkeypatch):
         step_minimum_crafts=7,
     )
     stock = {"electronic-circuit": 11, "copper-cable": 60, "iron-plate": 100}
-    monkeypatch.setattr(builder, "_LOAN_GATE_REFRESH_ATTEMPTS", {})
+    from orchestrator.loan_gate_retries import GateRetries, identity
+    store = GateRetries(tmp_path / 'script-output', 'episode')
+    store.start(identity(loan, SimpleNamespace(recipe='electronic-circuit', target_count=18)), 0, proposed=True)
+    monkeypatch.setattr(builder, '_loan_gate_retry_store', lambda *_: store)
+    ticks = iter(range(100, 1000))
+    monkeypatch.setattr(builder.live_base, "game_tick", lambda *_a: next(ticks))
+    monkeypatch.setattr(builder.live_base, "loan_cell_item_count", lambda *_a: 100)
+    monkeypatch.setattr(builder.live_base, "mall_gate_survey", lambda *_a: [{
+        "position": (36.5, 32.5), "recipe": "electronic-circuit", "circuit_enabled": False,
+        "gate": {"signal": "electronic-circuit", "comparator": "<", "constant": 11},
+    }])
     monkeypatch.setattr(
         builder, "_bootstrap_loan_stock", lambda *_a: (dict(stock), dict(stock)),
     )
@@ -2449,10 +2459,10 @@ def _stalled_gate_loan(monkeypatch):
     return loan
 
 
-def test_disabled_loan_gate_refreshes_instead_of_dying(monkeypatch) -> None:
+def test_disabled_loan_gate_refreshes_instead_of_dying(monkeypatch, tmp_path) -> None:
     """2026-09-04: a drill loan's circuit step sat disabled at 11/18 on a
     bill-frozen gate and ended the run. Refresh the gate and continue."""
-    loan = _stalled_gate_loan(monkeypatch)
+    loan = _stalled_gate_loan(monkeypatch, tmp_path)
     submitted: list[tuple[str, dict]] = []
     messages: list[str] = []
     monkeypatch.setattr(
@@ -2473,14 +2483,12 @@ def test_disabled_loan_gate_refreshes_instead_of_dying(monkeypatch) -> None:
         if "logistic_condition" in action
     ]
     assert gate_actions, "the refresh must re-apply the machine gate"
-    assert builder._LOAN_GATE_REFRESH_ATTEMPTS == {
-        (loan.group, "electronic-circuit", 18): 1,
-    }
+    assert next(iter(builder._loan_gate_retry_store(None, None, None).state['records'].values()))['attempts'] == 1
 
 
-def test_ignored_gate_refreshes_eventually_raise(monkeypatch) -> None:
+def test_ignored_gate_refreshes_eventually_raise(monkeypatch, tmp_path) -> None:
     """A step that ignores repeated refreshes is genuinely stuck."""
-    loan = _stalled_gate_loan(monkeypatch)
+    loan = _stalled_gate_loan(monkeypatch, tmp_path)
     messages: list[str] = []
     monkeypatch.setattr(builder, "_submit", lambda *_a, **_k: None)
 
@@ -2512,7 +2520,6 @@ def _starved_gate_loan(monkeypatch):
         step_minimum_crafts=2,
     )
     stock = {"electronic-circuit": 1, "copper-cable": 4, "iron-plate": 956}
-    monkeypatch.setattr(builder, "_LOAN_GATE_REFRESH_ATTEMPTS", {})
     monkeypatch.setattr(
         builder, "_bootstrap_loan_stock", lambda *_a: (dict(stock), dict(stock)),
     )
@@ -2559,7 +2566,7 @@ def test_starved_loan_gate_waits_without_refresh_budget(monkeypatch) -> None:
 
     assert "waits for" in remedy
     assert any("SUPPLY WAIT" in message for message in messages)
-    assert builder._LOAN_GATE_REFRESH_ATTEMPTS == {}
+    assert not any("GATE REFRESH" in message for message in messages)
 
 
 def test_half_without_provider_chest_is_not_borrowed(monkeypatch) -> None:
@@ -4633,6 +4640,7 @@ def test_rationed_parent_finishes_its_durable_prerequisite_before_reclaiming(
     }
     stock[prerequisite] = 0
     client = SimpleNamespace(command=lambda *_a: pytest.fail("unexpected RCON"))
+    monkeypatch.setattr(builder.live_base, "game_tick", lambda *_a: 100)
     finished = [101]
     loans = [builder.MallBootstrapLoan(
         original_recipe="underground-belt", target_item=item,

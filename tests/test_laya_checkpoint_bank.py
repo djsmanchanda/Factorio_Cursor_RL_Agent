@@ -30,7 +30,9 @@ def test_clock_requires_paused_integer_tick():
 
 
 def test_missing_checkpoints_are_explicit(tmp_path):
-    assert bank.discover(tmp_path) == {f'C{i}': [] for i in range(7)}
+    # Merge note (O1): Track A extended the bank to every strict milestone (0be154f8, C0-C9).
+    from orchestrator.checkpoint_milestones import MILESTONE_IDS
+    assert bank.discover(tmp_path) == {checkpoint: [] for checkpoint in MILESTONE_IDS}
 
 
 def test_changed_mods_need_an_explicit_directional_contract():

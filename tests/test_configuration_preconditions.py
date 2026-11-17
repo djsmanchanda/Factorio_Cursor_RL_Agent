@@ -10,7 +10,8 @@ import subprocess
 import jsonschema
 import pytest
 
-from orchestrator.configuration_preconditions import supports_configuration_preconditions
+from orchestrator.configuration_preconditions import (
+    supports_configuration_preconditions, supports_unconfigured_recipe_preconditions)
 
 ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.fast
@@ -275,7 +276,7 @@ assert(mutations == 0 and machine.valid)
 def test_capability_command_is_read_only(tmp_path):
     run_lua(tmp_path, '''
 registered.layout_executor_capabilities({})
-assert(printed == '{"configuration_preconditions":1}')
+assert(printed == '{"configuration_preconditions":1,"unconfigured_recipe_preconditions":1}')
 assert(mutations == 0 and report == nil)
 ''')
 
@@ -299,4 +300,84 @@ execute()
 assert(report.ok == false)
 assert(report.placement_failures[1].reason == 'configuration_precondition_failed:requester_groups_mismatch')
 assert(mutations == 0)
+''')
+
+
+@pytest.mark.parametrize('response,expected', [
+    ('{"configuration_preconditions":1,"unconfigured_recipe_preconditions":1}', True),
+    ('{"configuration_preconditions":1}', False),
+    ('{"configuration_preconditions":0,"unconfigured_recipe_preconditions":1}', False),
+    ('{"configuration_preconditions":1,"unconfigured_recipe_preconditions":true}', False),
+    ('{"configuration_preconditions":1,"unconfigured_recipe_preconditions":1.0}', False),
+    ('{"configuration_preconditions":1,"unconfigured_recipe_preconditions":0,"unconfigured_recipe_preconditions":1}', False),
+    ('[]', False), ('Unknown command', False),
+])
+def test_unconfigured_recipe_requires_new_capability(response, expected):
+    assert supports_unconfigured_recipe_preconditions(
+        type('Client', (), {'command': lambda self, _: response})()) is expected
+
+
+def test_schema_empty_recipe_and_disabled_gate_are_exact():
+    action = copy.deepcopy(ACTION)
+    action['configuration_preconditions'].update(recipe='', logistic_condition=False)
+    validate(action)
+    action['configuration_preconditions']['logistic_condition'] = True
+    with pytest.raises(jsonschema.ValidationError):
+        validate(action)
+
+
+@pytest.mark.parametrize('disabled', [False, True])
+def test_recipe_resume_from_unconfigured_machine(tmp_path, disabled):
+    run_lua(tmp_path, ('guard.logistic_condition=false;behavior.connect_to_logistic_network=false\n'
+                       if disabled else '') + '''
+recipe=nil
+function machine.get_recipe() if recipe then return {name=recipe} end end
+machine.bounding_box={left_top={x=-1.5,y=-1.5},right_bottom={x=1.5,y=1.5}}
+machine.surface={find_entities_filtered=function() return {} end}
+guard.recipe=''
+execute()
+assert(report.ok == true, report.error)
+assert(recipe == 'pipe' and behavior.logistic_condition.constant == 50)
+''')
+
+
+@pytest.mark.parametrize('change,detail', [
+    ("guard.recipe=''", 'recipe_mismatch'),
+    ('guard.logistic_condition=false', 'logistic_condition_mismatch'),
+])
+def test_empty_recipe_and_disabled_gate_never_match_other_state(tmp_path, change, detail):
+    run_lua(tmp_path, change + f'''
+execute()
+assert(report.ok == false)
+assert(report.placement_failures[1].reason == 'configuration_precondition_failed:{detail}')
+assert(mutations == 0 and recipe == 'pipe')
+''')
+
+
+def test_recipe_resume_checks_again_before_mutation(tmp_path):
+    run_lua(tmp_path, '''
+recipe=nil;guard.recipe=''
+local reads=0
+function machine.get_recipe()
+  reads=reads+1
+  if reads==2 then recipe='copper-cable' end
+  if recipe then return {name=recipe} end
+end
+execute()
+assert(report.ok == false)
+assert(report.placement_failures[1].reason == 'configuration_precondition_failed:recipe_mismatch')
+assert(mutations == 0 and recipe == 'copper-cable')
+''')
+
+
+@pytest.mark.parametrize('connection', ['nil', '0', '"false"'])
+def test_disabled_gate_requires_explicit_false(tmp_path, connection):
+    run_lua(tmp_path, f'''
+recipe=nil;guard.recipe='';guard.logistic_condition=false
+function machine.get_recipe() return nil end
+behavior.connect_to_logistic_network={connection}
+execute()
+assert(report.ok == false)
+assert(report.placement_failures[1].reason == 'configuration_precondition_failed:logistic_condition_mismatch')
+assert(mutations == 0 and recipe == nil)
 ''')

@@ -343,10 +343,13 @@
            "minimum": 1
           },
           "recipe": {
-           "type": "string"
+           "type": "string",
+           "description": "Exact current recipe; empty string requires an unconfigured machine."
           },
           "logistic_condition": {
-           "type": "object",
+           "type": ["object", "boolean"],
+           "not": {"const": true},
+           "description": "Exact simple logistic gate, or false to require logistic control disabled.",
            "additionalProperties": false,
            "required": [
             "signal",

@@ -1,0 +1,12 @@
+{
+  "$comment": "Path: schemas/laya_experiment_assignment.schema.json | Purpose: Define explicit seeded counterbalanced scheduling assignment.",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Opt-in experiment assignment declaration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["method", "seed"],
+  "properties": {
+    "method": {"const": "sha256-rotations-v1"},
+    "seed": {"type": "integer", "minimum": 0}
+  }
+}

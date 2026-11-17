@@ -31,3 +31,17 @@ def supports_configuration_preconditions(client) -> bool | None:
     if type(version) is not int or version < 0:
         return None
     return version == 1
+
+
+def supports_unconfigured_recipe_preconditions(client) -> bool:
+    """Old executors must never receive an unguarded recipe-resume fallback."""
+    try:
+        response = json.loads(client.command('/layout_executor_capabilities'),
+                              object_pairs_hook=_unique_object, parse_constant=_reject_constant)
+        return (isinstance(response, dict)
+                and type(response.get('unconfigured_recipe_preconditions')) is int
+                and response['unconfigured_recipe_preconditions'] == 1
+                and type(response.get('configuration_preconditions')) is int
+                and response['configuration_preconditions'] == 1)
+    except Exception:
+        return False

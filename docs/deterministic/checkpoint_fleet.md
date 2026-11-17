@@ -194,3 +194,35 @@ run. Python changes require the fleet coordinator, affected runners, and
 Operations Console to restart. Lua changes require deployment and restart of
 each affected Factorio lane; GUI synchronization is separate and occurs only
 when a GUI client will join.
+
+
+## Scoped production evidence (2026-11-17)
+
+Live C4/C6 production facts use `force-surface-item-input-v1`: the selected
+force's `get_item_production_statistics(surface).get_input_count(item)`, in
+item units. A machine's lifetime `products_finished` counter is not a per-recipe
+production total. Assigning or removing a recipe must neither manufacture nor
+erase item output. Provider inventory and adjacent same-recipe consumer crafts
+remain separate facts; C6's consumer rule and predicate versions are unchanged.
+
+Each production counter records its basis, force/surface names and indices,
+query tick and sampled generation. The session, strict sidecar and checkpoint
+monitor carry generations across samples; observed count regressions, scope
+changes or clock rollback break comparison with the original baseline. The
+generation survives bounded-history eviction and restart serialization. A missing,
+malformed or legacy fact after scoped telemetry retains its last provenance with
+an unavailable count and breaks the generation once for that interval; it cannot
+erase a previously observed boundary. This state is carried even when all valid
+samples have been evicted or the unavailable interval crosses a restart. A reset
+that overtakes the previous count between polls cannot be detected; these are
+sampled totals, not proof of uninterrupted production or selected-source delivery.
+
+Older restart bundles remain readable and retain their original counters on
+re-export. A modern item counter cannot be compared with a legacy machine-total
+baseline: that production leg is unknown, with an explicit reason, until a new
+measurement establishes a compatible baseline. No dispatch fence is changed or
+baseline silently rebased. Existing reached latches remain historical records;
+this repair does not retroactively certify old C6 results. Compare frozen
+instrument identities as well as predicate versions, and retain the production
+basis in reports. A fresh strict sidecar on a restored world establishes a new
+measurement baseline without changing the restored controller or safety state.

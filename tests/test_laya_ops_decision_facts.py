@@ -1,7 +1,6 @@
 # Path: tests/test_laya_ops_decision_facts.py | Purpose: Verify mall capacity, starter blocker and no-progress facts reach Laya's ops decision.
 
 import json
-from pathlib import Path
 from types import SimpleNamespace
 
 from training.laya_guided_policy import GuidedPolicy
@@ -124,13 +123,11 @@ def test_acceptance_records_per_starter_facts(monkeypatch):
             pass
 
         def observe(self):
-            return observer.StructuredObservation(snapshot, "fixture", "fixture", {"tick": snapshot.tick})
+            return SimpleNamespace(snapshot=snapshot)
 
     monkeypatch.setattr(observer, "LiveCheckpointObservationAdapter", Adapter)
     session = object.__new__(DeterministicSession)
     session.client = session.bridge = session.reference_point = None
-    session.episode_id = "fixture"
-    session.script_output = Path("/unused/script-output")
     session.acceptance()
     assert session.starter_facts["iron"] == {"present": True, "healthy": True, "producing": True,
                                              "output_count": 7, "blocker": "ready", "tick": 9}
@@ -168,13 +165,11 @@ def test_final_acceptance_is_fresh_while_reached_stays_latched(monkeypatch):
             pass
 
         def observe(self):
-            return observer.StructuredObservation(cm.FactorySnapshot.from_mapping({"tick": 9, "base_valid": True}), "fixture", "fixture", {"tick": 9})
+            return SimpleNamespace(snapshot=cm.FactorySnapshot.from_mapping({"tick": 9, "base_valid": True}))
 
     monkeypatch.setattr(observer, "LiveCheckpointObservationAdapter", Adapter)
     session = object.__new__(DeterministicSession)
     session.client = session.bridge = session.reference_point = None
-    session.episode_id = "fixture"
-    session.script_output = Path("/unused/script-output")
     session._evaluator, session._baseline, session._history = cm.CheckpointEvaluator((Definition(),)), None, []
     seen = [(session.acceptance()["C9"], session.acceptance_fresh["C9"]) for _ in range(3)]
     assert seen == [("passed", "passed"), ("passed", "failed"), ("passed", "unknown")]

@@ -224,3 +224,99 @@ def test_research_option_facts_follow_current_goal_and_unknown_capacity():
     assert all(not o['features']['goal_need'] for o in menu['options'])
     # Existing working labs with unknown capacity cannot justify unlimited growth.
     assert not any(o['family']=='research_labs' and o['option_id']!='op.research_labs.reconcile' for o in menu['options'])
+
+
+# --- C96d: research observation must stay fresh when the science report does not change ---
+# Recorded shape: data/laya-experiments/laya-c96d-c0-science3-2x-20261112/.../C0-science-s84200/
+# server/script-output/factorio_mod/science_reports/science_status_238724.json (0 labs, no research).
+C96D_SCIENCE = {"schema_version": "1.0.0", "ok": True, "surface": "nauvis", "force": "player",
+                "research": {"current": None, "progress": 0, "queue": [], "current_science_packs": {},
+                             "current_research_unit_count": 0},
+                "labs": {"total": 0, "working": 0, "status_counts": {}, "input_inventory": {}, "entries": []}}
+NIGHT_VISION = {"name": "night-vision-equipment", "canonical_name": "night-vision-equipment",
+                "requested_name": "night-vision-equipment", "researched": False, "enabled": True,
+                "target_completed": False, "state": "available", "current_level": 1, "prototype_level": 1,
+                "max_level": 1, "research_unit_count": 50,
+                "science_packs": {"automation-science-pack": 1, "logistic-science-pack": 1}}
+
+
+class _FakeMod:
+    """Answers bridge commands the way the mod does: one tick-stamped file per command."""
+
+    def __init__(self, root, tick):
+        self.root, self.tick = root, tick
+
+    def __call__(self, text):
+        name, _, body = text.partition(" ")
+        payload = json.loads(body) if body.startswith("{") else {}
+        reports = self.root / "factorio_mod"
+        if name == "/research_status":
+            target = dict(NIGHT_VISION, requested_name=payload["technology"])
+            report = {"ok": True, "tick": self.tick, "force": payload["force"], "research_progress": 0,
+                      "research_queue": [], "science_packs": {}, "technology": target,
+                      "request_id": payload["request_id"]}
+            path = reports / "research_reports" / f"research_status_{payload['request_id']}.json"
+        elif name == "/science_status":
+            report, path = dict(C96D_SCIENCE, tick=self.tick), reports / "science_reports" / f"science_status_{self.tick}.json"
+        elif name == "/research_options":
+            option = {"technology": "night-vision-equipment", "canonical_name": "night-vision-equipment",
+                      "state": "available", "current_level": 1, "max_level": 1,
+                      "science_packs": NIGHT_VISION["science_packs"]}
+            report = {"ok": True, "tick": self.tick, "force": "player", "research_queue": [], "options": [option]}
+            path = reports / "research_reports" / f"research_options_{self.tick}.json"
+        elif name == "/sc":
+            return json.dumps({"tick": self.tick, "force": "player", "canonical": "night-vision-equipment",
+                               "unit_energy": 900, "lab_speed": 1, "speed_bonus": 2.5})
+        else:
+            raise AssertionError(text)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(report))
+        return ""
+
+
+def test_unchanged_science_report_keeps_research_observation_fresh(tmp_path, monkeypatch):
+    """C96d: 0 labs and no research make every science report identical except its tick. The bridge
+    used to delete the new report and return the decision-1 file, so every later observation was
+    'stale or from future' (1,738 of 1,745 decisions). The caller must get its own report."""
+    from orchestrator.game_bridge import GameBridge
+    from orchestrator.research_operations import collect_research_reports
+    monkeypatch.setattr("orchestrator.game_bridge.RconClient", lambda *_a, **_kw: object())
+    bridge = GameBridge(script_output=tmp_path, poll_interval=0.01)
+    mod = _FakeMod(tmp_path, 238724)
+    monkeypatch.setattr(bridge, "command", mod)
+    target = "night-vision-equipment"
+    for tick in (238724, 239470, 240216):  # recorded first report tick, then the median 746-tick decision spacing
+        mod.tick = tick
+        reports = collect_research_reports(bridge, surface="nauvis", force="player", requested=target)
+        observed = research_observation(reports, tick=tick + 5, surface="nauvis", force="player", requested=target)
+        assert observed["available"] is True, observed.get("reason")
+        assert observed["report_ticks"] == {"research": tick, "science": tick}
+    # The disk saving is kept: identical science reports collapse to one file, the newest.
+    assert [p.name for p in (tmp_path / "factorio_mod/science_reports").glob("*.json")] == ["science_status_240216.json"]
+
+
+def test_valid_unresearched_target_with_labs_offers_select_and_labs(tmp_path, monkeypatch):
+    """Fake reports for a valid, unresearched target and one idle lab: the runner's own menu
+    contains research_select (from the live options report) and research_labs."""
+    from orchestrator.game_bridge import GameBridge
+    from orchestrator.research_operations import collect_research_reports
+    from training.laya_research import add_research_options
+    monkeypatch.setattr("orchestrator.game_bridge.RconClient", lambda *_a, **_kw: object())
+    bridge = GameBridge(script_output=tmp_path, poll_interval=0.01)
+    monkeypatch.setattr(bridge, "command", _FakeMod(tmp_path, 5000))
+    labs = {"total": 1, "working": 0, "status_counts": {"no_research_in_progress": 1}, "input_inventory": {},
+            "entries": [{"unit_number": 7, "position": {"x": 0.5, "y": 0.5}, "status": "no_research_in_progress",
+                         "input_inventory": {}}]}
+    monkeypatch.setitem(C96D_SCIENCE, "labs", labs)
+    target = "night-vision-equipment"
+    reports = collect_research_reports(bridge, surface="nauvis", force="player", requested=target)
+    observed = research_observation(reports, tick=5003, surface="nauvis", force="player", requested=target)
+    assert observed["available"] is True and observed["selection_candidates"]
+    facts = {"tick": 5003, "surface": "nauvis", "force": "player", "mods": {"base": "2.1.24"}}
+    objective = ResearchObjective(target, progressive=False)
+    menu = add_research_options({"options": []}, {"targets": objective.targets(observed), "needs": []},
+                                observed, facts, objective)
+    ids = {o["option_id"] for o in menu["options"]}
+    assert "op.research_select.night-vision-equipment" in ids
+    assert any(i.startswith("op.research_labs.") and i != "op.research_labs.reconcile" for i in ids)
+    assert {o["family"] for o in menu["options"]} >= {"research_select", "research_labs"}

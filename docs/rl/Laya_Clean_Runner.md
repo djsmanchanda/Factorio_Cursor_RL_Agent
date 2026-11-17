@@ -63,6 +63,30 @@ Receipts must retain transaction identity, selected parameters, typed cause,
 ownership, resource use and observed postconditions. A successful return is not
 by itself proof of delivered output or a standing producer.
 
+For bounded PM diagnostics, `tools.laya_pm_replay replay --capability-facts` records
+native line-query text/replies (including an atomic query tick and force/surface
+identity), production-capability results and the selected chemical rung in the
+operation's durable invocation. A capability fact references its exact query;
+missing/malformed scope or tick metadata explicitly makes that correlation
+unknown while retaining the controller's original boolean. Exact saved steel-seed targets are surveyed
+before submission and after diagnosis, with the plan hash, native drill mining
+area/resource census, machine recipes, lifetime craft counters and local
+inventories. These lifetime counters describe machines, not per-item output.
+Health reads distinguish a value, a successful absent value and a failed read;
+incomplete or inconsistent read-state coverage is rejected. This opt-in evidence
+never clears a dispatch fence, proves ownership of a replacement entity, selects
+a recovery, or changes factory decisions. Maintenance queries are outside the
+selected operation's capture; disabled capture retains the ordinary query path.
+
+Borrowed-cell recovery distinguishes global and allocatable stock from inputs
+physically at the cell. Provider staging is not requester delivery. Missing
+inputs, status or supported gate readback remain unknown. A control refresh
+requires local inputs, advancing game ticks, a nonregressing craft counter and
+an observed mismatched simple logistic gate; circuit-controlled gates wait.
+Electrical-network diagnostics do not identify logistic networks. Local counts
+still combine requester, machine inputs and feeding inserter hands; cargo,
+power and full request-setting observations remain incomplete.
+
 Shared service failures now distinguish `infrastructure_collision` (plan and
 observed occupant evidence) from `power_route_unavailable` (endpoints, pole,
 blocked tile count and route reason). Both remain failed bug outcomes; typing
@@ -94,6 +118,25 @@ complete fulfillment or finite-cell release contract. See the
 [reset integration record](Laya_Reset_Integration_Decision_2026-10-17.md) for tested scope.
 
 ## Decision facts and rules
+
+Ops observes interrupted paired-mall construction separately from recipe-bearing
+producers. A returned selected plan, persisted executor acknowledgement, placement
+ownership, current requester tags, complete hardware and absence of a shared-cell
+loan can expose `resume_mall_cell`. The shared produce operation also finishes
+this pending configuration before allocating a new cell. It rechecks the selected
+identity and current empty recipe, gate and requester identity atomically in the
+executor, then verifies the resulting recipe. Old executors cannot offer or run
+this operation without the `unconfigured_recipe_preconditions:1` capability.
+
+This covers a ready paired cell whose selected submitted plan includes its
+requester ownership group. New requester ghosts whose settings were deferred
+outside that plan remain outside this recovery scope. Missing or pending support
+hardware produces a typed reconciliation wait; this operation configures only
+complete owned hardware and does not rebuild supports, increase the cap or change
+loan/reclaim policy. The optional compact acknowledgement travels with invocation
+sidecars; missing or unverified acknowledgements cannot authorize a resume. A changed
+Lua mod pack requires a newly captured compatible checkpoint and hash-bound live
+reload validation before replay; no legacy fence or mod-hash bypass is allowed.
 
 The target compact projection keeps facts needed to discriminate available choices:
 
@@ -490,3 +533,105 @@ exploration component; choices remain seeded weighted samples, not argmax.
 The default epsilon remains 0.15. A geometry refusal's `unchanged_failure`
 fact persists across waits and idempotent queued requests, and clears after
 measured layout change or an operation that actually changes the layout.
+
+
+## Explicit mission capability and initial eligibility (15 November 2026)
+
+The mixed runner advertises its implemented mission modes and research operation
+families through training/laya_mission_capabilities.py. The scheduler validates
+this interface from the selected frozen runner, then forwards --objective-mode
+and the effective target. research_completion requires a target and deterministic
+actions. measurement_only clears variant research targets. Undeclared historical
+missions keep their legacy meaning.
+
+The first fresh, scoped, level-aware research observation latches eligible,
+inherited or unknown. Later observations cannot turn an unknown/inherited start
+into earned completion. The additional initial-research-eligibility-v1 contract
+is reported alongside laya-research-consumption-v1; it survives exact recovery.
+Recovery rejects a changed explicit objective mode. Existing supply, consumption
+and research progress evidence is still required for completion. These contracts
+have offline boundary coverage; no new live pack consumption or completion has
+been established. Future use needs newly frozen runners after active campaigns;
+no installed mod change is required for this Python patch.
+
+An inherited target is a refusal, not a label (C96d ran 12 science jobs on an
+already-researched `advanced-oil-processing`). `run_laya_mixed.py run` exits 3
+before the world goes live when the prepared world's `initial-state.json`
+`researched` map marks the exact target name researched; ranged levels have no
+entry there, so the ops runner's first live observation refuses them with stop
+`research_target_already_complete` and a `mission_refused` journal event, before
+any decision. Cohort freeze cannot check this: research state is inside the save
+and is only read once a world is prepared.
+
+The bridge returns the report its own command produced. Its de-duplication of
+unchanged reports used to delete the new file and return the older one, so in
+C96d the unchanging science report kept its first tick and 1,738 of 1,745
+research observations were "stale or from future". It now deletes the older
+copy instead.
+
+Startup component evidence (15 November 2026): the ops runner writes
+`journal.jsonl.components.json`; the strict sidecar writes its own components
+artifact next to its summary. Journal and summary references name and hash the
+immutable artifact. It records source file hashes, the source checkout identity
+when available, interpreter, effective mission, episode and predicate/contract
+versions. Runner-owned versions come from the runner; the sidecar leaves those
+unknown. A source copy nested in another repository does not inherit that
+repository's Git identity. World identity is declared evidence; loaded engine
+and mod versions remain unknown. These artifacts do not bind controller jobs
+or attest installed code. Publication is durable and exclusive. A changed
+manifest rejects startup before session construction and preserves the original;
+a legacy resume without a manifest retains unknown historical provenance.
+Future use requires reviewed frozen Python source and a new runner/sidecar
+start; this contract implies no Lua deployment or campaign restart.
+
+Managed extension refusal evidence (15 November 2026): an infrastructure
+conflict retains the existing prerequisite-deferred outcome and adds a precise
+`refusal_code` and `search_coverage` in details. Coverage describes one delta
+at the standing refinery origin/variant/mirror and current/target furnace
+counts. It does not describe all possible factory sites. When that is the
+latest matching extension attempt, the menu, decision journal and training
+record expose `extension_search` as `last_attempt_unrevalidated`, with its
+evidence tick. A later attempt replaces this history. The fact grants no
+current legality conclusion and changes no selection weights. No refusal
+cache or separate new-line/owned-transition operation is implemented yet.
+
+The managed-extension generator now reuses a bounded process-local cache of
+pure template deltas. Keys include template identity and geometry inputs; each
+caller receives an isolated plan. Template and plan validation still run, and
+every shared preflight rereads ownership/occupancy and the current combined
+extraction/material bill. No refusal or extraction plan is cached. This reduces
+template composition only and establishes no measured wall-time improvement.
+
+## Research mission admission
+
+Explicit `research_completion` requires a valid target and a version 1 capability
+manifest from the selected frozen arm's runner, declaring deterministic research
+selection, lab and production scaling operations. The freeze records the runner,
+capability and effective mission; dispatch verifies the same frozen identity and
+forwards the mode and target. `measurement_only` requires advertised support for enforcing that mode and
+labels calibration without an effective research target. An arm may explicitly
+clear a cohort target; dispatch uses that validated effective value. A full-origin mission with no declaration keeps its legacy
+interpretation. Frozen historical specifications are not rewritten. Initial target
+eligibility and earned research must be observed by the capable runner; manifest
+support alone proves neither pack consumption nor completion.
+
+
+The deterministic session and shared economics projection live under
+orchestrator/laya_session.py and orchestrator/laya_economics.py. The historical
+training/laya_ops.py import aliases the active module so existing classes,
+functions and dependency patches retain identity. This source move preserves
+this controller branch's operations; it does not import later PM features.
+
+Scheduler attempt evidence (15 November 2026): each attempted frozen job retains
+a versioned attempt ID across retries, effective mission and frozen input
+identity, boot/coordinator identity where observable, and exact prepare/run argv
+and cwd. An invocation is durably journaled before dispatch and records a known
+exit, signal, timeout, exception or interruption after it returns. Missing or
+malformed return codes remain unknown and stop further dispatch; no environment
+or credentials are copied into receipts. Unobserved child and runner lineage
+remains unknown. Terminal evidence is published before scoped cleanup; admission
+is retained until cleanup succeeds. KeyboardInterrupt/SystemExit still reach
+the caller. Recovery marks unfinished invocation evidence unknown without
+erasing an already-published terminal result. Planned-job accounting remains
+independent of attempts, and legacy histories are not reconstructed. This
+does not provide game-progress monitoring or a lock redesign. The independent coordinator health sidecar is thread-liveness evidence only; see Laya_Controller_Continuation.md.

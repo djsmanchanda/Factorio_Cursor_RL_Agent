@@ -1,12 +1,12 @@
 # Path: tests/test_checkpoint_milestones.py
 # Purpose: Verify structured, versioned, monotonic checkpoint predicates.
 from orchestrator.checkpoint_milestones import (
-    C1_V1,
-    C1_V2,
-    C5_V1,
+    C6_V2,
     CheckpointEvaluator,
     FactorySnapshot,
+    MilestoneDefinition,
     PredicateStatus,
+    _c5,
     default_milestones,
     evaluate_milestone,
 )
@@ -34,13 +34,10 @@ def _snapshot(**overrides):
 
 def test_default_registry_is_ordered_and_versioned_with_advanced_circuit_milestone():
     milestones = default_milestones()
-    assert [item.checkpoint_id for item in milestones] == ["C0", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9"]
-    versions = {item.checkpoint_id: item.predicate_version for item in milestones}
-    assert versions["C1"] == "c1-v2"
-    assert versions["C5"] == "c5-v2"
-    assert all(version.endswith("-v1") for key, version in versions.items() if key not in {"C1", "C5"})
-    assert milestones[6].name == "advanced_circuit_consumption"
-    assert milestones[-1].name == "mining_productivity_4"
+    assert [item.checkpoint_id for item in milestones] == ["C0", "C1", "C2", "C3", "C4", "C5", "C6a", "C6", "C7", "C8", "C9"]
+    assert [item.predicate_version for item in milestones] == [f"c{i}-v1" for i in range(5)] + [
+        "c5-v3", "c6a-v1", "c6-v3", "c7-v1", "c8-v1", "c9-v1"]
+    assert milestones[7].name == "advanced_circuit_consumption"
 
 
 def test_missing_telemetry_is_unknown_not_failed():
@@ -54,56 +51,6 @@ def test_c1_requires_four_working_mall_cells_and_required_recipes():
     assert result.passed
     broken = _snapshot(mall_assemblers=[{"recipe": "iron-gear-wheel", "working": True}] * 4)
     assert evaluate_milestone("C1", broken).failed
-
-
-def _mall(craft_counts, status, working=False):
-    recipes = ("iron-gear-wheel", "copper-cable", "electronic-circuit", "transport-belt")
-    return [
-        {
-            "recipe": recipe, "working": working, "status": status,
-            "position": {"x": index, "y": 0}, "craft_count": craft,
-        }
-        for index, (recipe, craft) in enumerate(zip(recipes, craft_counts))
-    ]
-
-
-def test_c1_v2_counts_assembler_idle_on_full_output_that_v1_does_not():
-    mall = [
-        {"recipe": "iron-gear-wheel", "working": True},
-        {"recipe": "copper-cable", "working": True},
-        {"recipe": "electronic-circuit", "working": True},
-        {"recipe": "iron-gear-wheel", "working": False, "status": "full_output"},
-    ]
-    snapshot = _snapshot(mall_assemblers=mall)
-    assert evaluate_milestone("C1", snapshot, milestones=(C1_V1,)).failed
-    assert evaluate_milestone("C1", snapshot, milestones=(C1_V2,)).passed
-
-
-def test_c1_counts_genuinely_stopped_mall_assemblers_under_neither_version():
-    history = [_snapshot(tick=0, mall_assemblers=_mall((5000, 5000, 5000, 5000), "no_power"))]
-    snapshot = _snapshot(tick=7200, mall_assemblers=_mall((5000, 5000, 5000, 5000), "no_power"))
-    for milestone in (C1_V1, C1_V2):
-        assert evaluate_milestone("C1", snapshot, history=history, milestones=(milestone,)).failed
-
-
-def test_c1_v2_counts_craft_advance_inside_window_only():
-    inside = _snapshot(
-        tick=7200,
-        mall_assemblers=_mall((2000, 2000, 2000, 2000), "waiting_for_source_items"),
-    )
-    history = [_snapshot(tick=0, mall_assemblers=_mall((1000, 1000, 1000, 1000), "waiting_for_source_items"))]
-    assert evaluate_milestone("C1", inside, history=history, milestones=(C1_V2,)).passed
-    assert evaluate_milestone("C1", inside, history=history, milestones=(C1_V1,)).failed
-
-    stale_history = [
-        _snapshot(tick=0, mall_assemblers=_mall((1000, 1000, 1000, 1000), "waiting_for_source_items")),
-        _snapshot(tick=1000, mall_assemblers=_mall((2000, 2000, 2000, 2000), "waiting_for_source_items")),
-    ]
-    stale = _snapshot(
-        tick=14400,
-        mall_assemblers=_mall((2000, 2000, 2000, 2000), "waiting_for_source_items"),
-    )
-    assert evaluate_milestone("C1", stale, history=stale_history, milestones=(C1_V2,)).failed
 
 
 def test_c2_requires_six_machine_foundations_and_absent_starters():
@@ -139,13 +86,16 @@ def test_c4_requires_new_plastic_production_and_delivery():
     assert evaluate_milestone("C4", current).unknown
 
 
+C5_V1 = (MilestoneDefinition("C5", "stable_plastic", "c5-v1", _c5),)
+
+
 def test_c5_requires_120_seconds_and_advancing_plastic_evidence():
     def sample(tick, craft, delivered):
         return {"tick": tick, "production": {"plastic-bar": {"craft_count": craft}}, "providers": {"plastic-bar": {"delivered": delivered}}}
 
     history = [sample(0, 1, 1), sample(3600, 2, 2), sample(7200, 3, 3)]
-    assert evaluate_milestone("C5", history[-1], history=history[:-1], milestones=(C5_V1,)).passed
-    assert evaluate_milestone("C5", sample(6000, 3, 3), history=history[:-1], milestones=(C5_V1,)).failed
+    assert evaluate_milestone("C5", history[-1], history=history[:-1], milestones=C5_V1).passed
+    assert evaluate_milestone("C5", sample(6000, 3, 3), history=history[:-1], milestones=C5_V1).failed
 
 
 def test_c5_ignores_preproduction_history_from_c0_lane():
@@ -158,7 +108,7 @@ def test_c5_ignores_preproduction_history_from_c0_lane():
         sample(200, 1, 1),
         sample(3800, 2, 2),
     ]
-    result = evaluate_milestone("C5", sample(7400, 3, 3), history=history, milestones=(C5_V1,))
+    result = evaluate_milestone("C5", sample(7400, 3, 3), history=history, milestones=C5_V1)
     assert result.passed
     assert result.evidence["ignored_preproduction_samples"] == 2
 
@@ -172,7 +122,31 @@ def test_c6_proves_advanced_circuit_production_and_new_owned_consumer_output():
         "production": {"advanced-circuit": {"produced": 2}},
         "recipes": {"processing-unit": {"owned": True, "ingredients": ["advanced-circuit"], "output_count": 1}},
     }
-    assert evaluate_milestone("C6", current, baseline=baseline).passed
+    assert evaluate_milestone("C6", current, baseline=baseline, milestones=(C6_V2,)).passed
+
+
+def test_c6_v2_rejects_a_logistics_chest_as_the_production_consumer():
+    baseline = {
+        "production": {"advanced-circuit": {"produced": 1}},
+        "recipes": {"passive-provider-chest": {"owned": True, "ingredients": ["advanced-circuit"], "output_count": 0}},
+    }
+    current = {
+        "production": {"advanced-circuit": {"produced": 2}},
+        "recipes": {"passive-provider-chest": {"owned": True, "ingredients": ["advanced-circuit"], "output_count": 1}},
+    }
+    assert not evaluate_milestone("C6", current, baseline=baseline, milestones=(C6_V2,)).passed
+
+
+def test_c6_v2_accepts_a_production_consumer():
+    baseline = {
+        "production": {"advanced-circuit": {"produced": 1}},
+        "recipes": {"processing-unit": {"owned": True, "ingredients": ["advanced-circuit"], "output_count": 0}},
+    }
+    current = {
+        "production": {"advanced-circuit": {"produced": 2}},
+        "recipes": {"processing-unit": {"owned": True, "ingredients": ["advanced-circuit"], "output_count": 1}},
+    }
+    assert evaluate_milestone("C6", current, baseline=baseline, milestones=(C6_V2,)).passed
 
 
 def test_evaluator_keeps_passed_checkpoint_monotonic():
@@ -247,3 +221,86 @@ def test_c9_needs_level_four_and_every_pack_made_and_consumed_this_run():
     assert evaluate_milestone("C9", _science(level=3, **earned), baseline=baseline).failed
     no_purple = {**earned, "production_science_pack": (0, 0)}
     assert evaluate_milestone("C9", _science(level=4, **no_purple), baseline=baseline).failed
+
+
+def _ac(tick, produced, machines):
+    return FactorySnapshot.from_mapping({"tick": tick, "production": {"advanced-circuit": {"produced": produced}},
+                                         "ac_consumers": [{"unit": u, "recipe": r, "count": c} for u, r, c in machines]})
+
+
+def test_c6_v3_does_not_count_a_relabelled_machines_lifetime_counter():
+    # C89 C0-smallcell-s83343: a mall cell switched to electric-furnace arrives with 2294 lifetime crafts.
+    baseline = _ac(1, 0, [])
+    relabel = _ac(2, 411, [(7, "electric-furnace", 2294)])
+    result = evaluate_milestone("C6", relabel, baseline=baseline, history=[baseline, relabel])
+    assert result.predicate_version == "c6-v3" and result.failed
+    assert result.evidence["machine_consumption"] == {}
+    later = _ac(3, 413, [(7, "electric-furnace", 2295)])
+    passed = evaluate_milestone("C6", later, baseline=baseline, history=[baseline, relabel, later])
+    assert passed.passed and passed.evidence["machine_consumption"] == {"electric-furnace": 1}
+
+
+def test_c6_v3_ignores_chests_and_recipe_switches_between_samples():
+    baseline = _ac(1, 0, [(3, "requester-chest", 0), (4, "productivity-module", 0)])
+    switched = _ac(2, 9, [(3, "requester-chest", 5), (4, "processing-unit", 40)])
+    result = evaluate_milestone("C6", switched, baseline=baseline, history=[baseline, switched])
+    assert result.failed and result.evidence["machine_consumption"] == {}
+
+
+def test_c6_v3_consumer_leg_is_unknown_without_machine_telemetry():
+    baseline = _ac(1, 0, [])
+    unreadable = FactorySnapshot.from_mapping({"tick": 2, "production": {"advanced-circuit": {"produced": 5}}})
+    assert evaluate_milestone("C6", unreadable, baseline=baseline, history=[baseline, unreadable]).unknown
+
+
+def _item_sample(tick, produced, *, scope='["nauvis",1,"player",1]', generation=0, consumers=()):
+    return FactorySnapshot.from_mapping({"tick": tick, "production": {"advanced-circuit": {
+        "produced": produced, "counter_basis": "force-surface-item-input-v1", "counter_scope": scope,
+        "counter_generation": generation, "sample_tick": tick}},
+        "ac_consumers": [{"unit": 7, "recipe": "bulk-inserter", "count": count} for count in consumers]})
+
+
+def test_item_totals_do_not_credit_recipe_retarget_or_erase_output_on_removal():
+    # The replay reassigns a 131-lifetime-craft assembler to AC while actual AC remains 297.
+    # A genuine +2 consumer event must not make that relabel into AC production.
+    baseline = _item_sample(1, 297, consumers=[10])
+    retarget = _item_sample(2, 297, consumers=[12])
+    result = evaluate_milestone('C6', retarget, baseline=baseline, history=[baseline, retarget])
+    assert result.failed and result.evidence['production_delta'] == 0
+    assert result.evidence['machine_consumption'] == {'bulk-inserter': 2}
+    actual_output = _item_sample(3, 298, consumers=[13])
+    assert evaluate_milestone('C6', actual_output, baseline=baseline, history=[baseline, retarget, actual_output]).passed
+    # Item statistics retain output even when the AC recipe is absent or assigned again.
+    no_recipe = _item_sample(4, 298)
+    assert evaluate_milestone('C6', no_recipe, baseline=baseline).evidence['production_delta'] == 1
+    assert evaluate_milestone('C6', _item_sample(5, 298), baseline=baseline).evidence['production_delta'] == 1
+
+
+def test_item_counter_refuses_scope_reset_clock_and_legacy_comparisons():
+    from orchestrator.checkpoint_milestones import _new_output
+    baseline = _item_sample(10, 297)
+    for current in (_item_sample(20, 300, scope='other-surface'), _item_sample(20, 300, generation=1),
+                    _item_sample(20, 1), _item_sample(9, 300), _item_sample(10, 300)):
+        value, evidence = _new_output(current, baseline, 'advanced-circuit')
+        assert value is None and evidence['production_delta'] is None
+        assert evidence['production_counter']['unavailable_reason']
+    legacy = _ac(1, 0, [])
+    for current, before in ((baseline, legacy), (legacy, baseline)):
+        assert _new_output(current, before, 'advanced-circuit')[0] is None
+
+
+def test_observed_item_counter_reset_generation_survives_history_eviction():
+    from orchestrator.checkpoint_milestones import _new_output, track_item_production
+    from tools.laya_strict_sidecar import Measurement
+    measurement = Measurement({})
+    baseline = _item_sample(10, 297)
+    measurement.add(baseline)
+    measurement.add(_item_sample(20, 1))
+    for tick in range(21, 50):
+        measurement.add(_item_sample(tick, 400 + tick))
+    current = measurement.history[-1]
+    assert len(measurement.history) == 20
+    assert current.production['advanced-circuit'].counter_generation == 1
+    assert _new_output(current, measurement.baseline, 'advanced-circuit')[0] is None
+    rolled_back = track_item_production(_item_sample(5, 1000), current)
+    assert rolled_back.production['advanced-circuit'].counter_generation == 2

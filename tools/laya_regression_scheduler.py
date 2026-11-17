@@ -4,6 +4,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import fcntl
+import copy
 import hashlib
 import json
 import os
@@ -12,14 +13,20 @@ import socket
 import shutil
 import signal
 import subprocess
+import sys
 import time
 import uuid
 import re
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 
 from tools.checkpoint_catalog import atomic_json
+from tools import laya_status_journal, runner_process, laya_experiment_contract, laya_coordinator_health
+from tools import laya_manipulation_check
 from tools.deterministic_fleet_runtime import create_detached_checkout
 from training.laya_restart_checkpoint import load as load_checkpoint
+from training.laya_mission_contract import mission_settings, frozen_capability
+from training import laya_milestone_report
+from training.laya_operation_outcome import read_records, summarize_records, planned_job_accounting
 
 # 2026-10-30 latest user directives (supersede the same-day 3-day scale
 # request): mixed cohorts are 120-150 jobs — the cohort owner picks the exact
@@ -32,12 +39,20 @@ MIN_MIXED_JOBS = 120
 MAX_MIXED_JOBS = 150
 MAX_MIXED_WORKERS = 30
 MAX_MEASUREMENT_ARMS = 6
-TERMINAL = {"completed", "failed", "timeout", "cancelled", "infrastructure_failure", "incompatible"}
+# cancelled_before_start is written by close-out/refreeze paths; without it a
+# successor's after= gate treats a closed cohort as still running.
+TERMINAL = {"completed", "failed", "timeout", "cancelled", "cancelled_before_start",
+            "infrastructure_failure", "incompatible"}
+#: strict_current is a convenience copy of the journal; only the last row is
+#: needed for strict_current_at_end and strict_reached is already computed.
+#: Keeping every row made one cohort's job-status.json 55 MB.
+STRICT_CURRENT_KEEP = 20
 # Live game speed is frozen per cohort. New cohorts run at 2x (120 UPS), as the
 # batch cohorts through C48 did; roots frozen before the field existed ran at
 # the runner's 1x default and keep it on resume, so no live cohort changes speed.
 DEFAULT_GAME_SPEED = 2.0
 LEGACY_GAME_SPEED = 1.0
+ACTION_PATH = 'deterministic'
 
 
 def sha(path):
@@ -159,9 +174,13 @@ def _milestone_versions(path):
 
 def enqueue(repo, registry, spec):
     """Freeze immutable Git arms and every planned job before any dispatch."""
+    if 'experiment_contract' in spec:
+        laya_experiment_contract.validate(spec['experiment_contract'], spec, action_path=ACTION_PATH)
     name = spec['name']
     if not name or Path(name).name != name or name.startswith(('.', '_')):
         raise ValueError('Invalid suite name')
+    for arm in spec.get('arms', {}):
+        mission_settings(spec, arm, new=True)
     setup = spec.get('purpose') == 'disposable_source_setup'
     mixed = spec.get('design') == 'mixed-start-v1'
     # Full-origin/checkpoint cohorts may run a control plus several one-factor
@@ -175,9 +194,18 @@ def enqueue(repo, registry, spec):
         raise ValueError('Distinct nonnegative seeds required')
     if spec['max_game_ticks'] <= 0 or spec['trial_wall_seconds'] <= 0:
         raise ValueError('Positive tick and wall budgets required')
+    if spec.get('max_workers') is not None and (
+            type(spec['max_workers']) is not int or not 1 <= spec['max_workers'] <= MAX_MIXED_WORKERS):
+        raise ValueError(f'max_workers must be an integer in 1..{MAX_MIXED_WORKERS}')
     speed = spec.setdefault('game_speed', DEFAULT_GAME_SPEED)
     if type(speed) not in (int, float) or not .25 <= speed <= 8:
         raise ValueError('Game speed must be 0.25..8')
+    for _arm, _config in (spec.get('arms') or {}).items():
+        _target = (_config or {}).get('research_target')
+        if _target is not None and (
+                not isinstance(_target, str)
+                or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,127}', _target)):
+            raise ValueError('Per-arm research target must be a bounded technology name')
     if spec.get('research_target') is not None and (
             not isinstance(spec['research_target'], str) or
             not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,127}', spec['research_target'])):
@@ -245,6 +273,13 @@ def enqueue(repo, registry, spec):
                         'status': 'queued', 'admission_reserved': False})
         if setup and len(jobs) > 12:
             raise ValueError('Disposable setup cap exceeded')
+    assignment = spec.get('experiment_contract', {}).get('assignment')
+    if assignment is not None:
+        from tools.laya_experiment_assignment import assign
+        jobs = assign(jobs, spec['arms'], assignment, mixed=mixed)
+    checks = {arm: laya_manipulation_check.validate(raw, sum(job['arm'] == arm for job in jobs))
+              for arm, raw in laya_manipulation_check.declarations(spec).items()}
+    validate_port_ranges(spec, len(jobs), registry)
     root = registry / name
     root.mkdir(parents=True, exist_ok=False)
     status = {'name': name, 'updated': time.time(), 'jobs': jobs}
@@ -318,11 +353,22 @@ def enqueue(repo, registry, spec):
                 variant.relative_to(code.resolve())
                 if not variant.is_file():
                     raise ValueError('Variant must be tracked inside the frozen arm')
-            freeze['arms'].append({'id': arm, 'revision': revision, 'code_sha256': tracked_hash(code),
+            if arm in checks:
+                laya_manipulation_check.validate_against_code(checks[arm], code)
+            runner = config.get('runner') or spec.get('runner', 'tools/run_laya_clean.py')
+            mission = mission_settings(spec, arm)
+            capability = frozen_capability(code, runner, spec['python']) if mission['objective_mode'] != 'legacy_unspecified' else None
+            mission = mission_settings(spec, arm, capability=capability)
+            freeze['arms'].append({'id': arm, 'revision': revision, 'runner': runner,
+                                   'mission_capability_version': 1 if capability else None,
+                                   'mission_capability': capability, 'effective_mission': mission, 'code_sha256': tracked_hash(code),
                                    'predicate_sha256': current, 'common_interface':interface})
         freeze['source_sha256'] = sha(spec['source_save'])
         if mixed and len({a['code_sha256'] for a in freeze['arms']}) != 1:
             raise ValueError('A/A calibration requires identical code, policy and interface')
+        if 'experiment_contract' in spec:
+            binding = laya_experiment_contract.make_binding(spec['experiment_contract'], jobs, freeze['arms'])
+            freeze['experiment_contract'] = laya_experiment_contract.publish(root, binding)
         freeze['state'] = 'ready'
     except Exception as error:
         freeze.update(state='incompatible', error=str(error))
@@ -333,6 +379,52 @@ def enqueue(repo, registry, spec):
     finally:
         atomic_json(root/'freeze.json', freeze)
     return root
+
+
+def validate_port_ranges(spec, planned_jobs, registry=None):
+    """Reject impossible ranges before creating a freeze or reserving a world.
+
+    Factorio game ports are UDP and RCON is TCP: equal port numbers across
+    those protocols do not collide. Same-protocol reuse needs an explicit
+    predecessor gate, or proof the old jobs have released their worlds.
+    """
+    ranges = {}
+    for field in ('game_port_base', 'rcon_port_base'):
+        base = spec.get(field)
+        if type(base) is not int or not 1 <= base <= base + planned_jobs - 1 <= 65535:
+            raise ValueError(f'{field} range must fit in 1..65535 for {planned_jobs} jobs')
+        ranges[field] = (base, base + planned_jobs - 1)
+    if registry is None:
+        return
+    predecessors = set()
+    pending = list(spec.get('after', []))
+    while pending:
+        name = pending.pop()
+        if name in predecessors:
+            continue
+        predecessors.add(name)
+        path = registry/name/'regression.json'
+        if path.exists():
+            pending.extend(read(path).get('after', []))
+    for path in registry.glob('*/regression.json'):
+        if path.parent.name in predecessors:
+            continue
+        other = read(path)
+        status_path = path.parent/'job-status.json'
+        if not status_path.exists():
+            continue
+        # Read the potentially large status only for a numeric overlap.
+        count = read(path.parent/'freeze.json')['planned_jobs']
+        overlaps = [field for field, (low, high) in ranges.items()
+                    if type(other.get(field)) is int
+                    and low <= other[field] + count - 1 and other[field] <= high]
+        if not overlaps:
+            continue
+        jobs = read(status_path)['jobs']
+        if any(j.get('status') not in TERMINAL or j.get('admission_reserved')
+               or (j.get('world') and not j.get('cleanup_completed')) for j in jobs):
+            raise ValueError(f'Port range overlaps {path.parent.name}: {", ".join(overlaps)}; '
+                             'use distinct ranges or an explicit predecessor gate')
 
 
 def ports_free(game, rcon):
@@ -414,6 +506,9 @@ def collect_result(world, job):
             except ValueError:
                 errors.append('malformed_acceptance_journal')
                 continue
+            if not isinstance(row, dict):
+                errors.append('malformed_acceptance_journal')
+                continue
             if row.get('event') == 'strict_current':
                 observations.append(row)
             elif row.get('event') == 'summary':
@@ -422,17 +517,22 @@ def collect_result(world, job):
                 research = row
             elif row.get('event') == 'acceptance':
                 statuses = row.get('statuses') or {}
+                if not isinstance(statuses, dict):
+                    errors.append('malformed_acceptance_statuses')
+                    final = None
+                    continue
                 final = None if 'error' in statuses else [k for k,v in statuses.items() if v == 'passed']
                 for key in final or []:
                     latches.setdefault(key, row.get('tick'))
-    outcomes = []
     records = world/'evidence/decision-states.jsonl'
-    if records.exists():
-        for line in records.read_text().splitlines():
-            try:
-                outcomes.append(json.loads(line).get('outcome') or {})
-            except ValueError:
-                errors.append('malformed_decision_journal')
+    rows = read_records(records)
+    outcomes = [(r.get('outcome') if isinstance(r.get('outcome'), dict) else {}, r.get('typed_outcome'))
+                for r in rows]
+    errors.extend('malformed_decision_journal' for r in rows if r.get('evidence_error'))
+    updates = []
+    if journal.exists():
+        updates = [r for r in read_records(journal) if r.get('event') == 'operation_observation']
+    accounting = summarize_records(records, observations=updates)
     loaded = summary.get('loaded_tick')
     if type(loaded) is not int:
         loaded = next((r['loaded_tick'] for r in observations if type(r.get('loaded_tick')) is int), None)
@@ -440,22 +540,72 @@ def collect_result(world, job):
     for row in observations:
         if type(loaded) is not int or type(row.get('tick')) is not int or row['tick'] <= loaded:
             continue
-        for stage, passed in row.get('statuses', {}).items():
+        statuses = row.get('statuses')
+        for stage, passed in (statuses.items() if isinstance(statuses, dict) else ()):
             if passed is True and stage not in reached:
                 reached[stage] = row['tick']
                 latency[stage] = {'ticks':row['tick']-loaded, 'time_seconds':row.get('elapsed_seconds'),
                                   'decisions':row.get('decisions')}
     target = job.get('strict_target')
-    passed = True if target in reached else False if target and observations else None
-    faults = summary.get('faults') or dict(__import__('collections').Counter(
-        str(r.get('code') or 'tool_error') for r in outcomes if not r.get('ok')))
-    relevant = [stage for stage in reached if stage > job.get('origin', job.get('checkpoint', 'C0'))]
+    known_target = [(r.get('statuses') or {}).get(target) for r in observations
+                    if isinstance(r.get('statuses'), dict) and type(r.get('tick')) is int
+                    and type(loaded) is int and r['tick'] > loaded]
+    legacy_reached = dict(reached)
+    contracts = [(r.get('predicate_evidence') or {}).get('_contract') for r in observations
+                 if isinstance(r.get('predicate_evidence'), dict)]
+    contract = next((c for c in reversed(contracts) if isinstance(c, dict)), None)
+    basis, eligible = 'legacy_current_pass_after_load', None
+    if contract is not None:
+        basis = 'observed_predicate_transitions'
+        reached = {}
+        for event in contract.get('observed_events') or ():
+            if (isinstance(event, dict) and event.get('kind') == 'predicate_transition'
+                    and isinstance(event.get('checkpoint'), str) and type(event.get('tick')) is int
+                    and type(loaded) is int and event['tick'] > loaded):
+                reached.setdefault(event['checkpoint'], event['tick'])
+        inherited = contract.get('inherited_start')
+        initial = (inherited.get('predicates') or {}).get(target) if isinstance(inherited, dict) else None
+        if isinstance(initial, dict) and initial.get('status') in ('passed', 'failed'):
+            eligible = initial['status'] == 'failed'
+    if contract is not None:
+        samples_by_tick = {r.get('tick'): r for r in observations if type(r.get('tick')) is int}
+        latency = {stage: {'ticks': tick-loaded,
+                          'time_seconds': samples_by_tick.get(tick, {}).get('elapsed_seconds'),
+                          'decisions': samples_by_tick.get(tick, {}).get('decisions')}
+                   for stage, tick in reached.items()}
+    passed = (True if target in reached and eligible is not False else False if any(v is False for v in known_target)
+              and (contract is None or eligible is True) else None)
+    # Geometry receipts use status rather than ok. A missing field is unknown,
+    # not a failed tool call; an explicitly empty summary is authoritative too.
+    faults = summary.get('faults')
+    if faults is None:
+        faults = dict(__import__('collections').Counter(
+            str(r.get('code') or ('runner_error:' + str(r.get('error_type') or 'unknown')
+                                  if r.get('status') == 'failed' else 'tool_error'))
+            for r, _ in outcomes if r.get('ok') is False or r.get('status') == 'failed'))
+    classification = summary.get('stop_classification')
+    if classification is None:
+        classification = 'genuine_failure' if summary.get('stop') == 'stalled' else 'unknown'
+    # One milestone block for every reader: contract evidence when present, else the same rule over polls, else the latch.
+    milestones = laya_milestone_report.from_journal_rows(observations, loaded, ever=sorted(latches), final=final)
+    from_contract = milestones['source'] == 'contract'
+    from orchestrator.checkpoint_milestones import MILESTONE_IDS
+    rank = lambda stage: MILESTONE_IDS.index(stage) if stage in MILESTONE_IDS else len(MILESTONE_IDS)
+    relevant = [stage for stage in reached if rank(stage) > rank(job.get('origin', job.get('checkpoint', 'C0')))]
+    versions = milestones.get('predicate_versions') or {}
     first = min(relevant, key=lambda stage: reached[stage]) if relevant else None
-    return {'faults':faults, 'accepted_ever':sorted(latches), 'accepted_final':final,
+    return {**accounting, 'legacy_counter_meanings': {'failures':'runner caught exceptions', 'faults':'historical summary or legacy fallback'}, 'faults':faults,
+            'milestones':milestones, 'accepted_ever':milestones['earned'] if from_contract else sorted(latches),
+            # c5-v1 (stable window) and c5-v2 (planned rate) measure different things; readers must not pool them.
+            'c5_predicate_version':versions.get('C5'), 'c6a_predicate_version':versions.get('C6a'),
+            'c6_predicate_version':versions.get('C6'),
+            'accepted_ever_basis':'earned_events' if from_contract else 'legacy_latch', 'accepted_final':final,
             'legacy_latch_reached':latches, 'strict_reached':reached, 'loaded_tick':loaded,
-            'strict_current':observations, 'strict_current_at_end':observations[-1]['statuses'] if observations else None,
+            'strict_reached_basis':basis, 'legacy_current_pass_reached':legacy_reached,
+            'objective_eligible':eligible, 'milestone_evidence':contract,
+            'strict_current':observations[-STRICT_CURRENT_KEEP:], 'strict_current_at_end':observations[-1].get('statuses') if observations else None,
             'stage_latency':latency, 'progress_latency':latency.get(first, {}),
-            'runner_stop':summary.get('stop'), 'stop_classification':summary.get('stop_classification', 'unknown'),
+            'runner_stop':summary.get('stop'), 'stop_classification':classification,
             'research_acceptance':summary.get('research_acceptance') or research,
             'objective_version':summary.get('objective_version'),
             'decisions':summary.get('decisions'), 'failures':summary.get('failures'),
@@ -464,11 +614,37 @@ def collect_result(world, job):
             'exact_continuation':False, 'full_run_acceptance_gate':'not_evaluated'}
 
 
-def _publish(root, mutate):
+#: A dispatch that finds no host budget changes nothing, but rewriting the whole
+#: job-status (which carries every job's strict history) on each poll holds the
+#: global admission lock for seconds. Refresh the cohort's liveness at this
+#: interval instead, so the host keeps seeing it without the write storm.
+HEARTBEAT_SECONDS = 240
+WAITING_OUTCOMES = frozenset({'waiting_for_host_budget', 'waiting_for_admission_interval', 'ports_unavailable', 'waiting_for_admission_lock'})
+
+
+def _publish(root, mutate, min_interval=0.0):
     with lock(root/'status.lock'):
-        status = read(root/'job-status.json')
+        status, seq, plan = laya_status_journal.load(root)
+        projection = root/'job-status.json'
+        try:
+            projected = read(projection)
+        except FileNotFoundError:
+            projected = None
+        except (OSError, ValueError) as exc:
+            raise laya_status_journal.JournalUnavailable(f'status projection unavailable: {exc}') from exc
+        if projected != status:
+            atomic_json(projection, status)
+        previous = copy.deepcopy(status)
         value = mutate(status)
+        if (isinstance(value, str) and value in WAITING_OUTCOMES
+                and time.time() - float(status.get('updated') or 0.0) < min_interval):
+            return value
         status['updated'] = time.time()
+        plan_path = root/'planned-jobs.json'
+        if plan_path.is_file():
+            status['accounting'] = planned_job_accounting(read(plan_path)['jobs'],
+                [job for job in status['jobs'] if not job.get('legacy_status_missing')])
+        laya_status_journal.append(root, previous, status, seq, plan)
         atomic_json(root/'job-status.json', status)
         return value
 
@@ -476,13 +652,49 @@ def _publish(root, mutate):
 def _update_job(root, identity, values):
     def change(status):
         next(j for j in status['jobs'] if j['id'] == identity).update(values)
+        status['progress_updated'] = time.time()
     _publish(root, change)
+
+
+def record_checks(spec, status):
+    """Evaluate declared manipulation checks in place; a failure here must not block publication."""
+    try:
+        return laya_manipulation_check.evaluate(spec, status, TERMINAL)
+    except Exception as error:  # noqa: BLE001 -- the check is advisory for terminal publication and recovery
+        status['manipulation_check_error'] = f'{type(error).__name__}: {error}'
+        return []
+
+
+def finalize_checks(root, spec):
+    """Durably publish any declared verdict that is due, whether or not more admissions follow.
+
+    Writes nothing when no verdict is due, so it is cheap to call at recovery and at campaign end.
+    """
+    if not laya_manipulation_check.declarations(spec):
+        return []
+    if not laya_manipulation_check.evaluate(spec, copy.deepcopy(read(root/'job-status.json')), TERMINAL):
+        return []
+    return _publish(root, lambda status: record_checks(spec, status))
 
 
 def recover(root):
     spec = read(root/'regression.json')
-    for job in read(root/'job-status.json')['jobs']:
+    jobs = _publish(root, lambda status: copy.deepcopy(status['jobs']))
+    for job in jobs:
         if job.get('admission_reserved'):
+            def interrupted(status):
+                row = next(j for j in status['jobs'] if j['id'] == job['id'])
+                if row.get('status') not in TERMINAL:
+                    row.update(status='infrastructure_failure', termination_cause='coordinator_interrupted_attempt',
+                               cleanup_completed=False)
+                if row.get('attempts'):
+                    attempt = row['attempts'][-1]
+                    attempt['outcome'] = attempt.get('outcome') or {'kind':'unknown', 'reason':'coordinator_interrupted'}
+                    for invocation in attempt['invocations']:
+                        if invocation.get('outcome') is None:
+                            invocation['outcome'] = {'kind':'unknown', 'reason':'coordinator_interrupted'}
+                            invocation['recovered_at'] = time.time()
+            _publish(root, interrupted)
             scoped_stop(root/'arms'/job['arm']/'code', Path(job['world']), spec['python'],
                         Path(spec['factorio_binary']).resolve().parents[2])
             updates = {'admission_reserved':False, 'cleanup_completed':True,
@@ -492,20 +704,28 @@ def recover(root):
             if job.get('status') not in TERMINAL:
                 updates.update(status='infrastructure_failure', termination_cause='coordinator_interrupted_attempt')
             _update_job(root, job['id'], updates)
+    finalize_checks(root, spec)
 
 
-def _dispatch(root, executor):
+def _reserve_job(root):
     spec, freeze = read(root/'regression.json'), read(root/'freeze.json')
     if sha(root/'regression.json') != freeze.get('spec_sha256') or freeze['state'] != 'ready':
         raise ValueError('Suite is not ready or frozen specification changed')
+    laya_experiment_contract.verify(root, spec, freeze, action_path=ACTION_PATH)
     if not predecessors_done(root.parent, spec['after']):
         return 'waiting_for_predecessors'
     def reserve(status):
+        laya_experiment_contract.verify(root, spec, freeze, status, action_path=ACTION_PATH)
+        if any(j.get('legacy_status_missing') for j in status['jobs']):
+            raise laya_status_journal.JournalUnavailable('legacy job status missing; dispatch unavailable')
         if time.time() >= datetime.fromisoformat(spec['until']).timestamp():
             for item in status['jobs']:
                 if item['status'] == 'queued':
                     item.update(status='cancelled', termination_cause='campaign_deadline_unstarted')
             return 'deadline'
+        # Declared arms only; a new verdict is published before any further admission.
+        if laya_manipulation_check.evaluate(spec, status, TERMINAL):
+            return 'manipulation_check_recorded'
         job = next((j for j in status['jobs'] if j['status'] == 'queued'), None)
         if job is None:
             return 'complete'
@@ -522,16 +742,46 @@ def _dispatch(root, executor):
         status['last_admit'] = time.time()
         return dict(job)
     # All admission records, including this suite, use the host's real lock.
-    with lock(root.parent/'.host-admission.lock'):
-        job = _publish(root, reserve)
-    if isinstance(job, str):
-        return job
+    # Do not queue a cohort's idle workers on the shared lock.
+    with (root.parent/'.host-admission.lock').open('a') as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return 'waiting_for_admission_lock'
+        job = _publish(root, reserve, min_interval=HEARTBEAT_SECONDS)
+    return job if isinstance(job, str) else (spec, freeze, job)
+
+
+def _dispatch(root, executor):
+    reserved = _reserve_job(root)
+    return reserved if isinstance(reserved, str) else _execute_job(root, executor, *reserved)
+
+
+def _execute_job(root, executor, spec, freeze, job):
     code = root/'arms'/job['arm']/'code'
     world = Path(job['world'])
     identity = next(a for a in freeze['arms'] if a['id'] == job['arm'])
     deadline = time.monotonic()+min(spec['trial_wall_seconds'], datetime.fromisoformat(spec['until']).timestamp()-time.time())
     result = {}
+    attempt_id = uuid.uuid4().hex
     try:
+        try:
+            boot_id = Path('/proc/sys/kernel/random/boot_id').read_text().strip() or None
+        except OSError:
+            boot_id = None
+        attempt = {'version':1, 'id':attempt_id, 'started':time.time(),
+                   'boot_id':boot_id, 'coordinator':{'pid':os.getpid(),
+                   'creation_token':runner_process._process_creation_token(os.getpid())},
+                   'child_identity':None, 'runner_identity':None,
+                   'frozen_identity':{'arm':identity, 'source_sha256':freeze.get('source_sha256'),
+                       'mods_sha256':freeze.get('mods_sha256'), 'engine_sha256':freeze.get('engine_sha256'),
+                       'spec_sha256':freeze.get('spec_sha256'), 'bundle_sha256':job.get('bundle_sha256')},
+                   'mission':mission_settings(spec, job['arm']), 'invocations':[], 'outcome':None}
+        def begin(status):
+            row = next(j for j in status['jobs'] if j['id'] == job['id'])
+            row.setdefault('attempts', []).append(attempt)
+            row['cleanup_completed'] = False
+        _publish(root, begin)
         if (tracked_hash(code) != identity['code_sha256'] or sha(spec['source_save']) != freeze['source_sha256']
                 or tree_hash(Path(spec['mods_source'])) != freeze['mods_sha256']
                 or sha(spec['factorio_binary']) != freeze['engine_sha256']):
@@ -542,13 +792,73 @@ def _dispatch(root, executor):
                 raise ValueError('Checkpoint manifest changed')
         (root/'logs').mkdir(exist_ok=True)
         with (root/'logs'/f'{job["id"]}.log').open('a') as log:
-            base = [spec['python'], str(code/spec.get('runner', 'tools/run_laya_clean.py'))]
+            # Track B arms run a different binary interface; allow one runner
+            # per arm, falling back to the cohort-wide runner.
+            arm_runner = ((spec.get('arms') or {}).get(job.get('arm')) or {}).get('runner')
+            base = [spec['python'], str(code/(arm_runner or spec.get('runner', 'tools/run_laya_clean.py')))]
+            effective = mission_settings(spec, job['arm'])
+            capability = {}
+            if effective['objective_mode'] != 'legacy_unspecified':
+                selected_runner = arm_runner or spec.get('runner', 'tools/run_laya_clean.py')
+                capability = frozen_capability(code, selected_runner, spec['python'])
+                if identity.get('runner') != selected_runner or identity.get('mission_capability') != capability:
+                    raise ValueError('Frozen mission capability changed')
+                effective = mission_settings(spec, job['arm'], capability=capability)
+            def set_mission(status):
+                row = next(j for j in status['jobs'] if j['id'] == job['id'])
+                next(a for a in row['attempts'] if a['id'] == attempt_id)['mission'] = effective
+            _publish(root, set_mission)
             def execute(arguments):
-                return executor(base+arguments, cwd=code, check=True, stdout=log, stderr=subprocess.STDOUT,
+                command = base + arguments
+                receipt = {'phase':arguments[0], 'argv':command, 'cwd':str(code),
+                           'started':time.time(), 'child_identity':None, 'runner_identity':None, 'outcome':None}
+                def add(status):
+                    row = next(j for j in status['jobs'] if j['id'] == job['id'])
+                    next(a for a in row['attempts'] if a['id'] == attempt_id)['invocations'].append(receipt)
+                _publish(root, add)
+                try:
+                    completed = executor(command, cwd=code, check=True, stdout=log, stderr=subprocess.STDOUT,
                                 env={**os.environ, 'LAYA_CHECKPOINT_RUNTIME_ROOT':str(Path(spec['factorio_binary']).resolve().parents[2])},
                                 timeout=max(.1, deadline-time.monotonic()))
+                except BaseException as error:
+                    if isinstance(error, subprocess.CalledProcessError):
+                        outcome = ({'kind':'signal', 'signal':-error.returncode} if error.returncode < 0
+                                   else {'kind':'exit', 'code':error.returncode})
+                    elif isinstance(error, subprocess.TimeoutExpired):
+                        outcome = {'kind':'timeout'}
+                    elif isinstance(error, Exception):
+                        outcome = {'kind':'exception', 'type':type(error).__name__}
+                    else:
+                        outcome = {'kind':'interruption', 'type':type(error).__name__}
+                    def finish_error(status):
+                        row = next(j for j in status['jobs'] if j['id'] == job['id'])
+                        next(a for a in row['attempts'] if a['id'] == attempt_id)['invocations'][-1].update(
+                            outcome=outcome, finished=time.time())
+                    try:
+                        _publish(root, finish_error)
+                    except BaseException as publication_error:
+                        if not isinstance(error, (KeyboardInterrupt, SystemExit)):
+                            raise
+                        error.add_note(f'Invocation evidence publication failed: {type(publication_error).__name__}')
+                    raise
+                code_returned = getattr(completed, 'returncode', None)
+                if type(code_returned) is not int:
+                    outcome = {'kind':'unknown', 'reason':'returncode_unavailable'}
+                else:
+                    outcome = ({'kind':'signal', 'signal':-code_returned} if code_returned < 0
+                               else {'kind':'exit', 'code':code_returned})
+                def finish(status):
+                    row = next(j for j in status['jobs'] if j['id'] == job['id'])
+                    next(a for a in row['attempts'] if a['id'] == attempt_id)['invocations'][-1].update(
+                        outcome=outcome, finished=time.time())
+                _publish(root, finish)
+                if type(code_returned) is not int:
+                    raise RuntimeError('Executor return code is unavailable')
+                if code_returned != 0:
+                    raise subprocess.CalledProcessError(code_returned, command)
+                return completed
             restart = ['--restart-checkpoint', job['bundle']] if job['bundle'] else []
-            common = ['--root',str(world),'--actions','deterministic']
+            common = ['--root',str(world),'--actions',ACTION_PATH]
             execute(['prepare',*common,'--game-port',str(job['game_port']), '--rcon-port',str(job['rcon_port']),
                      '--mods-source',spec['mods_source'],'--source-save',spec['source_save'],*restart])
             verify_engine(world, freeze['engine_sha256'])
@@ -558,8 +868,11 @@ def _dispatch(root, executor):
                    '--speed',f"{float(spec.get('game_speed', LEGACY_GAME_SPEED)):g}",*restart]
             if job.get('strict_target'):
                 run += ['--strict-target',job['strict_target']]
-            if spec.get('research_target'):
-                run += ['--research-target', spec['research_target']]
+            arm_research = ((spec.get('arms') or {}).get(job.get('arm')) or {}).get('research_target')
+            target = (effective['research_target'] if effective['objective_mode'] != 'legacy_unspecified'
+                      else arm_research or spec.get('research_target'))
+            if target:
+                run += ['--research-target', target]
             if spec.get('checkpoint_catalog'):
                 run += ['--checkpoint-catalog',spec['checkpoint_catalog']]
             if spec.get('capture_checkpoints'):
@@ -571,6 +884,9 @@ def _dispatch(root, executor):
             variant = spec['arms'][job['arm']].get('variant')
             if variant:
                 run += ['--variant',str(code/variant)]
+            if effective['objective_mode'] != 'legacy_unspecified':
+                run += ['--objective-mode', effective['objective_mode']]
+                _update_job(root, job['id'], {'effective_mission': effective, 'run_command': base + run})
             execute(run)
             if tracked_hash(code) != identity['code_sha256']:
                 raise ValueError('Frozen code changed during attempt')
@@ -581,39 +897,89 @@ def _dispatch(root, executor):
     except Exception as error:
         result = {'status':'infrastructure_failure', **collect_result(world,job),
                   'termination_cause':f'{type(error).__name__}: {error}', 'stop_classification':'infrastructure_failure'}
+    except BaseException as error:
+        result = {'status':'infrastructure_failure', 'termination_cause':f'interrupted: {type(error).__name__}',
+                  'stop_classification':'unknown'}
+        raise
     finally:
+        declared = laya_manipulation_check.declarations(spec).get(job['arm'])
+        if result and declared is not None:
+            result['exposure'] = laya_manipulation_check.measure_job(
+                world, laya_manipulation_check.validate(declared, freeze['planned_jobs']))
         # Publish terminal evidence before cleanup; retain the reservation if
         # physical cleanup fails, so the host cannot over-admit.
-        _update_job(root, job['id'], result)
-        scoped_stop(code, world, spec['python'], Path(spec['factorio_binary']).resolve().parents[2])
-        _update_job(root, job['id'], {'admission_reserved':False,'cleanup_completed':True,
-            'runner_exited':time.time(), 'server_seconds':time.time()-job['preparation_started']})
+        def terminal(status):
+            row = next(j for j in status['jobs'] if j['id'] == job['id'])
+            row.update(result or {'status':'infrastructure_failure', 'termination_cause':'unknown_attempt_outcome'})
+            row['cleanup_completed'] = False
+            for item in row.get('attempts', []):
+                if item['id'] == attempt_id:
+                    item['outcome'] = {'kind':row['status'], 'termination_cause':row.get('termination_cause')}
+                    item['finished'] = time.time()
+            # The verdict is published with the result that completes it, so it does not wait for another admission.
+            record_checks(spec, status)
+        pending = sys.exception()
+        try:
+            _publish(root, terminal)
+            scoped_stop(code, world, spec['python'], Path(spec['factorio_binary']).resolve().parents[2])
+            _update_job(root, job['id'], {'admission_reserved':False,'cleanup_completed':True,
+                'runner_exited':time.time(), 'server_seconds':time.time()-job['preparation_started']})
+        except BaseException as cleanup_error:
+            if not isinstance(pending, (KeyboardInterrupt, SystemExit)):
+                raise
+            pending.add_note(f'Publication or cleanup failed: {type(cleanup_error).__name__}; reservation retained if not durably released')
     return result['status']
 
 
 def run_one(root, *, executor=subprocess.run):
     root = root.resolve()
-    with lock(root/'coordinator.lock'):
+    with lock(root/'coordinator.lock'), laya_coordinator_health.coordinator_health(root):
         recover(root)
         return _dispatch(root, executor)
 
 
-def run_campaign(root, *, workers=MAX_MIXED_WORKERS, executor=subprocess.run):
+def cohort_workers(spec, workers=MAX_MIXED_WORKERS, *, adaptive=False):
+    """Retain the frozen pool limit unless host-adaptive dispatch is requested.
+
+    Adaptive mode raises only the execution-pool ceiling. The host admission
+    gate still approves each world before it receives an execution thread.
+    """
+    value = spec.get('max_workers')
+    if value is None:
+        return int(workers)
+    if type(value) is not int or not 1 <= value <= int(workers):
+        raise ValueError(f'max_workers must be an integer in 1..{int(workers)}')
+    return int(workers) if adaptive else value
+
+
+def run_campaign(root, *, workers=MAX_MIXED_WORKERS, executor=subprocess.run, adaptive=False):
     """Interleave the frozen plan with concurrent, host-admitted attempts."""
     root = root.resolve()
-    with lock(root/'coordinator.lock'):
+    with lock(root/'coordinator.lock'), laya_coordinator_health.coordinator_health(root):
         recover(root)
+        spec = read(root/'regression.json')
+        validate_port_ranges(spec, len(read(root/'job-status.json')['jobs']))
+        workers = cohort_workers(spec, workers, adaptive=adaptive)
+        if adaptive:
+            atomic_json(root/'dispatch-control.json', {'mode':'host-adaptive', 'pool_max':workers,
+                'frozen_max_workers':spec.get('max_workers'), 'started':time.time(),
+                'coordinator_pid':os.getpid(), 'scheduler_source_sha256':sha(Path(__file__))})
         with ThreadPoolExecutor(max_workers=workers) as pool:
             active = set()
             while True:
                 status = read(root/'job-status.json')
                 queued = any(j['status']=='queued' for j in status['jobs'])
                 if not active and not queued:
+                    finalize_checks(root, spec)
                     return 'complete'
-                if len(active) < workers and queued:
-                    active.add(pool.submit(_dispatch, root, executor))
-                done, active = wait(active, timeout=1, return_when=FIRST_COMPLETED)
                 idle = False
+                if len(active) < workers and queued:
+                    reserved = _reserve_job(root)
+                    if isinstance(reserved, str):
+                        idle = reserved.startswith('waiting') or reserved == 'ports_unavailable'
+                    else:
+                        active.add(pool.submit(_execute_job, root, executor, *reserved))
+                done, active = wait(active, timeout=1, return_when=FIRST_COMPLETED)
                 for future in done:
                     outcome = future.result()
                     idle |= outcome.startswith('waiting') or outcome == 'ports_unavailable'

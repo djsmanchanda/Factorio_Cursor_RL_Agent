@@ -21,7 +21,7 @@ def _manifest(origin: str = "C0") -> dict:
         "candidate_repository_revision": "abcdef01",
         "checkpoint_fleet": {
             "ordered_checkpoint_ids": ["C0", "C1", "C2"],
-            "predicate_versions": {"C0": "c0-v1", "C1": "c1-v2", "C2": "c2-v1"},
+            "predicate_versions": {"C0": "c0-v1", "C1": "c1-v1", "C2": "c2-v1"},
             "origin_checkpoint_id": origin,
             "result_path": "episode/fleet-result.json",
             "capture_policy": {"on_milestone": True},
@@ -182,26 +182,19 @@ def test_terminal_capture_uses_last_structured_boundary(tmp_path: Path) -> None:
     assert any(key.startswith("terminal-C1-") for key in result["captures"])
 
 
-
-def test_deterministic_lane_declares_startup_unknown_without_reading_creator_watch(monkeypatch):
-    from types import SimpleNamespace
-    from tools import autonomous_run
-    from orchestrator.checkpoint_observer import UnsupportedObservationAdapter
-    from orchestrator.checkpoint_milestones import evaluate_milestone
-    monitor = SimpleNamespace(adapter=UnsupportedObservationAdapter(),
-                              observe_boundary=lambda *args: {"status": "running"})
-    args = SimpleNamespace(surface="nauvis", force="player", rcon_host="127.0.0.1", rcon_port=1,
-                           rcon_password="test", script_output="unused", reference_point=(0, 0),
-                           max_iterations=1, bootstrap_profile="reduced-v1", episode_id="creator-episode",
-                           checkpoint_monitor=monitor)
-    def run(item, **kwargs):
-        client = SimpleNamespace(command=lambda text: pytest.fail("inherited startup watch must not be read"))
-        bridge = SimpleNamespace(episode_id="creator-episode", remote_interface="factorio_cursor_rl_agent")
-        kwargs["checkpoint_boundary"](client, bridge)
-        startup = monitor.adapter._plastic_startup(client)
-        result = evaluate_milestone("C5", {"tick": 9000, "plastic_startup": startup})
-        assert result.unknown
-        assert result.evidence["reason"] == "deterministic_startup_capture_unavailable"
-        return {"ok": True}
-    monkeypatch.setattr(autonomous_run, "run", run)
-    assert autonomous_run._run_item(args, "plastic-bar", lambda message: None) == {"ok": True}
+@pytest.mark.parametrize('partial', [{}, {'advanced-circuit': {'produced': True}}])
+def test_monitor_does_not_forget_production_reset_through_callable_partial_sample(tmp_path, partial):
+    from orchestrator.checkpoint_milestones import _new_output
+    def item(tick, count):
+        return {'tick': tick, 'production': {'advanced-circuit': {
+            'produced': count, 'counter_basis': 'force-surface-item-input-v1',
+            'counter_scope': 'nauvis:1/player:1', 'counter_generation': 0, 'sample_tick': tick}}}
+    values = [item(10, 297), item(20, 1), {'tick': 21, 'production': partial}, item(30, 301)]
+    monitor = CheckpointRunMonitor(_manifest(), root=tmp_path,
+                                  adapter=CallableObservationAdapter(lambda: values.pop(0)))
+    for _ in range(4):
+        monitor.observe_boundary()
+    current = monitor.history[-1]
+    assert current.production['advanced-circuit'].counter_generation > 0
+    assert _new_output(current, monitor.baseline, 'advanced-circuit')[0] is None
+    assert monitor._last_observation.raw['production']['advanced-circuit']['counter_generation'] > 0

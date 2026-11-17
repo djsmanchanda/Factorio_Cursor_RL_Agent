@@ -20,7 +20,7 @@ def ready_reason(fact):
     return None
 
 
-def observe_loans(client, surface, force):
+def observe_loans(client, surface, force, *, include_planning=False):
     from orchestrator import autonomous_builder as ab
     from orchestrator.mall_bootstrap import active_bootstrap_loans
 
@@ -47,6 +47,12 @@ def observe_loans(client, surface, force):
                 "completed_step_targets": dict(loan.completed_step_targets),
                 "identity": identity(loan), "releasing": loan.releasing}
         fact["ready_reason"] = ready_reason(fact)
+        if include_planning:
+            from orchestrator.operation_preview import observe_step_proposal
+            try:
+                fact['step_proposal'] = observe_step_proposal(client, surface, force, loan)
+            except Exception:
+                fact['step_proposal'] = None
         observed.append(fact)
     return observed
 

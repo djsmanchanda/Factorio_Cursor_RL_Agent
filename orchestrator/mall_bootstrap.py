@@ -295,6 +295,14 @@ def next_bootstrap_step(
     return descend(target_item, root_missing, frozenset())
 
 
+def preserve_bootstrap_step(planned: MallBootstrapStep | None, persisted: MallBootstrapStep | None,
+                            *, completed: bool) -> MallBootstrapStep | None:
+    """Keep an unfinished configured batch when a new plan points elsewhere."""
+    if not completed and persisted is not None and planned is not None and planned.recipe != persisted.recipe:
+        return persisted
+    return planned
+
+
 def bootstrap_external_shortages(
     target_item: str,
     target_count: int,

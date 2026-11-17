@@ -32,7 +32,7 @@ def world(tmp_path, monkeypatch):
     def unexpected(*args, **kwargs):
         pytest.fail("Session initialization chose work or accessed an unexpected live command")
 
-    bridge = SimpleNamespace(export_recipe_catalog=export)
+    bridge = SimpleNamespace(export_recipe_catalog=export, build_layout=unexpected)
     monkeypatch.setattr(laya_ops, "GameBridge", lambda **kwargs: bridge)
     monkeypatch.setattr(laya_ops, "RconClient", lambda *args: SimpleNamespace(command=unexpected))
     for name in ("_BOOTSTRAP_DISTRICT_LEDGER", "_MATERIAL_RESERVATION_LEDGER", "_BOOTSTRAP_WORK_LEDGER"):
@@ -45,7 +45,6 @@ def world(tmp_path, monkeypatch):
     monkeypatch.setattr(builder, "_material_sources_and_rates", lambda *args: ({}, {}))
     # These surveys are unrelated to the reservation being selected here.
     monkeypatch.setattr(laya_ops.DeterministicSession, "_maintain_mall", lambda self: None)
-    monkeypatch.setattr(laya_ops.DeterministicSession, "_prepare_operation", lambda self: None)
     return SimpleNamespace(root=root, server=server, exports=exports, bridge=bridge, catalog_path=catalog_path)
 
 
@@ -223,18 +222,18 @@ def test_reopening_restores_district_space_and_reconciles_only_measured_work(wor
     assert builder._BOOTSTRAP_WORK_LEDGER.edges == {"steel-plate": {"copper-plate": "still missing"}}
 
 
-def test_new_episode_arms_startup_before_runtime_initialization_but_resume_does_not(world, monkeypatch):
-    from orchestrator.checkpoint_observer import LiveCheckpointObservationAdapter
-    events = []
-    initialize = builder.initialize_operation_runtime
-    monkeypatch.setattr(LiveCheckpointObservationAdapter, "_plastic_startup",
-                        lambda self, client, *, arm=False: events.append(("sampler", arm)))
-    def initialized(*args, **kwargs):
-        events.append(("runtime", None))
-        return initialize(*args, **kwargs)
-    monkeypatch.setattr(builder, "initialize_operation_runtime", initialized)
-    open_session(world)
-    assert events == [("sampler", True), ("runtime", None)]
-    events.clear()
-    open_session(world, logical_episode_id="original-episode")
-    assert events == [("runtime", None)]
+def test_session_compatibility_identity_and_typed_operation(world, monkeypatch):
+    from orchestrator import laya_session
+    from training.laya_ops import DeterministicSession, receipt
+
+    assert laya_ops is laya_session
+    assert DeterministicSession is laya_session.DeterministicSession
+    assert receipt is laya_session.receipt
+    calls = []
+    monkeypatch.setattr(builder, 'produce_to_demand', lambda *args, **kwargs: calls.append(args) or (1, 2))
+    session = open_session(world)
+    assert session.run('produce', item='iron-gear-wheel')['code'] == 'producing'
+    assert calls and calls[0][4] == 'iron-gear-wheel'
+    monkeypatch.setattr(builder, '_transferable_or_available_stock', lambda *args: {})
+    refusal = session.run('reserve_steel_seed')
+    assert refusal['ok'] is False and refusal['code'] == 'material_shortage'

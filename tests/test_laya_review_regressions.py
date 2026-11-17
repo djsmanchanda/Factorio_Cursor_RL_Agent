@@ -46,7 +46,26 @@ def test_a_slow_world_does_not_create_a_per_minute_drain_cascade():
     state = {"target": 20, "mode": "performance"}
     assert choose(config, state, _metrics(ups_p95=90), now=100)[:2] == (20, "unhealthy_pending")
     assert choose(config, state, _metrics(ups_p95=90), now=160)[:2] == (19, "unhealthy")
-    for now in (220, 280, 340):
-        assert choose(config, state, _metrics(ups_p95=90, active_slots=19), now=now)[:2] == (19, "settling")
-    # Critical memory pressure still lowers admission immediately during that hold.
-    assert choose(config, state, _metrics(active_slots=19, available_gb=1), now=341)[:2] == (18, "memory")
+    # Merge note (O1, 2026-11-15): the harness scheduler (4818e4a7, later than this Oct 22 test)
+    # lets a sustained UPS breach drain through settling (test_ceiling_is_not_a_target_and_ups_still_drains).
+    # The protection kept here: at most one step per `unhealthy_samples` (2) windows, never per minute.
+    assert choose(config, state, _metrics(ups_p95=90, active_slots=19), now=220)[:2] == (19, "unhealthy_pending")
+    assert choose(config, state, _metrics(ups_p95=90, active_slots=19), now=280)[:2] == (18, "unhealthy")
+    assert choose(config, state, _metrics(ups_p95=90, active_slots=18), now=340)[:2] == (18, "unhealthy_pending")
+    # Critical memory pressure still lowers admission immediately.
+    assert choose(config, state, _metrics(active_slots=18, available_gb=1), now=341)[:2] == (17, "memory")
+
+
+@pytest.mark.parametrize("launcher", ["run_laya_mixed", "run_laya_clean"])
+def test_failed_saved_world_prepare_leaves_its_cause_in_the_job_log(launcher, tmp_path, monkeypatch, capfd):
+    # ab-60 lost the cause of two prepare failures because the child's stderr was captured and dropped.
+    import importlib
+    import subprocess
+    module = importlib.import_module(f"tools.{launcher}")
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools/run_laya_saved_world.py").write_text(
+        "import sys\nprint('partial result')\nprint('prepare failed: rcon never ready', file=sys.stderr)\nsys.exit(1)\n")
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+    with pytest.raises(subprocess.CalledProcessError):
+        module.saved_world("prepare", tmp_path / "world")
+    assert "prepare failed: rcon never ready" in capfd.readouterr().err

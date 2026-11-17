@@ -12,25 +12,33 @@ from tests.test_laya_chain_facts import world
 pytestmark = pytest.mark.fast
 
 
-def test_permanent_service_reuses_shared_executor_without_claiming_sustained_output(monkeypatch):
+def test_permanent_service_reuses_shared_executor_without_claiming_sustained_output(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from orchestrator.operation_invocations import Invocations
     from training import laya_ops
     calls = []
     monkeypatch.setattr(laya_ops.ab, "ensure_produced", lambda *a, **kw: calls.append((a, kw)))
     session = laya_ops.DeterministicSession.__new__(laya_ops.DeterministicSession)
-    session.client, session.bridge, session.reference_point, session.emit = object(), object(), (0, 0), lambda _: None
+    session.client, session.bridge, session.reference_point, session.emit = object(), SimpleNamespace(build_layout=None), (0, 0), lambda _: None
+    # Merge note (O1): Track A's single session journals every dispatch (8f535be9), so a bare
+    # session needs an invocation journal and a bridge whose build_layout it can wrap.
+    session.invocations = Invocations(tmp_path, "laya-test")
     session._maintain_mall = lambda: None
     menu = add_production_service_options({"options": [], "needs": []},
         {"needs": [{"item": "chemical-science-pack", "condition": "unmeasured"}]}, world())
     option = menu["options"][0]
     receipt = session.run(option["family"], **option["params"])
     assert calls[0][0][4] == "chemical-science-pack"
-    assert calls[0][1] == {"upgrade_bootstrap": True}
+    # Merge note (O1): one production_service operation is kept (Track A, 8d437e15). It passes its
+    # explicit defaults and returns the shared "producing" receipt; the harness-only
+    # "producer_available" receipt and receipt-level sustained flag were not kept. The option
+    # itself still declares sustained_service_verified=False.
+    assert calls[0][1]["upgrade_bootstrap"] is True
     assert receipt["code"] == "prerequisite_advanced" and receipt["ok"] is False
-    assert receipt["sustained_service_verified"] is False
+    assert option["features"]["sustained_service_verified"] is False
     monkeypatch.setattr(laya_ops.ab, "ensure_produced", lambda *a, **kw: (5, 7))
     receipt = session.run(option["family"], **option["params"])
-    assert receipt["code"] == "producer_available"
-    assert receipt["sustained_service_verified"] is False
+    assert receipt["code"] == "producing"
 
 
 def test_service_rejects_disabled_changed_recipe_and_plate_lifecycle_bypass():

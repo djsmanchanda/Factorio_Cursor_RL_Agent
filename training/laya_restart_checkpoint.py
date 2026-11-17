@@ -144,7 +144,7 @@ def ownership_defect(adapter, session):
             or tuple(session.reference_point) != (0., 0.)):
         return 'lineage_or_session_scope'
     registry = sidecar_registry(session.script_output, session.episode_id)
-    _read_sidecars(registry)  # Includes symlink, bounds and JSON validation.
+    _read_sidecars(registry, session.episode_id)  # Includes symlink, bounds and JSON/record validation.
     live = ab._MATERIAL_RESERVATION_LEDGER
     disk = MaterialReservationLedger(session.script_output, episode_id=session.episode_id,
                                      surface='nauvis', force='player')
@@ -305,11 +305,69 @@ def capture(adapter, session, checkpoint, summary, results, *, run_id, already_p
             adapter.bridge.command('/sc game.tick_paused=false')
 
 
+def _predicate_version(checkpoint_id):
+    from orchestrator.checkpoint_milestones import default_milestones
+    return next((item.predicate_version for item in default_milestones()
+                 if item.checkpoint_id == checkpoint_id), None)
+
+
+CONTEXT_FILE = 'state/logs/laya-restart-context.json'
+
+
+def auxiliary_files(bundle, root, metadata):
+    """Validated writes for the bundle's registered ``state/`` files; touches nothing.
+
+    A destination already holding identical bytes is left alone; a different
+    one is a conflict.
+    """
+    from training.laya_restart_state import _no_symlinks
+    pending = []
+    for relative, digest in sorted((metadata.get('files') or {}).items()):
+        if not relative.startswith('state/') or relative == CONTEXT_FILE:
+            continue
+        source = Path(bundle) / relative
+        target = Path(root) / 'server' / relative.removeprefix('state/')
+        _no_symlinks(source)
+        _no_symlinks(target)
+        data = source.read_bytes()
+        if hashlib.sha256(data).hexdigest() != digest:
+            raise ValueError(f'Bundle sidecar does not match its manifest: {relative}')
+        if target.exists():
+            if checkpoints.sha256(target) != digest:
+                raise ValueError(f'Destination durable sidecar conflicts with source: {relative}')
+            continue
+        pending.append((target, data))
+    return pending
+
+
+def install_sidecars(bundle, root, metadata, context):
+    """Install a restart bundle's durable sidecars without decoding its strict snapshots.
+
+    The same embedded-role preflight and all-or-nothing install as ``restore``
+    (uncertain-dispatch fences, loan-gate retry budgets, legacy unknown
+    provenance) plus the registered auxiliary files, for callers such as the
+    PM replay that only need ownership state. Returns the episode id and the
+    files written.
+    """
+    from orchestrator.checkpoint_restart_state import install_sidecars as install, plan_sidecars
+    state = (context or {}).get('restart_state') or {}
+    episode_id = (state.get('scope') or {}).get('episode_id')
+    if not episode_id:
+        raise ValueError('Checkpoint names no restart episode')
+    script_output = Path(root) / 'server/script-output'
+    written = install(plan_sidecars(state, script_output, episode_id=episode_id),
+                      auxiliary_files(bundle, root, metadata))
+    return {'episode_id': episode_id,
+            'installed': sorted(str(path.relative_to(Path(root) / 'server')) for path in written)}
+
+
 def restore(bundle, root, *, migration_contract=None):
     from training.laya_restart_state import import_restart_state
     metadata, context = load(bundle)
     if context['predicate_sha256'] != predicate_hash():
-        raise ValueError('Restoring code has a different strict predicate source')
+        version = (metadata.get('predicate') or {}).get('version')
+        if not version or version != _predicate_version(metadata.get('checkpoint_id')):
+            raise ValueError('Restoring code has a different strict predicate source')
     manifest = json.loads((Path(root) / 'manifest.json').read_text())
     if manifest.get('production_authority') is not False or manifest.get('runtime') != 'disposable_saved_world':
         raise ValueError('Checkpoint reload must be disposable')
@@ -318,25 +376,15 @@ def restore(bundle, root, *, migration_contract=None):
         raise ValueError('Prepared world does not derive from this checkpoint')
     state = copy.deepcopy(context['restart_state'])
     state['scope']['mod_scope'] = mod_scope(manifest)
+    # Embedded roles are only part of the durable state. Validate every
+    # registered auxiliary file too, then install both in one all-or-nothing
+    # step before a session can reconcile its ledgers.
     restored = import_restart_state(state, Path(root) / 'server/script-output',
-        episode_id=state['scope']['episode_id'], mod_scope=mod_scope(manifest))
-    # Embedded roles above are only part of the durable state. Restore every
-    # registered auxiliary file before a session can reconcile its ledgers.
-    for relative in metadata['files']:
-        if not relative.startswith('state/') or relative == 'state/logs/laya-restart-context.json':
-            continue
-        target = Path(root) / 'server' / relative.removeprefix('state/')
-        from training.laya_restart_state import _no_symlinks
-        _no_symlinks(target)
-        source = Path(bundle) / relative
-        if target.exists():
-            if checkpoints.sha256(target) != metadata['files'][relative]:
-                raise ValueError('Destination durable sidecar conflicts with source')
-        else:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with target.open('xb') as stream:
-                stream.write(source.read_bytes())
-    context = {**context, 'migration_contract_sha256': migration}
+        episode_id=state['scope']['episode_id'], mod_scope=mod_scope(manifest),
+        extra_writes=auxiliary_files(bundle, root, metadata))
+    context = {**context, 'migration_contract_sha256': migration,
+               # Reached milestones dropped to be re-earned under a newer predicate version (c5-v1 or c5-v2 -> c5-v3).
+               'strict_reearned': [dict(item) for item in restored.reearned]}
     return restored, context
 
 
@@ -353,10 +401,18 @@ def validate_restored(adapter, session, bundle, *, migration_contract=None):
         raise ValueError('Reload must be disposable')
     if _clock(adapter) != metadata['capture_tick']:
         raise ValueError('Loaded tick differs from capture')
+    from orchestrator.checkpoint_restart_state import migrate_reached
     state = session.export_restart_state(mod_scope=mod_scope(adapter.manifest))
     state['scope']['mod_scope'] = context['restart_state']['scope']['mod_scope']
-    if state != context['restart_state']:
-        raise ValueError('Restored baseline, history or ownership differs')
+    # The restore dropped re-earned milestones (c5-v1) from reached; compare against that same state.
+    expected, reearned = migrate_reached(context['restart_state'])
+    if state != expected:
+        # An unreached milestone version (c6-v2) may differ; everything reached must match.
+        def _reached_only(value):
+            reached = set(value.get('reached') or ())
+            return {**value, 'milestones': [item for item in value.get('milestones', []) if item.get('id') in reached]}
+        if _reached_only(state) != _reached_only(expected):
+            raise ValueError('Restored baseline, history or ownership differs')
     statuses = session.acceptance()
     if 'error' in statuses or not session._history or session._history[-1].tick != metadata['capture_tick']:
         raise ValueError('Fresh strict telemetry unavailable')
@@ -378,7 +434,7 @@ def validate_restored(adapter, session, bundle, *, migration_contract=None):
             'server_start_ticks': Path(f'/proc/{pid}/stat').read_text().split(') ', 1)[1].split()[19],
             'validator_pid': os.getpid(), 'migration_contract_sha256': migration,
             'migration_contract': copy.deepcopy(migration_contract) if migration is not None else None,
-            'ownership_reconstructed': True,
+            'ownership_reconstructed': True, 'strict_reearned': reearned,
             'generation': metadata['generation_id'], 'checkpoint': metadata['checkpoint_id'],
             'manifest_sha256': checkpoints.sha256(Path(bundle) / 'checkpoint.json'),
             'world_sha256': metadata['world']['sha256'],

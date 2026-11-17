@@ -10,7 +10,7 @@ unsupported result, never a log-based pass.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 import json
 import os
@@ -28,6 +28,7 @@ from orchestrator.checkpoint_milestones import (
     FactorySnapshot,
     MilestoneDefinition,
     PredicateStatus,
+    track_item_production,
 )
 from orchestrator.checkpoint_observer import (
     FileObservationAdapter,
@@ -517,6 +518,9 @@ class CheckpointRunMonitor:
         except Exception as error:
             self.finish("infrastructure_error", f"structured checkpoint observation failed: {type(error).__name__}: {error}")
             return self._payload()
+        snapshot = track_item_production(observation.snapshot, self.history[-1] if self.history else None)
+        observation = replace(observation, snapshot=snapshot, raw={
+            **observation.raw, "production": {item: asdict(counter) for item, counter in snapshot.production.items()}})
         if self.baseline is None:
             self.baseline = observation.snapshot
         self._last_observation = observation

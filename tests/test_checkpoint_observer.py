@@ -17,11 +17,9 @@ from orchestrator.checkpoint_observer import LiveCheckpointObservationAdapter, O
 
 class _Client:
     def command(self, text: str) -> str:
-        if "f.item_production_statistics" in text:
-            if "plastic-bar" in text:
-                return "5"
-            if "advanced-circuit" in text:
-                return "7"
+        if "local counts={}" in text:
+            return json.dumps({"tick": 120, "surface": 1, "force": 1,
+                               "counts": {"plastic-bar": 5, "advanced-circuit": 7}})
         if "electric-furnace" in text:
             return "1|101|working|2;2|102|working|3;3|103|working|4"
         return ""
@@ -45,7 +43,7 @@ def test_live_adapter_builds_structured_snapshot_without_logs(monkeypatch) -> No
                 machine_positions=((1.0, 1.0), (2.0, 2.0)), produced_count=9,
             )
         if recipe == "advanced-circuit":
-            return SimpleNamespace(machine_positions=((3.0, 3.0),), produced_count=7)
+            return SimpleNamespace(machine_positions=((3.0, 3.0),), produced_count=131)
         return None
 
     monkeypatch.setattr(live_base, "game_tick", lambda client: 120)
@@ -62,7 +60,9 @@ def test_live_adapter_builds_structured_snapshot_without_logs(monkeypatch) -> No
     assert snapshot.base_valid is True
     assert snapshot.starters["iron"].present is True
     assert snapshot.starters["copper"].present is False
-    assert snapshot.production["plastic-bar"].produced == 0
+    assert snapshot.production["plastic-bar"].produced == 5
+    assert snapshot.production["advanced-circuit"].produced == 7
+    assert snapshot.production["plastic-bar"].counter_basis == "force-surface-item-input-v1"
     assert snapshot.providers["plastic-bar"].available == 2
     assert snapshot.providers["plastic-bar"].delivered is None
     assert snapshot.recipes["processing-unit"].owned is False
@@ -386,57 +386,6 @@ def test_failed_census_leaves_foundations_unknown_with_the_raw_response(ledger):
     assert result.status.value == "unknown"
 
 
-@pytest.mark.parametrize("runtime,interface", [("deterministic", "factorio_cursor_rl_agent"),
-                                                 ("laya", "factorio_laya_agent")])
-def test_startup_sampler_uses_runtime_interface_and_scope(runtime, interface):
-    from orchestrator.game_bridge import GameBridge
-    from tools.runtime_namespace import resolve
-    bridge = GameBridge.__new__(GameBridge)
-    bridge._namespace = resolve(runtime)
-    bridge.episode_id = "logical-episode"
-    watch = {"surface": "nauvis", "force": "player", "run_id": bridge.episode_id, "samples": {}}
-    commands = []
-    client = SimpleNamespace(command=lambda command: (commands.append(command), json.dumps(watch))[1])
-    observer = LiveCheckpointObservationAdapter(client, bridge)
-    assert observer._plastic_startup(client, arm=True)["samples"] == []
-    assert f'remote.call("{interface}","production_startup_arm"' in commands[-1]
-    assert observer._plastic_startup(client)["run_id"] == bridge.episode_id
-    assert f'remote.call("{interface}","production_startup_read"' in commands[-1]
-    watch["run_id"] = "different-episode"
-    assert observer._plastic_startup(client) is None
-
-
-def test_missing_startup_sampler_does_not_invent_a_late_window():
-    from tools.rcon_client import RconError
-    def unavailable(command):
-        assert "production_startup_read" in command and "production_startup_arm" not in command
-        raise RconError("interface unavailable")
-    bridge = SimpleNamespace(episode_id="resumed-episode", remote_interface="factorio_laya_agent")
-    client = SimpleNamespace(command=unavailable)
-    assert LiveCheckpointObservationAdapter(client, bridge)._plastic_startup(client) is None
-
-
-
-@pytest.mark.lua
-def test_missing_watch_command_prints_null_without_serializing_lua_nil():
-    lua = shutil.which("lua") or shutil.which("lua5.4")
-    if lua is None:
-        pytest.skip("Lua is required for the sampler command wrapper")
-    commands = []
-    client = SimpleNamespace(command=lambda text: (commands.append(text), "null")[1])
-    bridge = SimpleNamespace(episode_id="legacy", remote_interface="factorio_laya_agent")
-    assert LiveCheckpointObservationAdapter(client, bridge)._plastic_startup(client) is None
-    setup = """
-      remote={interfaces={factorio_laya_agent={production_startup_read=true}},call=function() return nil end}
-      helpers={table_to_json=function(value) error('nil must not be serialized') end}
-      rcon={print=print}
-    """
-    result = subprocess.run([lua, "-"], input=setup+commands[0].removeprefix("/sc "),
-                            capture_output=True, text=True, timeout=5)
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "null"
-
-
 def test_science_read_returns_counters_and_degrades_to_an_unavailable_reason():
     class _Science:
         def __init__(self, reply):
@@ -452,3 +401,47 @@ def test_science_read_returns_counters_and_degrades_to_an_unavailable_reason():
     assert adapter._science(adapter.client)["mining_productivity_completed_level"] == 2
     broken = LiveCheckpointObservationAdapter(_Science("Cannot execute command. Error: ..."))
     assert broken._science(broken.client) == {"unavailable_reason": "science_read_failed: JSONDecodeError"}
+
+
+@pytest.mark.lua
+def test_item_production_uses_surface_item_statistics_not_machine_lifetime_counts():
+    from lupa import LuaRuntime
+    runtime = LuaRuntime(unpack_returned_tuples=True)
+    def encode(table):
+        return json.dumps({key: dict(value.items()) if hasattr(value, "items") else value
+                           for key, value in table.items()})
+    runtime.globals().encode = encode
+    runtime.execute("""
+        local surface={index=1}
+        local force={index=2,get_item_production_statistics=function(s)
+            assert(s==surface, 'statistics must be scoped to the selected surface')
+            return {get_input_count=function(item)
+                if item=='plastic-bar' then return 4800 end
+                if item=='advanced-circuit' then return 297 end
+                error('unexpected item')
+            end}
+        end}
+        setmetatable(force,{__index=function(_,key) error('invalid 2.1 API: '..key) end})
+        game={tick=498680,surfaces={nauvis=surface},forces={player=force}}
+        helpers={table_to_json=encode}
+        rcon={print=function(text) output=text end}
+    """)
+    class Client:
+        def command(self, command):
+            runtime.execute(command.removeprefix('/sc '))
+            return runtime.globals().output
+    adapter = LiveCheckpointObservationAdapter(surface='nauvis', force='player')
+    result = adapter._item_production(Client())
+    assert result['advanced-circuit'] == {
+        'produced': 297, 'counter_basis': 'force-surface-item-input-v1',
+        'counter_scope': '["nauvis",1,"player",2]', 'counter_generation': 0, 'sample_tick': 498680}
+    assert result['plastic-bar']['produced'] == 4800
+
+
+@pytest.mark.parametrize('bad', [None, {}, {'tick': 1, 'surface': 1, 'force': 1, 'counts': {}},
+    {'tick': 1, 'surface': 1, 'force': 1, 'counts': {'plastic-bar': 5, 'advanced-circuit': -1}},
+    {'tick': 1, 'surface': 1, 'force': 1, 'counts': {'plastic-bar': 5, 'advanced-circuit': True}}])
+def test_item_production_missing_or_invalid_is_not_zero(bad):
+    client = SimpleNamespace(command=lambda _: json.dumps(bad))
+    with pytest.raises(ObservationUnsupported, match='item production survey failed'):
+        LiveCheckpointObservationAdapter()._item_production(client)

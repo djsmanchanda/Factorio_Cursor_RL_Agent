@@ -11,7 +11,8 @@ view ``run-ledger.csv`` is regenerated from it.  Entries are keyed by
 (system, run_id); recording a run twice replaces its row.
 
 Milestones:
-* Laya: phases measured by the runner (exact, from its decision journal).
+* Laya: milestones earned by observed evidence (``milestone_source=earned_evidence``, from the summary's
+  milestone block); journals without it replay the recorded polls (``earned_from_polls``); only journals with no polls fall back to the runner's goal-ladder phases (``proxy_goal_ladder``).
 * Deterministic: first appearance of marker lines in the run's own log
   (``milestone_source=log_markers_v1``); a marker means the runner reported
   that step, not that a C-predicate passed.
@@ -189,10 +190,26 @@ def laya_entry(index: dict) -> dict:
     started_text = to_local(index.get("started")) or (to_local(datetime.fromtimestamp(int(epoch.group(1)), tz=timezone.utc))
                                                     if epoch else None)
     started = datetime.fromisoformat(started_text) if started_text else None
+    # Earned milestones come from the evidence-contract block in the run's summary row; the goal-ladder
+    # `phase_reached` events are only the fallback for journals written before that block existed.
+    block = next((r.get("milestones") for r in reversed(rows) if r.get("event") == "summary"
+                  and isinstance(r.get("milestones"), dict) and isinstance(r["milestones"].get("earned"), list)), None)
+    if block is None:  # journals from before the block: same rule over the recorded strict_current polls
+        from training.laya_milestone_report import from_polls
+        block = from_polls([r for r in rows if r.get("event") == "strict_current"])
     milestones = []
-    for row in rows:
-        if row.get("event") == "phase_reached":
-            milestones.append({"id": row["phase"], "tick": row.get("tick")})
+    if block is not None:
+        contract = next(((r.get("predicate_evidence") or {}).get("_contract") for r in reversed(rows)
+                         if r.get("event") == "strict_current" and isinstance((r.get("predicate_evidence") or {}).get("_contract"), dict)), {})
+        # The block's own events carry the transition tick (also for replayed legacy polls); a summary block that
+        # predates them falls back to the contract's observed events. Null only when no source has the tick.
+        ticks = {e.get("checkpoint"): e.get("tick") for e in contract.get("observed_events") or () if isinstance(e, dict)}
+        ticks.update({e["id"]: e.get("tick") for e in block.get("events") or () if isinstance(e, dict) and type(e.get("tick")) is int})
+        milestones = [{"id": cid, "tick": ticks.get(cid)} for cid in block["earned"]]
+    else:
+        for row in rows:
+            if row.get("event") == "phase_reached":
+                milestones.append({"id": row["phase"], "tick": row.get("tick")})
     failures = [r for r in rows if r.get("event") == "failure"]
     done = [r for r in rows if r.get("event") == "decision" and r.get("status") not in ("pending",)]
     summary = index.get("summary") or {}
@@ -221,7 +238,9 @@ def laya_entry(index: dict) -> dict:
             "target": (index.get("window") or {}).get("research_goal") or "mod-playground-mining-productivity-4",
             "research_goal": goal,
             "highest_milestone": milestones[-1]["id"] if milestones else None, "milestones": milestones,
-            "milestone_source": "measured_phases", "outcome": outcome,
+            "milestone_source": ("earned_evidence" if block["source"] == "contract" else "earned_from_polls") if block is not None else "proxy_goal_ladder",
+            "holds_at_end": block.get("holds_now") if block else None, "inherited": block.get("inherited") if block else None,
+            "outcome": outcome,
             "failure_code": failures[-1].get("error_type") if failures and outcome == "safe_stop" else None,
             "failure_cause": (None if outcome == "completed" else
                               failures[-1].get("error") if failures and outcome == "safe_stop"

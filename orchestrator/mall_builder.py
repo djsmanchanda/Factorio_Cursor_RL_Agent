@@ -62,6 +62,7 @@ def _configure_built_mall_recipes(
     client: RconClient, bridge: GameBridge, surface: str, force: str,
     recipe: str, machine_name: str, machine_positions: list[Point],
     stock_gate_target: int | None, emit: Callable[[str], None],
+    *, preconditions: Mapping[Point, dict] | None = None,
 ) -> None:
     """Assign recipes after bots have turned mall ghosts into machines."""
     actions = []
@@ -74,6 +75,8 @@ def _configure_built_mall_recipes(
         }
         if stock_gate_target is not None:
             action["logistic_condition"] = stock_gate(recipe, stock_gate_target)
+        if preconditions is not None:
+            action["configuration_preconditions"] = preconditions[(x, y)]
         actions.append(action)
     if not actions:
         return

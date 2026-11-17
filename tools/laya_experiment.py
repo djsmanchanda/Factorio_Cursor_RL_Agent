@@ -34,10 +34,10 @@ sys.path.insert(0, str(ROOT))
 
 from tools.run_laya_clean import RUN_INDEX  # noqa: E402
 from training.laya_mission import PHASES  # noqa: E402
+from training.laya_milestone_report import event_ticks  # noqa: E402
 from training.laya_variants import load_variant  # noqa: E402
-from training.laya_acceptance import condition_counts  # noqa: E402
 
-GAME_PORT, RCON_PORT, SLOTS = 34240, 27140, 40
+GAME_PORT, RCON_PORT, SLOTS = 34240, 27140, 20
 RUNNER = [sys.executable, str(ROOT / "tools/run_laya_clean.py")]
 ORDER = [p["phase_id"] for p in PHASES]
 
@@ -51,19 +51,16 @@ def _job(experiment: str, variant: Path | None, seed: int, slot: int, args: argp
     inputs = (["--source-save",str(args.source_save)] if getattr(args,'source_save',None) else [])
     inputs += (["--mods-source",str(args.mods_source)] if getattr(args,'mods_source',None) else [])
     with out.open("w") as log:
+        prepared = subprocess.run(RUNNER + ["prepare", "--root", str(root), *ports, *inputs], stdout=log, stderr=subprocess.STDOUT)
+        if prepared.returncode:
+            _finalize(experiment, variant, seed, root, args, "prepare_failed", prepared.returncode)
+            return {"variant": vid, "seed": seed, "error": f"prepare failed, see {out}"}
         stop, code = None, None
         try:
-            prepared = subprocess.run(RUNNER + ["prepare", "--root", str(root), *ports, *inputs],
-                                      stdout=log, stderr=subprocess.STDOUT, timeout=args.timeout)
-            if prepared.returncode:
-                stop, code = "prepare_failed", prepared.returncode
-                return {"variant": vid, "seed": seed, "error": f"prepare failed, see {out}"}
             command = RUNNER + ["run", "--root", str(root), "--seed", str(seed), "--no-helper", "--experiment", experiment,
                                "--speed", str(args.speed), "--actions", args.actions]
             command += ["--variant", str(variant)] if variant else []
             command += ["--until-phase", args.until_phase] if args.until_phase else []
-            target = getattr(args, "until_accepted", None)
-            command += ["--until-accepted", target] if target else []
             command += ["--max-game-ticks", str(args.max_game_ticks)] if args.max_game_ticks else []
             code = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=args.timeout).returncode
             stop = "crash" if code else None
@@ -94,20 +91,11 @@ def _finalize(experiment: str, variant: Path | None, seed: int, root: Path, args
         index.write(json.dumps({
             "run_id": f"{root.name}-unfinished", "root": resolved, "seed": seed, "experiment": experiment,
             "variant_id": loaded["variant_id"], "returncode": returncode,
-            "window": {"until_phase": args.until_phase, "until_accepted": getattr(args, "until_accepted", None),
-                       "max_game_ticks": args.max_game_ticks},
+            "window": {"until_phase": args.until_phase, "max_game_ticks": args.max_game_ticks},
             "summary": {"decisions": 0, "failures": 1, "phases_reached": [], "stop": stop}}) + "\n")
 
 
 def run(args: argparse.Namespace) -> int:
-    if not 1 <= args.parallel <= SLOTS or args.seeds < 1:
-        raise SystemExit(f"parallel must be 1..{SLOTS} and seeds must be positive")
-    games = range(args.game_base, args.game_base + args.parallel)
-    rcons = range(args.rcon_base, args.rcon_base + args.parallel)
-    if min(games.start, rcons.start) < 1 or max(games.stop, rcons.stop) > 65536:
-        raise SystemExit("port ranges must fit 1..65535")
-    if set(games) & set(rcons):
-        raise SystemExit("game and RCON port ranges must be disjoint")
     variants = [None] + [Path(v) for v in args.variants]  # None = baseline
     ids = [load_variant(v)["variant_id"] for v in variants]
     if len(set(ids)) != len(ids):
@@ -134,35 +122,74 @@ def _slot_job(slots: list[int], experiment: str, variant: Path | None, seed: int
         slots.append(slot)
 
 
+def _earned(summary: dict) -> list[str] | None:
+    """Milestones earned by observed evidence; None when the run's summary predates the milestone block."""
+    block = summary.get("milestones")
+    return block.get("earned") if isinstance(block, dict) and isinstance(block.get("earned"), list) else None
+
+
 def score(rows: list[dict], target: str | None) -> dict:
-    """Reliability first (share of runs reaching the target), then speed and cleanliness."""
-    reached = [r for r in rows if target and target in r["summary"].get("phases_reached", [])]
-    ticks = [r["summary"].get("phase_ticks", {}).get(target) for r in reached]
-    ticks = [t for t in ticks if t is not None]
-    highest = [max((ORDER.index(p) for p in r["summary"].get("phases_reached", [])), default=-1) for r in rows]
+    """Reliability first (share of runs earning the target), then speed and cleanliness.
+
+    Earned and held come from the evidence-contract block (summary.milestones). A run whose summary lacks it
+    falls back to the runner's goal-ladder proxy (phases_reached) and the old latch, and is counted in
+    ``proxy_fallback`` so the two bases are never mixed silently.
+    """
+    def reached_ids(summary: dict) -> list[str]:
+        earned = _earned(summary)
+        return summary.get("phases_reached", []) if earned is None else earned
+
+    reached = [r for r in rows if target and target in reached_ids(r["summary"])]
+    held = [r for r in rows if target and target in ((r["summary"].get("milestones") or {}).get("holds_now") or [])]
+    # Speed has two separately labelled bases. Evidence timing comes from the milestone block's own first-earned
+    # event, measured from the run's origin; a run whose event time or origin is missing stays unknown and is
+    # visible in the denominator (``timed_of``). Proxy timing is the runner's goal-ladder ``phase_ticks``.
+    timing = [event_ticks(r["summary"].get("milestones"), target) for r in reached if _earned(r["summary"]) is not None]
+    ticks = [t for t, _ in timing if t is not None]
+    proxy_ticks = [t for t in (r["summary"].get("phase_ticks", {}).get(target) for r in rows if target) if t is not None]
+    highest = [max((ORDER.index(p) for p in reached_ids(r["summary"]) if p in ORDER), default=-1) for r in rows]
     return {"runs": len(rows), "reached": len(reached), "reach_rate": round(len(reached) / len(rows), 2) if rows else 0,
+            "held_at_end": len(held),
+            "proxy_fallback": sum(_earned(r["summary"]) is None for r in rows),
+            "proxy_phases_reached": sum(bool(target) and target in r["summary"].get("phases_reached", []) for r in rows),
             "median_ticks": statistics.median(ticks) if ticks else None,
+            "timed": len(ticks), "timed_of": len(timing),
+            "timing_origins": sorted({o for t, o in timing if t is not None}),
+            "proxy_median_ticks": statistics.median(proxy_ticks) if proxy_ticks else None,
+            "proxy_timed": len(proxy_ticks),
             "mean_highest_phase": round(statistics.mean(highest), 2) if highest else None,
             "failures": sum(r["summary"].get("failures", 0) for r in rows),
             "untyped_stuck": sum((r["summary"].get("codes") or {}).get("untyped_stuck", 0) for r in rows),
-            # The deterministic predicate for the target, not the rate proxy (runs without it: not checked).
-            "accepted": sum(bool(target) and target in r["summary"].get("accepted", []) for r in rows),
-            "acceptance_checked": sum(r["summary"].get("acceptance", {}).get(target) in {"passed", "failed", "unknown"}
-                                      for r in rows),
-            "c1_observed": condition_counts(rows),
+            # The deterministic predicate for the target (runs without evidence: old latch, counted in proxy_fallback).
+            "accepted": sum(bool(target) and target in (_earned(r["summary"]) if _earned(r["summary"]) is not None
+                                                        else r["summary"].get("accepted", [])) for r in rows),
+            "acceptance_checked": sum("acceptance" in r["summary"] or _earned(r["summary"]) is not None for r in rows),
             "stops": dict(sorted({s: sum(r["summary"].get("stop") == s for r in rows)
                                   for s in {r["summary"].get("stop") for r in rows}}.items()))}
 
 
+def with_milestones(row: dict) -> dict:
+    """Index rows written before the milestone block get one from their own recorded polls (labelled legacy_polls)."""
+    summary = row.get("summary") or {}
+    if _earned(summary) is not None or not row.get("root"):
+        return row
+    journal = Path(row["root"]) / "evidence/clean-decisions.jsonl"
+    try:
+        polls = [json.loads(x) for x in journal.read_text().splitlines() if '"strict_current"' in x]
+        from training.laya_milestone_report import from_journal_rows
+        block = from_journal_rows([p for p in polls if isinstance(p, dict)])
+    except (OSError, ValueError):
+        return row
+    return {**row, "summary": {**summary, "milestones": block}} if block["source"] != "legacy_latch" else row
+
+
 def report(args: argparse.Namespace) -> int:
     rows = [json.loads(line) for line in RUN_INDEX.read_text().splitlines() if line.strip()] if RUN_INDEX.is_file() else []
-    rows = [r for r in rows if r.get("experiment") == args.experiment]
+    rows = [with_milestones(r) for r in rows if r.get("experiment") == args.experiment]
     if not rows:
         print(f"no runs recorded for experiment {args.experiment}")
         return 1
-    target = getattr(args, "until_accepted", None) or args.until_phase or next(
-        (r["window"].get("until_accepted") or r["window"].get("until_phase")
-         for r in rows if r.get("window", {}).get("until_accepted") or r.get("window", {}).get("until_phase")), None)
+    target = args.until_phase or next((r["window"]["until_phase"] for r in rows if r.get("window", {}).get("until_phase")), None)
     by_variant: dict[str, list[dict]] = {}
     for row in rows:
         by_variant.setdefault(row.get("variant_id", "baseline"), []).append(row)
@@ -171,12 +198,13 @@ def report(args: argparse.Namespace) -> int:
     path = ROOT / f"data/laya-saved-world/exp-{args.experiment}/report.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result, indent=2) + "\n")
-    print(f"| variant | runs | reached {target} (proxy) | accepted {target} (deterministic) | median ticks | "
-          f"mean highest phase | failures | untyped stuck | stops |")
-    print("|---|---|---|---|---|---|---|---|---|")
+    print(f"| variant | runs | earned {target} (evidence; proxy for old runs) | held at end | accepted {target} (deterministic) | "
+          f"runs without evidence block | median ticks (evidence; timed/earned) | proxy median ticks (timed) | mean highest phase | failures | untyped stuck | stops |")
+    print("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for vid, s in table.items():
-        print(f"| {vid} | {s['runs']} | {s['reached']} ({s['reach_rate']:.0%}) | "
-              f"{s['accepted']}/{s['runs']} (checked {s['acceptance_checked']}) | {s['median_ticks']} | "
+        print(f"| {vid} | {s['runs']} | {s['reached']} ({s['reach_rate']:.0%}) | {s['held_at_end']} | "
+              f"{s['accepted']}/{s['acceptance_checked']} | {s['proxy_fallback']} | "
+              f"{s['median_ticks']} ({s['timed']}/{s['timed_of']}) | {s['proxy_median_ticks']} ({s['proxy_timed']}) | "
               f"{s['mean_highest_phase']} | {s['failures']} | {s['untyped_stuck']} | {s['stops']} |")
     print(f"report: {path}")
     return 0
@@ -190,8 +218,6 @@ def main(argv=None) -> int:
     p.add_argument("--seeds", type=int, default=3)
     p.add_argument("--seed-base", type=int, default=1)
     p.add_argument("--until-phase", choices=ORDER)
-    p.add_argument("--until-accepted", choices=[f"C{i}" for i in range(7)],
-                   help="Ops only: shared checkpoint target instead of a production-rate proxy")
     p.add_argument("--max-game-ticks", type=int)
     p.add_argument("--speed", type=float, default=4.0, help="Live game speed for every run")
     p.add_argument("--parallel", type=int, default=4)
@@ -203,10 +229,8 @@ def main(argv=None) -> int:
     p.add_argument("--source-save", type=Path)
     p.add_argument("--mods-source", type=Path)
     args = p.parse_args(argv)
-    if args.until_accepted and (args.actions != "deterministic" or args.until_phase):
-        p.error("until-accepted requires deterministic actions and cannot be combined with until-phase")
-    if args.action == "run" and not (args.until_phase or args.until_accepted or args.max_game_ticks):
-        p.error("an experiment needs a proxy/accepted target and/or max-game-ticks")
+    if args.action == "run" and not (args.until_phase or args.max_game_ticks):
+        p.error("an experiment needs a window: --until-phase and/or --max-game-ticks")
     return run(args) if args.action == "run" else report(args)
 
 

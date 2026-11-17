@@ -276,22 +276,6 @@ def test_storage_wait_from_the_helper_does_not_mark_the_reclaim_ordered(tmp_path
     assert builder._STARTER_PROVIDER_RECLAIM_ORDERED == {}
 
 
-def test_operation_maintenance_reclaims_retained_providers(monkeypatch):
-    from orchestrator.operation_session import DeterministicSession
-
-    session = DeterministicSession.__new__(DeterministicSession)
-    session.client, session.bridge, session.emit = object(), object(), lambda _m: None
-    calls = []
-    monkeypatch.setattr(builder, "_refresh_logistic_chest_budget", lambda *_a, **_kw: None)
-    monkeypatch.setattr(builder, "_refresh_owned_standing_gates", lambda *_a: None)
-    monkeypatch.setattr(builder, "_maintain_retained_starter_providers", lambda *a: calls.append(a))
-    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", None)
-
-    session._prepare_operation()
-
-    assert len(calls) == 1
-
-
 def test_runtime_initialization_clears_provider_caches(monkeypatch):
     from types import SimpleNamespace
 

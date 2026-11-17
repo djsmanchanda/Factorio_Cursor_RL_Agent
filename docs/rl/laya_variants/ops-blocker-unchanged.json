@@ -1,0 +1,13 @@
+{
+  "version": "1.0.0",
+  "variant_id": "ops-blocker-unchanged",
+  "description": "Options whose latest attempt was refused or deferred and whose blocker has not changed since (blocker_unchanged: no named item gained stock, nothing succeeded or was built since) x0.05. Offline replay of 75 stalled C0 runs (data/review/project-audit-20261114/impl/O2): 96% of such choices failed again.",
+  "catalog": "docs/rl/laya_ops_guidelines.json",
+  "catalog_patch": {
+    "mission.ops-history-no-repeat": {
+      "prefer": [
+        {"when": {"blocker_unchanged": true}, "weight": 0.05}
+      ]
+    }
+  }
+}

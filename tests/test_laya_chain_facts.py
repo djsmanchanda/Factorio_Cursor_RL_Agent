@@ -111,13 +111,18 @@ def test_consumer_choice_checks_free_inputs_and_supported_recipe():
         assert not add_consumer_options({"options": [], "needs": []}, changed, history, economics, {})["options"]
 
 
-def test_consumer_option_uses_real_batch_dispatch_and_reports_prerequisite(monkeypatch):
+def test_consumer_option_uses_real_batch_dispatch_and_reports_prerequisite(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from orchestrator.operation_invocations import Invocations
     from training import laya_ops
 
     calls = []
     monkeypatch.setattr(laya_ops.ab, "produce_to_demand", lambda *args, **kwargs: calls.append((args, kwargs)))
     session = object.__new__(laya_ops.DeterministicSession)
-    session.client, session.bridge, session.reference_point, session.emit = object(), object(), (0, 0), lambda _: None
+    session.client, session.bridge, session.reference_point, session.emit = object(), SimpleNamespace(build_layout=None), (0, 0), lambda _: None
+    # Merge note (O1): Track A's single session journals every dispatch (8f535be9), so a bare
+    # session needs an invocation journal and a bridge whose build_layout it can wrap.
+    session.invocations = Invocations(tmp_path, "laya-test")
     session._maintain_mall = lambda: None
     results = [{"ok": True, "code": "producing", "operation": "mall_slot", "params": {"item": "inserter"}}]
     option = add_consumer_options({"options": [], "needs": []}, world(), results, {"projects": {}}, {})["options"][0]

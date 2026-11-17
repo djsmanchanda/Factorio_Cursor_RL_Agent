@@ -102,8 +102,12 @@ def is_promotable(item: str) -> bool:
 
 def live_intermediate_demand(
     client: RconClient, surface: str, force: str, item: str,
-) -> float:
-    """Sum the live per-second demand from working consumer lines."""
+) -> float | None:
+    """Sum working consumers' effective recipe draw, not their planned tier.
+
+    This is instantaneous potential input draw, not sustained delivery. Unknown
+    effective speed cannot be replaced with zero or a recipe's declared tier.
+    """
     total = 0.0
     for consumer, spec in LINE_RECIPES.items():
         if item not in spec.get("ingredients", ()) or consumer == item:
@@ -111,9 +115,12 @@ def live_intermediate_demand(
         line = live_base.find_line(client, surface, force, consumer, spec["machine"])
         if line is None or line.working_count <= 0:
             continue
+        speed = getattr(line, 'working_crafting_speed', None)
+        if type(speed) not in (int, float) or not math.isfinite(speed) or speed < 0:
+            return None
         for index, ingredient in enumerate(spec["ingredients"]):
             if ingredient == item:
-                total += machine_ingredient_rates(consumer, line.working_count)[index]
+                total += spec['amounts'][index] * speed / spec['craft_time']
     return total
 
 

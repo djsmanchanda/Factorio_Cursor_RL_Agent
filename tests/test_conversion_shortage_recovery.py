@@ -90,6 +90,9 @@ def test_saved_steel_seed_uses_its_fenced_poles_without_taking_bridge_stock(tmp_
         submitted.append((name, actual_plan))
 
     monkeypatch.setattr(builder, '_submit', submit)
+    # This regression isolates reservation ownership; native source recovery
+    # and interrupted retries are exercised in test_steel_seed_recovery.
+    monkeypatch.setattr(builder, '_recover_steel_seed_source', lambda *_: None)
     monkeypatch.setattr(builder, 'bring_stage_up', lambda *_a, **_k: None)
     monkeypatch.setattr(builder, '_ensure_power_anchor_on_generated_network', lambda *_a, **_k: None)
     monkeypatch.setattr(builder, '_diagnose_machines', lambda *_a, **_k: [])

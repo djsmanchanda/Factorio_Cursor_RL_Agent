@@ -1876,10 +1876,8 @@ def _mock_drill_recipe(monkeypatch) -> None:
     })
 
 
-def test_spare_phase_refreshes_the_frozen_bill_gate(monkeypatch) -> None:
-    """2026-09-03 drill stall: the machine gate froze at the bill of 6 while
-    the loan step advanced to the spare ceiling of 8, so the cell disabled at
-    6 and the run died on gate_mismatch. A drifted gate must reconfigure."""
+def test_spare_phase_unknown_gate_preserves_the_loan(monkeypatch) -> None:
+    """A changed desired target alone does not prove a control mismatch."""
     _mock_drill_recipe(monkeypatch)
     stock = {
         "electric-mining-drill": 6, "electronic-circuit": 100,
@@ -1909,24 +1907,15 @@ def test_spare_phase_refreshes_the_frozen_bill_gate(monkeypatch) -> None:
         lambda _message: None,
     )
 
-    assert [name for name, _plan in plans] == [
-        "bootstrap_loan_electric-mining-drill",
-    ]
-    machine = next(
-        action for action in plans[0][1]["phases"][0]["actions"]
-        if action.get("entity") == "assembling-machine-1"
-    )
-    assert machine["logistic_condition"] == {
-        "signal": "electric-mining-drill", "comparator": "<", "constant": 8,
-    }
+    assert plans == []
 
 
-def test_stale_disabled_reading_resumes_instead_of_ending_the_run(
+def test_stale_disabled_reading_waits_for_crafts_instead_of_resetting(
     monkeypatch,
 ) -> None:
     """Status and stock are sampled seconds apart while bots drain the batch:
-    a machine that already re-enabled must not end the run on the stale
-    disabled reading."""
+    a machine that already re-enabled must not end the run or reset its
+    controls on the stale disabled reading. Status alone is not a craft."""
     _mock_drill_recipe(monkeypatch)
     stock = {
         "electric-mining-drill": 6, "electronic-circuit": 100,
@@ -1947,6 +1936,8 @@ def test_stale_disabled_reading_resumes_instead_of_ending_the_run(
         builder.live_base, "entity_status_name", lambda *_a: next(statuses),
     )
     monkeypatch.setattr(builder, "_deliver_cell_ingredients", lambda *_a: False)
+    plans = []
+    monkeypatch.setattr(builder, "_submit", lambda *_a: plans.append(_a))
     monkeypatch.setattr(builder, "consume_wait", lambda *_a: None)
     monkeypatch.setattr(builder.time, "sleep", lambda *_a: None)
     monkeypatch.setattr(
@@ -1959,8 +1950,9 @@ def test_stale_disabled_reading_resumes_instead_of_ending_the_run(
         _drill_loan(step_target_count=8), messages.append,
     )
 
-    assert "producing temporary" in result
-    assert any("LOAN RESUMED" in message for message in messages)
+    assert "waits for electric-mining-drill production" in result
+    assert any("STATUS CHANGED" in message and "working" in message for message in messages)
+    assert plans == []
 
 
 def test_consumed_prerequisite_advances_and_persists_its_credit(

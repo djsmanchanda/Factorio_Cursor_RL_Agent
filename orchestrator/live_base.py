@@ -5,10 +5,11 @@ from __future__ import annotations
 
 import json
 import math
+import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from orchestrator import resource_patches
+from orchestrator import operation_facts, resource_patches
 from planners.transport_occupancy import Occupant, OccupantIdentity, RouteOccupancy
 from planners.recipe_data import DRILL_MINING_AREAS, drill_mining_reach
 from tools.rcon_client import RconClient
@@ -34,6 +35,39 @@ def game_tick(client: RconClient) -> int:
     return int(_sc(client, "rcon.print(game.tick)"))
 
 
+def _diagnostic_json(raw):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate diagnostic field")
+            result[key] = value
+        return result
+    def invalid_constant(value):
+        raise ValueError("nonfinite diagnostic field")
+    return json.loads(raw, object_pairs_hook=unique, parse_constant=invalid_constant)
+
+
+def _validate_query_scope(value, surface, force):
+    if (not isinstance(value, dict) or type(value.get("tick")) is not int or value["tick"] < 0
+            or value.get("surface") != surface or value.get("force") != force
+            or any(type(value.get(key)) is not int or value[key] < 1 for key in ("surface_index", "force_index"))):
+        raise ValueError("invalid native scope/tick")
+
+
+def _line_query_correlation(raw, surface, force):
+    try:
+        if "|@" not in raw:
+            raise ValueError("native scope/tick suffix missing")
+        metadata = _diagnostic_json(raw.split("|@", 1)[1])
+        _validate_query_scope(metadata, surface, force)
+        if set(metadata) != {"tick", "surface", "surface_index", "force", "force_index"}:
+            raise ValueError("unexpected native correlation fields")
+        return {"state": "validated", **metadata}
+    except (ValueError, TypeError) as error:
+        return {"state": "unknown", "reason": str(error)}
+
+
 @dataclass(frozen=True)
 class LineState:
     recipe: str
@@ -42,6 +76,10 @@ class LineState:
     output_position: Point | None
     machine_positions: tuple[Point, ...] = ()
     produced_count: int = 0
+    live_machine_count: int | None = None
+    output_blocked_ready_count: int = 0
+    working_machine_counts: Mapping[str, int] | None = None
+    working_crafting_speed: float | None = None
 
 
 @dataclass(frozen=True)
@@ -80,9 +118,17 @@ def find_line(
     not yet verified working" -- callers decide what to do with a struggling
     line; this just reports what's there).
 
-    Ghosts count by default (pending construction is still capacity), but
+    Ghosts count toward ``machine_count`` by default to track pending work, but
     anchor protection must pass ``include_ghosts=False``: an unbuilt ghost is
     not a producer that remains after borrowing the only real machine.
+
+    ``working_count`` keeps its instantaneous meaning. ``live_machine_count``
+    excludes ghosts; ``output_blocked_ready_count`` counts only live, active,
+    powered machines with a full output and solid inputs for their next craft.
+    These are capacity facts, not measured delivery or production rates.
+    Working counts by prototype and summed effective crafting speed describe
+    observed consumers; a tier-spanning count must not inherit one planned tier.
+    Missing speed readback stays unknown, including legacy survey payloads.
     """
     machine_names = (
         (machine,)
@@ -97,7 +143,8 @@ def find_line(
     )
     lua = (
         "local s=game.surfaces['" + surface + "'];local f=game.forces['" + force + "'];"
-        "local n=0;local w=0;local made=0;local pos={};"
+        "local n=0;local w=0;local made=0;local live=0;local blocked=0;local pos={};"
+        "local bytype={};local speed=0;local speedknown=true;"
         "local wanted=" + names + ";local machines={};"
         "for _,name in pairs(wanted) do for _,e in pairs(s.find_entities_filtered{name=name,force=f}) do "
         "machines[#machines+1]=e end end;"
@@ -107,13 +154,49 @@ def find_line(
         "if ok and r and r.name=='" + recipe + "' and ("
         + ("e.type=='entity-ghost' or not e.to_be_upgraded()" if exclude_upgrade_ordered else "true")
         + ") then n=n+1;"
-        "if e.type~='entity-ghost' and e.status==defines.entity_status.working then w=w+1 end;"
+        "if e.type~='entity-ghost' and e.status==defines.entity_status.working then "
+        "w=w+1;bytype[e.name]=(bytype[e.name] or 0)+1;"
+        "local oks,v=pcall(function() return e.crafting_speed end);"
+        "if oks and type(v)=='number' and v>=0 and v<math.huge then speed=speed+v "
+        "else speedknown=false end end;"
+        "if e.type~='entity-ghost' then live=live+1;"
+        "if e.status==defines.entity_status.full_output and e.active and e.energy>0 then "
+        "local inv=e.get_inventory(defines.inventory.crafter_input);local ready=true;"
+        "for _,part in pairs(r.ingredients) do "
+        "if part.type~='item' or not inv or inv.get_item_count(part.name)<part.amount then "
+        "ready=false;break end end;"
+        "if ready then blocked=blocked+1 end end end;"
         "local okp,p=pcall(function() return e.products_finished end);"
         "if okp and type(p)=='number' then made=made+p end;"
         "pos[#pos+1]=e.position.x..':'..e.position.y end end;"
-        "rcon.print(n..' '..w..' '..table.concat(pos,',')..' '..made)"
+        "local tiers={};for name,count in pairs(bytype) do tiers[#tiers+1]=name..':'..count end;"
+        "table.sort(tiers);"
+        "rcon.print(n..' '..w..' '..table.concat(pos,',')..' '..made..'|'..live..'|'..blocked"
+        "..'|'..table.concat(tiers,',')..'|'..(speedknown and tostring(speed) or '?')"
     )
-    tokens = _sc(client, lua).split()
+    if operation_facts.enabled():
+        lua += (
+            "..'|@'..helpers.table_to_json({tick=game.tick,surface=s.name,"
+            "surface_index=s.index,force=f.name,force_index=f.index})"
+        )
+    lua += ")"
+    request = {"surface": surface, "force": force, "recipe": recipe, "machine": machine,
+               "exact_machine": exact_machine, "exclude_upgrade_ordered": exclude_upgrade_ordered,
+               "include_ghosts": include_ghosts}
+    try:
+        raw = _sc(client, lua)
+    except Exception as error:
+        operation_facts.record("line_query_error", query=lua, request=request,
+                               error=f"{type(error).__name__}: {error}")
+        raise
+    # Retain the native reply before parsing: an empty/invalid line is precisely
+    # the missing fact when the chemical ladder unexpectedly reopens a rung.
+    if operation_facts.enabled():
+        operation_facts.record("line_query", query=lua, raw_reply=raw, request=request,
+                               query_id=uuid.uuid4().hex,
+                               correlation=_line_query_correlation(raw, surface, force))
+    observation, *capacity = raw.split('|@', 1)[0].split('|')
+    tokens = observation.split()
     count = int(tokens[0])
     if count == 0:
         return None
@@ -127,12 +210,125 @@ def find_line(
         (float(pair.split(":")[0]), float(pair.split(":")[1]))
         for pair in position_payload.split(",") if pair and ":" in pair
     )
+    working_machine_counts = None
+    working_crafting_speed = None
+    if len(capacity) >= 4:
+        try:
+            pairs = [part.split(':') for part in capacity[2].split(',') if part]
+            counts = {name: int(value) for name, value in pairs}
+            if (len(counts) != len(pairs) or sum(counts.values()) != working
+                    or any(name not in machine_names or value <= 0 for name, value in counts.items())):
+                raise ValueError('inconsistent working-machine counts')
+            working_machine_counts = counts
+            speed = float(capacity[3])
+            if math.isfinite(speed) and speed >= 0:
+                working_crafting_speed = speed
+        except (ValueError, TypeError):
+            pass
     return LineState(
         recipe=recipe, machine_count=count, working_count=working,
         output_position=machines[-1] if machines else None,
         machine_positions=machines,
         produced_count=produced_count,
+        live_machine_count=int(capacity[0]) if capacity else None,
+        output_blocked_ready_count=int(capacity[1]) if capacity else 0,
+        working_machine_counts=working_machine_counts,
+        working_crafting_speed=working_crafting_speed,
     )
+
+
+def plan_entity_health(client: RconClient, surface: str, force: str, plan: dict) -> dict:
+    """One read-only, tick-bound survey of exact planned identities, not ownership proof.
+
+    The caller supplies its owned plan. Missing/replaced entities and unsupported
+    fields remain explicit. The native mining area is surveyed completely; this
+    is not the saved world's sparse patch sample or a new siting decision.
+    """
+    targets = [
+        {"name": action["entity"], "position": action["position"]}
+        for phase in plan["phases"] for action in phase["actions"]
+        if action.get("action_type") in {"place_entity", "place_ghost", "configure_entity"}
+    ]
+    if not targets or len(targets) > 64:
+        raise ValueError("plan health requires 1..64 exact targets")
+    lua = (
+        "local s=game.surfaces[" + json.dumps(surface) + "];local f=game.forces["
+        + json.dumps(force) + "];local targets=helpers.json_to_table("
+        + json.dumps(json.dumps(targets)) + ");local rows={};"
+        "local names={};for name,id in pairs(defines.entity_status) do names[id]=name end;"
+        "for _,target in ipairs(targets) do local row={expected=target,found=false,errors={}};"
+        "local e=s.find_entities_filtered{name=target.name,position=target.position,radius=0.01,force=f}[1];"
+        "if e and e.position.x==target.position.x and e.position.y==target.position.y then "
+        "row.found=true;row.unit=e.unit_number;row.name=e.name;row.type=e.type;row.position=e.position;row.reads={};"
+        "row.status=names[e.status] or 'unknown';row.direction=e.direction;"
+        "local function read(key,fn) local ok,value=pcall(fn);"
+        "if ok and value~=nil then row[key]=value;row.reads[key]='value' "
+        "elseif ok then row.reads[key]='absent' "
+        "else row.reads[key]='error';row.errors[key]=tostring(value) end end;"
+        "read('energy',function() return e.energy end);read('active',function() return e.active end);"
+        "read('recipe',function() local r=e.get_recipe();return r and r.name end);"
+        "read('lifetime_crafts',function() return e.products_finished end);"
+        "read('electric_network_id',function() return e.electric_network_id end);"
+        "if e.type=='furnace' or e.type=='assembling-machine' then "
+        "read('input',function() local inv=e.get_inventory(defines.inventory.crafter_input);"
+        "return inv and inv.get_contents() end);"
+        "read('output',function() local inv=e.get_inventory(defines.inventory.crafter_output);"
+        "return inv and inv.get_contents() end);end;"
+        "if e.type=='container' or e.type=='logistic-container' then "
+        "read('contents',function() local inv=e.get_inventory(defines.inventory.chest);"
+        "return inv and inv.get_contents() end);end;"
+        "if e.type=='inserter' then "
+        "read('hand',function() local h=e.held_stack;"
+        "return h.valid_for_read and {name=h.name,count=h.count} or {count=0} end);"
+        "read('pickup_position',function() return e.pickup_position end);"
+        "read('drop_position',function() return e.drop_position end);end;"
+        "if e.type=='mining-drill' then "
+        "read('mining_area',function() return e.mining_area end);"
+        "read('mining_target',function() local r=e.mining_target;"
+        "return r and {name=r.name,position=r.position,amount=r.amount} end);"
+        "read('resources_in_mining_area',function() local resources={};"
+        "local area=e.mining_area;if not area then error('mining area unavailable') end;"
+        "for _,r in pairs(s.find_entities_filtered{type='resource',area=area}) do "
+        "resources[#resources+1]={name=r.name,position=r.position,amount=r.amount} end;"
+        "return resources end);read('drop_position',function() return e.drop_position end);end;"
+        "if e.type=='transport-belt' then read('belt_contents',function() local items={};"
+        "for i=1,2 do for _,stack in pairs(e.get_transport_line(i).get_contents()) do "
+        "items[#items+1]={name=stack.name,count=stack.count} end end;return items end);end;"
+        "else row.errors.entity='missing exact live identity' end;rows[#rows+1]=row end;"
+        "rcon.print(helpers.table_to_json({tick=game.tick,surface=s.name,surface_index=s.index,"
+        "force=f.name,force_index=f.index,entities=rows}))"
+    )
+    raw = _sc(client, lua)
+    operation_facts.record("plan_health_query", query=lua, raw_reply=raw)
+    result = _diagnostic_json(raw)
+    _validate_query_scope(result, surface, force)
+    if not isinstance(result.get("entities"), list) or len(result["entities"]) != len(targets):
+        raise ValueError("invalid plan health reply")
+    for row, target in zip(result["entities"], targets, strict=True):
+        if (not isinstance(row, dict) or row.get("expected") != target or type(row.get("found")) is not bool
+                or not isinstance(row.get("errors"), dict)
+                or (row["found"] and (row.get("name") != target["name"]
+                    or row.get("position") != target["position"] or not isinstance(row.get("status"), str)))):
+            raise ValueError("invalid plan health identity")
+        if row["found"]:
+            required = {"energy", "active", "recipe", "lifetime_crafts", "electric_network_id"}
+            required.update({
+                "furnace": ("input", "output"), "assembling-machine": ("input", "output"),
+                "container": ("contents",), "logistic-container": ("contents",),
+                "inserter": ("hand", "pickup_position", "drop_position"),
+                "mining-drill": ("mining_area", "mining_target", "resources_in_mining_area", "drop_position"),
+                "transport-belt": ("belt_contents",),
+            }.get(row.get("type"), ()))
+            reads = row.get("reads")
+            if not isinstance(row.get("type"), str) or not isinstance(reads, dict) or not required <= reads.keys():
+                raise ValueError("missing plan health read states")
+            for key, state in reads.items():
+                if (state not in ("value", "absent", "error")
+                        or (state == "value" and (key not in row or row[key] is None or key in row["errors"]))
+                        or (state == "absent" and (key in row or key in row["errors"]))
+                        or (state == "error" and (key in row or not isinstance(row["errors"].get(key), str)))):
+                    raise ValueError("inconsistent plan health read state")
+    return result
 
 
 def find_idle_machine_row(
@@ -2489,8 +2685,9 @@ def loan_cell_item_count(
     lua = (
         "local s=game.surfaces['" + surface + "'];local n=0;"
         "local c=" + at(requester_position, "logistic-container") + ";"
-        "if c then n=n+c.get_inventory(defines.inventory.chest).get_item_count('" + item + "') end;"
         "local m=" + at(machine_position, "assembling-machine") + ";"
+        "if not c or not m then rcon.print('UNKNOWN') return end;"
+        "n=n+c.get_inventory(defines.inventory.chest).get_item_count('" + item + "');"
         "if m then local inv=m.get_inventory(defines.inventory.crafter_input or defines.inventory.assembling_machine_input);"
         "if inv then n=n+inv.get_item_count('" + item + "') end;"
         "for _,i in pairs(s.find_entities_filtered{position=m.position,radius=4,type='inserter'}) do "
@@ -2936,7 +3133,7 @@ def requester_logistic_groups(
     return tuple(group for group in raw.split("|") if group)
 
 
-def mall_gate_survey(client: RconClient, surface: str, force: str) -> list[dict]:
+def mall_gate_survey(client: RconClient, surface: str, force: str, *, include_unconfigured=False) -> list[dict]:
     """Read real assembler identity and simple logistic gates; never configure.
 
     Compound, quality-specific and circuit-controlled conditions are ineligible
@@ -2947,12 +3144,14 @@ def mall_gate_survey(client: RconClient, surface: str, force: str) -> list[dict]
         'for _,e in pairs(s.find_entities_filtered{type="assembling-machine",force='
         + json.dumps(force) + '}) do '
         'local r=e.get_recipe();local b=e.get_control_behavior();'
-        'if r then local row={entity=e.name,unit_number=e.unit_number,recipe=r.name,'
+        'if r or ' + ('true' if include_unconfigured else 'false') + ' then '
+        'local row={entity=e.name,unit_number=e.unit_number,recipe=r and r.name or "",'
         'surface=s.name,force=e.force.name,position={e.position.x,e.position.y},circuit_enabled=true};'
         'if b then local ok,v=pcall(function() return b.circuit_enable_disable end);'
         'if ok and type(v)=="boolean" then row.circuit_enabled=v end;'
+        'if b.connect_to_logistic_network==false then row.gate=false end;'
         'local c=b.logistic_condition;c=c and (c.condition or c);'
-        'if b.connect_to_logistic_network and c and c.first_signal and '
+        'if b.connect_to_logistic_network==true and c and c.first_signal and '
         '(not c.first_signal.type or c.first_signal.type=="item") and '
         '(not c.first_signal.quality or c.first_signal.quality=="normal") and '
         'not c.second_signal and c.constant then '

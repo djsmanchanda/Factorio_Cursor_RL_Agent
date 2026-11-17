@@ -14,6 +14,7 @@ from orchestrator.autonomous_builder import (
 )
 from orchestrator.stage_recovery import (
     _existing_stage_feed_positions,
+    _existing_stage_feed_contract,
     repair_existing_ingredient_transport,
 )
 from orchestrator.stage_transport import transport_grace_seconds
@@ -99,12 +100,13 @@ def test_existing_starved_stage_repairs_declared_transport(monkeypatch) -> None:
     feeds, modes = _existing_stage_feed_positions("iron-gear-wheel", machines)
     assert feeds == {"iron-plate": (-29.5, -27.5)}
     assert modes == {"iron-plate": "belt"}
+    _, _, prototypes = _existing_stage_feed_contract("iron-gear-wheel", machines)
 
     calls = []
     monkeypatch.setattr(
         live_base, "entity_at",
         lambda _client, _surface, position: (
-            {"name": "requester-chest", "type": "container", "force": "player"}
+            {"name": prototypes["iron-plate"], "type": "container", "force": "player"}
             if position == feeds["iron-plate"] else None
         ),
     )
@@ -127,14 +129,15 @@ def test_existing_starved_stage_repairs_declared_transport(monkeypatch) -> None:
     assert calls == [((
         "iron-gear-wheel", "iron-plate", (-10.5, -10.5),
         (-29.5, -27.5), 2, ANY,
-    ), {"reuse_existing": True})]
+    ), {"reuse_existing": True, "mode": "belt"})]
 
 
 def test_existing_starved_stage_waits_for_missing_upstream(monkeypatch) -> None:
     machines = [(-25.5, -22.5), (-22.5, -22.5)]
+    _, _, prototypes = _existing_stage_feed_contract("iron-gear-wheel", machines)
     monkeypatch.setattr(
         live_base, "entity_at",
-        lambda *_args: {"name": "requester-chest", "type": "container", "force": "player"},
+        lambda *_args: {"name": prototypes["iron-plate"], "type": "container", "force": "player"},
     )
     monkeypatch.setattr(
         "orchestrator.stage_recovery.ensure_ingredient_transport",
@@ -145,3 +148,38 @@ def test_existing_starved_stage_waits_for_missing_upstream(monkeypatch) -> None:
         object(), object(), "nauvis", "player", "iron-gear-wheel", machines,
         lambda _ingredient: None, lambda _message: None,
     )
+
+
+def test_recovery_uses_constructed_belt_feed_prototype(monkeypatch) -> None:
+    """C92 belt feeds were steel chests under the chest-free constructor."""
+    from orchestrator import stage_recovery
+
+    original_swap = stage_recovery._swap_infinity_chests
+
+    def chest_free_swap(plan, modes):
+        positions = original_swap(plan, modes)
+        for phase in plan["phases"]:
+            for action in phase["actions"]:
+                position = action.get("position", {})
+                for ingredient, point in positions.items():
+                    if (position.get("x"), position.get("y")) == point and modes[ingredient] == "belt":
+                        action["entity"] = "steel-chest"
+        return positions
+
+    monkeypatch.setattr(stage_recovery, "_swap_infinity_chests", chest_free_swap)
+    monkeypatch.setattr(live_base, "entity_at", lambda *_: {"name": "steel-chest"})
+    calls = []
+    monkeypatch.setattr(stage_recovery, "ensure_ingredient_transport", lambda *a, **k: calls.append(a) or 0)
+    monkeypatch.setattr(stage_recovery, "_diagnose_machines", lambda *a, **k: [])
+    machines = [(-25.5, -22.5), (-22.5, -22.5)]
+    assert repair_existing_ingredient_transport(
+        object(), object(), "nauvis", "player", "iron-gear-wheel", machines,
+        lambda _: (-10.5, -10.5), lambda _: None,
+    )
+    assert len(calls) == 1
+    monkeypatch.setattr(live_base, "entity_at", lambda *_: {"name": "requester-chest"})
+    with pytest.raises(stage_recovery.StuckError, match="expected steel-chest.*found requester-chest"):
+        repair_existing_ingredient_transport(
+            object(), object(), "nauvis", "player", "iron-gear-wheel", machines,
+            lambda _: (-10.5, -10.5), lambda _: None,
+        )

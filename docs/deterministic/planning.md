@@ -25,6 +25,38 @@ These names describe intended responsibilities, not permission to build speculat
   persistence; diagnostics do not relax route legality.
 - Diagnose supply, delivery, inserter throughput, machine speed, and machine count in that order.
 - Repair existing capacity before duplicating it.
+  A constructor-owned direct-mining steel seed whose exact drill has an empty
+  native mining-area census can reuse its steel furnace and provider. A shared
+  belt route uses a side pickup from an observed, pure-iron output terminal to
+  a clear furnace-edge inserter within the existing medium-pole supply. The
+  through terminal and its future splitter seam stay clear for normal district
+  promotion. The source pickup uses the existing funded power-connection
+  operation. The complete additive route, including both new belt endpoints,
+  is funded and persisted inside the existing episode steel-seed sidecar before
+  submission; retries bind the original seed and source unit identities and
+  reuse that route. Unknown census, changed identities/recipes, mixed source
+  contents or blocked intakes defer without selecting a destructive remedy.
+  Submission and observed full construction establish separate baselines;
+  earlier buffered output cannot earn recovery-delivery credit. Increased
+  furnace crafts and increased steel in the exact retained provider are then
+  recorded separately from submission. No seed entity is retired by this feed repair;
+  the later steel-district promotion and its admission gate remain unchanged.
+  For a journalled chest-fed assembler row, recovery reads the exact selected
+  recipe row and declared feed prototypes from scoped acknowledged invocation
+  plans, including construction-shortage outcomes. Constructor-derived endpoint
+  identities resolve the selected per-ingredient modes; current demand and the
+  chest found live cannot change that choice. The mode is retained through both
+  endpoint validation and transport execution. Missing, conflicting, uncertain
+  or superseded provenance stays unresolved; upstream work triggers a recheck.
+  Recovery proves constructor feeder/lane/inserter positions and directions,
+  and rejects later removals, rotations and incompatible ingredient requests.
+  Compatible requester count/cap updates do not change the selected feed.
+  This recovery covers the default fast-inserter/transport-belt, three-tile
+  east-flow chest-fed topology. Other inserter tiers that change feeder counts
+  remain unresolved. It does not reinterpret sideload/full-bus layouts, missing recipe declarations, or a legacy
+  dispatch fence. Non-journalled deterministic callers retain the existing
+  constructor-default validation. Successful routing and craft recovery remain
+  runtime evidence, separate from choosing the correct contract.
 - Change the tier of an owned machine through Factorio's native upgrade order,
   never an overlapping ghost or a destroy-and-rebuild pair. Scope every order
   to the explicit surface and force, require the expected source prototype at
@@ -33,6 +65,25 @@ These names describe intended responsibilities, not permission to build speculat
   downgrade is legal only when the replacement prototype supports the active
   recipe; completion is observed only after the target prototype is live.
 - Keep mall reserves distinct from sustained intermediate demand. Promote intermediates to full lines when measured demand justifies it.
+  Observed consumer draw uses the summed effective crafting speed of working
+  live machines, retaining counts by prototype. Tier-spanning counts never
+  inherit the recipe's planned machine speed. Missing effective speed remains
+  unknown and defers line planning; ghosts and nonworking machines add no draw.
+  This instantaneous input requirement is distinct from measured delivery or
+  sustained production. Proposed layouts still use their selected tier rates.
+  Explicit `produce_finite` can satisfy an absolute bill target through existing
+  owned mall loan/vacancy operations without admitting another cell. Its
+  `finite_batch_facts` observation reports pending ownership, active loans,
+  candidate rejection reasons and selected complete hardware; unknown surveys
+  cannot authorize reuse. It retains the existing temporary-item catalog,
+  producer/anchor protections, origin exclusion and release semantics. Standing
+  persistent-producer choices and the bootstrap cap are unchanged.
+  Long-handed inserters remain unsupported by this batch catalog. PM replays
+  opt in with `--finite-bill-batches`; ordinary funding remains the default.
+  Prerequisite bills compare complete requirements against allocatable stock,
+  retaining completed loan credits. Recursive funding adds only the resulting
+  deficit to the failure-time network level. Feasibility is re-observed before
+  dispatch; it is not an atomic configuration guard or evidence of delivery.
 - Treat fluids as type-safe networks; never mix fluids through an implicit shared pipe.
   Opening oil links use bounded land, underground-bypass, wider-land, then
   water-crossing attempts. Reuse the validated route for both placements and
@@ -44,6 +95,14 @@ These names describe intended responsibilities, not permission to build speculat
   grow as two opposing half-rows sharing one same-fluid connector seam instead
   of extending indefinitely in one direction.
 - Base capacity on rates and live game facts, not machine counts alone.
+  Keep current working count, live machine count and output backpressure
+  separate. A powered, active machine with full output and solid ingredients
+  ready for its next craft contributes to a promotion's capacity estimate;
+  ghosts, empty inputs and finite stored output do not add a production rate.
+  This estimate does not establish sustained delivery: promoted lines still
+  require a validated feed route from their actual producing source.
+  The current survey aggregates matching machines across the surface; it does
+  not prove that all credited capacity reaches the selected feed endpoint.
 - Site persistent refineries by the complete transport bill: preserve legal
   input/output flow, minimize ore-belt plus plate-belt length, then prefer the
   output nearer current demand. Reserve the full expansion footprint at that
