@@ -179,4 +179,3 @@ def test_unknown_slot_count_is_not_an_empty_mall_with_room():
 
 def test_unknown_seed_stock_stays_unknown():
     assert mall_growth.seed_ready(None) is None
-
