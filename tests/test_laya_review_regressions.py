@@ -54,3 +54,18 @@ def test_a_slow_world_does_not_create_a_per_minute_drain_cascade():
     assert choose(config, state, _metrics(ups_p95=90, active_slots=18), now=340)[:2] == (18, "unhealthy_pending")
     # Critical memory pressure still lowers admission immediately.
     assert choose(config, state, _metrics(active_slots=18, available_gb=1), now=341)[:2] == (17, "memory")
+
+
+@pytest.mark.parametrize("launcher", ["run_laya_mixed", "run_laya_clean"])
+def test_failed_saved_world_prepare_leaves_its_cause_in_the_job_log(launcher, tmp_path, monkeypatch, capfd):
+    # ab-60 lost the cause of two prepare failures because the child's stderr was captured and dropped.
+    import importlib
+    import subprocess
+    module = importlib.import_module(f"tools.{launcher}")
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools/run_laya_saved_world.py").write_text(
+        "import sys\nprint('partial result')\nprint('prepare failed: rcon never ready', file=sys.stderr)\nsys.exit(1)\n")
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+    with pytest.raises(subprocess.CalledProcessError):
+        module.saved_world("prepare", tmp_path / "world")
+    assert "prepare failed: rcon never ready" in capfd.readouterr().err

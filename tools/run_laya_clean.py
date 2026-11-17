@@ -46,8 +46,9 @@ SOURCE_SAVE = ROOT / "saves/mod_playground.zip"
 
 
 def saved_world(action: str, root: Path, *extra: str) -> str:
+    # stdout is the result; stderr is passed through so a failed prepare/stop leaves its cause in the job log.
     return subprocess.run([sys.executable, str(ROOT / "tools/run_laya_saved_world.py"), action, "--root", str(root), *extra],
-                          check=True, capture_output=True, text=True).stdout.strip()
+                          check=True, stdout=subprocess.PIPE, stderr=None, text=True).stdout.strip()
 
 
 def runner_paths(root: Path) -> dict[str, Path]:
