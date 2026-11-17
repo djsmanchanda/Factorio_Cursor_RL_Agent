@@ -15,7 +15,9 @@ import re
 import types
 from typing import Any, Union, get_args, get_origin, get_type_hints
 
-from orchestrator.checkpoint_milestones import CheckpointEvaluator, CounterEvidence, FactorySnapshot, REEARNED_VERSIONS, PRODUCTION_PROVENANCE_FIELDS
+from orchestrator.checkpoint_milestones import (
+    CheckpointEvaluator, CounterEvidence, FactorySnapshot, REEARNED_VERSIONS, PRODUCTION_PROVENANCE_FIELDS, validate_c5_ledger,
+)
 from orchestrator.oil_transaction import OilTransactionStore
 from orchestrator.operation_invocations import decode_record
 from orchestrator.loan_gate_retries import (
@@ -33,7 +35,8 @@ _DISTRICT_FILE = re.compile(r"[0-9a-f]{16}\.json\Z", re.ASCII)
 _DIRECTORY_ROLES = {'bootstrap_district', 'operation_invocations'}
 #: Snapshot fields added after bundles were already captured: absent means "not observed" (None).
 #: Export omits them while None so a restored older bundle re-exports byte-identically.
-_LATER_SNAPSHOT_FIELDS = frozenset({'plastic'})
+#: ``c5_ledger`` is not an observation: C5's state over history trimmed before the first sample.
+_LATER_SNAPSHOT_FIELDS = frozenset({'plastic', 'c5_ledger'})
 
 
 def _valid_name(role, name, path):
@@ -183,11 +186,19 @@ def _snapshot_record(snapshot: FactorySnapshot) -> dict:
     return record
 
 
+def _validate_ledgers(history) -> None:
+    """Only the oldest sample may carry C5's ledger (the predicate reads it there), and it must be well formed."""
+    if any(sample.c5_ledger is not None for sample in history[1:]):
+        raise ValueError("C5 ledger on a sample other than the oldest")
+    if history and history[0].c5_ledger is not None:
+        validate_c5_ledger(history[0].c5_ledger)
+
+
 def reearned_milestones(bundle_milestones, reached) -> list[dict]:
     """Reached milestones whose recorded version the current code re-earns instead of refusing.
 
-    A bundle that reached C5 under c5-v1 or c5-v2 keeps every other reached milestone; C5 must be earned again
-    under the current C5 version (c5-v3). Returns one ``{id, from_version, to_version}`` record per dropped milestone.
+    A bundle that reached C5 under c5-v1, c5-v2 or c5-v3 keeps every other reached milestone; C5 must be earned again
+    under the current C5 version (c5-v4). Returns one ``{id, from_version, to_version}`` record per dropped milestone.
     """
     current = {item.checkpoint_id: item.predicate_version for item in CheckpointEvaluator().milestones}
     recorded = {item.get("id"): item.get("predicate_version") for item in bundle_milestones or ()
@@ -249,8 +260,7 @@ def export_restart_state(script_output: Path, episode_id: str, mod_scope: str,
         encoded = json.dumps(bundle, allow_nan=False)
         decoded = json.loads(encoded)
         _decode_typed(decoded["baseline"], FactorySnapshot)
-        for sample in decoded["history"]:
-            _decode_typed(sample, FactorySnapshot)
+        _validate_ledgers([_decode_typed(sample, FactorySnapshot) for sample in decoded["history"]])
     except (TypeError, ValueError) as error:
         raise ValueError("Strict state is not serializable") from error
     if len(encoded.encode()) > MAX_BYTES * 2:
@@ -380,7 +390,7 @@ def import_restart_state(bundle: dict, script_output: Path, *, episode_id: str, 
         raise ValueError("Restart version or scope mismatch")
     evaluator = CheckpointEvaluator()
     current = _milestones(evaluator)
-    # A milestone reached under a version the current code re-earns (c5-v1 or c5-v2 -> c5-v3) is dropped from
+    # A milestone reached under a version the current code re-earns (c5-v1, c5-v2 or c5-v3 -> c5-v4) is dropped from
     # reached here and recorded on the state; any other reached difference is still refused below.
     bundle, reearned = migrate_reached(bundle)
     if bundle["milestones"] != current:
@@ -395,6 +405,7 @@ def import_restart_state(bundle: dict, script_output: Path, *, episode_id: str, 
     if not isinstance(history, list) or not 1 <= len(history) <= MAX_HISTORY:
         raise ValueError("Invalid strict history")
     history = tuple(_decode_typed(sample, FactorySnapshot) for sample in history)
+    _validate_ledgers(history)
     reached = bundle["reached"]
     if (not isinstance(reached, list) or not all(isinstance(item, str) for item in reached)
             or reached != sorted(set(reached)) or not set(reached) <= {m.checkpoint_id for m in evaluator.milestones}):

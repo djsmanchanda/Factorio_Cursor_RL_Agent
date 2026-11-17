@@ -33,7 +33,7 @@ def c5(samples):
 def test_c5_passes_at_ninety_percent_of_planned_rate_after_settle_and_records_both_references():
     # First production at tick 0; settled from 1800; window 1800 -> 5400 makes 27 bars in 60 s = 0.45/s.
     result = c5([sample(-60, 0), sample(0, 10), sample(1800, 20), sample(5400, 47)])
-    assert result.passed and result.predicate_version == "c5-v3"
+    assert result.passed and result.predicate_version == "c5-v4"
     window = result.evidence["window"]
     assert window["measured_rate"] == 0.45 and window["window_ticks"] == 3600
     assert window["planned_target"] == {"rate": 0.5, "tick": 10, "source": TARGET["source"]}
@@ -69,9 +69,11 @@ def test_full_chest_after_earning_keeps_c5_through_bounded_history_and_the_sidec
     assert row["statuses"]["C5"] is True
     assert measurement.summary("stopped")["strict_current_at_end"]["C5"] is True
     assert row["predicate_evidence"]["C5"]["evidence"]["historical"] is True
-    # Trimming without the pinned proof would lose it.
+    # Trimming without the ledger would lose it; the bounded history is the newest 20, the oldest carrying the pass.
     assert c5((earned + flat)[-20:]).failed
-    assert [s.tick for s in bounded_history(earned + flat)[:4]] == [-60, 0, 1800, 5400]
+    bounded = bounded_history(earned + flat)
+    assert [s.tick for s in bounded] == [s.tick for s in (earned + flat)[-20:]]
+    assert bounded[0].c5_ledger["passing"]["tick"] == 5400 and c5(bounded).passed
 
 
 def test_plastic_collector_normalizes_capacity_and_empty_consumers():
@@ -120,12 +122,12 @@ def test_readers_order_c6a_and_accept_journals_with_and_without_it():
     assert MILESTONE_IDS.index("C5") < MILESTONE_IDS.index("C6a") < MILESTONE_IDS.index("C6")
     old = [{"event": "strict_current", "tick": t, "statuses": {"C5": s, "C6": False}} for t, s in ((1, False), (2, True))]
     new = [{"event": "strict_current", "tick": t, "statuses": {"C5": s, "C6a": s, "C6": False},
-            "predicate_evidence": {"C5": {"predicate_version": "c5-v3"}, "C6a": {"predicate_version": "c6a-v1"}}}
+            "predicate_evidence": {"C5": {"predicate_version": "c5-v4"}, "C6a": {"predicate_version": "c6a-v1"}}}
            for t, s in ((1, False), (2, True))]
     assert report.from_journal_rows(old)["earned"] == ["C5"]
     block = report.from_journal_rows(new)
     assert block["earned"] == ["C5", "C6a"]
-    assert block["predicate_versions"] == {"C5": "c5-v3", "C6a": "c6a-v1"}
+    assert block["predicate_versions"] == {"C5": "c5-v4", "C6a": "c6a-v1"}
 
 
 def test_evidence_state_written_before_c6a_is_still_valid_and_advances():
@@ -135,7 +137,7 @@ def test_evidence_state_written_before_c6a_is_still_valid_and_advances():
     validate_evidence_state(state)
     samples = [sample(-60, 0), sample(0, 10), sample(1800, 20), sample(5400, 47)]
     evidence_success(state, samples[0], samples)
-    assert "C6a" in state["last_statuses"] and state["events"]["C5"]["predicate_version"] == "c5-v3"
+    assert "C6a" in state["last_statuses"] and state["events"]["C5"]["predicate_version"] == "c5-v4"
 
 
 def old_bundle(tmp_path, reached):
@@ -154,7 +156,7 @@ def test_restart_bundle_that_reached_c5_v1_drops_it_to_be_reearned(tmp_path):
     bundle = old_bundle(tmp_path, {"C0", "C4", "C5"})
     state = import_restart_state(copy.deepcopy(bundle), tmp_path / "target", episode_id="episode", mod_scope="mods")
     assert state.evaluator.reached == {"C0", "C4"}
-    assert state.reearned == ({"id": "C5", "from_version": "c5-v1", "to_version": "c5-v3"},)
+    assert state.reearned == ({"id": "C5", "from_version": "c5-v1", "to_version": "c5-v4"},)
     expected, records = migrate_reached(bundle)
     again = export_restart_state(tmp_path / "target", "episode", "mods", state.baseline, list(state.history), state.evaluator)
     assert again["reached"] == expected["reached"] == ["C0", "C4"] and records == list(state.reearned)
@@ -206,7 +208,7 @@ def test_dense_sampling_still_forms_a_settled_window():
     rows = [sample(60 * i, i) for i in range(100)]
     assert c5(rows).passed
     history = _incremental(rows)
-    assert len(history) <= 20 + 6 and c5(history).passed
+    assert len(history) == 20 and c5(history).passed
     assert c5(history).evidence["first_production_tick"] == 60
 
 

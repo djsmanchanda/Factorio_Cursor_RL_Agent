@@ -11,6 +11,7 @@ measured negative result and makes predicates replayable in tests.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import asdict, dataclass, field, replace
 from enum import Enum
 from typing import Any, Callable, Iterable, Mapping, Sequence
@@ -282,6 +283,9 @@ class FactorySnapshot:
     #  "consumers": [{"unit", "recipe", "count"}] or None}. A runner declares the target in the game;
     # the predicate never invents one.
     plastic: Any = None
+    # Not an observation: C5's fold state over the history trimmed before this sample, set only on the
+    # oldest sample of a bounded history (``checkpoint_evidence.bounded_history``; see ``c5_ledger``).
+    c5_ledger: Any = None
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "FactorySnapshot":
@@ -324,6 +328,7 @@ class FactorySnapshot:
             science=value.get("science") if isinstance(value.get("science"), Mapping) else None,
             ac_consumers=value.get("ac_consumers"),
             plastic=value.get("plastic") if isinstance(value.get("plastic"), Mapping) else None,
+            c5_ledger=value.get("c5_ledger") if isinstance(value.get("c5_ledger"), Mapping) else None,
         )
 
 
@@ -642,9 +647,11 @@ def _c5(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, history: S
     })
 
 
-#: C5 (c5-v3): skip this long after plastic production first starts, then measure over at least this long;
+#: C5 (c5-v4): skip this long after plastic production first starts, then measure over at least this long;
 #: pass at this share of the declared planned rate (owner decision, 16 November 2026).
-#: c5-v3 corrects two c5-v2 defects seen live on 17 November: production "started" at the first sample with a
+#: c5-v4 (17 November) is c5-v3 as a fold whose bounded history is exact; it differs from c5-v3 only when the
+#: game clock goes backwards, where c5-v3 measured windows across the jump and c5-v4 starts none across it.
+#: c5-v3 corrected two c5-v2 defects seen live on 17 November: production "started" at the first sample with a
 #: positive lifetime counter (a save's history made that the first sample, with no plants), and every window
 #: ending before the runner declared its target left the status unknown, so C5 never read failed and a
 #: failed-to-passed transition was never credited.
@@ -678,80 +685,135 @@ def _ratio(value: float | None, reference: Any) -> float | None:
     return round(value / reference, 4)
 
 
-def _c5_windows(samples: Sequence[FactorySnapshot]) -> tuple[int | None, list[dict[str, Any]]]:
-    """Settle start and every shortest post-settle window of at least C5_WINDOW_TICKS, oldest first.
+# C5 is a left fold over the observation sequence. Folding the trimmed prefix of a bounded history into a
+# small ledger, and continuing the fold over the retained samples, gives exactly the full-history result.
+# The state is JSON (lists, not tuples) so a restart bundle carries it unchanged.
+_C5_EMPTY_LEDGER: dict[str, Any] = {
+    "last": None,            # [tick, produced] of the newest usable sample: the first rise is production start
+    "start": None,           # tick of the first rise
+    "first_target": None,    # first target declared by a usable sample; judges windows without their own
+    "latest_target": None,   # newest declared target, from any sample
+    "begins": [],            # [tick, produced] settled samples that can still begin a window, oldest first
+    "windows": 0,            # windows formed so far
+    "last_window": None,     # newest window
+    "passing": None,         # first passing window
+    "pending": [],           # windows formed before any declaration, each faster than all before it
+}
 
-    Each window ends at a sample and starts at the newest earlier post-settle sample that is at least
-    the window length before it; samples without a tick or counter are skipped.
+
+def _c5_rate_passes(rate: float, target: Mapping[str, Any]) -> bool:
+    return rate >= C5_TARGET_SHARE * target["rate"]
+
+
+def _c5_fold(state: dict[str, Any], sample: FactorySnapshot) -> None:
+    """Advance C5's state by one observation.
+
+    A window ends at each settled sample and starts at the newest earlier settled sample at least
+    C5_WINDOW_TICKS before it; a later endpoint can only start at that sample or a newer one, so older
+    begins are dropped. No window spans a clock regression (a reloaded save): its begins are dropped too.
+    Before the first declaration, only windows faster than every earlier one are kept:
+    the first window to pass the first declared target is always one of them.
     """
-    usable = [(s.tick, _plastic_produced(s), s) for s in samples if s.tick is not None and _plastic_produced(s) is not None]
-    start = _production_start(usable)
-    if start is None:
-        return None, []
-    # The runner declares one planned rate for the line; a window that ended before the declaration is
-    # judged against the first declared rate, and says so, instead of staying unjudgeable for the run.
-    first_target = next((t for t in (_declared_target(row[2]) for row in usable) if t is not None), None)
-    settled = [row for row in usable if row[0] >= start + C5_SETTLE_TICKS]
-    windows = []
-    for index, (tick, produced, sample) in enumerate(settled):
-        begin = next((row for row in reversed(settled[:index]) if row[0] <= tick - C5_WINDOW_TICKS), None)
-        if begin is None:
-            continue
-        rate = (produced - begin[1]) * 60 / (tick - begin[0])
-        target = _declared_target(sample)
-        backfilled = target is None and first_target is not None
-        target = target or first_target
+    target = _declared_target(sample)
+    if target is not None:
+        state["latest_target"] = target
+    tick, produced = sample.tick, _plastic_produced(sample)
+    if tick is None or produced is None:
+        return
+    if state["first_target"] is None and target is not None:
+        state["first_target"] = target
+        if state["passing"] is None:
+            state["passing"] = next((w for w in state["pending"] if _c5_rate_passes(w["rate"], target)), None)
+        state["pending"] = []
+    last, state["last"] = state["last"], [tick, produced]
+    if last is not None and tick < last[0]:
+        state["begins"] = []
+    if state["start"] is None:
+        if last is not None and produced > last[1]:
+            state["start"] = tick
+        return
+    if tick < state["start"] + C5_SETTLE_TICKS:
+        return
+    begins = state["begins"]
+    index = next((i for i in range(len(begins) - 1, -1, -1) if begins[i][0] <= tick - C5_WINDOW_TICKS), None)
+    if index is not None:
+        begin = begins[index]
         capacity = _plastic_fact(sample, "capacity")
-        installed = capacity.get("rate") if isinstance(capacity, Mapping) else None
-        windows.append({
-            "from_tick": begin[0], "tick": tick, "window_ticks": tick - begin[0],
-            "produced_delta": produced - begin[1], "measured_rate": round(rate, 4),
-            "planned_target": target, "target_declared_after_window": backfilled, "installed_capacity": capacity if isinstance(capacity, Mapping) else None,
-            "ratio_to_target": None if target is None else _ratio(rate, target["rate"]),
-            "ratio_to_capacity": _ratio(rate, installed),
-            "passes": None if target is None else rate >= C5_TARGET_SHARE * target["rate"],
-            "_samples": (begin[2], sample),
-        })
-    return start, windows
+        window = {"from_tick": begin[0], "tick": tick, "produced_delta": produced - begin[1],
+                  "rate": (produced - begin[1]) * 60 / (tick - begin[0]), "target": target,
+                  "capacity": dict(capacity) if isinstance(capacity, Mapping) else None}
+        state["windows"] += 1
+        state["last_window"] = window
+        judge = target or state["first_target"]
+        if judge is None:
+            if not state["pending"] or window["rate"] > state["pending"][-1]["rate"]:
+                state["pending"].append(window)
+        elif state["passing"] is None and _c5_rate_passes(window["rate"], judge):
+            state["passing"] = window
+        del begins[:index]
+    # Of samples sharing a tick, only the newest can begin a later window.
+    if begins and begins[-1][0] == tick:
+        begins[-1] = [tick, produced]
+    else:
+        begins.append([tick, produced])
 
 
-def _production_start(usable: Sequence[tuple[int, int, FactorySnapshot]]) -> int | None:
-    """Tick of the first sample whose lifetime plastic counter rose over the previous usable sample."""
-    return next((usable[i][0] for i in range(1, len(usable)) if usable[i][1] > usable[i - 1][1]), None)
+def c5_ledger(samples: Sequence[FactorySnapshot]) -> dict[str, Any]:
+    """C5's state after ``samples``, continuing the ledger carried by the first one (a copy, never shared)."""
+    first = samples[0].c5_ledger if samples else None
+    state = copy.deepcopy(dict(first) if isinstance(first, Mapping) else _C5_EMPTY_LEDGER)
+    for sample in samples:
+        _c5_fold(state, sample)
+    return state
 
 
-def _production_anchor(samples: Sequence[FactorySnapshot]) -> tuple[FactorySnapshot, ...]:
-    """The two samples that fix the production start (last flat sample and first risen one)."""
-    usable = [s for s in samples if s.tick is not None and _plastic_produced(s) is not None]
-    for before, after in zip(usable, usable[1:]):
-        if _plastic_produced(after) > _plastic_produced(before):
-            return before, after
-    return ()
+def c5_ledger_or_none(state: Mapping[str, Any]) -> dict[str, Any] | None:
+    """``state`` to carry on a trimmed history, or None while C5 has seen no plastic counter."""
+    return None if state == _C5_EMPTY_LEDGER else dict(state)
 
 
-def c5_proof_samples(samples: Sequence[FactorySnapshot]) -> tuple[FactorySnapshot, ...]:
-    """The samples C5 needs to stay re-derivable from bounded history, or () before production starts.
+def validate_c5_ledger(value: Any) -> dict[str, Any]:
+    """A ledger read from a restart bundle: the expected keys and value types, or ValueError."""
+    def pair(item):
+        return isinstance(item, list) and len(item) == 2 and all(type(v) is int for v in item)
 
-    History holders keep these when trimming (``checkpoint_evidence.bounded_history``), at most six:
-    - the production-start pair, so the settle anchor never moves forward;
-    - the first settled sample, so a window of at least C5_WINDOW_TICKS can always form, however densely
-      the run samples (without it, 20 samples inside the settle period kept moving the start forward);
-    - the first sample that declared a target, which judges windows that ended before any declaration;
-    - the first passing window's endpoints, so a pass survives the output chest filling.
-    """
-    anchor = _production_anchor(samples)
-    if not anchor:
-        return ()
-    usable = [s for s in samples if s.tick is not None and _plastic_produced(s) is not None]
-    settled = next((s for s in usable if s.tick >= anchor[1].tick + C5_SETTLE_TICKS), None)
-    declared = next((s for s in usable if _declared_target(s) is not None), None)
-    _, windows = _c5_windows(samples)
-    passing = next((w for w in windows if w["passes"] is True), None)
-    proof: list[FactorySnapshot] = []
-    for sample in (*anchor, settled, declared, *(passing["_samples"] if passing else ())):
-        if sample is not None and not any(sample is kept for kept in proof):
-            proof.append(sample)
-    return tuple(proof)
+    def target(item):
+        return item is None or (isinstance(item, dict) and set(item) == {"rate", "tick", "source"}
+                                and _declared_target(FactorySnapshot(plastic={"declared_target": item})) == item)
+
+    def window(item):
+        return (isinstance(item, dict) and set(item) == {"from_tick", "tick", "produced_delta", "rate", "target", "capacity"}
+                and all(type(item[k]) is int for k in ("from_tick", "tick", "produced_delta"))
+                and type(item["rate"]) in (int, float) and target(item["target"])
+                and (item["capacity"] is None or isinstance(item["capacity"], dict)))
+
+    if not (isinstance(value, dict) and set(value) == set(_C5_EMPTY_LEDGER)
+            and (value["last"] is None or pair(value["last"]))
+            and (value["start"] is None or type(value["start"]) is int)
+            and target(value["first_target"]) and target(value["latest_target"])
+            and isinstance(value["begins"], list) and all(pair(item) for item in value["begins"])
+            and type(value["windows"]) is int and value["windows"] >= 0
+            and (value["last_window"] is None or window(value["last_window"]))
+            and (value["passing"] is None or window(value["passing"]))
+            and isinstance(value["pending"], list) and all(window(item) for item in value["pending"])):
+        raise ValueError("Invalid C5 ledger")
+    return value
+
+
+def _c5_window_evidence(window: Mapping[str, Any], first_target: Mapping[str, Any] | None) -> dict[str, Any]:
+    """A window as C5 evidence; one that ended before any declaration is judged against the first one."""
+    target = window["target"] or first_target
+    capacity = window["capacity"]
+    rate = window["rate"]
+    return {
+        "from_tick": window["from_tick"], "tick": window["tick"], "window_ticks": window["tick"] - window["from_tick"],
+        "produced_delta": window["produced_delta"], "measured_rate": round(rate, 4),
+        "planned_target": target, "target_declared_after_window": window["target"] is None and first_target is not None,
+        "installed_capacity": capacity,
+        "ratio_to_target": None if target is None else _ratio(rate, target["rate"]),
+        "ratio_to_capacity": _ratio(rate, capacity.get("rate") if isinstance(capacity, Mapping) else None),
+        "passes": None if target is None else _c5_rate_passes(rate, target),
+    }
 
 
 def _c5_planned_rate(snapshot: FactorySnapshot, _baseline: FactorySnapshot | None, history: Sequence[FactorySnapshot]) -> CheckpointResult:
@@ -759,24 +821,25 @@ def _c5_planned_rate(snapshot: FactorySnapshot, _baseline: FactorySnapshot | Non
 
     Historical: the first passing window is the result for the rest of the run, so a full output chest
     (production falls to zero) does not retract it. Without a declared target the result is unknown.
+    The history's first sample may carry the ledger of samples trimmed before it; the result is then the
+    one the untrimmed history gives.
     """
     samples = tuple(history) + ((snapshot,) if not history or history[-1] is not snapshot else ())
-    start, windows = _c5_windows(samples)
-    passing = next((w for w in windows if w["passes"] is True), None)
-    shown = passing or (windows[-1] if windows else None)
-    targets = [target for target in (_declared_target(s) for s in samples) if target is not None]
-    declared = targets[-1] if targets else None
+    state = c5_ledger(samples)
+    start, passing, windows = state["start"], state["passing"], state["windows"]
+    shown = passing or state["last_window"]
+    declared = state["latest_target"]
     evidence = {
         "first_production_tick": start,
         "settle_ticks": C5_SETTLE_TICKS, "min_window_ticks": C5_WINDOW_TICKS, "target_share": C5_TARGET_SHARE,
-        "window_count": len(windows), "sample_count": len(samples),
+        "window_count": windows, "sample_count": len(samples),
         "latest_declared_target": declared,
-        "window": None if shown is None else {k: v for k, v in shown.items() if k != "_samples"},
+        "window": None if shown is None else _c5_window_evidence(shown, state["first_target"]),
         "historical": passing is not None,
     }
     produced_now = _plastic_produced(snapshot)
     # A window without a declared target cannot be judged; it might have passed.
-    unjudged = declared is None or any(w["passes"] is None for w in windows)
+    unjudged = declared is None or (windows > 0 and state["first_target"] is None)
     if passing is not None:
         status, missing = PredicateStatus.PASSED, ()
     elif unjudged:
@@ -788,11 +851,11 @@ def _c5_planned_rate(snapshot: FactorySnapshot, _baseline: FactorySnapshot | Non
     checks = {
         "planned_target_declared": None if declared is None else True,
         "plastic_production_started": None if produced_now is None and start is None else start is not None,
-        "settled_window_at_least_30_seconds": bool(windows),
+        "settled_window_at_least_30_seconds": windows > 0,
         "rate_at_least_75_percent_of_target": (True if passing is not None else
                                                 None if unjudged or not windows else False),
     }
-    return _result("C5", "c5-v3", status, {"checks": checks, **evidence}, missing)
+    return _result("C5", "c5-v4", status, {"checks": checks, **evidence}, missing)
 
 
 def _plastic_consumers(samples: Sequence[FactorySnapshot]) -> dict[str, int] | None:
@@ -963,7 +1026,7 @@ DEFAULT_MILESTONES: tuple[MilestoneDefinition, ...] = (
     MilestoneDefinition("C2", "iron_copper_rollout", "c2-v1", _c2),
     MilestoneDefinition("C3", "stone_rollout", "c3-v1", _c3),
     MilestoneDefinition("C4", "first_plastic", "c4-v1", _c4),
-    MilestoneDefinition("C5", "plastic_at_planned_rate", "c5-v3", _c5_planned_rate),
+    MilestoneDefinition("C5", "plastic_at_planned_rate", "c5-v4", _c5_planned_rate),
     MilestoneDefinition("C6a", "plastic_consumption", "c6a-v1", _c6a),
     MilestoneDefinition("C6", "advanced_circuit_consumption", "c6-v3", _c6_v3),
     MilestoneDefinition("C7", "chemical_science_research", "c7-v1", _c7),
@@ -980,7 +1043,7 @@ LATER_MILESTONE_IDS: frozenset[str] = frozenset({"C6a"})
 
 #: A restart bundle that reached a milestone under one of these older versions is not refused: the
 #: milestone is dropped from ``reached`` and re-earned under the current version (recorded as such).
-REEARNED_VERSIONS: Mapping[str, frozenset[str]] = {"C5": frozenset({"c5-v1", "c5-v2"})}
+REEARNED_VERSIONS: Mapping[str, frozenset[str]] = {"C5": frozenset({"c5-v1", "c5-v2", "c5-v3"})}
 
 
 def default_milestones() -> tuple[MilestoneDefinition, ...]:

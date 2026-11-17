@@ -36,7 +36,7 @@ def test_default_registry_is_ordered_and_versioned_with_advanced_circuit_milesto
     milestones = default_milestones()
     assert [item.checkpoint_id for item in milestones] == ["C0", "C1", "C2", "C3", "C4", "C5", "C6a", "C6", "C7", "C8", "C9"]
     assert [item.predicate_version for item in milestones] == [f"c{i}-v1" for i in range(5)] + [
-        "c5-v3", "c6a-v1", "c6-v3", "c7-v1", "c8-v1", "c9-v1"]
+        "c5-v4", "c6a-v1", "c6-v3", "c7-v1", "c8-v1", "c9-v1"]
     assert milestones[7].name == "advanced_circuit_consumption"
 
 

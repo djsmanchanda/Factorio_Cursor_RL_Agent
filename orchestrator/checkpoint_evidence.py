@@ -2,8 +2,11 @@
 """Versioned, bounded observation evidence; this is not a milestone latch."""
 from __future__ import annotations
 
+from dataclasses import replace
+
 from orchestrator.checkpoint_milestones import (
-    C6_LOGISTICS_CHESTS, DEFAULT_MILESTONES, LATER_MILESTONE_IDS, c5_proof_samples, evaluate_milestone, _plastic_sample,
+    C6_LOGISTICS_CHESTS, DEFAULT_MILESTONES, LATER_MILESTONE_IDS, c5_ledger, c5_ledger_or_none, evaluate_milestone,
+    _plastic_sample,
 )
 
 #: Strict history bound shared by the runner session, the sidecar and restart bundles.
@@ -17,22 +20,19 @@ def retained_samples(history):
 
 
 def bounded_history(history, limit=HISTORY_LIMIT):
-    """The newest ``limit`` retained samples, keeping C5's proof samples when they would fall out.
+    """The newest ``limit`` retained samples; the oldest carries C5's ledger of every sample trimmed before it.
 
-    C5 is a historical predicate measured over a settled window: its production-start pair, first settled
-    sample, first target declaration and first passing window stay in history (``c5_proof_samples``, at
-    most six), so the stateless predicate can form a window under dense sampling and keeps passing after
-    production stops on a full chest. The rest are the newest samples, in tick order.
+    C5 is historical and measured over settled windows of any sampling density, so the samples it needs do
+    not fit in a fixed number of snapshots. Its ledger (``checkpoint_milestones.c5_ledger``) is the C5 fold
+    over the trimmed samples, continued from the ledger the previous oldest sample carried, so C5 over the
+    bounded history equals C5 over the full one. Every other predicate sees the newest samples, as before.
     """
     samples = retained_samples(history)
     if len(samples) <= limit:
         return samples
-    proof = c5_proof_samples(samples)
-    pinned = [any(sample is kept for kept in proof) for sample in samples]
-    unpinned = [i for i, kept in enumerate(pinned) if not kept]
-    room = limit - sum(pinned)
-    newest = set(unpinned[len(unpinned) - room:]) if room > 0 else set()
-    return [sample for i, sample in enumerate(samples) if pinned[i] or i in newest]
+    trimmed = len(samples) - limit
+    ledger = c5_ledger_or_none(c5_ledger(samples[:trimmed]))
+    return [replace(samples[trimmed], c5_ledger=ledger), *samples[trimmed + 1:]]
 
 
 def project_evidence(baseline, history):
