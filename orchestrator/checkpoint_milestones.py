@@ -698,7 +698,14 @@ _C5_EMPTY_LEDGER: dict[str, Any] = {
     "last_window": None,     # newest window
     "passing": None,         # first passing window
     "pending": [],           # windows formed before any declaration, each faster than all before it
+    "clock": None,           # newest observed tick of any sample, counter or not: detects a reloaded save
+    "pending_overflow": False,  # more than C5_PENDING_LIMIT record windows before any declaration
 }
+#: Record-rate windows kept before the first declaration. Runners declare before production, so this is
+#: normally 0; past the limit the pre-declaration windows are unjudged and C5 stays unknown until a later
+#: window passes (review of 0d3ce49d: the list was otherwise unbounded). Applied in the fold itself, so
+#: full and bounded histories still agree.
+C5_PENDING_LIMIT = 64
 
 
 def _c5_rate_passes(rate: float, target: Mapping[str, Any]) -> bool:
@@ -718,6 +725,11 @@ def _c5_fold(state: dict[str, Any], sample: FactorySnapshot) -> None:
     if target is not None:
         state["latest_target"] = target
     tick, produced = sample.tick, _plastic_produced(sample)
+    if tick is not None:
+        # Any observed rollback, with or without a plastic counter, ends every open window start.
+        if state["clock"] is not None and tick < state["clock"]:
+            state["begins"] = []
+        state["clock"] = tick
     if tick is None or produced is None:
         return
     if state["first_target"] is None and target is not None:
@@ -747,7 +759,10 @@ def _c5_fold(state: dict[str, Any], sample: FactorySnapshot) -> None:
         judge = target or state["first_target"]
         if judge is None:
             if not state["pending"] or window["rate"] > state["pending"][-1]["rate"]:
-                state["pending"].append(window)
+                if len(state["pending"]) < C5_PENDING_LIMIT:
+                    state["pending"].append(window)
+                else:
+                    state["pending_overflow"] = True
         elif state["passing"] is None and _c5_rate_passes(window["rate"], judge):
             state["passing"] = window
         del begins[:index]
@@ -761,7 +776,7 @@ def _c5_fold(state: dict[str, Any], sample: FactorySnapshot) -> None:
 def c5_ledger(samples: Sequence[FactorySnapshot]) -> dict[str, Any]:
     """C5's state after ``samples``, continuing the ledger carried by the first one (a copy, never shared)."""
     first = samples[0].c5_ledger if samples else None
-    state = copy.deepcopy(dict(first) if isinstance(first, Mapping) else _C5_EMPTY_LEDGER)
+    state = copy.deepcopy({**_C5_EMPTY_LEDGER, **first} if isinstance(first, Mapping) else _C5_EMPTY_LEDGER)
     for sample in samples:
         _c5_fold(state, sample)
     return state
@@ -787,7 +802,12 @@ def validate_c5_ledger(value: Any) -> dict[str, Any]:
                 and type(item["rate"]) in (int, float) and target(item["target"])
                 and (item["capacity"] is None or isinstance(item["capacity"], dict)))
 
+    # Ledgers written before the clock and overflow fields (b35b85d7) lack them; c5_ledger fills defaults.
+    if isinstance(value, dict) and set(_C5_EMPTY_LEDGER) - set(value) <= {"clock", "pending_overflow"}:
+        value = {**_C5_EMPTY_LEDGER, **value}
     if not (isinstance(value, dict) and set(value) == set(_C5_EMPTY_LEDGER)
+            and (value["clock"] is None or type(value["clock"]) is int)
+            and type(value["pending_overflow"]) is bool
             and (value["last"] is None or pair(value["last"]))
             and (value["start"] is None or type(value["start"]) is int)
             and target(value["first_target"]) and target(value["latest_target"])
@@ -840,10 +860,13 @@ def _c5_planned_rate(snapshot: FactorySnapshot, _baseline: FactorySnapshot | Non
     produced_now = _plastic_produced(snapshot)
     # A window without a declared target cannot be judged; it might have passed.
     unjudged = declared is None or (windows > 0 and state["first_target"] is None)
+    overflowed = state["pending_overflow"]
     if passing is not None:
         status, missing = PredicateStatus.PASSED, ()
     elif unjudged:
         status, missing = PredicateStatus.UNKNOWN, ("planned_target",)
+    elif overflowed:
+        status, missing = PredicateStatus.UNKNOWN, ("pre_declaration_windows",)
     elif produced_now is None:
         status, missing = PredicateStatus.UNKNOWN, ("plastic_production_counter",)
     else:
@@ -853,7 +876,7 @@ def _c5_planned_rate(snapshot: FactorySnapshot, _baseline: FactorySnapshot | Non
         "plastic_production_started": None if produced_now is None and start is None else start is not None,
         "settled_window_at_least_30_seconds": windows > 0,
         "rate_at_least_75_percent_of_target": (True if passing is not None else
-                                                None if unjudged or not windows else False),
+                                                None if unjudged or overflowed or not windows else False),
     }
     return _result("C5", "c5-v4", status, {"checks": checks, **evidence}, missing)
 
