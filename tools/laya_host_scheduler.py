@@ -238,7 +238,11 @@ def _world_unstable(world: Path, window_s: float) -> bool:
         # cohort start and forced a ~9 min/slot climb. A world directory or
         # runner log written in the last ten minutes means it is starting,
         # not sick; preparation runs before the runner log exists.
+        # A just-admitted job has no world directory until prepare creates it; that is starting too
+        # (17 November: every admission was cut back as runner_unstable, parking the target at 4).
         try:
+            if not world.exists():
+                return False
             if any(path.exists() and time.time() - path.stat().st_mtime < 600 for path in (log, world)):
                 return False
         except OSError:
