@@ -1162,6 +1162,59 @@ def test_ghost_bill_shortage_keeps_the_survey_free_semantics(monkeypatch) -> Non
     assert offline == {"splitter": 3}
 
 
+def test_a_no_loan_seed_gate_demands_the_cells_own_seed_not_the_ghost_bill(
+    monkeypatch,
+) -> None:
+    """The ghost bill sizes the loan; the seed gate reports the producer's
+    own remaining seed. When no cell can be borrowed, the typed fault must
+    still ask for the 2 inserters the cell itself needs, not the 14/24 the
+    submitted ghosts owe (main smoke4 2026-11-18: ``producer_bootstrap_
+    seed_shortage`` x11 reported ghost budgets)."""
+    client, plan, _loans = _cell_project_harness(
+        monkeypatch,
+        shortage_targets={"inserter": 2},
+        ghost_bill={"inserter": 14},
+        stock={"inserter": 0},
+    )
+    monkeypatch.setattr(builder, "_has_producer", lambda *_a: False)
+
+    with pytest.raises(builder.StuckError) as raised:
+        builder._reserve_compact_mall_project(
+            client, "nauvis", "player", "inserter", plan, None,
+            lambda _message: None,
+        )
+
+    assert raised.value.code == "producer_bootstrap_seed_shortage"
+    assert "needs 2 inserter seed item(s)" in str(raised.value)
+    assert raised.value.details["required_stock"] == 2
+    assert raised.value.details["ghost_owed_stock"] == 14
+
+
+def test_a_non_self_seeding_seed_gate_keeps_the_shortage_budget(
+    monkeypatch,
+) -> None:
+    """A cell whose own bill does not contain its product (nothing of the
+    product is needed to build its producer) keeps the motivating demand as
+    the seed budget, with the ghost bill alongside for triage."""
+    client, plan, _loans = _cell_project_harness(
+        monkeypatch,
+        shortage_targets={"fast-inserter": 1},
+        ghost_bill={"fast-inserter": 4},
+        stock={"fast-inserter": 0},
+    )
+    monkeypatch.setattr(builder, "_has_producer", lambda *_a: False)
+
+    with pytest.raises(builder.StuckError) as raised:
+        builder._reserve_compact_mall_project(
+            client, "nauvis", "player", "fast-inserter", plan, None,
+            lambda _message: None,
+        )
+
+    assert raised.value.code == "producer_bootstrap_seed_shortage"
+    assert raised.value.details["required_stock"] == 4
+    assert "needs 4 fast-inserter seed item(s)" in str(raised.value)
+
+
 def test_ready_pass_serves_peer_tasks_after_a_completion(monkeypatch) -> None:
     """Completing tasks pop out of the targets, so peers advance same pass."""
     served: list[str] = []

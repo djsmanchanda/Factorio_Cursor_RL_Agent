@@ -8489,9 +8489,13 @@ def _reserve_compact_mall_project(
         source_producers=sources, expected_rates=rates,
         priority=100, hold_until_producing=True,
     )
-    shortage = ledger.shortage_targets(project_id, stock)
+    ledger_shortage = ledger.shortage_targets(project_id, stock)
+    # The ghost bill is loan demand: it sizes the one batch that satisfies the
+    # submitted ghosts and this cell together. It is not the cell's own seed
+    # budget, which the no-loan seed gate below reports (smoke4 2026-11-18:
+    # a 2-inserter cell reported needing 14/24 because the ghosts owed them).
     shortage = _ghost_owed_shortage_targets(
-        client, surface, force, stock, shortage,
+        client, surface, force, stock, ledger_shortage,
     )
     emit(
         f"  MATERIAL PROJECT: {project_id} state={project.state} "
@@ -8532,8 +8536,18 @@ def _reserve_compact_mall_project(
         if remedy is not None:
             raise ProductionPrerequisiteDeferred(remedy)
     if item in shortage and not _has_producer(client, surface, force, item):
+        # The ghost-raised shortage sizes the loan above; the seed gate asks
+        # only for this cell's own remaining seed, because that is all it
+        # takes to construct the producer that then serves the ghosts.
+        seed_required = int(bill.get(item, 0)) - int(
+            getattr(project, "reserved", {}).get(item, 0)
+        )
+        if seed_required <= 0:
+            # Not a self-seeding bill (the cell builds without its own
+            # product): keep the demand that motivated the cell.
+            seed_required = int(shortage[item])
         raise StuckError(
-            f"{project_id} needs {shortage[item]} {item} seed item(s) before "
+            f"{project_id} needs {seed_required} {item} seed item(s) before "
             "its own producer can be constructed",
             code="producer_bootstrap_seed_shortage",
             classification="bug",
@@ -8541,9 +8555,10 @@ def _reserve_compact_mall_project(
             details={
                 "project_id": project_id,
                 "item": item,
-                "required_stock": shortage[item],
+                "required_stock": seed_required,
                 "available_stock": stock.get(item, 0),
                 "bill": bill,
+                "ghost_owed_stock": int(shortage[item]),
             },
         )
     raise MaterialShortage(project_id, shortage, stock)
