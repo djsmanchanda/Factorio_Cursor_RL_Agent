@@ -8391,6 +8391,41 @@ def _material_bill_pipeline_ready(
     )
 
 
+def _ghost_owed_shortage_targets(
+    client: RconClient, surface: str, force: str,
+    stock: Mapping[str, int], shortage: dict[str, int],
+) -> dict[str, int]:
+    """Fold the placed-ghost bill into a mall cell's shortage targets.
+
+    A coherent foundation submitted as additive ghosts keeps its promise that
+    "its exact bill drives mall priority" only through the deterministic
+    survey pass, which reads ``pending_construction_items`` into the mall
+    targets. An operation session never runs that pass, so once the ledger
+    project turns ``constructing`` it stops contributing to
+    ``stock_targets`` and every batch sizes itself to one ghost remedy at a
+    time (main smoke3 2026-11-18: a 2-inserter loan against a refinery owing
+    28). The ghost bill is a world fact, not a rule: any bill item the ghosts
+    still owe beyond transferable stock raises that item's target, the same
+    maximum the survey applies.
+    """
+    if not shortage or not hasattr(client, "command"):
+        return shortage
+    try:
+        ghost_bill = live_base.pending_construction_items(
+            client, surface, force,
+        )
+    except Exception:
+        return shortage
+    if not ghost_bill:
+        return shortage
+    raised = dict(shortage)
+    for name, count in ghost_bill.items():
+        owed = int(count)
+        if name in raised and owed > int(stock.get(name, 0)):
+            raised[name] = max(raised[name], owed)
+    return raised
+
+
 def _reserve_compact_mall_project(
     client: RconClient, surface: str, force: str, item: str,
     plan: _LinePlan, stock_gate_target: int | None,
@@ -8455,6 +8490,9 @@ def _reserve_compact_mall_project(
         priority=100, hold_until_producing=True,
     )
     shortage = ledger.shortage_targets(project_id, stock)
+    shortage = _ghost_owed_shortage_targets(
+        client, surface, force, stock, shortage,
+    )
     emit(
         f"  MATERIAL PROJECT: {project_id} state={project.state} "
         f"bill=" + ",".join(f"{name}:{count}" for name, count in bill.items())

@@ -1043,6 +1043,125 @@ def test_material_project_waits_without_producer_backing(monkeypatch) -> None:
         )
 
 
+def _cell_project_harness(monkeypatch, shortage_targets, ghost_bill, stock):
+    """Drive ``_reserve_compact_mall_project`` with a survey-capable client.
+
+    The ledger fake reproduces the merged-main regression shape: the only
+    active project is the cell's own bill (2 inserters), because the
+    foundation that also needs inserters was already submitted and its
+    ledger project turned ``constructing`` (inactive).
+    """
+    ledger = SimpleNamespace(
+        declare=lambda *_a, **_k: SimpleNamespace(state="supply_wait"),
+        shortage_targets=lambda _project, _stock: dict(shortage_targets),
+    )
+    monkeypatch.setattr(builder, "_MATERIAL_RESERVATION_LEDGER", ledger)
+    monkeypatch.setattr(
+        builder, "compact_mall_project_bill",
+        lambda _item, **_kwargs: {"assembling-machine-1": 1, "inserter": 2},
+    )
+    monkeypatch.setattr(
+        builder, "_material_sources_and_rates", lambda *_a: ({}, {}),
+    )
+    monkeypatch.setattr(
+        builder, "construction_supply_chain_is_scheduled", lambda *_a: False,
+    )
+    monkeypatch.setattr(
+        builder, "_independent_mall_ready", lambda *_a: False,
+    )
+    monkeypatch.setattr(
+        builder.live_base, "transferable_items", lambda *_a: dict(stock),
+    )
+    monkeypatch.setattr(
+        builder.live_base, "pending_construction_items",
+        lambda *_a, **_k: dict(ghost_bill),
+    )
+    monkeypatch.setattr(
+        builder, "_quad_bootstrap_mall_enabled", lambda *_a, **_k: False,
+    )
+    monkeypatch.setattr(
+        builder, "preview_mall_allocation", lambda *_a, **_k: None,
+    )
+    loans: list[tuple[str, int]] = []
+
+    def start_loan(_client, _bridge, _surface, _force, item, target, *_a, **_k):
+        loans.append((item, int(target)))
+        return "borrowed a cell"
+
+    monkeypatch.setattr(builder, "_start_bootstrap_loan", start_loan)
+    plan = SimpleNamespace(
+        spec={}, mall_storage_limit=1, fill_provider=False,
+        mall_request_multiplier=None, shared_provider=False,
+    )
+    client = SimpleNamespace(command=lambda *_a: "")
+    return client, plan, loans
+
+
+def test_a_submitted_foundation_ghost_bill_sizes_the_cell_loan(
+    monkeypatch,
+) -> None:
+    """A foundation already submitted as ghosts no longer holds an active
+    ledger project, so its unmet bill must reach the loan through the ghost
+    survey, exactly like the deterministic pass promotes it (main smoke3
+    2026-11-18: a 2-inserter loan against a refinery owing 28)."""
+    client, plan, loans = _cell_project_harness(
+        monkeypatch,
+        shortage_targets={"inserter": 2},
+        ghost_bill={"inserter": 28, "transport-belt": 200},
+        stock={},
+    )
+
+    with pytest.raises(builder.ProductionPrerequisiteDeferred):
+        builder._reserve_compact_mall_project(
+            client, "nauvis", "player", "inserter", plan, None,
+            lambda _message: None, bridge=object(), reference_point=(0.0, 0.0),
+        )
+
+    assert loans == [("inserter", 28)]
+
+
+def test_ghost_bill_neither_shrinks_a_larger_ledger_target_nor_dupes_stock(
+    monkeypatch,
+) -> None:
+    """The ghost bill only raises a target: an active ledger project that
+    already wants more keeps its level, and ghosts already covered by
+    transferable stock add nothing."""
+    client, plan, loans = _cell_project_harness(
+        monkeypatch,
+        shortage_targets={"inserter": 34},
+        ghost_bill={"inserter": 28, "transport-belt": 5},
+        stock={"inserter": 5, "transport-belt": 9},
+    )
+
+    with pytest.raises(builder.ProductionPrerequisiteDeferred):
+        builder._reserve_compact_mall_project(
+            client, "nauvis", "player", "inserter", plan, None,
+            lambda _message: None, bridge=object(), reference_point=(0.0, 0.0),
+        )
+
+    assert loans == [("inserter", 34)]
+
+
+def test_ghost_bill_shortage_keeps_the_survey_free_semantics(monkeypatch) -> None:
+    """The fold mirrors the deterministic survey comparison: transferable
+    stock that already covers the ghosts leaves the target alone, and a
+    client that cannot survey ghosts keeps the ledger's own word."""
+    monkeypatch.setattr(
+        builder.live_base, "pending_construction_items",
+        lambda *_a, **_k: {"splitter": 9},
+    )
+    covered = builder._ghost_owed_shortage_targets(
+        SimpleNamespace(command=lambda *_a: ""), "nauvis", "player",
+        {"splitter": 9}, {"splitter": 3},
+    )
+    assert covered == {"splitter": 3}
+
+    offline = builder._ghost_owed_shortage_targets(
+        object(), "nauvis", "player", {"splitter": 0}, {"splitter": 3},
+    )
+    assert offline == {"splitter": 3}
+
+
 def test_ready_pass_serves_peer_tasks_after_a_completion(monkeypatch) -> None:
     """Completing tasks pop out of the targets, so peers advance same pass."""
     served: list[str] = []

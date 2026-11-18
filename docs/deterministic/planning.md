@@ -307,6 +307,11 @@ gated separately and is not changed by the release.
   Unfunded ghosts restore binding mall demand even after a producer batch was
   credited or a starter retired; historical crafts cannot satisfy still-visible
   unfunded ghosts. Stock-covered ghosts do not demand duplicate production.
+  A submitted foundation turns its ledger project `constructing`, which no
+  longer counts toward mall targets, so a compact cell's shortage targets fold
+  the same live ghost bill in themselves (both runtimes; 2026-11-18, merged
+  main smoke3: an operation session sized a 2-inserter loan against a
+  refinery whose ghosts owed 28).
   Every named project records its complete item bill, current reservation,
   source producer, expected rate, and ETA. A compact producer reserves its
   whole standalone cell plus one recipe craft before it recursively schedules
